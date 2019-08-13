@@ -196,6 +196,10 @@ typedef struct TF_Function TF_Function;
 // Function definition options. TODO(iga): Define and implement
 typedef struct TF_FunctionOptions TF_FunctionOptions;
 
+// Sets the device attrs of nodes in graph to `device`.
+TF_CAPI_EXPORT extern void TF_GraphSetDevice(TF_Graph* graph,
+                                             const char* device);
+
 // Sets the shape of the Tensor referenced by `output` in `graph` to
 // the shape described by `dims` and `num_dims`.
 //

@@ -681,6 +681,15 @@ void TFOutputsFromOutputs(const std::vector<tensorflow::Output>& outputs,
 
 }  // namespace
 
+void TF_GraphSetDevice(TF_Graph* graph,
+                       const char* device) {
+  mutex_lock l(graph->mu);
+  Graph* g = &(graph->graph);
+  for (Node* node : g->nodes()) {
+    node->set_requested_device(device);
+  }
+}
+
 // Shape functions -----------------------------------------------------------
 
 void TF_GraphSetTensorShape(TF_Graph* graph, TF_Output output,
