@@ -1217,6 +1217,19 @@ TF_CAPI_EXPORT extern TF_Session* TF_LoadSessionFromSavedModel(
     const char* export_dir, const char* const* tags, int tags_len,
     TF_Graph* graph, TF_Buffer* meta_graph_def, TF_Status* status);
 
+// Get input and output names in MetaGraphDef
+// - `meta_graph_def` serialized MetaGraphDef protobuf message buffer
+// - `method_name` use mthod name to lookup signature map
+// - `ninput` input number
+// - `input_names` input names, memory are managered by function caller
+// - `noutput` output number
+// - `output_names` output names, memory are managered by function caller
+// Return true if success.
+TF_CAPI_EXPORT extern bool TF_GetIONamesFromMetaGraphDef(
+    const TF_Buffer* meta_graph_def, const char* method_name,
+    int* ninput, const char** input_names,
+    int* noutput, const char** output_names);
+
 // Close a session.
 //
 // Contacts any other processes associated with the session, if applicable.
