@@ -1227,8 +1227,8 @@ TF_CAPI_EXPORT extern TF_Session* TF_LoadSessionFromSavedModel(
 // Return true if success.
 TF_CAPI_EXPORT extern bool TF_GetIONamesFromMetaGraphDef(
     const TF_Buffer* meta_graph_def, const char* method_name,
-    int* ninput, const char** input_names,
-    int* noutput, const char** output_names);
+    int* ninput, char** input_names,
+    int* noutput, char** output_names);
 
 // Close a session.
 //

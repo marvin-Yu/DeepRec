@@ -2249,8 +2249,8 @@ TF_Session* TF_LoadSessionFromSavedModel(
 
 bool TF_GetIONamesFromMetaGraphDef(
     const TF_Buffer* meta_graph_def, const char* method_name,
-    int* ninput, const char** input_names,
-    int* noutput, const char** output_names) {
+    int* ninput, char** input_names,
+    int* noutput, char** output_names) {
   MetaGraphDef meta_graph_def_obj;
   if (meta_graph_def == nullptr) return false;
   if (!meta_graph_def_obj.ParseFromArray(meta_graph_def->data, meta_graph_def->length)) {
@@ -2264,25 +2264,27 @@ bool TF_GetIONamesFromMetaGraphDef(
   const auto& signature_def = sig_iter->second;
   int input_num = signature_def.inputs().size();
   *ninput = input_num;
-  input_names = (const char**)malloc(sizeof(const char**) * input_num); 
+  input_names = (char**)malloc(sizeof(char**) * input_num); 
   int i = 0;
   for (auto iter = signature_def.inputs().begin();
       iter != signature_def.inputs().end(); ++iter) {
     const auto& input_tensor_info = iter->second;
     const std::string& name = input_tensor_info.name();
-    input_names[i] = name.c_str();
+    input_names[i] = (char*)malloc(sizeof(char) * name.length());
+    strncpy(input_names[i], name.c_str(), name.length()); 
     ++i;
   }
 
   int output_num = signature_def.outputs().size();
   *noutput = output_num;
-  output_names = (const char**)malloc(sizeof(const char**) * output_num);
+  output_names = (char**)malloc(sizeof(char**) * output_num);
   i = 0;
   for (auto iter = signature_def.outputs().begin();
       iter != signature_def.outputs().end(); ++iter) {
     const auto& output_tensor_info = iter->second;
     const std::string& name = output_tensor_info.name();
-    output_names[i] = name.c_str();
+    output_names[i] = (char*)malloc(sizeof(char) * name.length());
+    strncpy(output_names[i], name.c_str(), name.length());
     ++i;
   }
   return true;
