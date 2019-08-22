@@ -2269,27 +2269,27 @@ void TF_GetIONamesFromMetaGraphDef(
   const auto& signature_def = sig_iter->second;
   int input_num = signature_def.inputs().size();
   *ninput = input_num;
-  *input_names = (char**)malloc(sizeof(char**) * input_num);
+  *input_names = (char**)malloc(sizeof(char*) * input_num);
   int i = 0;
   for (auto iter = signature_def.inputs().begin();
        iter != signature_def.inputs().end(); ++iter) {
     const auto& input_tensor_info = iter->second;
     const std::string& name = input_tensor_info.name();
-    (*input_names)[i] = (char*)malloc(sizeof(char*) * name.length());
-    strncpy((*input_names)[i], name.data(), name.length());
+    (*input_names)[i] = (char*)malloc(sizeof(char) * (name.length() + 1));
+    strcpy((*input_names)[i], name.c_str());
     ++i;
   }
 
   int output_num = signature_def.outputs().size();
   *noutput = output_num;
-  *output_names = (char**)malloc(sizeof(char**) * output_num);
+  *output_names = (char**)malloc(sizeof(char*) * output_num);
   i = 0;
   for (auto iter = signature_def.outputs().begin();
-      iter != signature_def.outputs().end(); ++iter) {
+       iter != signature_def.outputs().end(); ++iter) {
     const auto& output_tensor_info = iter->second;
     const std::string& name = output_tensor_info.name();
-    (*output_names)[i] = (char*)malloc(sizeof(char*) * name.length());
-    strncpy((*output_names)[i], name.data(), name.length());
+    (*output_names)[i] = (char*)malloc(sizeof(char) * (name.length() + 1));
+    strcpy((*output_names)[i], name.c_str());
     ++i;
   }
   status->status = Status::OK();
