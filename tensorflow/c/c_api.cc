@@ -2247,47 +2247,52 @@ TF_Session* TF_LoadSessionFromSavedModel(
 #endif  // defined(IS_MOBILE_PLATFORM) || defined(IS_SLIM_BUILD)
 }
 
-bool TF_GetIONamesFromMetaGraphDef(
+void TF_GetIONamesFromMetaGraphDef(
     const TF_Buffer* meta_graph_def, const char* method_name,
-    int* ninput, char** input_names,
-    int* noutput, char** output_names) {
+    int* ninput, char*** input_names,
+    int* noutput, char*** output_names, TF_Status* status) {
   MetaGraphDef meta_graph_def_obj;
-  if (meta_graph_def == nullptr) return false;
+  if (meta_graph_def == nullptr) {
+    status->status = InvalidArgument("MetaGraphDef Ptr is Null"); 
+    return;
+  }
   if (!meta_graph_def_obj.ParseFromArray(meta_graph_def->data, meta_graph_def->length)) {
-    return false;
+    status->status = InvalidArgument("MetaGraphDef Object Parse From Array Failed!");
+    return;
   }
   const auto& signature_def_map = meta_graph_def_obj.signature_def();
   auto sig_iter = signature_def_map.find(method_name);
   if (sig_iter == signature_def_map.end()) {
-    return false;
+    status->status = InvalidArgument("Method Name not Contained in Signature Map");
+    return;
   }
   const auto& signature_def = sig_iter->second;
   int input_num = signature_def.inputs().size();
   *ninput = input_num;
-  input_names = (char**)malloc(sizeof(char**) * input_num); 
+  *input_names = (char**)malloc(sizeof(char**) * input_num);
   int i = 0;
   for (auto iter = signature_def.inputs().begin();
-      iter != signature_def.inputs().end(); ++iter) {
+       iter != signature_def.inputs().end(); ++iter) {
     const auto& input_tensor_info = iter->second;
     const std::string& name = input_tensor_info.name();
-    input_names[i] = (char*)malloc(sizeof(char) * name.length());
-    strncpy(input_names[i], name.c_str(), name.length()); 
+    (*input_names)[i] = (char*)malloc(sizeof(char*) * name.length());
+    strncpy((*input_names)[i], name.data(), name.length());
     ++i;
   }
 
   int output_num = signature_def.outputs().size();
   *noutput = output_num;
-  output_names = (char**)malloc(sizeof(char**) * output_num);
+  *output_names = (char**)malloc(sizeof(char**) * output_num);
   i = 0;
   for (auto iter = signature_def.outputs().begin();
       iter != signature_def.outputs().end(); ++iter) {
     const auto& output_tensor_info = iter->second;
     const std::string& name = output_tensor_info.name();
-    output_names[i] = (char*)malloc(sizeof(char) * name.length());
-    strncpy(output_names[i], name.c_str(), name.length());
+    (*output_names)[i] = (char*)malloc(sizeof(char*) * name.length());
+    strncpy((*output_names)[i], name.data(), name.length());
     ++i;
   }
-  return true;
+  status->status = Status::OK();
 }
 
 void TF_CloseSession(TF_Session* s, TF_Status* status) {

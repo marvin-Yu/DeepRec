@@ -1224,11 +1224,10 @@ TF_CAPI_EXPORT extern TF_Session* TF_LoadSessionFromSavedModel(
 // - `input_names` input names, memory are managered by function caller
 // - `noutput` output number
 // - `output_names` output names, memory are managered by function caller
-// Return true if success.
-TF_CAPI_EXPORT extern bool TF_GetIONamesFromMetaGraphDef(
+TF_CAPI_EXPORT extern void TF_GetIONamesFromMetaGraphDef(
     const TF_Buffer* meta_graph_def, const char* method_name,
-    int* ninput, char** input_names,
-    int* noutput, char** output_names);
+    int* ninput, char*** input_names,
+    int* noutput, char*** output_names, TF_Status* status);
 
 // Close a session.
 //
