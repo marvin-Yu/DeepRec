@@ -91,6 +91,7 @@ tf_cuda_library(
     deps = [
         ":attr_builder",
         ":context",
+        ":eager_executor",
         ":tensor_handle",
         "//tensorflow/core:framework",
     ],
