@@ -1261,6 +1261,8 @@ class ExecutorState {
   StepStatsCollectorInterface* const stats_collector_;
   const tracing::EventCollector* const event_collector_;
   Context context_;
+  // Not owned.
+  Allocator* persistent_allocator_;
 
   // QUESTION: Make it a checkpoint::TensorSliceReaderCacheWrapper
   // instead of a pointer?  (avoids having to delete).
@@ -1398,6 +1400,7 @@ ExecutorState::ExecutorState(const Executor::Args& args, ExecutorImpl* impl)
       event_collector_(
           tracing::GetEventCollector(tracing::EventCategory::kCompute)),
       context_(ContextKind::kThread),
+      persistent_allocator_(args.persistent_allocator),
       slice_reader_cache_(new checkpoint::TensorSliceReaderCacheWrapper),
       call_frame_(args.call_frame),
       impl_(impl),
@@ -1674,6 +1677,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
     // deferred ops, or in ScheduleFinish if there aren't any deferred ops.
     if (finish_when_deferred_ops_done) Finish();
   };
+  params.persistent_allocator = persistent_allocator_;
 
   Status s;
   NodeExecStatsInterface* stats = nullptr;

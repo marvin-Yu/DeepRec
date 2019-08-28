@@ -730,6 +730,9 @@ class OpKernelContext {
     // For tracking actively running deferred ops.
     std::function<void()> inc_num_deferred_ops_function = []() {};
     std::function<void()> dec_num_deferred_ops_function = []() {};
+
+    // Persistent allocator. Not own.
+    Allocator* persistent_allocator = nullptr;
   };
 
   // params must outlive the OpKernelContext.
@@ -1287,8 +1290,7 @@ class OpKernelContext {
     return params_->dec_num_deferred_ops_function;
   }
 
-  Allocator* get_allocator(AllocatorAttributes attr);
-
+  Status get_allocator(AllocatorAttributes attr, Allocator** allocator);
  private:
   bool record_memory_consumption_ = false;
 
