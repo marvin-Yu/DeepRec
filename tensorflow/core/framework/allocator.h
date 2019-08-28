@@ -105,6 +105,9 @@ class Allocator {
   // Return a string identifying this allocator
   virtual string Name() = 0;
 
+  // Reset the allocator
+  virtual void Reset() { }
+
   // Return an uninitialized block of memory that is "num_bytes" bytes
   // in size.  The returned pointer is guaranteed to be aligned to a
   // multiple of "alignment" bytes.
@@ -220,6 +223,8 @@ class AllocatorWrapper : public Allocator {
 
   string Name() override { return wrapped_->Name(); }
 
+  void Reset() override { wrapped_->Reset(); }
+
   void* AllocateRaw(size_t alignment, size_t num_bytes) override {
     return wrapped_->AllocateRaw(alignment, num_bytes);
   }
@@ -286,6 +291,8 @@ struct AllocatorAttributes {
   bool nic_compatible() const { return value & (0x1 << 1); }
   void set_gpu_compatible(bool v) { value |= (static_cast<int>(v) << 2); }
   bool gpu_compatible() const { return value & (0x1 << 2); }
+  void set_persistent(bool v) { value |= (static_cast<int>(v) << 20); }
+  bool persistent() { return value & (0x1 << 20); }
   void Merge(AllocatorAttributes other) {
     value |= other.value;
     if (scope_id != other.scope_id) {

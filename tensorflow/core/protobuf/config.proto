@@ -97,6 +97,10 @@ message GPUOptions {
   // the overall host system performance.
   bool force_gpu_compatible = 8;
 
+  // When allocating persistent memory, chunks with sizes greater than
+  // this value will be deemed large.
+  int32 large_chunk_size_mb = 500;
+
   message Experimental {
     // Configuration for breaking down a visible GPU into multiple "virtual"
     // devices.
