@@ -606,6 +606,9 @@ message RunOptions {
 
   Experimental experimental = 8;
 
+  // Whether to enable CUDA Graph.
+  bool use_cuda_graph = 500;
+
   reserved 4;
 }
 

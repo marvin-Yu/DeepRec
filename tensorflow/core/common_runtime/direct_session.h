@@ -222,6 +222,13 @@ class DirectSession : public Session {
     int64 collective_graph_key = BuildGraphOptions::kNoCollectiveGraphKey;
   };
 
+  ::tensorflow::Status Run0(const ::tensorflow::RunOptions& run_options,
+                            const NamedTensorList& inputs,
+                            const std::vector<string>& output_names,
+                            const std::vector<string>& target_nodes,
+                            std::vector<Tensor>* outputs,
+                            RunMetadata* run_metadata);
+
   // Retrieves an already existing set of executors to run 'inputs' and
   // 'outputs', or creates and caches them for future use.
   ::tensorflow::Status GetOrCreateExecutors(

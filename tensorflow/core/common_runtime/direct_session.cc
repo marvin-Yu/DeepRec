@@ -774,6 +774,21 @@ Status DirectSession::Run(const RunOptions& run_options,
                           const std::vector<string>& target_nodes,
                           std::vector<Tensor>* outputs,
                           RunMetadata* run_metadata) {
+  if (TF_PREDICT_FALSE(run_options.use_cuda_graph())) {
+    printf("use cuda graph\n");
+    return Run0(run_options, inputs, output_names, target_nodes, outputs,
+                run_metadata);
+  }
+  return Run0(run_options, inputs, output_names, target_nodes, outputs,
+              run_metadata);
+}
+
+Status DirectSession::Run0(const RunOptions& run_options,
+                           const NamedTensorList& inputs,
+                           const std::vector<string>& output_names,
+                           const std::vector<string>& target_nodes,
+                           std::vector<Tensor>* outputs,
+                           RunMetadata* run_metadata) {
   TF_RETURN_IF_ERROR(CheckNotClosed());
   TF_RETURN_IF_ERROR(CheckGraphCreated("Run()"));
   direct_session_runs->GetCell()->IncrementBy(1);
