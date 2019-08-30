@@ -550,6 +550,12 @@ Status DirectSession::DecorateAndPublishGraphForDebug(
   return Status::OK();
 }
 
+Status DirectSession::RunWithCUDAGraph(CUDAGraphContext& context,
+                                       const NamedTensorList& inputs,
+                                       std::vector<Tensor>* outputs) {
+  return Status::OK();
+}
+
 Status DirectSession::RunInternal(
     int64 step_id, const RunOptions& run_options,
     CallFrameInterface* call_frame, ExecutorsAndKeys* executors_and_keys,
@@ -837,27 +843,32 @@ Status DirectSession::Run(const RunOptions& run_options,
                           const std::vector<string>& target_nodes,
                           std::vector<Tensor>* outputs,
                           RunMetadata* run_metadata) {
-  if (!run_options.use_cuda_graph()) {
+  auto cuda_graph = run_options.cuda_graph();
+  if (!cuda_graph.enable()) {
     return Run0(run_options, inputs, output_names, target_nodes, outputs,
                 run_metadata);
   }
   std::vector<string> input_names;
   std::vector<tensorflow::int64> input_dims;
+  input_names.reserve(inputs.size());
+  input_dims.reserve(inputs.size());
   for (const auto& e: inputs) {
     input_names.push_back(e.first);
     input_dims.push_back(e.second.dim_size(0));
   }
-  bool initializing = run_options.initializing_cuda_graphs();
-  if (initializing) {
+  string key;
+  BuildCUDAGraphKey(input_names, input_dims, output_names, &key);
+  if (cuda_graph.initializing()) {
   } else {
-    std::shared_ptr<CUDAGraphContext> context;
-    GetCUDAGraphContext(input_names, input_dims, output_names, &context);
+    CUDAGraphContext* context;
+    BorrowCUDAGraphContext(key, &context);
     if (!context) {
       return Run0(run_options, inputs, output_names, target_nodes, outputs,
                   run_metadata);
     }
-    return Run0(run_options, inputs, output_names, target_nodes, outputs,
-                run_metadata);
+    auto st = RunWithCUDAGraph(*context, inputs, outputs);
+    ReturnCUDAGraphContext(key, context);
+    return st;
   }
 }
 
@@ -1762,12 +1773,24 @@ Status DirectSession::CreateGraphs(
   return s;
 }
 
-void DirectSession::GetCUDAGraphContext(
+void DirectSession::BuildCUDAGraphKey(
   gtl::ArraySlice<string> inputs,
   gtl::ArraySlice<::tensorflow::int64> input_dims,
   gtl::ArraySlice<string> outputs,
-  std::shared_ptr<CUDAGraphContext>* context) {
+  string* key) {
+}
+
+void DirectSession::AddCUDAGraphContext(const string& key,
+                                        CUDAGraphContext** context) {
+}
+
+void DirectSession::BorrowCUDAGraphContext(const string& key,
+                                           CUDAGraphContext** context) {
   *context = nullptr;
+}
+
+void DirectSession::ReturnCUDAGraphContext(const string& key,
+                                           CUDAGraphContext* context) {
 }
 
 ::tensorflow::Status DirectSession::ListDevices(

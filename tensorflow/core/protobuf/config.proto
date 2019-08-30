@@ -606,11 +606,16 @@ message RunOptions {
 
   Experimental experimental = 8;
 
-  // Whether to enable CUDA Graph.
-  bool use_cuda_graph = 500;
+  message CUDAGraph {
+    // Whether to enable CUDA Graph.
+    bool enable = 1;
+    // Whether to initialize CUDA Graphs.
+    bool initializing = 2;
+    // Number of CUDA graph instances per instances per session.
+    int32 count = 3;
+  };
 
-  // Whether initializing CUDA Graphs.
-  bool initializing_cuda_graphs = 501;
+  CUDAGraph cuda_graph = 500;
 
   reserved 4;
 }

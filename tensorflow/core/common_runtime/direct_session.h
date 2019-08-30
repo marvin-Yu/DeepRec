@@ -255,10 +255,17 @@ class DirectSession : public Session {
       DataTypeVector* output_types, int64* collective_graph_key);
 
   struct CUDAGraphContext;
-  void GetCUDAGraphContext(gtl::ArraySlice<string> inputs,
-                           gtl::ArraySlice<::tensorflow::int64> input_dims,
-                           gtl::ArraySlice<string> outputs,
-                           std::shared_ptr<CUDAGraphContext>* context);
+  void BuildCUDAGraphKey(gtl::ArraySlice<string> inputs,
+                         gtl::ArraySlice<::tensorflow::int64> input_dims,
+                         gtl::ArraySlice<string> outputs,
+                         string* key);
+  void AddCUDAGraphContext(const string& key, CUDAGraphContext** context);
+  void BorrowCUDAGraphContext(const string& key, CUDAGraphContext** context);
+  void ReturnCUDAGraphContext(const string& key, CUDAGraphContext* context);
+
+  ::tensorflow::Status RunWithCUDAGraph(CUDAGraphContext& context,
+                                        const NamedTensorList& inputs,
+                                        std::vector<Tensor>* outputs);
 
   ::tensorflow::Status RunInternal(
       int64 step_id, const RunOptions& run_options,
