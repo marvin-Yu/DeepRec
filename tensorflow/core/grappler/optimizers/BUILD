@@ -604,6 +604,7 @@ cc_library(
         ":remapper",
         ":scoped_allocator_optimizer",
         ":shape_optimizer",
+        ":kernel_fusion",
         "//tensorflow/core:core_cpu_base",
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
@@ -1175,5 +1176,18 @@ tf_cc_test(
         "//tensorflow/core:test_main",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_library(
+    name = "kernel_fusion",
+    srcs = ["fusion_pattern.cc",
+            "graph_rewriter.cc"],
+    hdrs = ["fusion_pattern.h",
+            "graph_rewriter.h",
+            "common_defines.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//tensorflow/core:framework",
     ],
 )

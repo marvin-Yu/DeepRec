@@ -13,10 +13,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_KERNEL_FUSION_CORE_GRAPH_REWRITER_H_
-#define TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_KERNEL_FUSION_CORE_GRAPH_REWRITER_H_
+#ifndef TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_GRAPH_REWRITER_H_
+#define TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_GRAPH_REWRITER_H_
 
-#include "tensorflow/core/grappler/optimizers/kernel_fusion/fusion_pattern.h"
+#include "tensorflow/core/framework/graph.pb.h"
+
+#include <string>
+#include <vector>
 
 namespace tensorflow {
 namespace grappler {
@@ -49,48 +52,47 @@ struct Node {
   bool remove;
 };
 
+class FusionPattern;
+
 class GraphRewriter {
  public:
   explicit GraphRewriter(GraphDef* graph);
   virtual ~GraphRewriter() = default;
 
-  /*
-  bool FuseRewrite(GraphRusePattern& pattern);
+  inline std::string GetParentName(const std::string& name, int* out_pos = nullptr) const {
+    // TODO
+  }
 
-  bool ModifyOp(GraphOpModifier& modifier);*/
+  inline const Node* GetNodeByName(const std::string& name) const {
+    auto iter = idx_map_.find(name);
+    if (iter == idx_map_.end())
+      return nullptr;
+    int idx = iter->second;
+    if (idx < 0 || idx >= nodes_.size())
+      return nullptr;
+    return &nodes_[idx];
+  }
 
-  std::string GetParentName(const std::string& name, int* out_pos = nullptr) const;
-  const Node* GetNodeByName(const std::string& name) const;
-  const Node* GetNodeByInputName(const std::string& name, int* out_pos = nullptr) const {
+  inline const Node* GetParentNodeByInputName(const std::string& name, int* out_pos = nullptr) const {
     std::string node_name = GetParentName(name, out_pos);
     return GetNodeByName(node_name);
   }
 
-  // NodeDef* NewFusedNodeDef(bool new_name = true);
-  std::string GetOutputName(const std::string& op_name) const;
-
-  template <typename T>
-  void set_attr(const std::string& key, const T value) {
-    attr_[key] = value;
-  }
-
-  template <typename T>
-  T get_attr(const std::string& key) {
-    auto iter = attrs_find(key);
-    // TODO
-  }
+  // Do fuse
+  bool FuseRewrite(FusionPattern& pattern);
 
  protected:
-  // for debug
-  void DumpGraph();
-
+  // Construct direct graph
   void InitNodes(const std::unordered_map<std::string, int>& idx_map);
 
-  bool VerifyFusionPattern(const FusionPattern& pattern);
-
-  bool RewriteGraph(FusionPattern& pattern);
-
+  // Search pattern
   bool BFS(int root_id, FusionPattern& pattern);
+
+  // remove marked nodes
+  void Finalize();
+
+  // For debug
+  void DumpGraph();
 
   std::unordered_map<std::string, int> idx_map_;
   std::vector<Node> nodes_;
@@ -98,7 +100,7 @@ class GraphRewriter {
   GraphDef* fused_graph_def_;
 };
 
-}  // end namespace grappler
-}  // end namespace tensorflow
+}  // namespace grappler
+}  // namespace tensorflow
 
-#endif  // TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_KERNEL_FUSION_CORE_GRAPH_REWRITER_H_
+#endif  // TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_GRAPH_REWRITER_H_
