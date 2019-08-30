@@ -14,7 +14,9 @@ namespace tensorflow {
 
 GPUPersistentAllocator::GPUPersistentAllocator(const GPUOptions& options,
                                                PlatformGpuId platform_gpu_id)
-  : large_chunk_size_(options.large_chunk_size_mb() * 1024 * 1024),
+  : large_chunk_size_((options.large_chunk_size_mb() > 0
+                       ? options.large_chunk_size_mb() : 8)
+                      * 1024 * 1024),
     chunk_size_(large_chunk_size_) {
   stream_exec_ =
     GpuIdUtil::ExecutorForPlatformGpuId(platform_gpu_id).ValueOrDie();
