@@ -37,6 +37,7 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/rendezvous_mgr.h"
 #include "tensorflow/core/common_runtime/scoped_allocator_mgr.h"
 #include "tensorflow/core/common_runtime/step_stats_collector.h"
+#include "tensorflow/core/framework/allocator.h"
 #include "tensorflow/core/framework/function.h"
 #include "tensorflow/core/framework/graph.pb_text.h"
 #include "tensorflow/core/framework/graph.pb.h"
@@ -78,9 +79,71 @@ limitations under the License.
 #include "tensorflow/core/util/device_name_utils.h"
 #include "tensorflow/core/util/env_var.h"
 
+// NOTE(zhujun): Currently the CUDA Graph support is implemented
+// directly here. This is a bit hacky as it is not well
+// encapsulated. But for now we are aiming to make it work, so we only
+// want to clean this up in the future.
+#include "third_party/gpus/cuda/include/cuda.h"
+
 namespace tensorflow {
 
 namespace {
+
+// Everything needed for a CUDA Graph run.
+struct CUDAGraphContext {
+  CUgraph graph = nullptr;
+  CUgraphExec exec = nullptr;
+  ~CUDAGraphContext() {
+    if (exec) {
+      CUresult res = cuGraphExecDestroy(exec);
+      if (res != CUDA_SUCCESS) {
+        const char* err;
+        cuGetErrorString(res, &err);
+        LOG(ERROR) << "cuGraphExecDestroy failed to destroy " << exec
+                   << (err ? string(": ") + err : "") ;
+      }
+    }
+    if (graph) {
+      CUresult res = cuGraphDestroy(graph);
+      if (res != CUDA_SUCCESS) {
+        const char* err;
+        cuGetErrorString(res, &err);
+        LOG(ERROR) << "cuGraphDestroy failed to destroy " << graph
+                   << (err ? string(": ") + err : "");
+      }
+    }
+  }
+};
+
+class CUDAGraphDeviceContext {
+  using CUDAGraphContextMap =
+    std::unordered_map<string, std::deque<std::shared_ptr<CUDAGraphContext>>>;
+ public:
+  void AddContext(const string& key, CUDAGraphContext** context);
+  void GetContext(const string& key,
+                  std::shared_ptr<CUDAGraphContext>* context);
+  void GetOrCreateAllocator(int instance_id,
+                            std::shared_ptr<Allocator>* allocator);
+ private:
+  mutex mu_;
+  CUDAGraphContextMap contexts_ GUARDED_BY(mu_);
+  std::vector<std::shared_ptr<Allocator>> persistent_allocators_
+  GUARDED_BY(mu_);
+};
+
+void CUDAGraphDeviceContext::AddContext(const string& key,
+                                        CUDAGraphContext** context) {
+}
+
+void CUDAGraphDeviceContext::GetContext(
+  const string& key,
+  std::shared_ptr<CUDAGraphContext>* context) {
+}
+
+void CUDAGraphDeviceContext::GetOrCreateAllocator(
+  int instance_id,
+  std::shared_ptr<Allocator>* allocator) {
+}
 
 auto* direct_session_runs = monitoring::Counter<0>::New(
     "/tensorflow/core/direct_session_runs",
@@ -774,13 +837,28 @@ Status DirectSession::Run(const RunOptions& run_options,
                           const std::vector<string>& target_nodes,
                           std::vector<Tensor>* outputs,
                           RunMetadata* run_metadata) {
-  if (TF_PREDICT_FALSE(run_options.use_cuda_graph())) {
-    printf("use cuda graph\n");
+  if (!run_options.use_cuda_graph()) {
     return Run0(run_options, inputs, output_names, target_nodes, outputs,
                 run_metadata);
   }
-  return Run0(run_options, inputs, output_names, target_nodes, outputs,
-              run_metadata);
+  std::vector<string> input_names;
+  std::vector<tensorflow::int64> input_dims;
+  for (const auto& e: inputs) {
+    input_names.push_back(e.first);
+    input_dims.push_back(e.second.dim_size(0));
+  }
+  bool initializing = run_options.initializing_cuda_graphs();
+  if (initializing) {
+  } else {
+    std::shared_ptr<CUDAGraphContext> context;
+    GetCUDAGraphContext(input_names, input_dims, output_names, &context);
+    if (!context) {
+      return Run0(run_options, inputs, output_names, target_nodes, outputs,
+                  run_metadata);
+    }
+    return Run0(run_options, inputs, output_names, target_nodes, outputs,
+                run_metadata);
+  }
 }
 
 Status DirectSession::Run0(const RunOptions& run_options,
@@ -1682,6 +1760,14 @@ Status DirectSession::CreateGraphs(
   std::swap(*input_types, client_graph->feed_types);
   std::swap(*output_types, client_graph->fetch_types);
   return s;
+}
+
+void DirectSession::GetCUDAGraphContext(
+  gtl::ArraySlice<string> inputs,
+  gtl::ArraySlice<::tensorflow::int64> input_dims,
+  gtl::ArraySlice<string> outputs,
+  std::shared_ptr<CUDAGraphContext>* context) {
+  *context = nullptr;
 }
 
 ::tensorflow::Status DirectSession::ListDevices(

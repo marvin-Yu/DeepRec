@@ -254,6 +254,12 @@ class DirectSession : public Session {
       RunStateArgs* run_state_args, DataTypeVector* input_types,
       DataTypeVector* output_types, int64* collective_graph_key);
 
+  struct CUDAGraphContext;
+  void GetCUDAGraphContext(gtl::ArraySlice<string> inputs,
+                           gtl::ArraySlice<::tensorflow::int64> input_dims,
+                           gtl::ArraySlice<string> outputs,
+                           std::shared_ptr<CUDAGraphContext>* context);
+
   ::tensorflow::Status RunInternal(
       int64 step_id, const RunOptions& run_options,
       CallFrameInterface* call_frame, ExecutorsAndKeys* executors_and_keys,
@@ -355,6 +361,10 @@ class DirectSession : public Session {
   // same ExecutorsAndKey object.
   std::unordered_map<string, std::shared_ptr<ExecutorsAndKeys>> executors_
       GUARDED_BY(executor_lock_);
+
+  struct CUDAGraphDeviceContext;
+  std::unordered_map<string, std::shared_ptr<CUDAGraphDeviceContext>>
+  cuda_graph_contexts_ GUARDED_BY(executor_lock_);
 
   class RunCallableCallFrame;
   struct Callable {

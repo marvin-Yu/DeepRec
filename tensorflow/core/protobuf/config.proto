@@ -609,6 +609,9 @@ message RunOptions {
   // Whether to enable CUDA Graph.
   bool use_cuda_graph = 500;
 
+  // Whether initializing CUDA Graphs.
+  bool initializing_cuda_graphs = 501;
+
   reserved 4;
 }
 
