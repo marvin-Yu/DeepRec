@@ -259,9 +259,12 @@ class DirectSession : public Session {
                          gtl::ArraySlice<::tensorflow::int64> input_dims,
                          gtl::ArraySlice<string> outputs,
                          string* key);
-  void AddCUDAGraphContext(const string& key, CUDAGraphContext** context);
-  void BorrowCUDAGraphContext(const string& key, CUDAGraphContext** context);
-  void ReturnCUDAGraphContext(const string& key, CUDAGraphContext* context);
+  void AddCUDAGraphContext(const string& device, const string& key,
+                           CUDAGraphContext** context);
+  void BorrowCUDAGraphContext(const string& device, const string& key,
+                              CUDAGraphContext** context);
+  void ReturnCUDAGraphContext(const string& device, const string& key,
+                              CUDAGraphContext* context);
 
   ::tensorflow::Status RunWithCUDAGraph(CUDAGraphContext& context,
                                         const NamedTensorList& inputs,

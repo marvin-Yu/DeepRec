@@ -93,6 +93,7 @@ namespace {
 struct CUDAGraphContext {
   CUgraph graph = nullptr;
   CUgraphExec exec = nullptr;
+  CUstream stream = nullptr;    // Not own.
   ~CUDAGraphContext() {
     if (exec) {
       CUresult res = cuGraphExecDestroy(exec);
@@ -848,6 +849,11 @@ Status DirectSession::Run(const RunOptions& run_options,
     return Run0(run_options, inputs, output_names, target_nodes, outputs,
                 run_metadata);
   }
+  const string& device = cuda_graph.device();
+  if (device.empty()) {
+    return errors::InvalidArgument("No device provided while "
+                                   "creating/running CUDA Graphs");
+  }
   std::vector<string> input_names;
   std::vector<tensorflow::int64> input_dims;
   input_names.reserve(inputs.size());
@@ -861,13 +867,13 @@ Status DirectSession::Run(const RunOptions& run_options,
   if (cuda_graph.initializing()) {
   } else {
     CUDAGraphContext* context;
-    BorrowCUDAGraphContext(key, &context);
+    BorrowCUDAGraphContext(device, key, &context);
     if (!context) {
       return Run0(run_options, inputs, output_names, target_nodes, outputs,
                   run_metadata);
     }
     auto st = RunWithCUDAGraph(*context, inputs, outputs);
-    ReturnCUDAGraphContext(key, context);
+    ReturnCUDAGraphContext(device, key, context);
     return st;
   }
 }
@@ -1780,16 +1786,18 @@ void DirectSession::BuildCUDAGraphKey(
   string* key) {
 }
 
-void DirectSession::AddCUDAGraphContext(const string& key,
+void DirectSession::AddCUDAGraphContext(const string& device, const string& key,
                                         CUDAGraphContext** context) {
 }
 
-void DirectSession::BorrowCUDAGraphContext(const string& key,
+void DirectSession::BorrowCUDAGraphContext(const string& device,
+                                           const string& key,
                                            CUDAGraphContext** context) {
   *context = nullptr;
 }
 
-void DirectSession::ReturnCUDAGraphContext(const string& key,
+void DirectSession::ReturnCUDAGraphContext(const string& device,
+                                           const string& key,
                                            CUDAGraphContext* context) {
 }
 
