@@ -152,19 +152,19 @@ void NewStageSubGraphThreadPoolFromStageSubGraphThreadPoolOptions(
     const SessionOptions& sess_options,
     const StageSubGraphThreadPoolOptionsProto& thread_pool_options,
     const int pool_number,
-    std::pair<thread::ThreadPoolInterface *, thread::ThreadPoolInterface *>& pool) {  
+    std::pair<thread::ThreadPoolInterface *, thread::ThreadPoolInterface *>& pool) {
   const std::string name_prefix =
       thread_pool_options.global_name() + "_" + std::to_string(pool_number);
 
   auto stage_subgraph_inter_op_thread_pool =
       new CustomThreadPoolImpl(strings::StrCat(name_prefix, "_inter"),
-                               thread_pool_options.inter_op_threads_num());  
+                               thread_pool_options.inter_op_threads_num());
   auto stage_subgraph_intra_op_thread_pool =
       new CustomThreadPoolImpl(strings::StrCat(name_prefix, "_intra"),
-			       thread_pool_options.intra_op_threads_num());  
+			       thread_pool_options.intra_op_threads_num());
 
   pool.first = stage_subgraph_inter_op_thread_pool;
-  pool.second = stage_subgraph_intra_op_thread_pool; 
+  pool.second = stage_subgraph_intra_op_thread_pool;
 }
 
 thread::ThreadPool* GlobalThreadPool(const SessionOptions& options) {
@@ -363,7 +363,7 @@ class DirectSessionFactory : public SessionFactory {
 
     std::vector<unsigned> visible_cpus;
     DirectSession* session =
-        new DirectSession(options, new DeviceMgr(std::move(devices)),
+        new DirectSession(options, new StaticDeviceMgr(std::move(devices)),
                           this, visible_cpus);
 
 #if GOOGLE_CUDA
@@ -837,8 +837,8 @@ DirectSession::DirectSession(const SessionOptions& options,
         pool_interface;
     NewStageSubGraphThreadPoolFromStageSubGraphThreadPoolOptions(
         options_, options_.config.session_stage_subgraph_thread_pool(i), i,
-        pool_interface);    
-    stage_subgraph_thread_pools_.emplace_back(pool_interface);    
+        pool_interface);
+    stage_subgraph_thread_pools_.emplace_back(pool_interface);
   }
 
   bool use_cost_model_executor = false;
@@ -937,7 +937,7 @@ DirectSession::~DirectSession() {
   for (const auto& p_and_owned : thread_pools_) {
     if (p_and_owned.second) delete p_and_owned.first;
   }
-  
+
   for (const auto& p_inter_and_intra : stage_subgraph_thread_pools_) {
     delete p_inter_and_intra.first;
     delete p_inter_and_intra.second;
@@ -1283,10 +1283,10 @@ Status DirectSession::RunInternal(
       args.runner = default_runner;
       args.cost_runner = default_cost_runner;
     } else {
-      args.runner = [this, device_thread_pool](Executor::Args::Closure c) { 
+      args.runner = [this, device_thread_pool](Executor::Args::Closure c) {
         device_thread_pool->Schedule(std::move(c));
       };
-      args.cost_runner = [this, device_thread_pool](Executor::Args::Closure c, int64 cost) { 
+      args.cost_runner = [this, device_thread_pool](Executor::Args::Closure c, int64 cost) {
         device_thread_pool->Schedule(std::move(c));
       };
     }
@@ -1457,7 +1457,7 @@ Status DirectSession::Run(const RunOptions& run_options,
   if (LogMemory::IsEnabled()) {
     LogMemory::RecordStep(step_id, run_state_args.handle);
   }
-  
+
   auto thread_pool_options = thread::ThreadPoolOptions();
   if (run_options.use_stage_subgraph_thread_pool()) {
     int id = run_options.stage_subgraph_thread_pool_id();
@@ -1473,7 +1473,7 @@ Status DirectSession::Run(const RunOptions& run_options,
   }
   TF_RETURN_IF_ERROR(RunInternal(step_id, run_options, &call_frame,
                                  executors_and_keys, run_metadata,
-                                 thread_pool_options));  
+                                 thread_pool_options));
 
   // Receive outputs.
   if (outputs) {
