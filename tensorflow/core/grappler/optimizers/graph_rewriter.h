@@ -16,41 +16,12 @@ limitations under the License.
 #ifndef TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_GRAPH_REWRITER_H_
 #define TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_GRAPH_REWRITER_H_
 
+#include "tensorflow/core/graph/graph.h"
 #include "tensorflow/core/framework/graph.pb.h"
-
-#include <string>
-#include <vector>
+#include "tensorflow/core/grappler/optimizers/fusion_pattern.h"
 
 namespace tensorflow {
 namespace grappler {
-
-struct Node {
-  Node() : remove(false) { }
-
-  struct Input {
-    // parent node id
-    int parent_node_id;
-    // position of parent output
-    int output_pos;
-  };
-  struct Output {
-    // child node id
-    int child_node_id;
-    // position of output
-    int output_pos;
-  };
-
-  const std::string& name() const { return node_def->name(); }
-  const std::string& op_name() const { return node_def->op(); }
-  std::string output_name(int pos) const {
-    if (pos == 0) return node_def->name();
-    return node_def->name() + ":" + std::to_string(pos);
-  }
-  std::vector<Input> inputs;
-  std::vector<Output> outputs;
-  NodeDef* node_def;
-  bool remove;
-};
 
 class FusionPattern;
 
@@ -59,43 +30,21 @@ class GraphRewriter {
   explicit GraphRewriter(GraphDef* graph);
   virtual ~GraphRewriter() = default;
 
-  inline std::string GetParentName(const std::string& name, int* out_pos = nullptr) const {
-    // TODO
-  }
-
-  inline const Node* GetNodeByName(const std::string& name) const {
-    auto iter = idx_map_.find(name);
-    if (iter == idx_map_.end())
-      return nullptr;
-    int idx = iter->second;
-    if (idx < 0 || idx >= nodes_.size())
-      return nullptr;
-    return &nodes_[idx];
-  }
-
-  inline const Node* GetParentNodeByInputName(const std::string& name, int* out_pos = nullptr) const {
-    std::string node_name = GetParentName(name, out_pos);
-    return GetNodeByName(node_name);
-  }
-
   // Do fuse
   bool FuseRewrite(FusionPattern& pattern);
 
  protected:
-  // Construct direct graph
-  void InitNodes(const std::unordered_map<std::string, int>& idx_map);
-
   // Search pattern
-  bool BFS(int root_id, FusionPattern& pattern);
+  bool BFS(Node* root, FusionPattern& pattern);
 
-  // remove marked nodes
+  // Remove marked nodes
   void Finalize();
 
   // For debug
   void DumpGraph();
 
-  std::unordered_map<std::string, int> idx_map_;
-  std::vector<Node> nodes_;
+  std::shared_ptr<Graph> graph_;
+  //Graph graph_;
   GraphDef raw_graph_def_;
   GraphDef* fused_graph_def_;
 };

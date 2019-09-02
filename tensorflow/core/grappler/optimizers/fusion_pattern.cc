@@ -8,8 +8,8 @@ FusionPattern& FusionPattern::Name(const std::string& name) {
   return *this;
 }
 
-FusionPattern& FusionPattern::FusionOpName(const std::string& fusion_op_name) {
-  this->fusion_op_name_ = fusion_op_name;
+FusionPattern& FusionPattern::FusionOpTypeString(const std::string& fusion_op_type_string) {
+  this->fusion_op_type_string_ = fusion_op_type_string;
   return *this;
 }
 
@@ -34,21 +34,21 @@ void FusionPattern::Init() {
 }
 
 bool FusionPattern::Match(std::vector<Node*>& nodes,
-                          GraphRewriter* graph_rewriter) {
+                          Graph* graph) {
   if (this->fusion_pattern_impl_)
-    return fusion_pattern_impl_->Match(nodes, graph_rewriter);
+    return fusion_pattern_impl_->Match(nodes, graph);
   return false;
 }
 
 void FusionPattern::GraphRewrite(std::vector<Node *> &nodes,
-                                 GraphRewriter *graph_rewriter) {
+                                 Graph* graph) {
   if (this->fusion_pattern_impl_)
-    fusion_pattern_impl_->GraphRewrite(nodes, graph_rewriter);
+    fusion_pattern_impl_->GraphRewrite(nodes, graph);
 }
 
-const std::string& FusionPattern::GetFusionPatternRootName() const {
+const std::string& FusionPattern::GetFusionPatternRootType() const {
   if (bfs_pattern_nodes_.size() > 0) {
-    return bfs_pattern_nodes_[0].op_name;
+    return bfs_pattern_nodes_[0].op_type_string;
   } else {
     return kEmptyString;
   }

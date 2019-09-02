@@ -4,49 +4,18 @@
 #include <set>
 #include <fstream>
 
-#include "tensorflow/core/grappler/optimizers/fusion_pattern.h"
+#include "tensorflow/core/graph/graph_constructor.h"
 
 namespace tensorflow {
 namespace grappler {
 
-GraphRewriter::GraphRewriter(tensorflow::GraphDef *graph_def)
-    : fused_graph_def_(graph_def) {
+GraphRewriter::GraphRewriter(GraphDef* graph_def)
+    : fused_graph_def_(graph_def),
+      graph_(new Graph(OpRegistry::Global())) {
   // TODO ifdef debug
   raw_graph_def_ = *fused_graph_def_;
   // TODO end if
-  nodes_.resize(fused_graph_def_->node_size());
-  for (auto i = 0; i < fused_graph_def_->node_size(); ++i) {
-    idx_map_[fused_graph_def_->node(i).name()] = i;
-    nodes_[i].node_def = fused_graph_def_->mutable_node(i);
-    nodes_[i].remove = false;
-  }
-  // Build directed graph
-  InitNodes(idx_map_);
-}
-
-void GraphRewriter::InitNodes(const std::unordered_map<std::string, int> &idx_map) {
-  int out_pos = 0;
-  for (size_t i = 0; i < nodes_.size(); ++i) {
-    auto& node = nodes_[i];
-    node.inputs.resize(node.node_def->input_size());
-    for (auto j = 0; j < node.node_def->input_size(); ++j) {
-      const auto& input_name = node.node_def->input(i);
-      const auto& parent_name = GetParentName(input_name, &out_pos);
-      auto iter = idx_map_.find(parent_name);
-      if (iter != idx_map_.end()) {
-        // set current node input
-        node.inputs[i].parent_node_id = iter->second;
-        node.inputs[i].output_pos = out_pos;
-        // set parent node output
-        Node::Output output;
-        output.child_node_id = i;
-        output.output_pos = out_pos;
-        nodes_[iter->second].outputs.emplace_back(output);
-      } else {
-        node.inputs[i].parent_node_id = -1;
-      }
-    }
-  }
+  ConvertGraphDefToGraph({}, *graph_def, graph_.get());
 }
 
 bool GraphRewriter::FuseRewrite(FusionPattern& pattern) {
@@ -54,11 +23,12 @@ bool GraphRewriter::FuseRewrite(FusionPattern& pattern) {
   if (!valid) return false;
 
   bool graph_fused = false;
-  const std::string& root_op_name = pattern.GetFusionPatternRootName();
-  for (size_t i = 0; i < nodes_.size(); ++i) {
+  const std::string& root_op_type = pattern.GetFusionPatternRootType();
+  for (size_t i = 0; i < graph_->num_node_ids(); ++i) {
+    Node* node = graph_->FindNodeId(i);
     // subgraph matching
-    if (nodes_[i].op_name() != root_op_name) continue;
-    if (BFS(i, pattern)) {
+    if (node->type_string() != root_op_type) continue;
+    if (BFS(node, pattern)) {
       graph_fused = true;
       break;
     }
@@ -68,61 +38,71 @@ bool GraphRewriter::FuseRewrite(FusionPattern& pattern) {
   return graph_fused;
 }
 
-bool GraphRewriter::BFS(int root_id, FusionPattern& pattern) {
+bool GraphRewriter::BFS(Node* root, FusionPattern& pattern) {
   std::queue<int> queue;
   std::set<int> visited;
   std::vector<Node*> candidate_fuse_nodes;
-  queue.push(root_id);
+  queue.push(root->id());
 
   size_t bfs_node_iter = 0;
   while (!queue.empty()) {
     auto node_id = queue.front();
     queue.pop();
-    if (node_id < 0 || node_id >= nodes_.size()) {
+    if (node_id < 0 || node_id >= graph_->num_node_ids()) {
       LOG(ERROR) << "Invalid node_id: " << node_id
-          << " node_size:" << nodes_.size();
+          << " node_size:" << graph_->num_node_ids();
       break;
     }
+    Node* node = graph_->FindNodeId(node_id);
+    if (nullptr == node) continue;
+
     if (!visited.count(node_id)) {
       auto& fuse_node = pattern.bfs_pattern_nodes()[bfs_node_iter];
       // match op name
-      if (nodes_[node_id].op_name() != fuse_node.op_name) {
-        LOG(ERROR) << "nodes_[node_id].name=" << nodes_[node_id].op_name()
-            << " fuse_node.op_name=" << fuse_node.op_name;
+      if (node->type_string() != fuse_node.op_type_string) {
+        LOG(ERROR) << "nodes->type_string()=" << node->type_string()
+            << " fuse_node.op_type_string=" << fuse_node.op_type_string;
         break;
       }
       // TODO: check single node here
 
-      for (const auto& output_pos : fuse_node.output_pos) {
-        if (output_pos < 0 || output_pos >= nodes_[node_id].outputs.size()) {
-          LOG(ERROR) << "Invalid ";
+      for (const auto& input_pos : fuse_node.input_pos) {
+        if (input_pos < 0 || input_pos >= node->num_inputs()) {
+          LOG(ERROR) << "Invalid input pos, input_pos=" << input_pos
+              << " node->num_inputs()=", node->num_inputs();
           break;
         }
-        queue.push(nodes_[node_id].outputs[output_pos].child_node_id);
-        candidate_fuse_nodes.push_back(&(nodes_[node_id]));
-        visited.insert(node_id);
+        const Edge* input_edge = nullptr;
+        Status status = node->input_edge(input_pos, &input_edge);
+        if (status != Status::OK() || nullptr == input_edge) {
+          LOG(ERROR) << "Get input edge failed, input_pos=" << input_pos;
+          break;
+        }
+
+        Node* parent_node = input_edge->src();
+        queue.push(parent_node->id());
+        candidate_fuse_nodes.push_back(parent_node);
+        visited.insert(parent_node->id());
         ++bfs_node_iter;
       }
     }
   }
 
-  if (bfs_node_iter == pattern.bfs_pattern_nodes().size() && pattern.Match(candidate_fuse_nodes, this)) {
-    pattern.GraphRewrite(candidate_fuse_nodes, this);
+  if (bfs_node_iter == pattern.bfs_pattern_nodes().size() && pattern.Match(candidate_fuse_nodes, graph_.get())) {
+    pattern.GraphRewrite(candidate_fuse_nodes, graph_.get());
     return true;
   }
   return false;
 }
 
 void GraphRewriter::Finalize() {
-  auto graph = *fused_graph_def_;
-  fused_graph_def_->clear_node();
-  for (size_t i = 0; i < nodes_.size(); ++i) {
-    if (nodes_[i].remove) {
-      LOG(INFO) << "remove node:" << graph.node(i).DebugString();
-      continue;
-    }
-    *(fused_graph_def_->add_node()) = graph.node(i);
-  }
+  // TODO
+  fused_graph_def_->Clear();
+  graph_->ToGraphDef(fused_graph_def_);
+
+  // TODO ifdef debug
+  DumpGraph();
+  // TODO end if
 }
 
 void GraphRewriter::DumpGraph() {
