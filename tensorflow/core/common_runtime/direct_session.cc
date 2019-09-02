@@ -147,6 +147,8 @@ void DirectSession::CUDAGraphDeviceContext::GetOrCreateAllocator(
   int instance_id,
   std::shared_ptr<Allocator>* allocator) {
 }
+#else
+struct DirectSession::CUDAGraphContext { };
 #endif
 
 namespace {
