@@ -31,6 +31,7 @@ load(
     "//third_party/mkl:build_defs.bzl",
     "if_mkl_ml",
 )
+load("@local_config_cuda//cuda:build_defs.bzl", "if_cuda")
 
 package(
     default_visibility = [":internal"],
@@ -648,7 +649,7 @@ tf_cc_shared_object(
             "-z defs",
             "-Wl,--version-script,$(location //tensorflow:tf_version_script.lds)",
         ],
-    }),
+    }) + if_cuda(["-lcuda"]),
     per_os_targets = True,
     soversion = VERSION,
     visibility = ["//visibility:public"],

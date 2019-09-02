@@ -229,6 +229,13 @@ class DirectSession : public Session {
                             std::vector<Tensor>* outputs,
                             RunMetadata* run_metadata);
 
+  struct CUDAGraphContext;
+  ::tensorflow::Status RecordCUDAGraph(
+    const ::tensorflow::RunOptions& run_options, const NamedTensorList& inputs,
+    const std::vector<string>& output_names,
+    const std::vector<string>& target_nodes, std::vector<Tensor>* outputs,
+    RunMetadata* run_metadata, const string& device, CUDAGraphContext* context);
+
   // Retrieves an already existing set of executors to run 'inputs' and
   // 'outputs', or creates and caches them for future use.
   ::tensorflow::Status GetOrCreateExecutors(
@@ -254,13 +261,12 @@ class DirectSession : public Session {
       RunStateArgs* run_state_args, DataTypeVector* input_types,
       DataTypeVector* output_types, int64* collective_graph_key);
 
-  struct CUDAGraphContext;
   void BuildCUDAGraphKey(gtl::ArraySlice<string> inputs,
                          gtl::ArraySlice<::tensorflow::int64> input_dims,
                          gtl::ArraySlice<string> outputs,
                          string* key);
-  void AddCUDAGraphContext(const string& device, const string& key,
-                           CUDAGraphContext** context);
+  bool MaybeAddCUDAGraphContext(int count, const string& device,
+                                const string& key, CUDAGraphContext* context);
   void BorrowCUDAGraphContext(const string& device, const string& key,
                               CUDAGraphContext** context);
   void ReturnCUDAGraphContext(const string& device, const string& key,
@@ -268,6 +274,7 @@ class DirectSession : public Session {
 
   ::tensorflow::Status RunWithCUDAGraph(CUDAGraphContext& context,
                                         const NamedTensorList& inputs,
+                                        const std::vector<string>& output_names,
                                         std::vector<Tensor>* outputs);
 
   ::tensorflow::Status RunInternal(

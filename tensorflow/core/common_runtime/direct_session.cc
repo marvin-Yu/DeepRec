@@ -79,18 +79,19 @@ limitations under the License.
 #include "tensorflow/core/util/device_name_utils.h"
 #include "tensorflow/core/util/env_var.h"
 
+#ifdef GOOGLE_CUDA
 // NOTE(zhujun): Currently the CUDA Graph support is implemented
 // directly here. This is a bit hacky as it is not well
 // encapsulated. But for now we are aiming to make it work, so we only
 // want to clean this up in the future.
 #include "third_party/gpus/cuda/include/cuda.h"
+#endif
 
 namespace tensorflow {
 
-namespace {
-
+#ifdef GOOGLE_CUDA
 // Everything needed for a CUDA Graph run.
-struct CUDAGraphContext {
+struct DirectSession::CUDAGraphContext {
   CUgraph graph = nullptr;
   CUgraphExec exec = nullptr;
   CUstream stream = nullptr;    // Not own.
@@ -116,7 +117,7 @@ struct CUDAGraphContext {
   }
 };
 
-class CUDAGraphDeviceContext {
+class DirectSession::CUDAGraphDeviceContext {
   using CUDAGraphContextMap =
     std::unordered_map<string, std::deque<std::shared_ptr<CUDAGraphContext>>>;
  public:
@@ -132,19 +133,23 @@ class CUDAGraphDeviceContext {
   GUARDED_BY(mu_);
 };
 
-void CUDAGraphDeviceContext::AddContext(const string& key,
-                                        CUDAGraphContext** context) {
+void DirectSession::CUDAGraphDeviceContext::AddContext(
+  const string& key,
+  CUDAGraphContext** context) {
 }
 
-void CUDAGraphDeviceContext::GetContext(
+void DirectSession::CUDAGraphDeviceContext::GetContext(
   const string& key,
   std::shared_ptr<CUDAGraphContext>* context) {
 }
 
-void CUDAGraphDeviceContext::GetOrCreateAllocator(
+void DirectSession::CUDAGraphDeviceContext::GetOrCreateAllocator(
   int instance_id,
   std::shared_ptr<Allocator>* allocator) {
 }
+#endif
+
+namespace {
 
 auto* direct_session_runs = monitoring::Counter<0>::New(
     "/tensorflow/core/direct_session_runs",
@@ -553,8 +558,12 @@ Status DirectSession::DecorateAndPublishGraphForDebug(
 
 Status DirectSession::RunWithCUDAGraph(CUDAGraphContext& context,
                                        const NamedTensorList& inputs,
+                                       const std::vector<string>& output_names,
                                        std::vector<Tensor>* outputs) {
+#ifdef GOOGLE_CUDA
+#else
   return Status::OK();
+#endif
 }
 
 Status DirectSession::RunInternal(
@@ -844,11 +853,13 @@ Status DirectSession::Run(const RunOptions& run_options,
                           const std::vector<string>& target_nodes,
                           std::vector<Tensor>* outputs,
                           RunMetadata* run_metadata) {
+#ifdef GOOGLE_CUDA
   auto cuda_graph = run_options.cuda_graph();
   if (!cuda_graph.enable()) {
     return Run0(run_options, inputs, output_names, target_nodes, outputs,
                 run_metadata);
   }
+
   const string& device = cuda_graph.device();
   if (device.empty()) {
     return errors::InvalidArgument("No device provided while "
@@ -864,18 +875,52 @@ Status DirectSession::Run(const RunOptions& run_options,
   }
   string key;
   BuildCUDAGraphKey(input_names, input_dims, output_names, &key);
+
   if (cuda_graph.initializing()) {
-  } else {
-    CUDAGraphContext* context;
-    BorrowCUDAGraphContext(device, key, &context);
-    if (!context) {
-      return Run0(run_options, inputs, output_names, target_nodes, outputs,
-                  run_metadata);
+    auto count = cuda_graph.count();
+    for (auto k = 0; k < count; k++) {
+      CUDAGraphContext* context = new CUDAGraphContext;
+      auto st = RecordCUDAGraph(run_options, inputs, output_names, target_nodes,
+                                outputs, run_metadata, device, context);
+      if (!st.ok()) {
+        delete context;
+        return st;
+      }
+      mutex_lock l(executor_lock_);
+      auto added = MaybeAddCUDAGraphContext(count, device, key, context);
+      if (!added) {
+        delete context;
+        return Status::OK();
+      }
     }
-    auto st = RunWithCUDAGraph(*context, inputs, outputs);
-    ReturnCUDAGraphContext(device, key, context);
-    return st;
+    return Status::OK();
   }
+
+  CUDAGraphContext* context;
+  BorrowCUDAGraphContext(device, key, &context);
+  if (!context) {
+    return Run0(run_options, inputs, output_names, target_nodes, outputs,
+                run_metadata);
+  }
+  auto st = RunWithCUDAGraph(*context, inputs, output_names, outputs);
+  ReturnCUDAGraphContext(device, key, context);
+  return st;
+#else
+  return Run0(run_options, inputs, output_names, target_nodes, outputs,
+              run_metadata);
+#endif
+}
+
+Status DirectSession::RecordCUDAGraph(const RunOptions& run_options,
+                                      const NamedTensorList& inputs,
+                                      const std::vector<string>& output_names,
+                                      const std::vector<string>& target_nodes,
+                                      std::vector<Tensor>* outputs,
+                                      RunMetadata* run_metadata,
+                                      const string& device,
+                                      CUDAGraphContext* context) {
+#ifdef GOOGLE_CUDA
+#endif
 }
 
 Status DirectSession::Run0(const RunOptions& run_options,
@@ -1786,19 +1831,32 @@ void DirectSession::BuildCUDAGraphKey(
   string* key) {
 }
 
-void DirectSession::AddCUDAGraphContext(const string& device, const string& key,
-                                        CUDAGraphContext** context) {
+bool DirectSession::MaybeAddCUDAGraphContext(int count,
+                                             const string& device,
+                                             const string& key,
+                                             CUDAGraphContext* context) {
+#ifdef GOOGLE_CUDA
+  return false;
+#else
+  return false;
+#endif
 }
 
 void DirectSession::BorrowCUDAGraphContext(const string& device,
                                            const string& key,
                                            CUDAGraphContext** context) {
+#ifdef GOOGLE_CUDA
+#else
   *context = nullptr;
+#endif
 }
 
 void DirectSession::ReturnCUDAGraphContext(const string& device,
                                            const string& key,
                                            CUDAGraphContext* context) {
+#ifdef GOOGLE_CUDA
+#else
+#endif
 }
 
 ::tensorflow::Status DirectSession::ListDevices(
