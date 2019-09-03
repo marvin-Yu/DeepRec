@@ -20,6 +20,7 @@ FusionPattern& FusionPattern::BfsPatternNodes(const std::vector<PatternNode>& bf
 
 FusionPattern& FusionPattern::SetFusionPatternImpl(FusionPatternImpl* fusion_pattern_impl) {
   this->fusion_pattern_impl_ = fusion_pattern_impl;
+  this->fusion_pattern_impl_->pattern = this;
   return *this;
 }
 

@@ -7,6 +7,8 @@
 namespace tensorflow {
 namespace grappler {
 
+class FusionPattern;
+
 class FusionPatternImpl {
  public:
   // Init fusion pattern impl
@@ -17,6 +19,8 @@ class FusionPatternImpl {
 
   // Do graph rewrite
   virtual void GraphRewrite(std::vector<Node*>& nodes, Graph* graph) { }
+
+  FusionPattern* pattern;
 };
 
 // The fusion pattern definition, which must be Fully Connected Graph.
@@ -35,11 +39,12 @@ class FusionPattern {
   struct PatternNode {
     // Op type string
     std::string op_type_string;
-    // input pos of edge, which is used for pattern graph BFS
+    // Input pos of edge, which is used for pattern graph BFS
     std::vector<int> input_pos;
   };
 
-  virtual ~FusionPattern();
+  FusionPattern() : fusion_pattern_impl_(nullptr)  {}
+  virtual ~FusionPattern() = default;
 
   FusionPattern& Name(const std::string& name);
   inline const std::string& name() const { return name_; }
@@ -76,8 +81,28 @@ class FusionPattern {
   // The fusion type
   std::string fusion_op_type_string_;
   // The fusion pattern impl
-  FusionPatternImpl* fusion_pattern_impl_ = nullptr;
+  FusionPatternImpl* fusion_pattern_impl_;
 };
+
+// Pattern register
+struct FusionPatternRegisterer {
+  static FusionPatternRegisterer* Get() {
+    static std::shared_ptr<FusionPatternRegisterer> inst(new FusionPatternRegisterer());
+    return inst.get();
+  }
+  FusionPattern& Register() {
+    size_t idx = pattern.size();
+    pattern.resize(idx + 1);
+    pattern[idx].reset(new FusionPattern());
+    return *(pattern[idx].get());
+  }
+
+  std::vector<std::shared_ptr<FusionPattern>> pattern;
+};
+
+#define REGISTER_FUSION_PATTERN(name)                             \
+    static FusionPattern& ANONYMOUS_VARIABLE(name) =              \
+      FusionPatternRegisterer::Get()->Register().Name(#name)
 
 }  // namespace grappler
 }  // namespace tensorflow

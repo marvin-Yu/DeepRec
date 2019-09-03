@@ -23,8 +23,6 @@ limitations under the License.
 namespace tensorflow {
 namespace grappler {
 
-class FusionPattern;
-
 class GraphRewriter {
  public:
   explicit GraphRewriter(GraphDef* graph);

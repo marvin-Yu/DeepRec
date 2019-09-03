@@ -597,6 +597,7 @@ cc_library(
         ":generic_layout_optimizer",
         ":graph_optimizer",
         ":implementation_selector",
+        ":kernel_fusion_optimizer",
         ":loop_optimizer",
         ":memory_optimizer",
         ":model_pruner",
@@ -604,7 +605,6 @@ cc_library(
         ":remapper",
         ":scoped_allocator_optimizer",
         ":shape_optimizer",
-        ":kernel_fusion",
         "//tensorflow/core:core_cpu_base",
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
@@ -1180,14 +1180,18 @@ tf_cc_test(
 )
 
 cc_library(
-    name = "kernel_fusion",
+    name = "kernel_fusion_optimizer",
     srcs = ["fusion_pattern.cc",
-            "graph_rewriter.cc"],
-    hdrs = ["fusion_pattern.h",
+            "graph_rewriter.cc",
+            "kernel_fusion_optimizer.cc"],
+    hdrs = ["common_defines.h",
+            "fusion_pattern.h",
             "graph_rewriter.h",
-            "common_defines.h"],
+            "kernel_fusion_optimizer.h",
+            ],
     visibility = ["//visibility:public"],
     deps = [
+        ":graph_optimizer",
         "//tensorflow/core:framework",
         "//tensorflow/core:graph",
     ],

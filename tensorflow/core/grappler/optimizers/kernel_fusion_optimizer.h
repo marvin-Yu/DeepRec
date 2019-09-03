@@ -16,7 +16,7 @@ limitations under the License.
 #ifndef TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_KERNEL_FUSION_OPTIMIZER_H_
 #define TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_KERNEL_FUSION_OPTIMIZER_H_
 
-#include "tensorflow/core/grappler/optimizers/kernel_fusion_optimizer.h"
+#include "tensorflow/core/grappler/optimizers/graph_optimizer.h"
 
 namespace tensorflow {
 namespace grappler {
@@ -26,13 +26,16 @@ class KernelFusionOptimizer : public GraphOptimizer {
   KernelFusionOptimizer() {}
   ~KernelFusionOptimizer() override {}
 
-  string name() const override { return "model_pruner"; };
+  string name() const override { return "kernel_fusion"; };
 
-  Status Optimize(Cluster* cluster, const GrapplerItem& item,
-                  GraphDef* optimized_graph) override;
+  virtual Status Optimize(Cluster* cluster, const GrapplerItem& item,
+                          GraphDef* optimized_graph) override;
+
+  virtual void Feedback(Cluster* cluster, const GrapplerItem& item,
+                        const GraphDef& optimized_graph, double result) override;
 };
 
-}  // end namespace grappler
-}  // end namespace tensorflow
+}  // namespace grappler
+}  // namespace tensorflow
 
 #endif  // TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_KERNEL_FUSION_OPTIMIZER_H_
