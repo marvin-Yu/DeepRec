@@ -2184,6 +2184,64 @@ TF_Session* TF_NewSession(TF_Graph* graph, const TF_SessionOptions* opt,
   }
 }
 
+TF_Session* TF_LoadSessionFromCheckpoint(
+    const TF_SessionOptions* session_options, const TF_Buffer* run_options,
+    const char* export_dir, TF_Graph* graph, TF_Buffer* meta_graph_def,
+    TF_Status* status) {
+// TODO(sjr): Remove the IS_MOBILE_PLATFORM guard. This will require ensuring
+// that the tensorflow/cc/saved_model:loader build target is mobile friendly.
+#if defined(IS_MOBILE_PLATFORM) || defined(IS_SLIM_BUILD)
+  status->status = tensorflow::errors::Unimplemented(
+      "Loading a SavedModel is not supported on mobile. File a bug at "
+      "https://github.com/tensorflow/tensorflow/issues if this feature is "
+      "important to you");
+  return nullptr;
+#else
+  mutex_lock l(graph->mu);
+  if (!graph->name_map.empty()) {
+    status->status = InvalidArgument("Graph is non-empty.");
+    return nullptr;
+  }
+
+  RunOptions run_options_proto;
+  if (run_options != nullptr && !run_options_proto.ParseFromArray(
+                                    run_options->data, run_options->length)) {
+    status->status = InvalidArgument("Unparseable RunOptions proto");
+    return nullptr;
+  }
+
+  tensorflow::SavedModelBundle bundle;
+  status->status =
+      tensorflow::LoadCheckpoint(session_options->options, run_options_proto,
+                                 export_dir, &bundle);
+  if (TF_GetCode(status) != TF_OK) return nullptr;
+
+  // Create a TF_Graph from the MetaGraphDef. This is safe as long as Session
+  // extends using GraphDefs. The Graph instance is different, but equivalent
+  // to the one used to create the session.
+  //
+  // TODO(jhseu): When Session is modified to take Graphs instead of
+  // GraphDefs, return the Graph generated in LoadSavedModel().
+  TF_ImportGraphDefOptions* import_opts = TF_NewImportGraphDefOptions();
+  TF_ImportGraphDefResults results;
+  GraphImportGraphDefLocked(graph, bundle.meta_graph_def.graph_def(),
+                            import_opts, &results, status);
+  TF_DeleteImportGraphDefOptions(import_opts);
+  if (TF_GetCode(status) != TF_OK) return nullptr;
+
+  if (meta_graph_def != nullptr) {
+    status->status = MessageToBuffer(bundle.meta_graph_def, meta_graph_def);
+    if (TF_GetCode(status) != TF_OK) return nullptr;
+  }
+
+  TF_Session* session = new TF_Session(bundle.session.release(), graph);
+
+  graph->sessions[session] = "";
+  session->last_num_graph_nodes = graph->graph.num_node_ids();
+  return session;
+#endif  // defined(IS_MOBILE_PLATFORM) || defined(IS_SLIM_BUILD)
+}
+
 TF_Session* TF_LoadSessionFromSavedModel(
     const TF_SessionOptions* session_options, const TF_Buffer* run_options,
     const char* export_dir, const char* const* tags, int tags_len,

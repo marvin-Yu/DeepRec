@@ -43,6 +43,13 @@ struct SavedModelBundle {
   SavedModelBundle() = default;
 };
 
+/// Loads a Checkpoint from the specified export directory.
+/// Returns a SavedModel bundle with a session and
+/// the requested meta graph def, if found.
+Status LoadCheckpoint(const SessionOptions& session_options,
+                      const RunOptions& run_options, const string& export_dir,
+                      SavedModelBundle* const bundle);
+
 /// Loads a SavedModel from the specified export directory. The meta graph def
 /// to be loaded is identified by the supplied tags, corresponding exactly to
 /// the set of tags used at SavedModel build time. Returns a SavedModel bundle

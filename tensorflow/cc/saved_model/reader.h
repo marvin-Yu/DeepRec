@@ -26,6 +26,11 @@ limitations under the License.
 
 namespace tensorflow {
 
+// Reads the MetaGraphDef from a .meta in the given directory,
+// Returns a failure status when a .meta does not exist.
+Status ReadMetaGraphDefFromCheckpoint(const string& export_dir,
+                                      MetaGraphDef* const meta_graph_def);
+
 // Reads the SavedModel proto from saved_model.pb(txt) in the given directory,
 // finds the MetaGraphDef that matches the given set of tags and writes it to
 // the `meta_graph_def` parameter. Returns a failure status when the SavedModel
