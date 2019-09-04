@@ -95,6 +95,9 @@ struct DirectSession::CUDAGraphContext {
   CUgraph graph = nullptr;
   CUgraphExec exec = nullptr;
   CUstream stream = nullptr;    // Not own.
+  std::vector<CUdeviceptr> inputs;    // Not owning the data.
+  std::vector<CUdeviceptr> outputs;   // Not owning the data.
+  std::vector<::tensorflow::TensorShape> output_shapes;
   ~CUDAGraphContext() {
     if (exec) {
       CUresult res = cuGraphExecDestroy(exec);
@@ -862,11 +865,6 @@ Status DirectSession::Run(const RunOptions& run_options,
                 run_metadata);
   }
 
-  const string& device = cuda_graph.device();
-  if (device.empty()) {
-    return errors::InvalidArgument("No device provided while "
-                                   "creating/running CUDA Graphs");
-  }
   std::vector<string> input_names;
   std::vector<tensorflow::int64> input_dims;
   input_names.reserve(inputs.size());
@@ -877,6 +875,11 @@ Status DirectSession::Run(const RunOptions& run_options,
   }
   string key;
   BuildCUDAGraphKey(input_names, input_dims, output_names, &key);
+
+  const string& device = GetAssignedDevice(input_names);
+  if (device.empty()) {
+    return errors::InvalidArgument("Graph not assigned to any device");
+  }
 
   if (cuda_graph.initializing()) {
     auto count = cuda_graph.count();
@@ -922,6 +925,10 @@ Status DirectSession::RecordCUDAGraph(const RunOptions& run_options,
                                       const string& device,
                                       CUDAGraphContext* context) {
 #ifdef GOOGLE_CUDA
+  return Status::OK();
+#else
+  return Run0(run_options, inputs, output_names, target_nodes, outputs,
+              run_metadata);
 #endif
 }
 
@@ -1848,6 +1855,7 @@ void DirectSession::BorrowCUDAGraphContext(const string& device,
                                            const string& key,
                                            CUDAGraphContext** context) {
 #ifdef GOOGLE_CUDA
+  *context = nullptr;
 #else
   *context = nullptr;
 #endif
@@ -1858,6 +1866,23 @@ void DirectSession::ReturnCUDAGraphContext(const string& device,
                                            CUDAGraphContext* context) {
 #ifdef GOOGLE_CUDA
 #else
+#endif
+}
+
+string DirectSession::GetAssignedDevice(gtl::ArraySlice<string> input_names) {
+#ifdef GOOGLE_CUDA
+  mutex_lock l(graph_state_lock_);
+  auto execution_state = execution_state_.get();
+  for (auto& name: input_names) {
+    std::vector<string> parts = str_util::Split(name, ":");
+    auto node = execution_state->get_node_by_name(parts[0]);
+    if (node) {
+      return node->assigned_device_name();
+    }
+  }
+  return "";
+#else
+  return "";
 #endif
 }
 

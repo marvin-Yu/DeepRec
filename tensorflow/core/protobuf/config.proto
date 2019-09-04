@@ -613,8 +613,6 @@ message RunOptions {
     bool initializing = 2;
     // Number of CUDA graph instances per instances per session.
     int32 count = 3;
-    // The device on which the CUDA Graphs resides.
-    string device = 4;
   };
 
   CUDAGraph cuda_graph = 500;
