@@ -223,14 +223,16 @@ class DirectSession : public Session {
     int64 collective_graph_key = BuildGraphOptions::kNoCollectiveGraphKey;
   };
 
+  struct CUDAGraphContext;
   ::tensorflow::Status Run0(const ::tensorflow::RunOptions& run_options,
                             const NamedTensorList& inputs,
                             const std::vector<string>& output_names,
                             const std::vector<string>& target_nodes,
                             std::vector<Tensor>* outputs,
-                            RunMetadata* run_metadata);
+                            RunMetadata* run_metadata,
+                            CUDAGraphContext* cuda_graph_context = nullptr,
+                            Allocator* persistent_allocator = nullptr);
 
-  struct CUDAGraphContext;
   ::tensorflow::Status RecordCUDAGraph(
     const ::tensorflow::RunOptions& run_options, const NamedTensorList& inputs,
     const std::vector<string>& output_names,
@@ -266,8 +268,8 @@ class DirectSession : public Session {
                          gtl::ArraySlice<::tensorflow::int64> input_dims,
                          gtl::ArraySlice<string> outputs,
                          string* key);
-  bool MaybeAddCUDAGraphContext(int count, const string& device,
-                                const string& key, CUDAGraphContext* context);
+  struct CUDAGraphDeviceContext;
+  CUDAGraphDeviceContext* GetCUDAGraphDeviceContext(const string& device);
   void BorrowCUDAGraphContext(const string& device, const string& key,
                               CUDAGraphContext** context);
   void ReturnCUDAGraphContext(const string& device, const string& key,
@@ -380,7 +382,6 @@ class DirectSession : public Session {
   std::unordered_map<string, std::shared_ptr<ExecutorsAndKeys>> executors_
       GUARDED_BY(executor_lock_);
 
-  struct CUDAGraphDeviceContext;
   std::unordered_map<string, std::shared_ptr<CUDAGraphDeviceContext>>
   cuda_graph_contexts_ GUARDED_BY(executor_lock_);
 

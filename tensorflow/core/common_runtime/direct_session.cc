@@ -121,37 +121,32 @@ struct DirectSession::CUDAGraphContext {
 };
 
 class DirectSession::CUDAGraphDeviceContext {
-  using CUDAGraphContextMap =
-    std::unordered_map<string, std::deque<std::shared_ptr<CUDAGraphContext>>>;
  public:
-  void AddContext(const string& key, CUDAGraphContext** context);
-  void GetContext(const string& key,
-                  std::shared_ptr<CUDAGraphContext>* context);
-  void GetOrCreateAllocator(int instance_id,
-                            std::shared_ptr<Allocator>* allocator);
+  bool GetContext(int id, const string& key, CUDAGraphContext** context);
+  void RemoveContext(int id, const string& key);
+  Allocator* GetOrCreateAllocator(int id);
  private:
   mutex mu_;
-  CUDAGraphContextMap contexts_ GUARDED_BY(mu_);
   std::vector<std::shared_ptr<Allocator>> persistent_allocators_
   GUARDED_BY(mu_);
 };
 
-void DirectSession::CUDAGraphDeviceContext::AddContext(
-  const string& key,
-  CUDAGraphContext** context) {
+// Value is true if this a newly created context, or false otherwise.
+bool DirectSession::CUDAGraphDeviceContext::GetContext(
+  int id, const string& key, CUDAGraphContext** context) {
+  return false;
 }
 
-void DirectSession::CUDAGraphDeviceContext::GetContext(
-  const string& key,
-  std::shared_ptr<CUDAGraphContext>* context) {
+void DirectSession::CUDAGraphDeviceContext::RemoveContext(
+  int id, const string& key) {
 }
 
-void DirectSession::CUDAGraphDeviceContext::GetOrCreateAllocator(
-  int instance_id,
-  std::shared_ptr<Allocator>* allocator) {
+Allocator* DirectSession::CUDAGraphDeviceContext::GetOrCreateAllocator(int id) {
+  return nullptr;
 }
 #else
 struct DirectSession::CUDAGraphContext { };
+struct DirectSession::CUDAGraphDeviceContext { };
 #endif
 
 namespace {
@@ -566,6 +561,7 @@ Status DirectSession::RunWithCUDAGraph(CUDAGraphContext& context,
                                        const std::vector<string>& output_names,
                                        std::vector<Tensor>* outputs) {
 #ifdef GOOGLE_CUDA
+  return Status::OK();
 #else
   return Status::OK();
 #endif
@@ -886,20 +882,24 @@ Status DirectSession::Run(const RunOptions& run_options,
   if (cuda_graph.initializing()) {
     auto count = cuda_graph.count();
     for (auto k = 0; k < count; k++) {
-      CUDAGraphContext* context = new CUDAGraphContext;
-      auto st = RecordCUDAGraph(run_options, inputs, output_names, target_nodes,
-                                outputs, run_metadata, device, context);
-      if (!st.ok()) {
-        delete context;
-        return st;
-      }
       mutex_lock l(executor_lock_);
-      auto added = MaybeAddCUDAGraphContext(count, device, key, context);
-      if (!added) {
-        VLOG(2) << "Already enough CUDA Graphs for " << key
-                << " on device " << device;
-        delete context;
-        return Status::OK();
+      auto device_context = GetCUDAGraphDeviceContext(device);
+      CUDAGraphContext* context;
+      if (!device_context->GetContext(k, key, &context)) {
+        VLOG(2) << "Instance " << k << " of CUDA Graph context for key " << key
+                << " already exists";
+        continue;
+      }
+      VLOG(2) << "Creating instance " << k << " of CUDA Graph context for key "
+              << key;
+      auto persistent_allocator = device_context->GetOrCreateAllocator(k);
+      auto st = Run0(run_options, inputs, output_names, target_nodes,
+                     outputs, run_metadata, context, persistent_allocator);
+      if (!st.ok()) {
+        VLOG(2) << "Failed to create instance " << k << " of CUDA Graph context"
+                << " for key " << key << ": " << st;
+        device_context->RemoveContext(k, key);
+        return st;
       }
     }
     VLOG(2) << "Finished creating CUDA Graphs";
@@ -923,28 +923,14 @@ Status DirectSession::Run(const RunOptions& run_options,
 #endif
 }
 
-Status DirectSession::RecordCUDAGraph(const RunOptions& run_options,
-                                      const NamedTensorList& inputs,
-                                      const std::vector<string>& output_names,
-                                      const std::vector<string>& target_nodes,
-                                      std::vector<Tensor>* outputs,
-                                      RunMetadata* run_metadata,
-                                      const string& device,
-                                      CUDAGraphContext* context) {
-#ifdef GOOGLE_CUDA
-  return Status::OK();
-#else
-  return Run0(run_options, inputs, output_names, target_nodes, outputs,
-              run_metadata);
-#endif
-}
-
 Status DirectSession::Run0(const RunOptions& run_options,
                            const NamedTensorList& inputs,
                            const std::vector<string>& output_names,
                            const std::vector<string>& target_nodes,
                            std::vector<Tensor>* outputs,
-                           RunMetadata* run_metadata) {
+                           RunMetadata* run_metadata,
+                           CUDAGraphContext* cuda_graph_context,
+                           Allocator* persistent_allocator) {
   TF_RETURN_IF_ERROR(CheckNotClosed());
   TF_RETURN_IF_ERROR(CheckGraphCreated("Run()"));
   direct_session_runs->GetCell()->IncrementBy(1);
@@ -1847,14 +1833,12 @@ void DirectSession::BuildCUDAGraphKey(
   string* key) {
 }
 
-bool DirectSession::MaybeAddCUDAGraphContext(int count,
-                                             const string& device,
-                                             const string& key,
-                                             CUDAGraphContext* context) {
+DirectSession::CUDAGraphDeviceContext* DirectSession::GetCUDAGraphDeviceContext(
+  const string& device) {
 #ifdef GOOGLE_CUDA
-  return false;
+  return nullptr;
 #else
-  return false;
+  return nullptr;
 #endif
 }
 
