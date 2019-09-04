@@ -2,29 +2,9 @@
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/register_types.h"
-#include "tensorflow/core/framework/shape_inference.h"
 #include "take_grad_lib.h"
 
 using namespace tensorflow;
-using shape_inference::DimensionHandle;
-using shape_inference::InferenceContext;
-using shape_inference::ShapeHandle;
-using shape_inference::UnchangedShape;
-
-/* values N * (scences, unit_size)
- * coords N * (scences, 2)
- * output_shape (2, ) [user's sessions, max scenes in one session]
- * output (users' sessions, max scenes in one session, unit_size)
- */
-
-REGISTER_OP("TakeGrad")
-    .Input("grad: T")
-    .Input("coords: N * Tindices")
-    .Output("grad_values: N * T")
-    .Attr("N: int")
-    .Attr("T: realnumbertype")
-    .Attr("Tindices: {int32,int64}")
-    .SetShapeFn(shape_inference::UnknownShape);
 
 typedef Eigen::ThreadPoolDevice CPUDevice;
 #if GOOGLE_CUDA
@@ -97,6 +77,15 @@ class TakeGradOp : public OpKernel {
                               .TypeConstraint<index_type>("Tindices"), \
                               TakeGradOp<CPUDevice, type, index_type>);
 
+#define REGISTER_CPU_ALL(type)     \
+  REGISTER_CPU(type, int32);       \
+  REGISTER_CPU(type, int64);
+
+TF_CALL_REAL_NUMBER_TYPES(REGISTER_CPU_ALL);
+#undef REGISTER_CPU_ALL
+#undef REGISTER_CPU
+
+#if GOOGLE_CUDA
 #define REGISTER_GPU(type, index_type)                                 \
   REGISTER_KERNEL_BUILDER(Name("TakeGrad")                             \
                               .Device(tensorflow::DEVICE_GPU)          \
@@ -104,20 +93,15 @@ class TakeGradOp : public OpKernel {
                               .TypeConstraint<index_type>("Tindices"), \
                               TakeGradOp<GPUDevice, type, index_type>);
 
-#define REGISTER_CPU_ALL(type)     \
-  REGISTER_CPU(type, int32);       \
-  REGISTER_CPU(type, int64);
 
 #define REGISTER_GPU_ALL(type)     \
   REGISTER_GPU(type, int32);       \
   REGISTER_GPU(type, int64);
 
 TF_CALL_GPU_NUMBER_TYPES(REGISTER_GPU_ALL);
-TF_CALL_REAL_NUMBER_TYPES(REGISTER_CPU_ALL);
-#undef REGISTER_CPU_ALL
-#undef REGISTER_CPU
 #undef REGISTER_GPU_ALL
 #undef REGISTER_GPU
+#endif  // GOOGLE_CUDA
 /*
 REGISTER_CPU(float, int32)
 */

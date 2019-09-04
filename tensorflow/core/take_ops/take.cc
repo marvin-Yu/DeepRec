@@ -110,6 +110,15 @@ class TakeOp : public OpKernel {
                               .HostMemory("output_shape"),             \
                               TakeOp<CPUDevice, type, index_type>);
 
+#define REGISTER_CPU_ALL(type)     \
+  REGISTER_CPU(type, int32);       \
+  REGISTER_CPU(type, int64);
+
+TF_CALL_REAL_NUMBER_TYPES(REGISTER_CPU_ALL);
+#undef REGISTER_CPU_ALL
+#undef REGISTER_CPU
+
+#if GOOGLE_CUDA
 #define REGISTER_GPU(type, index_type)                                 \
   REGISTER_KERNEL_BUILDER(Name("Take")                                 \
                               .Device(tensorflow::DEVICE_GPU)          \
@@ -118,20 +127,14 @@ class TakeOp : public OpKernel {
                               .HostMemory("output_shape"),             \
                               TakeOp<GPUDevice, type, index_type>);
 
-#define REGISTER_CPU_ALL(type)     \
-  REGISTER_CPU(type, int32);       \
-  REGISTER_CPU(type, int64);
-
 #define REGISTER_GPU_ALL(type)     \
   REGISTER_GPU(type, int32);       \
   REGISTER_GPU(type, int64);
 
 TF_CALL_GPU_NUMBER_TYPES(REGISTER_GPU_ALL);
-TF_CALL_REAL_NUMBER_TYPES(REGISTER_CPU_ALL);
-#undef REGISTER_CPU_ALL
-#undef REGISTER_CPU
 #undef REGISTER_GPU_ALL
 #undef REGISTER_GPU
+#endif  // GOOGLE_CUDA
 /*
 REGISTER_CPU(float, int32)
 */
