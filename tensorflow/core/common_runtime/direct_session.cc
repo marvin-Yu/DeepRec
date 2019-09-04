@@ -866,7 +866,7 @@ Status DirectSession::Run(const RunOptions& run_options,
   }
 
   std::vector<string> input_names;
-  std::vector<tensorflow::int64> input_dims;
+  std::vector<::tensorflow::int64> input_dims;
   input_names.reserve(inputs.size());
   input_dims.reserve(inputs.size());
   for (const auto& e: inputs) {
@@ -875,11 +875,13 @@ Status DirectSession::Run(const RunOptions& run_options,
   }
   string key;
   BuildCUDAGraphKey(input_names, input_dims, output_names, &key);
+  VLOG(2) << "CUDA Graph key is " << key;
 
   const string& device = GetAssignedDevice(input_names);
   if (device.empty()) {
     return errors::InvalidArgument("Graph not assigned to any device");
   }
+  VLOG(2) << "Using device " << device << " for CUDA Graphs";
 
   if (cuda_graph.initializing()) {
     auto count = cuda_graph.count();
@@ -894,16 +896,21 @@ Status DirectSession::Run(const RunOptions& run_options,
       mutex_lock l(executor_lock_);
       auto added = MaybeAddCUDAGraphContext(count, device, key, context);
       if (!added) {
+        VLOG(2) << "Already enough CUDA Graphs for " << key
+                << " on device " << device;
         delete context;
         return Status::OK();
       }
     }
+    VLOG(2) << "Finished creating CUDA Graphs";
     return Status::OK();
   }
 
   CUDAGraphContext* context;
   BorrowCUDAGraphContext(device, key, &context);
   if (!context) {
+    VLOG(2) << "Existing CUDA Graph context was not found, run in the "
+            << "plain old TensorFlow way";
     return Run0(run_options, inputs, output_names, target_nodes, outputs,
                 run_metadata);
   }
