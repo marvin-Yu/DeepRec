@@ -22,6 +22,8 @@ namespace grappler {
 
 Status KernelFusionOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
                                        GraphDef* optimized_graph) {
+  GrapplerItem optimized_item(item);
+
   std::vector<std::shared_ptr<FusionPattern>>& pattern =
       FusionPatternRegisterer::Get()->pattern;
 
@@ -31,7 +33,7 @@ Status KernelFusionOptimizer::Optimize(Cluster* cluster, const GrapplerItem& ite
     for (auto& p : pattern) {
       bool rewrite = false;
       do {
-        GraphRewriter graph(optimized_graph);
+        GraphRewriter graph(&optimized_item.graph);
         rewrite = graph.FuseRewrite(*p);
         if (rewrite) {
           finished = false;
@@ -39,6 +41,8 @@ Status KernelFusionOptimizer::Optimize(Cluster* cluster, const GrapplerItem& ite
       } while (rewrite);
     }
   } while (!finished);
+
+  optimized_graph->Swap(&optimized_item.graph);
 
   return Status::OK();
 }
