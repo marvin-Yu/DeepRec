@@ -1194,5 +1194,6 @@ cc_library(
         ":graph_optimizer",
         "//tensorflow/core:framework",
         "//tensorflow/core:graph",
+        "//tensorflow/core/grappler:grappler_item",
     ],
 )

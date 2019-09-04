@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "tensorflow/core/grappler/optimizers/kernel_fusion_optimizer.h"
 
+#include "tensorflow/core/grappler/grappler_item.h"
 #include "tensorflow/core/grappler/optimizers/graph_rewriter.h"
 
 namespace tensorflow {
