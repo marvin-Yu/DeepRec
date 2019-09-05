@@ -2237,8 +2237,11 @@ TF_Session* TF_LoadSessionFromCheckpoint(
 
   if (VLOG_IS_ON(1)) {
     std::fstream f;
-    f.open("ckpt.pbtxt", std::fstream::out);
-    f << graph->graph.ToGraphDefDebug().DebugString();
+    f.open("ckpt.metagraph.pbtxt", std::fstream::out);
+	f << bundle.meta_graph_def.DebugString();
+    f.close();
+    f.open("ckpt.graph.pb", std::fstream::out | std::fstream::binary);
+    f << bundle.meta_graph_def.graph_def().SerializeAsString();
     f.close();
   }
 
@@ -2305,6 +2308,15 @@ TF_Session* TF_LoadSessionFromSavedModel(
     if (TF_GetCode(status) != TF_OK) return nullptr;
   }
 
+  if (VLOG_IS_ON(1)) {
+    std::fstream f;
+    f.open("savedmodel.metagraph.pbtxt", std::fstream::out);
+	f << bundle.meta_graph_def.DebugString();
+    f.close();
+    f.open("savedmodel.graph.pb", std::fstream::out | std::fstream::binary);
+    f << bundle.meta_graph_def.graph_def().SerializeAsString();
+    f.close();
+  }
   TF_Session* session = new TF_Session(bundle.session.release(), graph);
 
   graph->sessions[session] = "";
