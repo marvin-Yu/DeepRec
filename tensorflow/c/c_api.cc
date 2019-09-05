@@ -16,6 +16,7 @@ limitations under the License.
 #include "tensorflow/c/c_api.h"
 
 #include <algorithm>
+#include <fstream>
 #include <limits>
 #include <memory>
 #include <vector>
@@ -2232,6 +2233,13 @@ TF_Session* TF_LoadSessionFromCheckpoint(
   if (meta_graph_def != nullptr) {
     status->status = MessageToBuffer(bundle.meta_graph_def, meta_graph_def);
     if (TF_GetCode(status) != TF_OK) return nullptr;
+  }
+
+  if (VLOG_IS_ON(1)) {
+    std::fstream f;
+    f.open("ckpt.pbtxt", std::fstream::out);
+    f << graph->graph.ToGraphDefDebug().DebugString();
+    f.close();
   }
 
   TF_Session* session = new TF_Session(bundle.session.release(), graph);
