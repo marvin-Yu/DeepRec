@@ -18,6 +18,7 @@ limitations under the License.
 
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -662,6 +663,7 @@ class OpKernelContext {
 
     // Array indexed by output number for this node
     const AllocatorAttributes* output_attr_array = nullptr;
+    std::shared_ptr<const AllocatorAttributes> real_output_attr_array;
 
     // Shared resources accessible by this op kernel invocation.
     ResourceMgr* resource_manager = nullptr;
@@ -733,6 +735,15 @@ class OpKernelContext {
 
     // Persistent allocator. Not own.
     Allocator* persistent_allocator = nullptr;
+
+    // Allocator attributes to use.
+    std::shared_ptr<AllocatorAttributes> allocator_attributes;
+
+    const AllocatorAttributes* get_output_attr_array() {
+      return (real_output_attr_array
+              ? real_output_attr_array.get()
+              : output_attr_array);
+    }
   };
 
   // params must outlive the OpKernelContext.
@@ -1028,7 +1039,10 @@ class OpKernelContext {
   }
   Status allocate_temp(DataType type, const TensorShape& shape,
                        Tensor* out_temp) {
-    return allocate_temp(type, shape, out_temp, AllocatorAttributes());
+    return allocate_temp(type, shape, out_temp,
+                         (params_->allocator_attributes
+                          ? *params_->allocator_attributes
+                          : AllocatorAttributes()));
   }
 
   // Allocates a Tensor of the specified type and shape which the Op
@@ -1103,7 +1117,7 @@ class OpKernelContext {
   }
 
   AllocatorAttributes output_alloc_attr(int index) const {
-    return params_->output_attr_array[index];
+    return params_->get_output_attr_array()[index];
   }
 
   gtl::InlinedVector<WrappedAllocator, 4> ConsumeWrappedAllocators() {

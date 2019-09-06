@@ -464,9 +464,11 @@ void OpKernelContext::forward_ref_input_to_ref_output(int input_index,
 bool OpKernelContext::forward_input_to_output_with_shape(
     int input_index, int output_index, const TensorShape& output_shape,
     Tensor** output) {
-  const auto output_attr = params_->output_attr_array == nullptr
-                               ? AllocatorAttributes()
-                               : output_alloc_attr(output_index);
+  const auto output_attr =
+    (params_->get_output_attr_array() == nullptr
+     ? (params_->allocator_attributes
+        ? *params_->allocator_attributes : AllocatorAttributes())
+     : output_alloc_attr(output_index));
   std::unique_ptr<Tensor> new_tensor = forward_input(
       input_index, output_index, expected_output_dtype(output_index),
       output_shape, output_memory_type(output_index), output_attr);

@@ -269,7 +269,9 @@ class DirectSession : public Session {
                          gtl::ArraySlice<string> outputs,
                          string* key);
   struct CUDAGraphDeviceContext;
-  CUDAGraphDeviceContext* GetCUDAGraphDeviceContext(const string& device);
+  ::tensorflow::Status GetCUDAGraphDeviceContext(
+    const string& device, const GPUOptions& gpu_options,
+    CUDAGraphDeviceContext** context);
   void BorrowCUDAGraphContext(const string& device, const string& key,
                               CUDAGraphContext** context);
   void ReturnCUDAGraphContext(const string& device, const string& key,
@@ -284,7 +286,9 @@ class DirectSession : public Session {
       int64 step_id, const RunOptions& run_options,
       CallFrameInterface* call_frame, ExecutorsAndKeys* executors_and_keys,
       RunMetadata* run_metadata,
-      const thread::ThreadPoolOptions& threadpool_options);
+      const thread::ThreadPoolOptions& threadpool_options,
+      CUDAGraphContext* cuda_graph_context = nullptr,
+      Allocator* persistent_allocator = nullptr);
 
   // Returns whether inter-op execution uses a global pool or the input
   // `run_options` requests being run on inter_op_thread_pool = 0 in case
@@ -382,8 +386,9 @@ class DirectSession : public Session {
   std::unordered_map<string, std::shared_ptr<ExecutorsAndKeys>> executors_
       GUARDED_BY(executor_lock_);
 
+  mutex cuda_graph_lock_; // protects cuda_graph_device_contexts_
   std::unordered_map<string, std::shared_ptr<CUDAGraphDeviceContext>>
-  cuda_graph_contexts_ GUARDED_BY(executor_lock_);
+  cuda_graph_device_contexts_ GUARDED_BY(cuda_graph_lock_);
 
   class RunCallableCallFrame;
   struct Callable {

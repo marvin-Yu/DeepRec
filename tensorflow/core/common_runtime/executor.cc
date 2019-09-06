@@ -1757,7 +1757,20 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
       params.op_kernel = op_kernel;
       params.frame_iter = FrameAndIter(input_frame->frame_id, input_iter);
       params.is_input_dead = is_input_dead;
-      params.output_attr_array = item.output_attrs();
+      if (persistent_allocator_) {
+        auto p = new AllocatorAttributes[item.num_outputs];
+        memcpy(p, item.output_attrs(),
+               sizeof(AllocatorAttributes) * item.num_outputs);
+        for (int k = 0; k < item.num_outputs; k++) {
+          p[k].set_persistent(true);
+        }
+        params.real_output_attr_array.reset(p);
+        p = new AllocatorAttributes;
+        p->set_persistent(true);
+        params.allocator_attributes.reset(p);
+      } else {
+        params.output_attr_array = item.output_attrs();
+      }
       params.forward_from_array = item.forward_from();
 
       if (item.kernel_is_async) {

@@ -3405,7 +3405,7 @@ tf_cuda_library(
         "//tensorflow/core/profiler/lib:profiler_session",
         "//tensorflow/core/profiler/lib:traceme",
         "@com_google_absl//absl/container:flat_hash_set",
-    ],
+    ] + if_cuda([":gpu_runtime"]),
     alwayslink = 1,
 )
 

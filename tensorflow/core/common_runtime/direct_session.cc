@@ -29,6 +29,8 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/executor.h"
 #include "tensorflow/core/common_runtime/executor_factory.h"
 #include "tensorflow/core/common_runtime/function.h"
+#include "tensorflow/core/common_runtime/gpu/gpu_device.h"
+#include "tensorflow/core/common_runtime/gpu/gpu_persistent_allocator.h"
 #include "tensorflow/core/common_runtime/graph_optimizer.h"
 #include "tensorflow/core/common_runtime/memory_types.h"
 #include "tensorflow/core/common_runtime/metrics.h"
@@ -37,7 +39,6 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/rendezvous_mgr.h"
 #include "tensorflow/core/common_runtime/scoped_allocator_mgr.h"
 #include "tensorflow/core/common_runtime/step_stats_collector.h"
-#include "tensorflow/core/framework/allocator.h"
 #include "tensorflow/core/framework/function.h"
 #include "tensorflow/core/framework/graph.pb_text.h"
 #include "tensorflow/core/framework/graph.pb.h"
@@ -122,19 +123,24 @@ struct DirectSession::CUDAGraphContext {
 
 class DirectSession::CUDAGraphDeviceContext {
  public:
+  CUDAGraphDeviceContext(const GPUOptions& gpu_options,
+                         PlatformGpuId platform_gpu_id):
+    gpu_options_(gpu_options), platform_gpu_id_(platform_gpu_id) {}
   bool GetContext(int id, const string& key, CUDAGraphContext** context);
   void RemoveContext(int id, const string& key);
   Allocator* GetOrCreateAllocator(int id);
  private:
   mutex mu_;
-  std::vector<std::shared_ptr<Allocator>> persistent_allocators_
+  std::vector<std::unique_ptr<Allocator>> persistent_allocators_
   GUARDED_BY(mu_);
+  GPUOptions gpu_options_;
+  PlatformGpuId platform_gpu_id_;
 };
 
 // Value is true if this a newly created context, or false otherwise.
 bool DirectSession::CUDAGraphDeviceContext::GetContext(
   int id, const string& key, CUDAGraphContext** context) {
-  return false;
+  return true;
 }
 
 void DirectSession::CUDAGraphDeviceContext::RemoveContext(
@@ -142,7 +148,14 @@ void DirectSession::CUDAGraphDeviceContext::RemoveContext(
 }
 
 Allocator* DirectSession::CUDAGraphDeviceContext::GetOrCreateAllocator(int id) {
-  return nullptr;
+  mutex_lock l(mu_);
+  if (persistent_allocators_.size() < id + 1 || !persistent_allocators_[id]) {
+    persistent_allocators_.resize(id + 1);
+    GPUOptions options;
+    persistent_allocators_[id].reset(
+      new GPUPersistentAllocator(options, platform_gpu_id_));
+  }
+  return persistent_allocators_[id].get();
 }
 #else
 struct DirectSession::CUDAGraphContext { };
@@ -571,7 +584,8 @@ Status DirectSession::RunInternal(
     int64 step_id, const RunOptions& run_options,
     CallFrameInterface* call_frame, ExecutorsAndKeys* executors_and_keys,
     RunMetadata* run_metadata,
-    const thread::ThreadPoolOptions& threadpool_options) {
+    const thread::ThreadPoolOptions& threadpool_options,
+    CUDAGraphContext* cuda_graph_context, Allocator* persistent_allocator) {
   const uint64 start_time_usecs = options_.env->NowMicros();
   const int64 executor_step_count = executors_and_keys->step_count.fetch_add(1);
   RunState run_state(step_id, &devices_);
@@ -657,6 +671,7 @@ Status DirectSession::RunInternal(
   args.step_container = &run_state.step_container;
   args.sync_on_finish = sync_on_finish_;
   args.user_intra_op_threadpool = threadpool_options.intra_op_threadpool;
+  args.persistent_allocator = persistent_allocator;
 
   const bool do_trace = (run_options.trace_level() > RunOptions::NO_TRACE);
 
@@ -880,27 +895,31 @@ Status DirectSession::Run(const RunOptions& run_options,
   VLOG(2) << "Using device " << device << " for CUDA Graphs";
 
   if (cuda_graph.initializing()) {
+    auto gpu_options = cuda_graph.gpu_options();
     auto count = cuda_graph.count();
     for (auto k = 0; k < count; k++) {
-      mutex_lock l(executor_lock_);
-      auto device_context = GetCUDAGraphDeviceContext(device);
+      mutex_lock l(cuda_graph_lock_);
+      CUDAGraphDeviceContext* device_context;
+      auto st = GetCUDAGraphDeviceContext(device, gpu_options, &device_context);
+      if (!st.ok()) {
+        return st;
+      }
       CUDAGraphContext* context;
       if (!device_context->GetContext(k, key, &context)) {
         VLOG(2) << "Instance " << k << " of CUDA Graph context for key " << key
                 << " already exists";
         continue;
       }
-      VLOG(2) << "Creating instance " << k << " of CUDA Graph context for key "
-              << key;
       auto persistent_allocator = device_context->GetOrCreateAllocator(k);
-      auto st = Run0(run_options, inputs, output_names, target_nodes,
-                     outputs, run_metadata, context, persistent_allocator);
+      VLOG(2) << "Creating instance " << k << " of CUDA Graph context for key "
+              << key << ", persistent allocator is " << persistent_allocator;
+      st = Run0(run_options, inputs, output_names, target_nodes,
+                outputs, run_metadata, context, persistent_allocator);
       if (!st.ok()) {
-        VLOG(2) << "Failed to create instance " << k << " of CUDA Graph context"
-                << " for key " << key << ": " << st;
         device_context->RemoveContext(k, key);
         return st;
       }
+      persistent_allocator->Reset();
     }
     VLOG(2) << "Finished creating CUDA Graphs";
     return Status::OK();
@@ -990,7 +1009,8 @@ Status DirectSession::Run0(const RunOptions& run_options,
 
   TF_RETURN_IF_ERROR(RunInternal(step_id, run_options, &call_frame,
                                  executors_and_keys, run_metadata,
-                                 thread::ThreadPoolOptions()));
+                                 thread::ThreadPoolOptions(),
+                                 cuda_graph_context, persistent_allocator));
 
   // Receive outputs.
   if (outputs) {
@@ -1833,12 +1853,33 @@ void DirectSession::BuildCUDAGraphKey(
   string* key) {
 }
 
-DirectSession::CUDAGraphDeviceContext* DirectSession::GetCUDAGraphDeviceContext(
-  const string& device) {
+::tensorflow::Status DirectSession::GetCUDAGraphDeviceContext(
+  const string& device_name, const GPUOptions& gpu_options,
+  DirectSession::CUDAGraphDeviceContext** context) {
 #ifdef GOOGLE_CUDA
-  return nullptr;
+  auto it = cuda_graph_device_contexts_.find(device_name);
+  if (it != cuda_graph_device_contexts_.end()) {
+    *context =  it->second.get();
+    return Status::OK();
+  }
+  Device* device0;
+  auto st = device_mgr_->LookupDevice(device_name, &device0);
+  if (!st.ok()) {
+    return st;
+  }
+  auto device_type = device0->attributes().device_type();
+  if (device_type != "GPU") {
+    return errors::InvalidArgument(
+      "Expecting a GPU device for ", device_name, ", but got a ",
+      device_type, " device");
+  }
+  BaseGPUDevice* device = reinterpret_cast<BaseGPUDevice*>(device0);
+  cuda_graph_device_contexts_[device_name].reset(
+    new CUDAGraphDeviceContext(gpu_options, PlatformGpuId(device->gpu_id())));
+  *context = cuda_graph_device_contexts_[device_name].get();
+  return Status::OK();
 #else
-  return nullptr;
+  return Status::OK();
 #endif
 }
 

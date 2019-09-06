@@ -613,6 +613,8 @@ message RunOptions {
     bool initializing = 2;
     // Number of CUDA graph instances per instances per session.
     int32 count = 3;
+    // Options for GPU
+    GPUOptions gpu_options = 4;
   };
 
   CUDAGraph cuda_graph = 500;
