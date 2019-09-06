@@ -12,7 +12,7 @@
 
 namespace tensorflow {
 
-GPUPersistentAllocator::GPUPersistentAllocator(const GPUOptions& options,
+GPUPersistentAllocator::GPUPersistentAllocator(const CUDAGraphOptions& options,
                                                PlatformGpuId platform_gpu_id)
   : large_chunk_size_((options.large_chunk_size_mb() > 0
                        ? options.large_chunk_size_mb() : 8)

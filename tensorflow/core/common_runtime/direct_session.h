@@ -232,6 +232,15 @@ class DirectSession : public Session {
                             RunMetadata* run_metadata,
                             CUDAGraphContext* cuda_graph_context = nullptr,
                             Allocator* persistent_allocator = nullptr);
+  ::tensorflow::Status RecordCUDAGraph(
+    const ::tensorflow::RunOptions& run_options,
+    const NamedTensorList& inputs,
+    const std::vector<string>& output_names,
+    const std::vector<string>& target_nodes,
+    std::vector<Tensor>* outputs,
+    RunMetadata* run_metadata,
+    CUDAGraphContext* cuda_graph_context,
+    Allocator* persistent_allocator);
 
   ::tensorflow::Status RecordCUDAGraph(
     const ::tensorflow::RunOptions& run_options, const NamedTensorList& inputs,
@@ -269,13 +278,17 @@ class DirectSession : public Session {
                          gtl::ArraySlice<string> outputs,
                          string* key);
   struct CUDAGraphDeviceContext;
-  ::tensorflow::Status GetCUDAGraphDeviceContext(
-    const string& device, const GPUOptions& gpu_options,
+  ::tensorflow::Status GetOrCreateCUDAGraphDeviceContext(
+    const string& device, const CUDAGraphOptions& options,
     CUDAGraphDeviceContext** context);
-  void BorrowCUDAGraphContext(const string& device, const string& key,
-                              CUDAGraphContext** context);
-  void ReturnCUDAGraphContext(const string& device, const string& key,
-                              CUDAGraphContext* context);
+  ::tensorflow::Status GetCUDAGraphDeviceContext(
+    const string& device, CUDAGraphDeviceContext** context);
+  ::tensorflow::Status BorrowCUDAGraphContext(const string& device,
+                                              const string& key,
+                                              CUDAGraphContext** context);
+  ::tensorflow::Status ReturnCUDAGraphContext(const string& device,
+                                              const string& key,
+                                              CUDAGraphContext* context);
 
   ::tensorflow::Status RunWithCUDAGraph(CUDAGraphContext& context,
                                         const NamedTensorList& inputs,
@@ -387,7 +400,7 @@ class DirectSession : public Session {
       GUARDED_BY(executor_lock_);
 
   mutex cuda_graph_lock_; // protects cuda_graph_device_contexts_
-  std::unordered_map<string, std::shared_ptr<CUDAGraphDeviceContext>>
+  std::unordered_map<string, std::unique_ptr<CUDAGraphDeviceContext>>
   cuda_graph_device_contexts_ GUARDED_BY(cuda_graph_lock_);
 
   class RunCallableCallFrame;

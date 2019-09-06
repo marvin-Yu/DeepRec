@@ -18,7 +18,7 @@ namespace tensorflow {
 // conjunction with CUDA Graph.
 class GPUPersistentAllocator : public Allocator {
  public:
-  explicit GPUPersistentAllocator(const GPUOptions& options,
+  explicit GPUPersistentAllocator(const CUDAGraphOptions& options,
                                   PlatformGpuId platform_gpu_id);
   ~GPUPersistentAllocator() override;
   string Name() override { return "gpu_persistent"; }
