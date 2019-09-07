@@ -3633,6 +3633,7 @@ MATH_DEPS = [
     ":bounds_check",
     ":fill_functor",
     "//tensorflow/core:core_cpu",
+    "//tensorflow/core:cuda_device_functions",
     "//tensorflow/core:framework",
     "//tensorflow/core:lib",
     "//tensorflow/core:lib_internal",
@@ -3680,6 +3681,7 @@ cc_library(
         ":histogram_op",
         ":matmul_op",
         ":nextafter_op",
+        ":parallel_gemm_op",
         ":population_count_op",
         ":reduction_ops",
         ":scan_ops",
@@ -3708,6 +3710,17 @@ tf_kernel_library(
     deps = MATH_DEPS + [":eigen_contraction_kernel"] + if_mkl_ml([
         "//third_party/mkl:intel_binary_blob",
     ]),
+)
+
+tf_kernel_library(
+    name = "parallel_gemm_op",
+    hdrs = ["parallel_gemm_op.h"],
+    srcs = ["parallel_gemm_op.cc"],
+    gpu_srcs = [
+        "parallel_gemm_op.h",
+        "parallel_gemm_op_gpu.cu.cc",
+        ],
+    deps = MATH_DEPS,
 )
 
 tf_mkl_kernel_library(
