@@ -1549,12 +1549,16 @@ void ExecutorState::RunAsync(Executor::DoneCallback done) {
     return;
   }
 
-//#ifdef GOOGLE_CUDA
 #if 0
-  if (on_gpu && stream_) {
+//#ifdef GOOGLE_CUDA
+  Device* device = impl_->params_.device;
+  bool on_gpu = device->attributes().device_type() == "GPU";
+  if (on_gpu && cuda_graph_) {
     auto stream =
-      static_cast<CUstream>((*stream_)->implementation()->GpuStreamHack());
-    auto ret = cuStreamBeginCapture(stream, CU_STREAM_CAPTURE_MODE_RELAXED);
+      device->tensorflow_gpu_device_info()->default_context->stream();
+    auto cu_stream =
+      static_cast<CUstream>(stream->implementation()->GpuStreamHack());
+    auto ret = cuStreamBeginCapture(cu_stream, CU_STREAM_CAPTURE_MODE_RELAXED);
     if (ret != CUDA_SUCCESS) {
       const char* error;
       cuGetErrorString(ret, &error);
@@ -2529,13 +2533,16 @@ void ExecutorState::Finish() {
   CHECK(done_cb != nullptr);
   Device* device = impl_->params_.device;
 
-//#ifdef GOOGLE_CUDA
 #if 0
-  if (device->attributes().device_type() == "GPU" && stream_ && cuda_graph_) {
+//#ifdef GOOGLE_CUDA
+  Device* device = impl_->params_.device;
+  if (device->attributes().device_type() == "GPU" && cuda_graph_) {
     auto stream =
-      static_cast<CUstream>((*stream_)->implementation()->GpuStreamHack());
+      device->tensorflow_gpu_device_info()->default_context->stream();
+    auto cu_stream =
+      static_cast<CUstream>(stream->implementation()->GpuStreamHack());
     auto cuda_graph = static_cast<CUgraph*>(cuda_graph_);
-    auto ret = cuStreamEndCapture(stream, cuda_graph);
+    auto ret = cuStreamEndCapture(cu_stream, cuda_graph);
     if (ret != CUDA_SUCCESS) {
       const char* error;
       cuGetErrorString(ret, &error);
