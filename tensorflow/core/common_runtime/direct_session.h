@@ -283,10 +283,10 @@ class DirectSession : public Session {
     CUDAGraphDeviceContext** context);
   ::tensorflow::Status GetCUDAGraphDeviceContext(
     const string& device, CUDAGraphDeviceContext** context);
-  ::tensorflow::Status BorrowCUDAGraphContext(const string& device,
+  ::tensorflow::Status BorrowCUDAGraphContext(const string& device_name,
                                               const string& key,
                                               CUDAGraphContext** context);
-  ::tensorflow::Status ReturnCUDAGraphContext(const string& device,
+  ::tensorflow::Status ReturnCUDAGraphContext(const string& device_name,
                                               const string& key,
                                               CUDAGraphContext* context);
 

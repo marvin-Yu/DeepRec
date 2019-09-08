@@ -94,143 +94,207 @@ namespace tensorflow {
 #ifdef GOOGLE_CUDA
 // Everything needed for a CUDA Graph run.
 struct DirectSession::CUDAGraphContext {
+
+  int id;
+
   CUgraph graph = nullptr;
+
   CUgraphExec exec = nullptr;
+
   CUstream stream = nullptr;    // Not own.
+
   std::vector<CUdeviceptr> inputs;    // Not owning the data.
+
   std::vector<CUdeviceptr> outputs;   // Not owning the data.
+
   std::vector<::tensorflow::TensorShape> output_shapes;
-  ~CUDAGraphContext() {
-    if (exec) {
-      CUresult res = cuGraphExecDestroy(exec);
-      if (res != CUDA_SUCCESS) {
-        const char* err;
-        cuGetErrorString(res, &err);
-        LOG(ERROR) << "cuGraphExecDestroy failed to destroy " << exec
-                   << (err ? string(": ") + err : "") ;
-      }
-    }
-    if (graph) {
-      CUresult res = cuGraphDestroy(graph);
-      if (res != CUDA_SUCCESS) {
-        const char* err;
-        cuGetErrorString(res, &err);
-        LOG(ERROR) << "cuGraphDestroy failed to destroy " << graph
-                   << (err ? string(": ") + err : "");
-      }
-    }
-  }
+
+  CUDAGraphContext(int id): id(id) { }
+
+  ~CUDAGraphContext();
 };
 
 class DirectSession::CUDAGraphDeviceContext {
+
  public:
+
   CUDAGraphDeviceContext(const CUDAGraphOptions& options,
                          PlatformGpuId platform_gpu_id):
-    options_(options), platform_gpu_id_(platform_gpu_id) {}
+    options_(options), platform_gpu_id_(platform_gpu_id),
+    wait_time_(wait_time_in_microseconds(options)),
+    instances_(options.count()) { }
+
   ~CUDAGraphDeviceContext();
-  bool CreateContext(int id, const string& key, CUDAGraphContext** context);
-  void RemoveContext(int id, const string& key);
+
+  bool AddContext(const string& key, int id, CUDAGraphContext* context);
+
   Status BorrowContext(const string& key, CUDAGraphContext** context);
-  Status ReturnContext(const string& key, CUDAGraphContext* context);
-  Allocator* GetOrCreateAllocator(int id);
+
+  void ReturnContext(const string& key, CUDAGraphContext* context);
+
+  Status BorrowAllocator(int id, Allocator** allocator);
+
+  void ReturnAllocator(int id, Allocator* allocator);
+
  private:
-  struct Entry {
-    enum Status { EMPTY, BORROWED, READY, DELETED };
-    CUDAGraphContext* ctx;
+
+  uint64 wait_time_in_microseconds(const CUDAGraphOptions& options) {
+    auto n = options_.wait_time_in_microseconds();
+    return (n > 0 ? n : 100) * 1000;
+  }
+
+  struct Instance {
+    enum Status { READY, BORROWED };
     Status status;
+    std::unique_ptr<Allocator> persistent_allocator;
+    std::map<string, CUDAGraphContext*> contexts;
   };
+
+  struct Checker {
+    std::vector<Instance>* instances_;
+    const string* key_;
+    Instance** instance_;
+    CUDAGraphContext** context_;
+    Checker(std::vector<Instance>* instances, const string* key,
+            Instance** instance, CUDAGraphContext** context):
+      instances_(instances), key_(key), instance_(instance), context_(context)
+      { }
+    bool check() {
+      for (auto& inst: *instances_) {
+        if (inst.status == Instance::Status::READY) {
+          auto& contexts = inst.contexts;
+          auto it = contexts.find(*key_);
+          if (it != contexts.end()) {
+            *instance_ = &inst;
+            *context_ = it->second;
+            return true;
+          }
+        }
+      }
+      *instance_ = nullptr;
+      *context_ = nullptr;
+      return false;
+    }
+  };
+
   mutex mu_;
-  std::vector<std::unique_ptr<Allocator>> persistent_allocators_
-  GUARDED_BY(mu_);
-  std::map<string, std::vector<Entry>> contexts_ GUARDED_BY(mu_);
+
   const CUDAGraphOptions options_;
+
   PlatformGpuId platform_gpu_id_;
+
+  const uint64 wait_time_;
+
+  std::vector<Instance> instances_ GUARDED_BY(mu_);
 };
 
-DirectSession::CUDAGraphDeviceContext::~CUDAGraphDeviceContext() {
-  for (auto& e: contexts_) {
-    for (auto& v: e.second) {
-      if (v.ctx) {
-        delete v.ctx;
-      }
+DirectSession::CUDAGraphContext::~CUDAGraphContext() {
+  if (exec) {
+    CUresult res = cuGraphExecDestroy(exec);
+    if (res != CUDA_SUCCESS) {
+      const char* err;
+      cuGetErrorString(res, &err);
+      LOG(ERROR) << "cuGraphExecDestroy failed to destroy " << exec
+                 << (err ? string(": ") + err : "") ;
+    }
+  }
+  if (graph) {
+    CUresult res = cuGraphDestroy(graph);
+    if (res != CUDA_SUCCESS) {
+      const char* err;
+      cuGetErrorString(res, &err);
+      LOG(ERROR) << "cuGraphDestroy failed to destroy " << graph
+                 << (err ? string(": ") + err : "");
     }
   }
 }
 
-// Value is true if a new context is created, otherwise false
-bool DirectSession::CUDAGraphDeviceContext::CreateContext(
-  int id, const string& key, CUDAGraphContext** context) {
+DirectSession::CUDAGraphDeviceContext::~CUDAGraphDeviceContext() {
   mutex_lock l(mu_);
-  auto& ctxs = contexts_[key];
-  if (ctxs.size() < id + 1) {
-    ctxs.resize(id + 1);
-  }
-  auto& e = ctxs[id];
-  switch (e.status) {
-  case Entry::Status::EMPTY: {
-    auto p = new CUDAGraphContext;
-    e.ctx = p;
-    *context = p;
-    return true;
-  }
-  case Entry::Status::BORROWED:
-  case Entry::Status::DELETED:
-  case Entry::Status::READY: {
-    *context = nullptr;
-    return false;
-  }
+  for (auto& inst: instances_) {
+    for (auto e: inst.contexts) {
+      delete e.second;
+    }
   }
 }
 
-void DirectSession::CUDAGraphDeviceContext::RemoveContext(
-  int id, const string& key) {
-  mutex_lock l(mu_);
-  auto& ctxs = contexts_[key];
-  if (ctxs.size() < id + 1) {
-    ctxs.resize(id + 1);
-  }
-  auto& e = ctxs[id];
-  switch (e.status) {
-  case Entry::Status::EMPTY: {
-    break;
-  }
-  case Entry::Status::BORROWED: {
-    e.status = Entry::Status::DELETED;
-    break;
-  }
-  case Entry::Status::READY: {
-    delete e.ctx;
-    e.ctx = nullptr;
-    e.status = Entry::Status::EMPTY;
-    break;
-  }
-  case Entry::Status::DELETED: {
-    break;
-  }
-  }
+// Value is true if successfully added, otherwise false (i.e. already
+// exists)
+bool DirectSession::CUDAGraphDeviceContext::AddContext(
+  const string& key, int id, CUDAGraphContext* context) {
+  mu_.lock();
+  auto& contexts = instances_[id].contexts;
+  auto res = contexts.emplace(key, context);
+  mu_.unlock();
+  auto added = std::get<1>(res);
+  return added;
 }
 
 Status DirectSession::CUDAGraphDeviceContext::BorrowContext(
   const string& key, CUDAGraphContext** context) {
-  int max_retries = options_.max_retries();
-  for (int i = 0; i < max_retries; i++) {
+  Instance* inst = nullptr;
+  Checker checker(&instances_, &key, &inst, context);
+  mu_.lock();
+  if (checker.check()) {
+    inst->status = Instance::Status::BORROWED;
+    mu_.unlock();
+    return Status::OK();
   }
-  return errors::Internal("Too many failures to borrow CUDA Graph"
-                          " device context");
+  mu_.AwaitWithDeadline(Condition(&checker, &Checker::check), wait_time_);
+  if (inst) {
+    inst->status = Instance::Status::BORROWED;
+    mu_.unlock();
+    return Status::OK();
+  }
+  mu_.unlock();
+  return errors::Internal(
+    "Timed out while borrowing CUDA Graph context for key ", key);
 }
 
-Status DirectSession::CUDAGraphDeviceContext::ReturnContext(
+void DirectSession::CUDAGraphDeviceContext::ReturnContext(
   const string& key, CUDAGraphContext* context) {
+  mu_.lock();
+  auto& instance = instances_[context->id];
+  instance.status = Instance::Status::READY;
+  mu_.unlock();
 }
 
-Allocator* DirectSession::CUDAGraphDeviceContext::GetOrCreateAllocator(int id) {
-  mutex_lock l(mu_);
-  if (persistent_allocators_.size() < id + 1 || !persistent_allocators_[id]) {
-    persistent_allocators_.resize(id + 1);
-    persistent_allocators_[id].reset(
+Status DirectSession::CUDAGraphDeviceContext::BorrowAllocator(
+  int id, Allocator** allocator) {
+  mu_.lock();
+  auto& instance = instances_[id];
+  if (!instance.persistent_allocator) {
+    instance.persistent_allocator.reset(
       new GPUPersistentAllocator(options_, platform_gpu_id_));
   }
-  return persistent_allocators_[id].get();
+  if (instance.status == Instance::Status::READY) {
+    instance.status = Instance::Status::BORROWED;
+    *allocator = instance.persistent_allocator.get();
+    mu_.unlock();
+    return Status::OK();
+  }
+  auto ready =
+    mu_.AwaitWithDeadline(Condition(+[](Instance* instance) -> bool {
+      return instance->status == Instance::Status::READY;
+    }, &instance), wait_time_);
+  if (ready) {
+    instance.status = Instance::Status::BORROWED;
+    *allocator = instance.persistent_allocator.get();
+    mu_.unlock();
+    return Status::OK();
+  }
+  mu_.unlock();
+  return errors::Internal(
+    "Timed out while borrowing persistent allocator for instance ", id);
+}
+
+void DirectSession::CUDAGraphDeviceContext::ReturnAllocator(
+  int id, Allocator* allocator) {
+  mu_.lock();
+  auto& instance = instances_[id];
+  instance.status = Instance::Status::READY;
+  allocator->Reset();
+  mu_.unlock();
 }
 #else
 struct DirectSession::CUDAGraphContext { };
@@ -972,30 +1036,31 @@ Status DirectSession::Run(const RunOptions& run_options,
   if (cuda_graph_options.initializing()) {
     auto count = cuda_graph_options.count();
     for (auto k = 0; k < count; k++) {
-      mutex_lock l(cuda_graph_lock_);
       CUDAGraphDeviceContext* device_context;
       auto st = GetOrCreateCUDAGraphDeviceContext(device, cuda_graph_options,
                                                   &device_context);
       if (!st.ok()) {
         return st;
       }
-      CUDAGraphContext* context;
-      if (!device_context->CreateContext(k, key, &context)) {
-        VLOG(2) << "Instance " << k << " of CUDA Graph context for key " << key
-                << " already exists";
-        continue;
+      Allocator* persistent_allocator;
+      st = device_context->BorrowAllocator(k, &persistent_allocator);
+      if (!st.ok()) {
+        return st;
       }
-      auto persistent_allocator = device_context->GetOrCreateAllocator(k);
+      CUDAGraphContext* context = new CUDAGraphContext(k);
       VLOG(2) << "Creating instance " << k << " of CUDA Graph context for key "
               << key << ", persistent allocator is " << persistent_allocator;
       st = RecordCUDAGraph(run_options, inputs, output_names, target_nodes,
                            outputs, run_metadata, context,
                            persistent_allocator);
+      device_context->ReturnAllocator(k, persistent_allocator);
       if (!st.ok()) {
-        device_context->RemoveContext(k, key);
+        delete context;
         return st;
       }
-      persistent_allocator->Reset();
+      if (!device_context->AddContext(key, k, context)) {
+        delete context;
+      }
     }
     VLOG(2) << "Finished creating CUDA Graphs";
     return Status::OK();
@@ -1988,6 +2053,7 @@ Status DirectSession::GetOrCreateCUDAGraphDeviceContext(
   const string& device_name, const CUDAGraphOptions& options,
   DirectSession::CUDAGraphDeviceContext** context) {
 #ifdef GOOGLE_CUDA
+  mutex_lock l(cuda_graph_lock_);
   auto it = cuda_graph_device_contexts_.find(device_name);
   if (it != cuda_graph_device_contexts_.end()) {
     *context = it->second.get();
@@ -2005,9 +2071,9 @@ Status DirectSession::GetOrCreateCUDAGraphDeviceContext(
       device_type, " device");
   }
   BaseGPUDevice* device = reinterpret_cast<BaseGPUDevice*>(device0);
-  cuda_graph_device_contexts_[device_name].reset(
-    new CUDAGraphDeviceContext(options, PlatformGpuId(device->gpu_id())));
-  *context = cuda_graph_device_contexts_[device_name].get();
+  auto p = new CUDAGraphDeviceContext(options, PlatformGpuId(device->gpu_id()));
+  cuda_graph_device_contexts_[device_name].reset(p);
+  *context = p;
   return Status::OK();
 #else
   return Status::OK();
@@ -2017,6 +2083,7 @@ Status DirectSession::GetOrCreateCUDAGraphDeviceContext(
 Status DirectSession::GetCUDAGraphDeviceContext(
   const string& device_name, DirectSession::CUDAGraphDeviceContext** context) {
 #ifdef GOOGLE_CUDA
+  mutex_lock l(cuda_graph_lock_);
   auto it = cuda_graph_device_contexts_.find(device_name);
   *context = (it == cuda_graph_device_contexts_.end()
               ? nullptr : it->second.get());
@@ -2031,17 +2098,14 @@ Status DirectSession::BorrowCUDAGraphContext(const string& device,
                                              CUDAGraphContext** context) {
 #ifdef GOOGLE_CUDA
   CUDAGraphDeviceContext* device_context;
-  {
-    mutex_lock l(cuda_graph_lock_);
-    auto st = GetCUDAGraphDeviceContext(device, &device_context);
-    if (!st.ok()) {
-      *context = nullptr;
-      return st;
-    }
-    if (device_context == nullptr) {
-      return errors::Internal("Cannot find CUDA Graph device context for ",
-                              "device ", device);
-    }
+  auto st = GetCUDAGraphDeviceContext(device, &device_context);
+  if (!st.ok()) {
+    *context = nullptr;
+    return st;
+  }
+  if (device_context == nullptr) {
+    return errors::Internal(
+      "Cannot find CUDA Graph device context for device ", device);
   }
   return device_context->BorrowContext(key, context);
 #else
@@ -2066,7 +2130,8 @@ Status DirectSession::ReturnCUDAGraphContext(const string& device,
                               "device ", device);
     }
   }
-  return device_context->ReturnContext(key, context);
+  device_context->ReturnContext(key, context);
+  return Status::OK();
 #else
   return Status::OK();
 #endif
