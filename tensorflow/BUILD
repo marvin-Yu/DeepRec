@@ -574,7 +574,7 @@ tf_cc_shared_object(
         "//conditions:default": [
             "-Wl,--version-script,$(location //tensorflow:tf_framework_version_script.lds)",
         ],
-    }),
+    }) + if_cuda(["-lcuda"]),
     linkstatic = 1,
     per_os_targets = True,
     soversion = VERSION,

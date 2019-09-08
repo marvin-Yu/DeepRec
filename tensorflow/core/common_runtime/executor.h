@@ -108,6 +108,9 @@ class Executor {
     typedef std::function<void(Closure)> Runner;
     Runner runner = nullptr;
     Allocator* persistent_allocator = nullptr;
+    int gpu_id = -1;
+    se::Stream** stream;
+    void* cuda_graph;
   };
   typedef std::function<void(const Status&)> DoneCallback;
   virtual void RunAsync(const Args& args, DoneCallback done) = 0;

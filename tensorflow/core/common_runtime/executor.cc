@@ -26,9 +26,11 @@ limitations under the License.
 #include "absl/strings/string_view.h"
 #include "tensorflow/core/common_runtime/costmodel_manager.h"
 #include "tensorflow/core/common_runtime/executor_factory.h"
+#include "tensorflow/core/common_runtime/gpu_device_context.h"
 #include "tensorflow/core/common_runtime/pending_counts.h"
 #include "tensorflow/core/common_runtime/renamed_device.h"
 #include "tensorflow/core/common_runtime/step_stats_collector.h"
+#include "tensorflow/core/common_runtime/gpu/gpu_id_utils.h"
 #include "tensorflow/core/framework/allocation_description.pb.h"
 #include "tensorflow/core/framework/allocator.h"
 #include "tensorflow/core/framework/cancellation.h"
@@ -71,6 +73,14 @@ limitations under the License.
 #include "tensorflow/core/profiler/internal/traceme_recorder.h"
 #include "tensorflow/core/profiler/lib/traceme.h"
 #include "tensorflow/core/util/tensor_slice_reader_cache.h"
+
+#ifdef GOOGLE_CUDA
+// NOTE(zhujun): Currently the CUDA Graph support is implemented
+// directly here. This is a bit hacky as it is not well
+// encapsulated. But for now we are aiming to make it work, so we only
+// want to clean this up in the future.
+#include "third_party/gpus/cuda/include/cuda.h"
+#endif
 
 namespace tensorflow {
 namespace {
@@ -944,6 +954,7 @@ class ExecutorState {
   // Contains a value for [node->id()] for the device context assigned by the
   // device at the beginning of a step.
   DeviceContextMap device_context_map_;
+  bool needs_to_unref_contexts_;
 
   struct TaggedNode;
   typedef gtl::InlinedVector<TaggedNode, 8> TaggedNodeSeq;
@@ -1263,6 +1274,9 @@ class ExecutorState {
   Context context_;
   // Not owned.
   Allocator* persistent_allocator_;
+  int gpu_id_;
+  se::Stream** stream_;
+  void* cuda_graph_;
 
   // QUESTION: Make it a checkpoint::TensorSliceReaderCacheWrapper
   // instead of a pointer?  (avoids having to delete).
@@ -1382,6 +1396,11 @@ class ExecutorState {
                          int64 input_iter) const NO_THREAD_SAFETY_ANALYSIS {
     return input_frame->GetIteration(input_iter)->input_tensors;
   }
+
+#ifdef GOOGLE_CUDA
+  void FillContextMap(const Graph* graph, DeviceContextMap* device_context_map,
+                      int gpu_id);
+#endif
 };
 
 ExecutorState::ExecutorState(const Executor::Args& args, ExecutorImpl* impl)
@@ -1401,6 +1420,9 @@ ExecutorState::ExecutorState(const Executor::Args& args, ExecutorImpl* impl)
           tracing::GetEventCollector(tracing::EventCategory::kCompute)),
       context_(ContextKind::kThread),
       persistent_allocator_(args.persistent_allocator),
+      gpu_id_(args.gpu_id),
+      stream_(args.stream),
+      cuda_graph_(args.cuda_graph),
       slice_reader_cache_(new checkpoint::TensorSliceReaderCacheWrapper),
       call_frame_(args.call_frame),
       impl_(impl),
@@ -1433,8 +1455,10 @@ ExecutorState::~ExecutorState() {
   for (auto name_frame : outstanding_frames_) {
     delete name_frame.second;
   }
-  for (auto it : device_context_map_) {
-    it->Unref();
+  if (needs_to_unref_contexts_) {
+    for (auto it : device_context_map_) {
+      it->Unref();
+    }
   }
   delete slice_reader_cache_;
 }
@@ -1525,15 +1549,48 @@ void ExecutorState::RunAsync(Executor::DoneCallback done) {
   const Graph* graph = impl_->graph_.get();
   TaggedNodeSeq ready;
 
-  // Ask the device to fill in the device context map.
+  // Fill in the device context map.
   Device* device = impl_->params_.device;
-  const Status fill_status =
+#ifdef GOOGLE_CUDA
+  bool on_gpu = device->attributes().device_type() == "GPU";
+  if (on_gpu && gpu_id_ >= 0) {
+    FillContextMap(graph, &device_context_map_, gpu_id_);
+    needs_to_unref_contexts_ = false;
+  } else {
+    needs_to_unref_contexts_ = true;
+    const Status fill_status =
       device->FillContextMap(graph, &device_context_map_);
+    if (!fill_status.ok()) {
+      delete this;
+      done(fill_status);
+      return;
+    }
+  }
+#else
+  needs_to_unref_contexts_ = true;
+  const Status fill_status =
+    device->FillContextMap(graph, &device_context_map_);
   if (!fill_status.ok()) {
     delete this;
     done(fill_status);
     return;
   }
+#endif
+
+#ifdef GOOGLE_CUDA
+  if (on_gpu && stream_ && cuda_graph_) {
+    auto stream =
+      static_cast<CUstream>((*stream_)->implementation()->GpuStreamHack());
+    auto ret = cuStreamBeginCapture(stream, CU_STREAM_CAPTURE_MODE_RELAXED);
+    if (ret != CUDA_SUCCESS) {
+      const char* error;
+      cuGetErrorString(ret, &error);
+      done(errors::Internal(
+             "Cannot begin to capture stream ", stream, ": ", error));
+      return;
+    }
+  }
+#endif
 
   // Initialize the ready queue.
   for (const Node* n : impl_->root_nodes_) {
@@ -1551,6 +1608,24 @@ void ExecutorState::RunAsync(Executor::DoneCallback done) {
     ScheduleReady(ready, nullptr);
   }
 }
+
+#ifdef GOOGLE_CUDA
+void ExecutorState::FillContextMap(const Graph* graph,
+                                   DeviceContextMap* device_context_map,
+                                   int gpu_id) {
+  auto platform_gpu_id = PlatformGpuId(gpu_id);
+  auto exec_status = GpuIdUtil::ExecutorForPlatformGpuId(platform_gpu_id);
+  auto exec = exec_status.ValueOrDie();
+  auto stream = new se::Stream(exec);
+  stream->Init();
+  gtl::InlinedVector<se::Stream*, 4> d2d;
+  d2d.push_back(stream);
+  auto ctx = new GPUDeviceContext(0, stream, stream, stream, d2d);
+  for (Node* node: graph->nodes()) {
+    //(*device_context_map)[node->id()] = ctx;
+  }
+}
+#endif
 
 // State kept alive for executing an asynchronous node in another
 // thread.  NOTE: We need to make a copy of p.input,
