@@ -209,6 +209,15 @@ DirectSession::CUDAGraphContext::~CUDAGraphContext() {
     }
   }
   if (stream) {
+    auto cu_stream = static_cast<CUstream>(
+      stream->implementation()->GpuStreamHack());
+    CUresult res = cuStreamDestroy(cu_stream);
+    if (res != CUDA_SUCCESS) {
+      const char* err;
+      cuGetErrorString(res, &err);
+      LOG(ERROR) << "cuStreamDestroy failed to destroy " << cu_stream
+                 << (err ? string(": ") + err : "");
+    }
     delete stream;
   }
 }
@@ -1104,7 +1113,7 @@ Status DirectSession::RecordCUDAGraph(
   auto st = Run0(run_options, inputs, output_names, target_nodes,
                  outputs, run_metadata, cuda_graph_context,
                  persistent_allocator, device_id, &cuda_graph_context->stream,
-                 *cuda_graph);
+                 cuda_graph);
   std::vector<char> error_buf(1024);
   ret = cuGraphInstantiate(&cuda_graph_context->cuda_graph_exec, *cuda_graph,
                            nullptr, error_buf.data(), 1024);

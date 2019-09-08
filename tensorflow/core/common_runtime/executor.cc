@@ -1399,7 +1399,7 @@ class ExecutorState {
 
 #ifdef GOOGLE_CUDA
   void FillContextMap(const Graph* graph, DeviceContextMap* device_context_map,
-                      int gpu_id);
+                      int gpu_id, se::Stream** saved_stream);
 #endif
 };
 
@@ -1458,6 +1458,10 @@ ExecutorState::~ExecutorState() {
   if (needs_to_unref_contexts_) {
     for (auto it : device_context_map_) {
       it->Unref();
+    }
+  } else {
+    if (!device_context_map_.empty()) {
+      delete device_context_map_[0];
     }
   }
   delete slice_reader_cache_;
@@ -1553,8 +1557,8 @@ void ExecutorState::RunAsync(Executor::DoneCallback done) {
   Device* device = impl_->params_.device;
 #ifdef GOOGLE_CUDA
   bool on_gpu = device->attributes().device_type() == "GPU";
-  if (on_gpu && gpu_id_ >= 0) {
-    FillContextMap(graph, &device_context_map_, gpu_id_);
+  if (on_gpu && gpu_id_ >= 0 && stream_) {
+    FillContextMap(graph, &device_context_map_, gpu_id_, stream_);
     needs_to_unref_contexts_ = false;
   } else {
     needs_to_unref_contexts_ = true;
@@ -1578,13 +1582,14 @@ void ExecutorState::RunAsync(Executor::DoneCallback done) {
 #endif
 
 #ifdef GOOGLE_CUDA
-  if (on_gpu && stream_ && cuda_graph_) {
+  if (on_gpu && stream_) {
     auto stream =
       static_cast<CUstream>((*stream_)->implementation()->GpuStreamHack());
     auto ret = cuStreamBeginCapture(stream, CU_STREAM_CAPTURE_MODE_RELAXED);
     if (ret != CUDA_SUCCESS) {
       const char* error;
       cuGetErrorString(ret, &error);
+      delete this;
       done(errors::Internal(
              "Cannot begin to capture stream ", stream, ": ", error));
       return;
@@ -1612,17 +1617,19 @@ void ExecutorState::RunAsync(Executor::DoneCallback done) {
 #ifdef GOOGLE_CUDA
 void ExecutorState::FillContextMap(const Graph* graph,
                                    DeviceContextMap* device_context_map,
-                                   int gpu_id) {
+                                   int gpu_id, se::Stream** saved_stream) {
   auto platform_gpu_id = PlatformGpuId(gpu_id);
   auto exec_status = GpuIdUtil::ExecutorForPlatformGpuId(platform_gpu_id);
   auto exec = exec_status.ValueOrDie();
   auto stream = new se::Stream(exec);
   stream->Init();
+  *saved_stream = stream;
   gtl::InlinedVector<se::Stream*, 4> d2d;
   d2d.push_back(stream);
   auto ctx = new GPUDeviceContext(0, stream, stream, stream, d2d);
+  device_context_map->resize(graph->num_node_ids());
   for (Node* node: graph->nodes()) {
-    //(*device_context_map)[node->id()] = ctx;
+    (*device_context_map)[node->id()] = ctx;
   }
 }
 #endif
@@ -2572,6 +2579,23 @@ void ExecutorState::Finish() {
   mu_.unlock();
   CHECK(done_cb != nullptr);
   Device* device = impl_->params_.device;
+
+#ifdef GOOGLE_CUDA
+  if (device->attributes().device_type() == "GPU" && stream_ && cuda_graph_) {
+    auto stream =
+      static_cast<CUstream>((*stream_)->implementation()->GpuStreamHack());
+    auto cuda_graph = static_cast<CUgraph*>(cuda_graph_);
+    auto ret = cuStreamEndCapture(stream, cuda_graph);
+    if (ret != CUDA_SUCCESS) {
+      const char* error;
+      cuGetErrorString(ret, &error);
+      delete this;
+      done_cb(errors::Internal(
+                "Cannot end to capture stream ", stream, ": ", error));
+      return;
+    }
+  }
+#endif
 
   // There are several potential race conditions below. To name a few:
   // 1. Even if the device's status is OK at the precise moment when
