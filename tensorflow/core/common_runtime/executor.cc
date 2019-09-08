@@ -2594,6 +2594,15 @@ void ExecutorState::Finish() {
                 "Cannot end to capture stream ", stream, ": ", error));
       return;
     }
+    size_t n;
+    ret = cuGraphGetNodes(*cuda_graph, nullptr, &n);
+    if (ret != CUDA_SUCCESS) {
+      const char* error;
+      cuGetErrorString(ret, &error);
+      VLOG(2) << "Cannot get number of nodes for CUDA Graph " << *cuda_graph;
+    } else {
+      VLOG(2) << "Number of nodes in captured CUDA Graph is " << n;
+    }
   }
 #endif
 
