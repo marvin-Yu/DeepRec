@@ -17,6 +17,7 @@ limitations under the License.
 
 #include "tensorflow/core/grappler/grappler_item.h"
 #include "tensorflow/core/grappler/optimizers/graph_rewriter.h"
+#include <fstream>
 
 namespace tensorflow {
 namespace grappler {
@@ -24,6 +25,13 @@ namespace grappler {
 Status KernelFusionOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
                                        GraphDef* optimized_graph) {
   GrapplerItem optimized_item(item);
+  std::fstream f;
+  f.open("ckpt.pbtxt", std::fstream::out);
+  f << item.graph.DebugString();
+  f.close();
+  f.open("ckpt.graph.pb", std::fstream::out | std::fstream::binary);
+  f << item.graph.SerializeAsString();
+  f.close();
 
   std::vector<std::shared_ptr<FusionPattern>>& pattern =
       FusionPatternRegisterer::Get()->pattern;
@@ -34,8 +42,12 @@ Status KernelFusionOptimizer::Optimize(Cluster* cluster, const GrapplerItem& ite
     for (auto& p : pattern) {
       bool rewrite = false;
       do {
-        GraphRewriter graph(&optimized_item.graph);
-        rewrite = graph.FuseRewrite(*p);
+        GraphRewriter graph_rewriter(&optimized_item.graph);
+        if (!graph_rewriter.Init()) {
+          string error_message = "GraphRewriter init failed!";
+          return errors::Internal(error_message);
+        }
+        rewrite = graph_rewriter.FuseRewrite(*p);
         if (rewrite) {
           finished = false;
         }

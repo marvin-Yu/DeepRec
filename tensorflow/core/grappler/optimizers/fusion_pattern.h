@@ -18,7 +18,7 @@ class FusionPatternImpl {
   virtual bool Match(std::vector<Node*>& nodes, Graph* graph) { return false; }
 
   // Do graph rewrite
-  virtual void GraphRewrite(std::vector<Node*>& nodes, Graph* graph) { }
+  virtual bool GraphRewrite(std::vector<Node*>& nodes, Graph* graph) { }
 
   FusionPattern* pattern;
 };
@@ -58,6 +58,9 @@ class FusionPattern {
   FusionPattern& SetFusionPatternImpl(FusionPatternImpl* fusion_pattern_impl);
   FusionPatternImpl* fusion_pattern_impl() { return fusion_pattern_impl_; }
 
+  // Check valid
+  bool CheckValid();
+
   // Initialize the pattern
   void Init();
 
@@ -65,10 +68,7 @@ class FusionPattern {
   bool Match(std::vector<Node*>& nodes, Graph* graph);
 
   // Rewrite graph
-  void GraphRewrite(std::vector<Node*>& nodes, Graph* graph);
-
-  // Check valid
-  bool CheckValid();
+  bool GraphRewrite(std::vector<Node*>& nodes, Graph* graph);
 
   // Get pattern root type
   const std::string& GetFusionPatternRootType() const;

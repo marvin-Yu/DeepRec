@@ -41,10 +41,11 @@ bool FusionPattern::Match(std::vector<Node*>& nodes,
   return false;
 }
 
-void FusionPattern::GraphRewrite(std::vector<Node *> &nodes,
+bool FusionPattern::GraphRewrite(std::vector<Node *> &nodes,
                                  Graph* graph) {
   if (this->fusion_pattern_impl_)
-    fusion_pattern_impl_->GraphRewrite(nodes, graph);
+    return fusion_pattern_impl_->GraphRewrite(nodes, graph);
+  return false;
 }
 
 const std::string& FusionPattern::GetFusionPatternRootType() const {

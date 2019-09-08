@@ -15,7 +15,15 @@ GraphRewriter::GraphRewriter(GraphDef* graph_def)
   // TODO ifdef debug
   raw_graph_def_ = *fused_graph_def_;
   // TODO end if
-  ConvertGraphDefToGraph({}, *graph_def, graph_.get());
+}
+
+bool GraphRewriter::Init() {
+  Status status = ConvertGraphDefToGraph({}, *fused_graph_def_, graph_.get());
+  if (status != Status::OK()) {
+    LOG(ERROR) << "Convert graphdef to graph failed! " << status.ToString();
+    return false;
+  }
+  return true;
 }
 
 bool GraphRewriter::FuseRewrite(FusionPattern& pattern) {
@@ -24,17 +32,16 @@ bool GraphRewriter::FuseRewrite(FusionPattern& pattern) {
 
   bool graph_fused = false;
   const std::string& root_op_type = pattern.GetFusionPatternRootType();
-  for (size_t i = 0; i < graph_->num_node_ids(); ++i) {
+  for (int i = 0; i < graph_->num_node_ids(); ++i) {
     Node* node = graph_->FindNodeId(i);
     // subgraph matching
     if (node->type_string() != root_op_type) continue;
     if (BFS(node, pattern)) {
       graph_fused = true;
+      Finalize();
       break;
     }
   }
-
-  Finalize();
   return graph_fused;
 }
 
@@ -60,12 +67,11 @@ bool GraphRewriter::BFS(Node* root, FusionPattern& pattern) {
       auto& fuse_node = pattern.bfs_pattern_nodes()[bfs_node_iter];
       // match op name
       if (node->type_string() != fuse_node.op_type_string) {
-        LOG(ERROR) << "nodes->type_string()=" << node->type_string()
+        LOG(ERROR) << "node->type_string()=" << node->type_string()
             << " fuse_node.op_type_string=" << fuse_node.op_type_string;
         break;
       }
       // TODO: check single node here
-
       for (const auto& input_pos : fuse_node.input_pos) {
         if (input_pos < 0 || input_pos >= node->num_inputs()) {
           LOG(ERROR) << "Invalid input pos, input_pos=" << input_pos
@@ -81,16 +87,15 @@ bool GraphRewriter::BFS(Node* root, FusionPattern& pattern) {
 
         Node* parent_node = input_edge->src();
         queue.push(parent_node->id());
-        candidate_fuse_nodes.push_back(parent_node);
-        visited.insert(parent_node->id());
-        ++bfs_node_iter;
+        visited.insert(node_id);
       }
+      candidate_fuse_nodes.push_back(node);
+      ++bfs_node_iter;
     }
   }
 
   if (bfs_node_iter == pattern.bfs_pattern_nodes().size() && pattern.Match(candidate_fuse_nodes, graph_.get())) {
-    pattern.GraphRewrite(candidate_fuse_nodes, graph_.get());
-    return true;
+    return pattern.GraphRewrite(candidate_fuse_nodes, graph_.get());
   }
   return false;
 }

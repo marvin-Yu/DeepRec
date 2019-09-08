@@ -28,6 +28,8 @@ class GraphRewriter {
   explicit GraphRewriter(GraphDef* graph);
   virtual ~GraphRewriter() = default;
 
+  bool Init();
+
   // Do fuse
   bool FuseRewrite(FusionPattern& pattern);
 
@@ -44,7 +46,7 @@ class GraphRewriter {
   std::shared_ptr<Graph> graph_;
   //Graph graph_;
   GraphDef raw_graph_def_;
-  GraphDef* fused_graph_def_;
+  GraphDef* fused_graph_def_ = nullptr;
 };
 
 }  // namespace grappler
