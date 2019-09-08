@@ -232,8 +232,7 @@ class DirectSession : public Session {
                             RunMetadata* run_metadata,
                             CUDAGraphContext* cuda_graph_context = nullptr,
                             Allocator* persistent_allocator = nullptr,
-                            int gpu_id = 0, se::Stream** stream = nullptr,
-                            void* cuda_graph = nullptr);
+                            int gpu_id = 0, void* cuda_graph = nullptr);
   ::tensorflow::Status RecordCUDAGraph(
     const ::tensorflow::RunOptions& run_options,
     const NamedTensorList& inputs,
@@ -305,7 +304,7 @@ class DirectSession : public Session {
       const thread::ThreadPoolOptions& threadpool_options,
       CUDAGraphContext* cuda_graph_context = nullptr,
       Allocator* persistent_allocator = nullptr, int gpu_id = 0,
-      se::Stream** stream = nullptr, void* cuda_graph = nullptr);
+      void* cuda_graph = nullptr);
 
   // Returns whether inter-op execution uses a global pool or the input
   // `run_options` requests being run on inter_op_thread_pool = 0 in case

@@ -954,7 +954,6 @@ class ExecutorState {
   // Contains a value for [node->id()] for the device context assigned by the
   // device at the beginning of a step.
   DeviceContextMap device_context_map_;
-  bool needs_to_unref_contexts_;
 
   struct TaggedNode;
   typedef gtl::InlinedVector<TaggedNode, 8> TaggedNodeSeq;
@@ -1275,7 +1274,6 @@ class ExecutorState {
   // Not owned.
   Allocator* persistent_allocator_;
   int gpu_id_;
-  se::Stream** stream_;
   void* cuda_graph_;
 
   // QUESTION: Make it a checkpoint::TensorSliceReaderCacheWrapper
@@ -1396,11 +1394,6 @@ class ExecutorState {
                          int64 input_iter) const NO_THREAD_SAFETY_ANALYSIS {
     return input_frame->GetIteration(input_iter)->input_tensors;
   }
-
-#ifdef GOOGLE_CUDA
-  void FillContextMap(const Graph* graph, DeviceContextMap* device_context_map,
-                      int gpu_id, se::Stream** saved_stream);
-#endif
 };
 
 ExecutorState::ExecutorState(const Executor::Args& args, ExecutorImpl* impl)
@@ -1421,7 +1414,6 @@ ExecutorState::ExecutorState(const Executor::Args& args, ExecutorImpl* impl)
       context_(ContextKind::kThread),
       persistent_allocator_(args.persistent_allocator),
       gpu_id_(args.gpu_id),
-      stream_(args.stream),
       cuda_graph_(args.cuda_graph),
       slice_reader_cache_(new checkpoint::TensorSliceReaderCacheWrapper),
       call_frame_(args.call_frame),
@@ -1455,14 +1447,8 @@ ExecutorState::~ExecutorState() {
   for (auto name_frame : outstanding_frames_) {
     delete name_frame.second;
   }
-  if (needs_to_unref_contexts_) {
-    for (auto it : device_context_map_) {
-      it->Unref();
-    }
-  } else {
-    if (!device_context_map_.empty()) {
-      delete device_context_map_[0];
-    }
+  for (auto it : device_context_map_) {
+    it->Unref();
   }
   delete slice_reader_cache_;
 }
@@ -1555,23 +1541,6 @@ void ExecutorState::RunAsync(Executor::DoneCallback done) {
 
   // Fill in the device context map.
   Device* device = impl_->params_.device;
-#ifdef GOOGLE_CUDA
-  bool on_gpu = device->attributes().device_type() == "GPU";
-  if (on_gpu && gpu_id_ >= 0 && stream_) {
-    FillContextMap(graph, &device_context_map_, gpu_id_, stream_);
-    needs_to_unref_contexts_ = false;
-  } else {
-    needs_to_unref_contexts_ = true;
-    const Status fill_status =
-      device->FillContextMap(graph, &device_context_map_);
-    if (!fill_status.ok()) {
-      delete this;
-      done(fill_status);
-      return;
-    }
-  }
-#else
-  needs_to_unref_contexts_ = true;
   const Status fill_status =
     device->FillContextMap(graph, &device_context_map_);
   if (!fill_status.ok()) {
@@ -1579,9 +1548,9 @@ void ExecutorState::RunAsync(Executor::DoneCallback done) {
     done(fill_status);
     return;
   }
-#endif
 
-#ifdef GOOGLE_CUDA
+//#ifdef GOOGLE_CUDA
+#if 0
   if (on_gpu && stream_) {
     auto stream =
       static_cast<CUstream>((*stream_)->implementation()->GpuStreamHack());
@@ -1613,26 +1582,6 @@ void ExecutorState::RunAsync(Executor::DoneCallback done) {
     ScheduleReady(ready, nullptr);
   }
 }
-
-#ifdef GOOGLE_CUDA
-void ExecutorState::FillContextMap(const Graph* graph,
-                                   DeviceContextMap* device_context_map,
-                                   int gpu_id, se::Stream** saved_stream) {
-  auto platform_gpu_id = PlatformGpuId(gpu_id);
-  auto exec_status = GpuIdUtil::ExecutorForPlatformGpuId(platform_gpu_id);
-  auto exec = exec_status.ValueOrDie();
-  auto stream = new se::Stream(exec);
-  stream->Init();
-  *saved_stream = stream;
-  gtl::InlinedVector<se::Stream*, 4> d2d;
-  d2d.push_back(stream);
-  auto ctx = new GPUDeviceContext(0, stream, stream, stream, d2d);
-  device_context_map->resize(graph->num_node_ids());
-  for (Node* node: graph->nodes()) {
-    (*device_context_map)[node->id()] = ctx;
-  }
-}
-#endif
 
 // State kept alive for executing an asynchronous node in another
 // thread.  NOTE: We need to make a copy of p.input,
@@ -2580,7 +2529,8 @@ void ExecutorState::Finish() {
   CHECK(done_cb != nullptr);
   Device* device = impl_->params_.device;
 
-#ifdef GOOGLE_CUDA
+//#ifdef GOOGLE_CUDA
+#if 0
   if (device->attributes().device_type() == "GPU" && stream_ && cuda_graph_) {
     auto stream =
       static_cast<CUstream>((*stream_)->implementation()->GpuStreamHack());

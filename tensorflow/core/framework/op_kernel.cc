@@ -287,7 +287,10 @@ OpKernelContext::OpKernelContext(Params* params, int num_outputs)
   if (params_->eigen_gpu_device != nullptr) {
     bool invalid = false;
     Allocator* eigen_gpu_allocator;
-    Status s = get_allocator(AllocatorAttributes(), &eigen_gpu_allocator);
+    Status s = get_allocator((params_->allocator_attributes
+                              ? *params_->allocator_attributes
+                              : AllocatorAttributes()),
+                             &eigen_gpu_allocator);
     if (!s.ok()) {
       SetStatus(s);
       invalid = true;

@@ -324,8 +324,8 @@ BaseGPUDevice::~BaseGPUDevice() {
 // This should be idempotent if already initialized.
 Status BaseGPUDevice::InitScratchBuffers() {
   mutex_lock l(scratch_init_mutex_);
-  if (scratch_.size() < max_streams_) {
-    for (int i = 0; i < max_streams_; i++) {
+  if (scratch_.size() < get_max_streams()) {
+    for (int i = 0; i < get_max_streams(); i++) {
       DCHECK(streams_[i]);
       if (scratch_.size() > i && scratch_[i]) continue;
       size_t scratch_buffer_size =
@@ -354,6 +354,9 @@ Status BaseGPUDevice::InitScratchBuffers() {
 }
 
 Status BaseGPUDevice::Init(const SessionOptions& options) {
+  TF_RETURN_IF_ERROR(
+    ReadBoolFromEnvVar("TF_ENABLE_CUDA_GRAPH", false, &enable_cuda_graph_));
+
   auto executor_status = GpuIdUtil::ExecutorForTfGpuId(tf_gpu_id_);
   if (!executor_status.status().ok()) {
     return errors::Internal("Failed to get StreamExecutor for device ",
@@ -362,12 +365,12 @@ Status BaseGPUDevice::Init(const SessionOptions& options) {
 
   executor_ = executor_status.ValueOrDie();
 
-  if (max_streams_ < 1) {
+  if (get_max_streams() < 1) {
     return errors::InvalidArgument("Invalid value for max_streams.");
   }
 
   // Create the specified number of GPU streams
-  for (int i = 0; i < max_streams_; i++) {
+  for (int i = 0; i < get_max_streams(); i++) {
     streams_.push_back(StreamGroupFactory::Global().GetOrCreate(
         tf_gpu_id_, i, executor_, options.config.gpu_options()));
     device_contexts_.push_back(new GPUDeviceContext(
@@ -388,7 +391,7 @@ Status BaseGPUDevice::Init(const SessionOptions& options) {
   if (timestamped_allocator_ ||
       (tracker_params.max_interval > 0 || tracker_params.max_bytes > 0 ||
        tracker_params.max_pending > 0)) {
-    if (max_streams_ > 1) {
+    if (get_max_streams() > 1) {
       LOG(FATAL) << "max_streams > 1 was specified together with "
                     "timestamped_allocator and/or kernel tracking.  This is an "
                     "unsupported combination.";
@@ -476,7 +479,7 @@ bool BaseGPUDevice::RequiresRecordingAccessedTensors() const {
 
 Status BaseGPUDevice::FillContextMap(const Graph* graph,
                                      DeviceContextMap* device_context_map) {
-  VLOG(2) << "FillContextMap";
+  VLOG(2) << "FillContextMap " << enable_cuda_graph_;
 
   const size_t num_streams = streams_.size();
   // Special case for single stream.
