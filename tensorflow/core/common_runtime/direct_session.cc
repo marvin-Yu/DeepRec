@@ -209,15 +209,6 @@ DirectSession::CUDAGraphContext::~CUDAGraphContext() {
     }
   }
   if (stream) {
-    auto cu_stream = static_cast<CUstream>(
-      stream->implementation()->GpuStreamHack());
-    CUresult res = cuStreamDestroy(cu_stream);
-    if (res != CUDA_SUCCESS) {
-      const char* err;
-      cuGetErrorString(res, &err);
-      LOG(ERROR) << "cuStreamDestroy failed to destroy " << cu_stream
-                 << (err ? string(": ") + err : "");
-    }
     delete stream;
   }
 }
