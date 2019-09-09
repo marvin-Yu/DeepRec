@@ -2,7 +2,7 @@
 // Created by qiaoxj on 2019-09-06.
 //
 
-#include "parallel_gemm_op.h"
+#include "tensorflow/core/kernels/parallel_gemm_op.h"
 
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/register_types.h"
@@ -19,17 +19,13 @@
 #include "tensorflow/core/util/work_sharder.h"
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
 
-#if defined(TENSORFLOW_USE_CUSTOM_CONTRACTION_KERNEL)
-#include "tensorflow/core/kernels/eigen_contraction_kernel.h"
-#endif
-
 namespace tensorflow {
 
 template <typename Scalar>
 struct LaunchParallelGemm<CPUDevice, Scalar> {
-  static void Launch(OpKernelContext* context, Scalar alpha, const Tensor& in_x,
-                     const Tensor& in_y, Scalar beta, const Tensor& in_c,
-                     Tensor* out, int64 batch_size) {}
+  void operator()(OpKernelContext* context, Scalar alpha, const Tensor& in_x,
+                  const Tensor& in_y, Scalar beta, const Tensor& in_c,
+                  Tensor* out, int64 batch_size) {}
 };
 
 template <typename Device, typename Scalar>
@@ -82,9 +78,6 @@ class ParallelGemmlOp : public OpKernel {
                 errors::InvalidArgument("a mismatch b shape: ", d1, " vs. ", d2,
                                         ": ", a.shape().DebugString(), " ",
                                         b.shape().DebugString()));
-    VLOG(2) << "parallel_gemm debug: " << d0 << d1 << d2 << d3;
-    std::cout << "parallel_gemm debug: " << d0 << d1 << d2 << d3 << std::endl;
-    std::cerr << "parallel_gemm debug: " << d0 << d1 << d2 << d3 << std::endl;
     Tensor* out = nullptr;
     OP_REQUIRES_OK(ctx, ctx->allocate_output(0, out_shape, &out));
     if (out->NumElements() == 0) {
@@ -98,12 +91,12 @@ class ParallelGemmlOp : public OpKernel {
 
     if (beta_ == 0.0) {
       Tensor c;
-      LaunchParallelGemm<Device, Scalar>::Launch(ctx, alpha_, a, b, beta_, c,
-                                                 out, parallel_num_);
+      LaunchParallelGemm<Device, Scalar>()(ctx, alpha_, a, b, beta_, c, out,
+                                           parallel_num_);
     } else {
       const Tensor& c = ctx->input(2);
-      LaunchParallelGemm<Device, Scalar>::Launch(ctx, alpha_, a, b, beta_, c,
-                                                 out, parallel_num_);
+      LaunchParallelGemm<Device, Scalar>()(ctx, alpha_, a, b, beta_, c, out,
+                                           parallel_num_);
     }
   };
 
@@ -112,10 +105,20 @@ class ParallelGemmlOp : public OpKernel {
   Scalar alpha_, beta_;
 };
 
-TF_CALL_float(REGISTER_PARALLEL_GEMM_CPU);
-TF_CALL_double(REGISTER_PARALLEL_GEMM_CPU);
+#define REGISTER_PARALLEL_GEMM_CPU(TYPE)                                 \
+  REGISTER_KERNEL_BUILDER(                                               \
+      Name("ParallelGemm").Device(DEVICE_CPU).TypeConstraint<TYPE>("T"), \
+      ParallelGemmlOp<GPUDevice, TYPE>);
+REGISTER_PARALLEL_GEMM_CPU(float);
+REGISTER_PARALLEL_GEMM_CPU(double);
+
 #if GOOGLE_CUDA
-TF_CALL_float(REGISTER_PARALLEL_GEMM_GPU);
-TF_CALL_double(REGISTER_PARALLEL_GEMM_GPU);
+#define REGISTER_PARALLEL_GEMM_GPU(TYPE)                                 \
+  extern template struct LaunchParallelGemm<GPUDevice, TYPE>;            \
+  REGISTER_KERNEL_BUILDER(                                               \
+      Name("ParallelGemm").Device(DEVICE_GPU).TypeConstraint<TYPE>("T"), \
+      ParallelGemmlOp<GPUDevice, TYPE>);
+REGISTER_PARALLEL_GEMM_GPU(float);
+REGISTER_PARALLEL_GEMM_GPU(double);
 #endif
 }

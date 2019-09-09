@@ -13,21 +13,20 @@ typedef Eigen::GpuDevice GPUDevice;
 
 template <typename Device, typename Scalar>
 struct LaunchParallelGemm {
-  static void Launch(OpKernelContext* context, Scalar alpha, const Tensor& in_x,
-                     const Tensor& in_y, Scalar beta, const Tensor& in_c,
-                     Tensor* out, int64 batch_size) {}
+  void operator()(OpKernelContext* context, Scalar alpha, const Tensor& in_x,
+                  const Tensor& in_y, Scalar beta, const Tensor& in_c,
+                  Tensor* out, int64 batch_size);
 };
 
-#define REGISTER_PARALLEL_GEMM_GPU(TYPE)                                   \
-  REGISTER_KERNEL_BUILDER(                                                \
-      Name("ParallelGemm").Device(DEVICE_GPU).TypeConstraint<TYPE>("T"),   \
-      ParallelGemmlOp<GPUDevice, TYPE>);
+#if GOOGLE_CUDA
+template <typename Scalar>
+struct LaunchParallelGemm<GPUDevice, Scalar> {
+  void operator()(OpKernelContext* context, Scalar alpha, const Tensor& in_x,
+                  const Tensor& in_y, Scalar beta, const Tensor& in_c,
+                  Tensor* out, int64 batch_size);
+};
 
-#define REGISTER_PARALLEL_GEMM_CPU(TYPE)                                   \
-  REGISTER_KERNEL_BUILDER(                                                \
-      Name("ParallelGemm").Device(DEVICE_CPU).TypeConstraint<TYPE>("T"),   \
-      ParallelGemmlOp<GPUDevice, TYPE>);
-
+#endif
 }  // namespace tensorflow
 
 #endif  // TENSORFLOW_PARALLEL_GEMM_OP_H

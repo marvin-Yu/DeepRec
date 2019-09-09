@@ -2,9 +2,8 @@
 // Created by qiaoxj on 2019-09-06.
 //
 
-#include "parallel_gemm_op.h"
+#include "tensorflow/core/kernels/parallel_gemm_op.h"
 
-#include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/register_types.h"
 #include "tensorflow/core/framework/tensor.h"
@@ -18,11 +17,8 @@
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/util/matmul_bcast.h"
 #include "tensorflow/core/util/work_sharder.h"
+#include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
 
-#if defined(TENSORFLOW_USE_CUSTOM_CONTRACTION_KERNEL)
-#include "tensorflow/core/kernels/eigen_contraction_kernel.h"
-#endif
-#define GOOGLE_CUDA 1
 #if GOOGLE_CUDA
 #include "tensorflow/core/platform/stream_executor.h"
 #define EIGEN_USE_GPU
@@ -30,20 +26,22 @@
 
 namespace tensorflow {
 
-namespace {
-template <typename T>
-se::DeviceMemory<T> AsDeviceMemory(const T* gpu_memory) {
-  se::DeviceMemoryBase wrapped(const_cast<T*>(gpu_memory));
-  se::DeviceMemory<T> typed(wrapped);
-  return typed;
-}
-}
+// namespace
 
 #define CUDA_KERNEL_LOOP(i, n)                                   \
   for (int64 i = blockIdx.x * blockDim.x + threadIdx.x; i < (n); \
        i += blockDim.x * gridDim.x)
 
 #define CUDA_GET_BLOCKS(N, Threads) (N + Threads - 1) / Threads
+
+namespace {
+template <typename T>
+inline se::DeviceMemory<T> AsDeviceMemory(const T* gpu_memory) {
+  se::DeviceMemoryBase wrapped(const_cast<T*>(gpu_memory));
+  se::DeviceMemory<T> typed(wrapped);
+  return typed;
+}
+}  // namespace
 
 inline int GetThreadsNum(int data_size, bool upper = false) {
   if (upper) {
@@ -89,9 +87,9 @@ inline int GetBlockNum(int block_size, int elem_per_thread = 16) {
     return z;
 }
 
-template <typename DType>
-__global__ void BatchedUBroadcastKernel(DType* y, int64 batch_count,
-                                        int64 y_size, const DType* x,
+template <typename Scalar>
+__global__ void BatchedUBroadcastKernel(Scalar* y, int64 batch_count,
+                                        int64 y_size, const Scalar* x,
                                         int64 x_size) {
   int64 total_y_size = batch_count * y_size;
   CUDA_KERNEL_LOOP(index, total_y_size) {
@@ -101,40 +99,27 @@ __global__ void BatchedUBroadcastKernel(DType* y, int64 batch_count,
   }
 }
 
-template <typename DType>
-static void BatchedUBroadcast(DType* y, int64 batch_size,
-                              const std::vector<int64>& y_shape, const DType* x,
-                              const std::vector<int64>& x_shape,
-                              const GPUDevice& gpu_device) {
-  int64 y_size = std::accumulate(y_shape.begin(), y_shape.end(), 1,
-                                 std::multiplies<int64>());
-  int64 x_size = std::accumulate(x_shape.begin(), x_shape.end(), 1,
-                                 std::multiplies<int64>());
-  int thread_num = GetThreadsNum(y_size * batch_size);
-  int block_num = GetBlockNum(CUDA_GET_BLOCKS(y_size * batch_size, thread_num));
-  BatchedUBroadcastKernel<DType>
-  <<<block_num, thread_num, 0, gpu_device.stream()>>>(y, batch_size, y_size,
-      x, x_size);
-}
-
-template <typename DType>
-static void RunGemmStridedBatched(OpKernelContext* context,
-                                  perftools::gputools::blas::Transpose trans_a,
-                                  perftools::gputools::blas::Transpose trans_b,
-                                  uint64 m, uint64 n, uint64 k, DType alpha,
-                                  DType* a, int64 stride_a, DType* b,
-                                  int64 stride_b, DType beta, DType* c,
-                                  int64 stride_c, int batch_count) {
-  int lda =
-      (trans_a == perftools::gputools::blas::Transpose::kNoTranspose) ? k : m;
-  int ldb =
-      (trans_b == perftools::gputools::blas::Transpose::kNoTranspose) ? n : k;
+template <typename Scalar>
+void RunGemmStridedBatched(OpKernelContext* context, bool trans_a, bool trans_b,
+                           int64 m, int64 n, int64 k, Scalar alpha,
+                           const se::DeviceMemory<Scalar>& a, int64 stride_a,
+                           const se::DeviceMemory<Scalar>& b, int64 stride_b,
+                           Scalar beta, se::DeviceMemory<Scalar>* c,
+                           int64 stride_c, int batch_count) {
+  int lda = trans_a ? m : k;
+  int ldb = trans_b ? k : n;
   int ldc = n;
+  auto trans_a_tf = trans_a ? se::blas::Transpose::kTranspose
+                            : se::blas::Transpose::kNoTranspose;
+  auto trans_b_tf = trans_b ? se::blas::Transpose::kTranspose
+                            : se::blas::Transpose::kNoTranspose;
   auto* stream = context->op_device_context()->stream();
-  bool blas_launch_status = stream->ThenBlasGemmStridedBatched(
-      trans_b, trans_a, n, m, k, alpha, *AsDeviceMemory(b), ldb, stride_b,
-      *AsDeviceMemory(a), lda, stride_a, beta, *AsDeviceMemory(c), ldc,
-      stride_c, batch_count);
+  bool blas_launch_status =
+      stream
+          ->ThenBlasGemmStridedBatched(trans_b_tf, trans_a_tf, n, m, k, alpha,
+                                       b, ldb, stride_b, a, lda, stride_a, beta,
+                                       c, ldc, stride_c, batch_count)
+          .ok();
   if (!blas_launch_status) {
     context->SetStatus(errors::Internal(
         "Blas GemmStridedBatched launch failed : m=", m, ", n=", n, ", k=", k));
@@ -142,54 +127,60 @@ static void RunGemmStridedBatched(OpKernelContext* context,
 }
 
 template <typename Scalar>
-struct LaunchParallelGemm<GPUDevice, Scalar> {
-  static void Launch(OpKernelContext* context, Scalar alpha, const Tensor& in_x,
-                     const Tensor& in_y, Scalar beta, const Tensor& in_c,
-                     Tensor* out, int64 batch_size) {
-    printf("parallel_gemm cu debug: %s", in_c.DebugString());
-    VLOG(2) << "parallel_gemm cu debug: " << in_c.DebugString();
-    std::cout << "parallel_gemm cu debug: " << in_c.DebugString() << std::endl;
-    std::cerr << "parallel_gemm cu debug: " << in_c.DebugString() << std::endl;
-    const uint64 m = in_x.dims() == 3 ? in_x.dim_size(1) : in_x.dim_size(0);
-    const uint64 k = in_x.dims() == 3 ? in_x.dim_size(2) : in_x.dim_size(1);
-    const uint64 n = in_y.dim_size(1);
-    auto* stream = context->op_device_context()->stream();
-    OP_REQUIRES(context, stream, errors::Internal("No GPU stream available."));
-    auto trans_a = perftools::gputools::blas::Transpose::kNoTranspose;
-    auto trans_b = perftools::gputools::blas::Transpose::kNoTranspose;
-    auto* a_base_ptr = in_x.template flat<Scalar>().data();
-    auto* b_base_ptr = in_y.template flat<Scalar>().data();
-    auto* out_base_ptr = out->template flat<Scalar>().data();
-    const GPUDevice& gpu_device = context->eigen_gpu_device();
-    if (beta != 0) {
-      auto* c_base_ptr = in_c.template flat<Scalar>().data();
-      auto out_shape = out->shape().dim_sizes();
-      auto c_shape = in_c.shape().dim_sizes();
-      out_shape[0] /= batch_size;
-      c_shape[0] /= batch_size;
-      // broadcast in_c to out;
-      BatchedUBroadcast(out_base_ptr, batch_size, out_shape, c_base_ptr,
-                        c_shape, gpu_device);
-      std::cout << "in_c: " << in_c.DebugString() << std::endl;
-      std::cout << "out: " << out->DebugString() << std::endl;
-    }
-    if (in_x.dims() == 3) {
-      // Now Cublas is not supported, We sequentially run.
-      for (int i = 0; i < batch_size; i++) {
-        RunGemmStridedBatched(context, trans_a, trans_b, m, n, k, alpha,
-                              a_base_ptr, m * k, b_base_ptr + i * k * n, 0,
-                              beta, out_base_ptr + i * m * n * in_x.dim_size(0),
-                              m * n, in_x.dim_size(0));
-        std::cout << "Batched gemm" << out->DebugString() << std::endl;
-      }
-    } else {
-      RunGemmStridedBatched(context, trans_a, trans_b, m, n, k, alpha,
-                            a_base_ptr, 0, b_base_ptr, k * n, beta,
-                            out_base_ptr, m * n, batch_size);
-      std::cout << "out" << out->DebugString() << std::endl;
-    }
+void LaunchParallelGemm<GPUDevice, Scalar>::operator()(
+    OpKernelContext* context, Scalar alpha, const Tensor& in_x,
+    const Tensor& in_y, Scalar beta, const Tensor& in_c, Tensor* out,
+    int64 batch_size) {
+  const int64 m = in_x.dims() == 3 ? in_x.dim_size(1) : in_x.dim_size(0);
+  const int64 k = in_x.dims() == 3 ? in_x.dim_size(2) : in_x.dim_size(1);
+  const int64 n = in_y.dim_size(1);
+  auto* stream = context->op_device_context()->stream();
+  OP_REQUIRES(context, stream, errors::Internal("No GPU stream available."));
+  auto a_base_ptr = in_x.template flat<Scalar>().data();
+  auto b_base_ptr = in_y.template flat<Scalar>().data();
+  auto out_base_ptr = out->template flat<Scalar>().data();
+  const GPUDevice& gpu_device = context->eigen_gpu_device();
+  if (beta != 0) {
+    auto c_base_ptr = in_c.template flat<Scalar>().data();
+    auto out_shape = out->shape().dim_sizes();
+    auto c_shape = in_c.shape().dim_sizes();
+    out_shape[0] /= batch_size;
+    c_shape[0] /= batch_size;
+    // broadcast in_c to out;
+    int64 out_size = std::accumulate(out_shape.begin(), out_shape.end(), 1,
+                                     std::multiplies<int64>());
+    int64 c_size = std::accumulate(c_shape.begin(), c_shape.end(), 1,
+                                   std::multiplies<int64>());
+    int thread_num = GetThreadsNum(out_size * batch_size);
+    int block_num =
+        GetBlockNum(CUDA_GET_BLOCKS(out_size * batch_size, thread_num));
+    BatchedUBroadcastKernel<Scalar>
+        <<<block_num, thread_num, 0, gpu_device.stream()>>>(
+            out_base_ptr, batch_size, out_size, c_base_ptr, c_size);
   }
-};
+  if (in_x.dims() == 3) {
+    // Now Cublas is not supported, We sequentially run.
+    for (int i = 0; i < batch_size; i++) {
+      auto a_ptr = AsDeviceMemory(in_x.template flat<Scalar>().data());
+      auto b_ptr =
+          AsDeviceMemory(in_y.template flat<Scalar>().data() + i * k * n);
+      auto out_ptr = AsDeviceMemory(out->template flat<Scalar>().data() +
+                                    i * m * n * in_x.dim_size(0));
+      RunGemmStridedBatched<Scalar>(context, false, false, m, n, k, alpha,
+                                    a_ptr, m * k, b_ptr, 0, beta, &out_ptr,
+                                    m * n, in_x.dim_size(0));
+    }
+  } else {
+    auto a_ptr = AsDeviceMemory(in_x.template flat<Scalar>().data());
+    auto b_ptr = AsDeviceMemory(in_y.template flat<Scalar>().data());
+    auto out_ptr = AsDeviceMemory(out->template flat<Scalar>().data());
+    RunGemmStridedBatched<Scalar>(context, false, false, m, n, k, alpha, a_ptr,
+                                  0, b_ptr, k * n, beta, &out_ptr, m * n,
+                                  batch_size);
+  }
+}
 
+template struct LaunchParallelGemm<GPUDevice, float>;
+template struct LaunchParallelGemm<GPUDevice, double>;
 #endif  // GOOGLE_CUDA
 }
