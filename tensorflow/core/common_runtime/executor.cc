@@ -1316,6 +1316,11 @@ class ExecutorState {
   // name of the new frame from nodedef.
   gtl::FlatMap<string, FrameState*> outstanding_frames_ GUARDED_BY(mu_);
 
+  // Number of outstanding _Recv operations. When the number drops
+  // down to zero, we can start to capture the compute stream to build
+  // a CUDA Graph.
+  std::atomic_int_fast32_t num_outstanding_recv_ops_;
+
   // The unique name of a frame.
   inline string MakeFrameName(FrameState* frame, int64 iter_id,
                               const string& name) {
@@ -1549,6 +1554,20 @@ void ExecutorState::RunAsync(Executor::DoneCallback done) {
     return;
   }
 
+#ifdef GOOGLE_CUDA
+  // Count the number of _Recv operations in the graph. CUDA Graphs
+  // can only be captured after all _Recv operations are done.
+  if (device->attributes().device_type() == "GPU" && cuda_graph_) {
+    int n = 0;
+    for (auto node: graph->nodes()) {
+      if (node->type_string() == "_Recv") {
+        n++;
+      }
+    }
+    num_outstanding_recv_ops_ = n;
+  }
+#endif
+
   // Initialize the ready queue.
   for (const Node* n : impl_->root_nodes_) {
     DCHECK_EQ(n->in_edges().size(), 0);
@@ -1709,34 +1728,34 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
     const NodeItem& item = *gview.node(id);
 
 #ifdef GOOGLE_CUDA
-        if (node->type_string() == "_Send" && node->name() == "run_test/z/_4") {
-          Device* device = impl_->params_.device;
-          if (device->attributes().device_type() == "GPU" && cuda_graph_) {
-            auto stream =
-              device->tensorflow_gpu_device_info()->default_context->stream();
-            auto cu_stream =
-              static_cast<CUstream>(stream->implementation()->GpuStreamHack());
-            auto cuda_graph = static_cast<CUgraph*>(cuda_graph_);
-            auto ret = cuStreamEndCapture(cu_stream, cuda_graph);
-            if (ret != CUDA_SUCCESS) {
-              // const char* error;
-              // cuGetErrorString(ret, &error);
-              // delete this;
-              // done_cb(errors::Internal(
-              //           "Cannot end to capture stream ", stream, ": ", error));
-              // return;
-            }
-            size_t n;
-            ret = cuGraphGetNodes(*cuda_graph, nullptr, &n);
-            if (ret != CUDA_SUCCESS) {
-              const char* error;
-              cuGetErrorString(ret, &error);
-              VLOG(2) << "Cannot get number of nodes for CUDA Graph " << *cuda_graph;
-            } else {
-              VLOG(2) << "Number of nodes in captured CUDA Graph is " << n;
-            }
-          }
-        }
+    if (device->attributes().device_type() == "GPU"
+        && cuda_graph_
+        && node->type_string() == "_Send") {
+      auto stream =
+        device->tensorflow_gpu_device_info()->default_context->stream();
+      auto cu_stream =
+        static_cast<CUstream>(stream->implementation()->GpuStreamHack());
+      auto cuda_graph = static_cast<CUgraph*>(cuda_graph_);
+      auto ret = cuStreamEndCapture(cu_stream, cuda_graph);
+      if (ret != CUDA_SUCCESS) {
+        const char* error;
+        cuGetErrorString(ret, &error);
+        s = errors::Internal(
+          "Cannot end to capture stream ", cu_stream, ": ", error);
+        MaybeMarkCompleted(input_frame, input_iter, id);
+        completed = NodeDone(s, item.node, ready, stats, &inline_ready);
+        continue;
+      }
+      size_t n;
+      ret = cuGraphGetNodes(*cuda_graph, nullptr, &n);
+      if (ret != CUDA_SUCCESS) {
+        const char* error;
+        cuGetErrorString(ret, &error);
+        VLOG(2) << "Cannot get number of nodes for CUDA Graph " << *cuda_graph;
+      } else {
+        VLOG(2) << "Number of nodes in captured CUDA Graph is " << n;
+      }
+    }
 #endif
 
     // TODO(misard) Replace with a finer-grain enabling flag once we
@@ -1866,33 +1885,31 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
             device->ConsumeListOfAccessedTensors(state->ctx.op_device_context(),
                                                  accessed);
           }
-          const bool completed =
-              NodeDone(s, state->item->node, ready, stats, nullptr);
-          delete state;
-
 
 #ifdef GOOGLE_CUDA
-          auto node = state->tagged_node.node;
-          if (node->type_string() == "_Recv" && node->name() == "_arg_run_test/w_0_0/_3") {
-            Device* device = impl_->params_.device;
-            bool on_gpu = device->attributes().device_type() == "GPU";
-            if (on_gpu && cuda_graph_) {
-              auto stream =
-                device->tensorflow_gpu_device_info()->default_context->stream();
-              auto cu_stream =
-                static_cast<CUstream>(stream->implementation()->GpuStreamHack());
-              auto ret = cuStreamBeginCapture(cu_stream, CU_STREAM_CAPTURE_MODE_RELAXED);
-              if (ret != CUDA_SUCCESS) {
-                const char* error;
-                cuGetErrorString(ret, &error);
-                // delete this;
-                // done(errors::Internal(
-                //        "Cannot begin to capture stream ", stream, ": ", error));
-                // return;
-              }
+          if (s.ok()
+              && device->attributes().device_type() == "GPU"
+              && cuda_graph_
+              && state->tagged_node.node->type_string() == "_Recv"
+              && num_outstanding_recv_ops_-- == 1) {
+            auto stream =
+              device->tensorflow_gpu_device_info()->default_context->stream();
+            auto cu_stream =
+              static_cast<CUstream>(stream->implementation()->GpuStreamHack());
+            auto ret =
+              cuStreamBeginCapture(cu_stream, CU_STREAM_CAPTURE_MODE_RELAXED);
+            if (ret != CUDA_SUCCESS) {
+              const char* error;
+              cuGetErrorString(ret, &error);
+              s = errors::Internal(
+                "Cannot begin to capture stream ", cu_stream, ": ", error);
             }
           }
 #endif
+
+          const bool completed =
+              NodeDone(s, state->item->node, ready, stats, nullptr);
+          delete state;
           if (completed) ScheduleFinish();
         };
         nodestats::SetOpStart(stats);
