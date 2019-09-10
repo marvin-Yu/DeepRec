@@ -1549,27 +1549,6 @@ void ExecutorState::RunAsync(Executor::DoneCallback done) {
     return;
   }
 
-#if 0
-//#ifdef GOOGLE_CUDA
-  Device* device = impl_->params_.device;
-  bool on_gpu = device->attributes().device_type() == "GPU";
-  if (on_gpu && cuda_graph_) {
-    auto stream =
-      device->tensorflow_gpu_device_info()->default_context->stream();
-    auto cu_stream =
-      static_cast<CUstream>(stream->implementation()->GpuStreamHack());
-    auto ret = cuStreamBeginCapture(cu_stream, CU_STREAM_CAPTURE_MODE_RELAXED);
-    if (ret != CUDA_SUCCESS) {
-      const char* error;
-      cuGetErrorString(ret, &error);
-      delete this;
-      done(errors::Internal(
-             "Cannot begin to capture stream ", stream, ": ", error));
-      return;
-    }
-  }
-#endif
-
   // Initialize the ready queue.
   for (const Node* n : impl_->root_nodes_) {
     DCHECK_EQ(n->in_edges().size(), 0);
@@ -1729,6 +1708,37 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
     const int id = node->id();
     const NodeItem& item = *gview.node(id);
 
+#ifdef GOOGLE_CUDA
+        if (node->type_string() == "_Send" && node->name() == "run_test/z/_4") {
+          Device* device = impl_->params_.device;
+          if (device->attributes().device_type() == "GPU" && cuda_graph_) {
+            auto stream =
+              device->tensorflow_gpu_device_info()->default_context->stream();
+            auto cu_stream =
+              static_cast<CUstream>(stream->implementation()->GpuStreamHack());
+            auto cuda_graph = static_cast<CUgraph*>(cuda_graph_);
+            auto ret = cuStreamEndCapture(cu_stream, cuda_graph);
+            if (ret != CUDA_SUCCESS) {
+              // const char* error;
+              // cuGetErrorString(ret, &error);
+              // delete this;
+              // done_cb(errors::Internal(
+              //           "Cannot end to capture stream ", stream, ": ", error));
+              // return;
+            }
+            size_t n;
+            ret = cuGraphGetNodes(*cuda_graph, nullptr, &n);
+            if (ret != CUDA_SUCCESS) {
+              const char* error;
+              cuGetErrorString(ret, &error);
+              VLOG(2) << "Cannot get number of nodes for CUDA Graph " << *cuda_graph;
+            } else {
+              VLOG(2) << "Number of nodes in captured CUDA Graph is " << n;
+            }
+          }
+        }
+#endif
+
     // TODO(misard) Replace with a finer-grain enabling flag once we
     // add better optional debugging support.
     if (vlog_ && VLOG_IS_ON(1)) {
@@ -1859,6 +1869,30 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
           const bool completed =
               NodeDone(s, state->item->node, ready, stats, nullptr);
           delete state;
+
+
+#ifdef GOOGLE_CUDA
+          auto node = state->tagged_node.node;
+          if (node->type_string() == "_Recv" && node->name() == "_arg_run_test/w_0_0/_3") {
+            Device* device = impl_->params_.device;
+            bool on_gpu = device->attributes().device_type() == "GPU";
+            if (on_gpu && cuda_graph_) {
+              auto stream =
+                device->tensorflow_gpu_device_info()->default_context->stream();
+              auto cu_stream =
+                static_cast<CUstream>(stream->implementation()->GpuStreamHack());
+              auto ret = cuStreamBeginCapture(cu_stream, CU_STREAM_CAPTURE_MODE_RELAXED);
+              if (ret != CUDA_SUCCESS) {
+                const char* error;
+                cuGetErrorString(ret, &error);
+                // delete this;
+                // done(errors::Internal(
+                //        "Cannot begin to capture stream ", stream, ": ", error));
+                // return;
+              }
+            }
+          }
+#endif
           if (completed) ScheduleFinish();
         };
         nodestats::SetOpStart(stats);
@@ -2532,36 +2566,6 @@ void ExecutorState::Finish() {
   mu_.unlock();
   CHECK(done_cb != nullptr);
   Device* device = impl_->params_.device;
-
-#if 0
-//#ifdef GOOGLE_CUDA
-  Device* device = impl_->params_.device;
-  if (device->attributes().device_type() == "GPU" && cuda_graph_) {
-    auto stream =
-      device->tensorflow_gpu_device_info()->default_context->stream();
-    auto cu_stream =
-      static_cast<CUstream>(stream->implementation()->GpuStreamHack());
-    auto cuda_graph = static_cast<CUgraph*>(cuda_graph_);
-    auto ret = cuStreamEndCapture(cu_stream, cuda_graph);
-    if (ret != CUDA_SUCCESS) {
-      const char* error;
-      cuGetErrorString(ret, &error);
-      delete this;
-      done_cb(errors::Internal(
-                "Cannot end to capture stream ", stream, ": ", error));
-      return;
-    }
-    size_t n;
-    ret = cuGraphGetNodes(*cuda_graph, nullptr, &n);
-    if (ret != CUDA_SUCCESS) {
-      const char* error;
-      cuGetErrorString(ret, &error);
-      VLOG(2) << "Cannot get number of nodes for CUDA Graph " << *cuda_graph;
-    } else {
-      VLOG(2) << "Number of nodes in captured CUDA Graph is " << n;
-    }
-  }
-#endif
 
   // There are several potential race conditions below. To name a few:
   // 1. Even if the device's status is OK at the precise moment when
