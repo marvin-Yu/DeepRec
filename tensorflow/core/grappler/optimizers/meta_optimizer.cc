@@ -32,6 +32,7 @@ limitations under the License.
 #include "tensorflow/core/grappler/optimizers/debug_stripper.h"
 #include "tensorflow/core/grappler/optimizers/dependency_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/function_optimizer.h"
+#include "tensorflow/core/grappler/optimizers/gemm_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/generic_layout_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/implementation_selector.h"
 #include "tensorflow/core/grappler/optimizers/kernel_fusion_optimizer.h"
@@ -153,7 +154,8 @@ std::unique_ptr<GraphOptimizer> MetaOptimizer::MakeNewOptimizer(
                                       cfg_.scoped_allocator_opts()));
   MK_OPT("pin_to_host",
          new PinToHostOptimizer(cfg_.pin_to_host_optimization()));
-  MK_OPT("kernel_fusion", new KernelFusionOptimizer());
+  MK_OPT("gemm", new GemmOptimizer());
+  // MK_OPT("kernel_fusion", new KernelFusionOptimizer());
 
   return std::unique_ptr<GraphOptimizer>();
 }
@@ -237,8 +239,11 @@ Status MetaOptimizer::InitializeOptimizers(
     optimizers->push_back(MakeUnique<ScopedAllocatorOptimizer>(
         cfg_.scoped_allocator_optimization(), cfg_.scoped_allocator_opts()));
   }
-  if (cfg_.kernel_fusion_optimization() != RewriterConfig::OFF) {
-    optimizers->push_back(MakeUnique<KernelFusionOptimizer>());
+  // if (cfg_.kernel_fusion_optimization() != RewriterConfig::OFF) {
+  //   optimizers->push_back(MakeUnique<KernelFusionOptimizer>());
+  // }
+  if (cfg_.gemm_optimization() != RewriterConfig::OFF) {
+    optimizers->push_back(MakeUnique<GemmOptimizer>());
   }
 
   return InitializeCustomGraphOptimizers(std::set<string>(), optimizers);

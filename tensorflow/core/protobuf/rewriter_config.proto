@@ -90,6 +90,8 @@ message RewriterConfig {
   Toggle auto_mixed_precision = 23;
   // Kernel fusion optimizations (default is ON).
   Toggle kernel_fusion_optimization = 24;
+  // Gemm optimizations (default is ON).
+  Toggle gemm_optimization = 25;
 
   // Disable the entire meta optimizer (off by default).
   bool disable_meta_optimizer = 19;
