@@ -139,6 +139,24 @@ void SetReferencedTensors(NodeExecStatsInterface* stats,
 
 }  // namespace nodestats
 
+static string ProcessInputName(const string& name) {
+  static const string prefix = "_arg_";
+  if (name.substr(0, prefix.size()) != prefix) {
+    return name + ":0";
+  }
+  string name1 = name.substr(prefix.size());
+  std::vector<string> parts = str_util::Split(name1, "_");
+  for (auto i = 0; i < 3; i++) {
+    parts.pop_back();
+  }
+  return absl::StrJoin(parts, "_") + ":0";
+}
+
+static string ProcessOutputName(const string& name) {
+  auto idx = name.find_last_of('/');
+  return (idx == string::npos ? name : name.substr(0, idx)) + ":0";
+}
+
 class ExecutorImpl;
 class GraphView;
 
@@ -1275,6 +1293,8 @@ class ExecutorState {
   Allocator* persistent_allocator_;
   int gpu_id_;
   void* cuda_graph_;
+  Executor::Args::SaveIO save_input_;
+  Executor::Args::SaveIO save_output_;
 
   // QUESTION: Make it a checkpoint::TensorSliceReaderCacheWrapper
   // instead of a pointer?  (avoids having to delete).
@@ -1420,6 +1440,8 @@ ExecutorState::ExecutorState(const Executor::Args& args, ExecutorImpl* impl)
       persistent_allocator_(args.persistent_allocator),
       gpu_id_(args.gpu_id),
       cuda_graph_(args.cuda_graph),
+      save_input_(args.save_input),
+      save_output_(args.save_output),
       slice_reader_cache_(new checkpoint::TensorSliceReaderCacheWrapper),
       call_frame_(args.call_frame),
       impl_(impl),
@@ -1736,6 +1758,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
       auto cu_stream =
         static_cast<CUstream>(stream->implementation()->GpuStreamHack());
       auto cuda_graph = static_cast<CUgraph*>(cuda_graph_);
+      VLOG(2) << "Ending the capture of stream " << cu_stream;
       auto ret = cuStreamEndCapture(cu_stream, cuda_graph);
       if (ret != CUDA_SUCCESS) {
         const char* error;
@@ -1841,6 +1864,24 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
           NodeExecStatsInterface* stats = state->stats;  // Shorthand
           Entry* first_input = state->first_input;       // Shorthand
 
+#ifdef GOOGLE_CUDA
+          if (state->ctx.status().ok()
+              && state->tagged_node.node->type_string() == "_Recv") {
+            auto name = state->tagged_node.node->name();
+            auto dev_type = device->attributes().device_type();
+            auto tensor = state->ctx.mutable_output(0);
+            if (dev_type == "CPU") {
+              auto real_name = ProcessOutputName(name);
+              VLOG(2) << "Saving result " << real_name << " (" << tensor << ")";
+              save_output_(real_name, tensor);
+            } else {            // GPU
+              auto real_name = ProcessInputName(name);
+              VLOG(2) << "Saving input " << real_name << " (" << tensor << ")";
+              save_input_(real_name, tensor);
+            }
+          }
+#endif
+
           nodestats::SetOpEnd(stats);
           EntryVector outputs;
           Status s = ProcessOutputs(*state->item, &state->ctx, &outputs, stats);
@@ -1887,6 +1928,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
               device->tensorflow_gpu_device_info()->default_context->stream();
             auto cu_stream =
               static_cast<CUstream>(stream->implementation()->GpuStreamHack());
+            VLOG(2) << "Beginning the capture of stream " << cu_stream;
             auto ret =
               cuStreamBeginCapture(cu_stream, CU_STREAM_CAPTURE_MODE_RELAXED);
             if (ret != CUDA_SUCCESS) {

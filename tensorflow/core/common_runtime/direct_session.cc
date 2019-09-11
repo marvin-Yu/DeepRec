@@ -87,6 +87,7 @@ limitations under the License.
 // encapsulated. But for now we are aiming to make it work, so we only
 // want to clean this up in the future.
 #include "third_party/gpus/cuda/include/cuda.h"
+#include "third_party/gpus/cuda/include/cuda_runtime_api.h"
 #endif
 
 namespace tensorflow {
@@ -100,11 +101,11 @@ struct DirectSession::CUDAGraphContext {
 
   CUgraphExec cuda_graph_exec = nullptr;
 
-  std::vector<CUdeviceptr> inputs;    // Not owning the data.
+  std::map<string, std::unique_ptr<Tensor>> inputs;
 
-  std::vector<CUdeviceptr> outputs;   // Not owning the data.
+  std::map<string, std::unique_ptr<Tensor>> outputs;
 
-  std::vector<::tensorflow::TensorShape> output_shapes;
+  CUstream stream = nullptr;
 
   CUDAGraphContext(int id): id(id) { }
 
@@ -203,6 +204,15 @@ DirectSession::CUDAGraphContext::~CUDAGraphContext() {
       const char* err;
       cuGetErrorString(res, &err);
       LOG(ERROR) << "cuGraphDestroy failed to destroy " << cuda_graph
+                 << (err ? string(": ") + err : "");
+    }
+  }
+  if (stream) {
+    CUresult res = cuStreamDestroy(stream);
+    if (res != CUDA_SUCCESS) {
+      const char* err;
+      cuGetErrorString(res, &err);
+      LOG(ERROR) << "cuStreamDestroy failed to destroy " << stream
                  << (err ? string(": ") + err : "");
     }
   }
@@ -724,7 +734,9 @@ Status DirectSession::RunInternal(
     RunMetadata* run_metadata,
     const thread::ThreadPoolOptions& threadpool_options,
     CUDAGraphContext* cuda_graph_context, Allocator* persistent_allocator,
-    int gpu_id, void* cuda_graph) {
+    int gpu_id, void* cuda_graph,
+    std::map<string, std::unique_ptr<Tensor>>* saved_inputs,
+    std::map<string, std::unique_ptr<Tensor>>* saved_outputs) {
   const uint64 start_time_usecs = options_.env->NowMicros();
   const int64 executor_step_count = executors_and_keys->step_count.fetch_add(1);
   RunState run_state(step_id, &devices_);
@@ -813,6 +825,12 @@ Status DirectSession::RunInternal(
   args.persistent_allocator = persistent_allocator;
   args.gpu_id = gpu_id;
   args.cuda_graph = cuda_graph;
+  args.save_input = [saved_inputs](const string& name, Tensor* tensor) {
+    (*saved_inputs)[name].reset(new Tensor(*tensor));
+  };
+  args.save_output = [saved_outputs](const string& name, Tensor* tensor) {
+    (*saved_outputs)[name].reset(new Tensor(*tensor));
+  };
 
   const bool do_trace = (run_options.trace_level() > RunOptions::NO_TRACE);
 
@@ -1088,6 +1106,7 @@ Status DirectSession::RecordCUDAGraph(
   const std::vector<string>& target_nodes, std::vector<Tensor>* outputs,
   RunMetadata* run_metadata, CUDAGraphContext* cuda_graph_context,
   Allocator* persistent_allocator, int device_id) {
+
   auto cuda_graph = &cuda_graph_context->cuda_graph;
   auto ret = cuGraphCreate(cuda_graph, 0);
   if (ret != CUDA_SUCCESS) {
@@ -1117,18 +1136,45 @@ Status DirectSession::RecordCUDAGraph(
       "Cannot instantiate CUDA Graph exec for captured graph: ",
       error, ": ", reinterpret_cast<char*>(error_buf.data()));
   }
+
+  int old_device_id;
+  auto ret1 = cudaGetDevice(&old_device_id);
+  if (ret1 != cudaSuccess) {
+    return errors::Internal(
+      "Cannot get the old device: ", cudaGetErrorString(ret1));
+  }
+  ret1 = cudaSetDevice(device_id);
+  if (ret1 != cudaSuccess) {
+    return errors::Internal(
+      "Cannot set the current device: ", cudaGetErrorString(ret1));
+  }
+  ret = cuStreamCreate(&cuda_graph_context->stream, CU_STREAM_NON_BLOCKING);
+  if (ret != CUDA_SUCCESS) {
+    const char* error;
+    cuGetErrorString(ret, &error);
+    return errors::Internal("Cannot create a new stream: ", error);
+  }
+  ret1 = cudaSetDevice(old_device_id);
+  if (ret1 != cudaSuccess) {
+    return errors::Internal(
+      "Cannot set the old device: ", cudaGetErrorString(ret1));
+  }
+
   return Status::OK();
 }
 
-Status DirectSession::Run0(const RunOptions& run_options,
-                           const NamedTensorList& inputs,
-                           const std::vector<string>& output_names,
-                           const std::vector<string>& target_nodes,
-                           std::vector<Tensor>* outputs,
-                           RunMetadata* run_metadata,
-                           CUDAGraphContext* cuda_graph_context,
-                           Allocator* persistent_allocator, int device_id,
-                           void* cuda_graph) {
+Status DirectSession::Run0(
+  const RunOptions& run_options,
+  const NamedTensorList& inputs,
+  const std::vector<string>& output_names,
+  const std::vector<string>& target_nodes,
+  std::vector<Tensor>* outputs,
+  RunMetadata* run_metadata,
+  CUDAGraphContext* cuda_graph_context,
+  Allocator* persistent_allocator, int device_id,
+  void* cuda_graph,
+  std::map<string, std::unique_ptr<Tensor>>* saved_inputs,
+  std::map<string, std::unique_ptr<Tensor>>* saved_outputs) {
   TF_RETURN_IF_ERROR(CheckNotClosed());
   TF_RETURN_IF_ERROR(CheckGraphCreated("Run()"));
   direct_session_runs->GetCell()->IncrementBy(1);
@@ -1190,7 +1236,8 @@ Status DirectSession::Run0(const RunOptions& run_options,
                                  executors_and_keys, run_metadata,
                                  thread::ThreadPoolOptions(),
                                  cuda_graph_context, persistent_allocator,
-                                 device_id, cuda_graph));
+                                 device_id, cuda_graph, saved_inputs,
+                                 saved_outputs));
 
   // Receive outputs.
   if (outputs) {

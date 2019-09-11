@@ -110,6 +110,10 @@ class Executor {
     Allocator* persistent_allocator = nullptr;
     int gpu_id = -1;
     void* cuda_graph;
+
+    typedef std::function<void (const string&, Tensor*)> SaveIO;
+    SaveIO save_input = nullptr;
+    SaveIO save_output = nullptr;
   };
   typedef std::function<void(const Status&)> DoneCallback;
   virtual void RunAsync(const Args& args, DoneCallback done) = 0;

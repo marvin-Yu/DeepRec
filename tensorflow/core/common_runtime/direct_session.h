@@ -17,6 +17,7 @@ limitations under the License.
 #define TENSORFLOW_CORE_COMMON_RUNTIME_DIRECT_SESSION_H_
 
 #include <atomic>
+#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -224,15 +225,18 @@ class DirectSession : public Session {
   };
 
   struct CUDAGraphContext;
-  ::tensorflow::Status Run0(const ::tensorflow::RunOptions& run_options,
-                            const NamedTensorList& inputs,
-                            const std::vector<string>& output_names,
-                            const std::vector<string>& target_nodes,
-                            std::vector<Tensor>* outputs,
-                            RunMetadata* run_metadata,
-                            CUDAGraphContext* cuda_graph_context = nullptr,
-                            Allocator* persistent_allocator = nullptr,
-                            int gpu_id = 0, void* cuda_graph = nullptr);
+  ::tensorflow::Status Run0(
+    const ::tensorflow::RunOptions& run_options,
+    const NamedTensorList& inputs,
+    const std::vector<string>& output_names,
+    const std::vector<string>& target_nodes,
+    std::vector<Tensor>* outputs,
+    RunMetadata* run_metadata,
+    CUDAGraphContext* cuda_graph_context = nullptr,
+    Allocator* persistent_allocator = nullptr,
+    int gpu_id = 0, void* cuda_graph = nullptr,
+    std::map<string, std::unique_ptr<Tensor>>* saved_inputs = nullptr,
+    std::map<string, std::unique_ptr<Tensor>>* saved_outputs = nullptr);
   ::tensorflow::Status RecordCUDAGraph(
     const ::tensorflow::RunOptions& run_options,
     const NamedTensorList& inputs,
@@ -304,7 +308,9 @@ class DirectSession : public Session {
       const thread::ThreadPoolOptions& threadpool_options,
       CUDAGraphContext* cuda_graph_context = nullptr,
       Allocator* persistent_allocator = nullptr, int gpu_id = 0,
-      void* cuda_graph = nullptr);
+      void* cuda_graph = nullptr,
+      std::map<string, std::unique_ptr<Tensor>>* saved_inputs = nullptr,
+      std::map<string, std::unique_ptr<Tensor>>* saved_outputs = nullptr);
 
   // Returns whether inter-op execution uses a global pool or the input
   // `run_options` requests being run on inter_op_thread_pool = 0 in case
