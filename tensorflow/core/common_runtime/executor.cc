@@ -1866,6 +1866,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
 
 #ifdef GOOGLE_CUDA
           if (state->ctx.status().ok()
+              && cuda_graph_
               && state->tagged_node.node->type_string() == "_Recv") {
             auto name = state->tagged_node.node->name();
             auto dev_type = device->attributes().device_type();
