@@ -1106,7 +1106,7 @@ Status DirectSession::RecordCUDAGraph(
   const std::vector<string>& target_nodes, std::vector<Tensor>* outputs,
   RunMetadata* run_metadata, CUDAGraphContext* cuda_graph_context,
   Allocator* persistent_allocator, int device_id) {
-
+#ifdef GOOGLE_CUDA
   auto cuda_graph = &cuda_graph_context->cuda_graph;
   auto ret = cuGraphCreate(cuda_graph, 0);
   if (ret != CUDA_SUCCESS) {
@@ -1161,6 +1161,9 @@ Status DirectSession::RecordCUDAGraph(
   }
 
   return Status::OK();
+#else
+  return Status::OK();
+#endif
 }
 
 Status DirectSession::Run0(
