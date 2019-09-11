@@ -1867,19 +1867,13 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
 #ifdef GOOGLE_CUDA
           if (state->ctx.status().ok()
               && cuda_graph_
-              && state->tagged_node.node->type_string() == "_Recv") {
+              && device->attributes().device_type() == "GPU"
+              && IsRecv(state->tagged_node.node)) {
             auto name = state->tagged_node.node->name();
-            auto dev_type = device->attributes().device_type();
+            auto real_name = ProcessInputName(name);
             auto tensor = state->ctx.mutable_output(0);
-            if (dev_type == "CPU") {
-              auto real_name = ProcessOutputName(name);
-              VLOG(2) << "Saving result " << real_name << " (" << tensor << ")";
-              save_output_(real_name, tensor);
-            } else {            // GPU
-              auto real_name = ProcessInputName(name);
-              VLOG(2) << "Saving input " << real_name << " (" << tensor << ")";
-              save_input_(real_name, tensor);
-            }
+            VLOG(2) << "Saving input " << real_name << " (" << tensor << ")";
+            save_input_(real_name, tensor);
           }
 #endif
 
@@ -1979,6 +1973,18 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
           tracing::ScopedAnnotation annotation(kernel_label);
           device->Compute(op_kernel, &ctx);
         } else {
+#ifdef GOOGLE_CUDA
+          if (cuda_graph_
+              && device->attributes().device_type() == "GPU"
+              && IsSend(node)) {
+            auto name = node->name();
+            auto real_name = ProcessOutputName(name);
+            auto tensor = const_cast<Tensor*>(&ctx.input(0));
+            VLOG(2) << "Saving result " << real_name << " (" << tensor << ")";
+            save_output_(real_name, tensor);
+          }
+#endif
+
           // In the common case, avoid creating any tracing objects.
           if (op_kernel->IsExpensive()) {
             KernelTimer timer;

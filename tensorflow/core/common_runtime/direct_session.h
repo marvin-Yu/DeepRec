@@ -99,6 +99,8 @@ class DirectSession : public Session {
   // If 'containers' is empty, then Reset clears the default container.
   ::tensorflow::Status Reset(const std::vector<string>& containers);
 
+  ::tensorflow::Status GetAssignedCPUDevice(string* device_name,
+                                            Device** device);
   ::tensorflow::Status GetAssignedGPUDevice(gtl::ArraySlice<string> input_names,
                                             string* device_name,
                                             Device** device);

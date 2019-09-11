@@ -728,6 +728,12 @@ Status DirectSession::RunWithCUDAGraph(CUDAGraphContext& context,
                                        const std::vector<string>& output_names,
                                        std::vector<Tensor>* outputs) {
 #ifdef GOOGLE_CUDA
+  string cpu_device_name;
+  Device* cpu_device;
+  TF_RETURN_IF_ERROR(GetAssignedCPUDevice(&cpu_device_name, &cpu_device));
+  AllocatorAttributes aa;
+  auto cpu_allocator = cpu_device->GetAllocator(aa);
+
   Status status;
   Notification notification;
   auto device = context.device;
@@ -735,7 +741,7 @@ Status DirectSession::RunWithCUDAGraph(CUDAGraphContext& context,
     context.device->tensorflow_gpu_device_info()->default_context;
 
   std::function<void (int idx, const Tensor**, Tensor**)> lookup_input =
-    [inputs, &context](int idx, const Tensor** in, Tensor** out) {
+    [&] (int idx, const Tensor** in, Tensor** out) {
       auto& entry = inputs[idx];
       auto& name = std::get<0>(entry);
       *in = &std::get<1>(entry);
@@ -743,12 +749,13 @@ Status DirectSession::RunWithCUDAGraph(CUDAGraphContext& context,
       VLOG(2) << "Found input " << name << ": " << *in << " => " << *out;
     };
 
+  outputs->resize(output_names.size());
   std::function<void (int idx, const Tensor**, Tensor**)> lookup_output =
-    [output_names, &outputs, &context]
-    (int idx, const Tensor** in, Tensor** out) {
+    [&] (int idx, const Tensor** in, Tensor** out) {
       auto& name = output_names[idx];
       *in = context.outputs[name].get();
       *out = &(*outputs)[idx];
+      **out = Tensor(cpu_allocator, (*in)->dtype(), (*in)->shape());
       VLOG(2) << "Found output " << name << ": " << *in << " => " << *out;
     };
 
@@ -756,9 +763,7 @@ Status DirectSession::RunWithCUDAGraph(CUDAGraphContext& context,
   const Tensor* gpu_tensor;
   Tensor* output_tensor;
   std::function<void (const Status&)> output_loop =
-    [output_loop, lookup_output, &context, device_context, &gpu_tensor,
-     &output_tensor, device, &output_idx, output_names, &outputs, &status,
-     &notification] (const Status& st) {
+    [&] (const Status& st) {
       if (!st.ok()) {
         status = st;
         notification.Notify();
@@ -779,10 +784,7 @@ Status DirectSession::RunWithCUDAGraph(CUDAGraphContext& context,
   const Tensor* cpu_tensor;
   Tensor* device_tensor;
   std::function<void (const Status&)> input_loop =
-    [input_loop, output_loop, lookup_input, lookup_output, &context,
-     device_context, &cpu_tensor, device, &device_tensor, &input_idx, inputs,
-     &output_idx, output_names, &outputs, &gpu_tensor, &output_tensor, &status,
-     &notification] (const Status& st) {
+    [&] (const Status& st) {
       if (!st.ok()) {
         status = st;
         notification.Notify();
@@ -1198,6 +1200,7 @@ Status DirectSession::Run(const RunOptions& run_options,
     return Run0(run_options, inputs, output_names, target_nodes, outputs,
                 run_metadata);
   }
+  VLOG(2) << "Running with CUDA Graph context " << context;
   st = RunWithCUDAGraph(*context, inputs, output_names, outputs);
   ReturnCUDAGraphContext(device_name, key, context);
   return st;
@@ -2256,7 +2259,6 @@ Status DirectSession::ReturnCUDAGraphContext(const string& device,
 #ifdef GOOGLE_CUDA
   CUDAGraphDeviceContext* device_context;
   {
-    mutex_lock l(cuda_graph_lock_);
     TF_RETURN_IF_ERROR(GetCUDAGraphDeviceContext(device, &device_context));
     if (device_context == nullptr) {
       return errors::Internal("Cannot find CUDA Graph device context for ",
@@ -2265,6 +2267,34 @@ Status DirectSession::ReturnCUDAGraphContext(const string& device,
   }
   device_context->ReturnContext(key, context);
   return Status::OK();
+#else
+  return Status::OK();
+#endif
+}
+
+Status DirectSession::GetAssignedCPUDevice(string* device_name,
+                                           Device** device) {
+#ifdef GOOGLE_CUDA
+  mutex_lock l(graph_state_lock_);
+  auto execution_state = execution_state_.get();
+  for (auto node: execution_state->full_graph()->op_nodes()) {
+    auto name = node->assigned_device_name();
+    Device* candidate;
+    TF_RETURN_IF_ERROR(device_mgr_->LookupDevice(name, &candidate));
+    if (candidate->attributes().device_type() == "CPU") {
+      *device_name = name;
+      *device = candidate;
+      return Status::OK();
+    }
+  }
+  for (auto dev: device_mgr_->ListDevices()) {
+    if (dev->attributes().device_type() == "CPU") {
+      *device_name = dev->name();
+      *device = dev;
+      return Status::OK();
+    }
+  }
+  return errors::Internal("Not assigned to any CPU device");
 #else
   return Status::OK();
 #endif
