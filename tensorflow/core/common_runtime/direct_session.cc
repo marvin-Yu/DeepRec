@@ -740,6 +740,7 @@ Status DirectSession::RunWithCUDAGraph(CUDAGraphContext& context,
       auto& name = std::get<0>(entry);
       *in = &std::get<1>(entry);
       *out = context.inputs[name].get();
+      VLOG(2) << "Found input " << name << ": " << *in << " => " << *out;
     };
 
   std::function<void (int idx, const Tensor**, Tensor**)> lookup_output =
@@ -748,6 +749,7 @@ Status DirectSession::RunWithCUDAGraph(CUDAGraphContext& context,
       auto& name = output_names[idx];
       *in = context.outputs[name].get();
       *out = &(*outputs)[idx];
+      VLOG(2) << "Found output " << name << ": " << *in << " => " << *out;
     };
 
   int output_idx = 0;
@@ -792,6 +794,8 @@ Status DirectSession::RunWithCUDAGraph(CUDAGraphContext& context,
                                               input_loop);
         return;
       }
+
+      VLOG(2) << "Launching CUDA Graph";
       auto ret = cuGraphLaunch(context.cuda_graph_exec, context.stream);
       if (ret != CUDA_SUCCESS) {
         const char* error;
@@ -809,6 +813,8 @@ Status DirectSession::RunWithCUDAGraph(CUDAGraphContext& context,
         notification.Notify();
         return;
       }
+
+      VLOG(2) << "Fetching output from CUDA Graph";
       lookup_output(output_idx, &gpu_tensor, &output_tensor);
       device_context->CopyDeviceTensorToCPU(gpu_tensor,
                                             output_names[output_idx],
@@ -816,6 +822,7 @@ Status DirectSession::RunWithCUDAGraph(CUDAGraphContext& context,
                                             output_loop);
     };
 
+  VLOG(2) << "Feeding inputs to CUDA Graph";
   lookup_input(input_idx, &cpu_tensor, &device_tensor);
   device_context->CopyCPUTensorToDevice(cpu_tensor, device, device_tensor,
                                         input_loop);
