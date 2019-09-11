@@ -99,7 +99,9 @@ class DirectSession : public Session {
   // If 'containers' is empty, then Reset clears the default container.
   ::tensorflow::Status Reset(const std::vector<string>& containers);
 
-  string GetAssignedDevice(gtl::ArraySlice<string> input_names);
+  ::tensorflow::Status GetAssignedGPUDevice(gtl::ArraySlice<string> input_names,
+                                            string* device_name,
+                                            Device** device);
   ::tensorflow::Status ListDevices(
       std::vector<DeviceAttributes>* response) override;
   ::tensorflow::Status Close() override;
@@ -285,10 +287,10 @@ class DirectSession : public Session {
                          string* key);
   struct CUDAGraphDeviceContext;
   ::tensorflow::Status GetOrCreateCUDAGraphDeviceContext(
-    const string& device, const CUDAGraphOptions& options,
+    const string& device_name, Device* device, const CUDAGraphOptions& options,
     CUDAGraphDeviceContext** context);
   ::tensorflow::Status GetCUDAGraphDeviceContext(
-    const string& device, CUDAGraphDeviceContext** context);
+    const string& device_name, CUDAGraphDeviceContext** context);
   ::tensorflow::Status BorrowCUDAGraphContext(const string& device_name,
                                               const string& key,
                                               CUDAGraphContext** context);
