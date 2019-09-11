@@ -107,8 +107,10 @@ class Executor {
     typedef std::function<void()> Closure;
     typedef std::function<void(Closure)> Runner;
     Runner runner = nullptr;
+    // Not owned.
     Allocator* persistent_allocator = nullptr;
     int gpu_id = -1;
+    // Not owned.
     void* cuda_graph;
 
     typedef std::function<void (const string&, Tensor*)> SaveIO;

@@ -1292,6 +1292,7 @@ class ExecutorState {
   // Not owned.
   Allocator* persistent_allocator_;
   int gpu_id_;
+  // Not owned.
   void* cuda_graph_;
   Executor::Args::SaveIO save_input_;
   Executor::Args::SaveIO save_output_;
