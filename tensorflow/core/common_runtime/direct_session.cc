@@ -733,8 +733,7 @@ Status DirectSession::RunInternal(
     CallFrameInterface* call_frame, ExecutorsAndKeys* executors_and_keys,
     RunMetadata* run_metadata,
     const thread::ThreadPoolOptions& threadpool_options,
-    CUDAGraphContext* cuda_graph_context, Allocator* persistent_allocator,
-    int gpu_id, void* cuda_graph,
+    Allocator* persistent_allocator, int gpu_id, void* cuda_graph,
     std::map<string, std::unique_ptr<Tensor>>* saved_inputs,
     std::map<string, std::unique_ptr<Tensor>>* saved_outputs) {
   const uint64 start_time_usecs = options_.env->NowMicros();
@@ -1239,9 +1238,8 @@ Status DirectSession::Run0(
   TF_RETURN_IF_ERROR(RunInternal(step_id, run_options, &call_frame,
                                  executors_and_keys, run_metadata,
                                  thread::ThreadPoolOptions(),
-                                 cuda_graph_context, persistent_allocator,
-                                 device_id, cuda_graph, saved_inputs,
-                                 saved_outputs));
+                                 persistent_allocator, device_id, cuda_graph,
+                                 saved_inputs, saved_outputs));
 
   // Receive outputs.
   if (outputs) {
