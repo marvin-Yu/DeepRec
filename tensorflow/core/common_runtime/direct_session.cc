@@ -1116,7 +1116,8 @@ Status DirectSession::RecordCUDAGraph(
   }
   auto st = Run0(run_options, inputs, output_names, target_nodes,
                  outputs, run_metadata, cuda_graph_context,
-                 persistent_allocator, device_id, cuda_graph);
+                 persistent_allocator, device_id, cuda_graph,
+                 &cuda_graph_context->inputs, &cuda_graph_context->outputs);
   size_t n;
   ret = cuGraphGetNodes(*cuda_graph, nullptr, &n);
   if (ret != CUDA_SUCCESS) {
