@@ -1148,10 +1148,7 @@ Status DirectSession::Run(const RunOptions& run_options,
 
   string device_name;
   Device* device;
-  Status st = GetAssignedGPUDevice(&device_name, &device);
-  if (!st.ok()) {
-    return st;
-  }
+  TF_RETURN_IF_ERROR(GetAssignedGPUDevice(&device_name, &device));
   VLOG(2) << "Using device " << device_name << " for CUDA Graphs";
 
   std::vector<string> input_names;
@@ -1179,9 +1176,10 @@ Status DirectSession::Run(const RunOptions& run_options,
       CUDAGraphContext* context = new CUDAGraphContext(k);
       VLOG(2) << "Creating instance " << k << " of CUDA Graph context for key "
               << key << ", persistent allocator is " << persistent_allocator;
-      st = RecordCUDAGraph(run_options, inputs, output_names, target_nodes,
-                           outputs, run_metadata, context, persistent_allocator,
-                           device_context->device_id());
+      auto st = RecordCUDAGraph(run_options, inputs, output_names, target_nodes,
+                                outputs, run_metadata, context,
+                                persistent_allocator,
+                                device_context->device_id());
       device_context->ReturnAllocator(k, persistent_allocator);
       if (!st.ok()) {
         delete context;

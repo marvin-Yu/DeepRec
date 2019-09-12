@@ -1584,7 +1584,7 @@ void ExecutorState::RunAsync(Executor::DoneCallback done) {
 #ifdef GOOGLE_CUDA
   // Count the number of _Recv operations in the graph. CUDA Graphs
   // can only be captured after all _Recv operations are done.
-  if (IsGPU(device) && cuda_graph_) {
+  if (cuda_graph_ && IsGPU(device)) {
     int n = 0;
     for (auto node: graph->nodes()) {
       if (IsRecv(node)) {
@@ -1755,7 +1755,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
     const NodeItem& item = *gview.node(id);
 
 #ifdef GOOGLE_CUDA
-    if (IsGPU(device) && cuda_graph_ && IsSend(node)) {
+    if (cuda_graph_ && IsGPU(device) && IsSend(node)) {
       auto stream =
         device->tensorflow_gpu_device_info()->default_context->stream();
       auto cu_stream =
@@ -1918,9 +1918,9 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
 
 #ifdef GOOGLE_CUDA
           if (s.ok()
-              && IsGPU(device)
               && cuda_graph_
-              && IsSend(state->tagged_node.node)
+              && IsGPU(device)
+              && IsRecv(state->tagged_node.node)
               && num_outstanding_recv_ops_-- == 1) {
             auto stream =
               device->tensorflow_gpu_device_info()->default_context->stream();
