@@ -1203,7 +1203,7 @@ Status DirectSession::Run(const RunOptions& run_options,
                 run_metadata);
   }
   VLOG(2) << "Running with CUDA Graph context " << context;
-  st = RunWithCUDAGraph(*context, inputs, output_names, outputs);
+  auto st = RunWithCUDAGraph(*context, inputs, output_names, outputs);
   ReturnCUDAGraphContext(device_name, key, context);
   return st;
 #else
