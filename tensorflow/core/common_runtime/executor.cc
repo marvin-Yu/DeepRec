@@ -1571,10 +1571,10 @@ void ExecutorState::RunAsync(Executor::DoneCallback done) {
   const Graph* graph = impl_->graph_.get();
   TaggedNodeSeq ready;
 
-  // Fill in the device context map.
+  // Ask the device to fill in the device context map.
   Device* device = impl_->params_.device;
   const Status fill_status =
-    device->FillContextMap(graph, &device_context_map_);
+      device->FillContextMap(graph, &device_context_map_);
   if (!fill_status.ok()) {
     delete this;
     done(fill_status);
