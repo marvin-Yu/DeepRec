@@ -740,92 +740,115 @@ Status DirectSession::RunWithCUDAGraph(CUDAGraphContext& context,
   auto device_context =
     context.device->tensorflow_gpu_device_info()->default_context;
 
-  std::function<void (int idx, const Tensor**, Tensor**)> lookup_input =
+  std::function<Status (int idx, const Tensor**, Tensor**)> lookup_input =
     [&] (int idx, const Tensor** in, Tensor** out) {
       auto& entry = inputs[idx];
       auto& name = std::get<0>(entry);
       *in = &std::get<1>(entry);
       *out = context.inputs[name].get();
+      if ((*in)->shape() != (*out)->shape()) {
+        return errors::InvalidArgument(
+          "Mismatched shapes for input ", name, ": expected ",
+          (*out)->shape(), ", provided ", (*in)->shape());
+      }
       VLOG(2) << "Found input " << name << ": " << *in << " => " << *out;
+      return Status::OK();
     };
 
   outputs->resize(output_names.size());
-  std::function<void (int idx, const Tensor**, Tensor**)> lookup_output =
+  std::function<Status (int idx, const Tensor**, Tensor**)> lookup_output =
     [&] (int idx, const Tensor** in, Tensor** out) {
       auto& name = output_names[idx];
       *in = context.outputs[name].get();
       *out = &(*outputs)[idx];
       **out = Tensor(cpu_allocator, (*in)->dtype(), (*in)->shape());
       VLOG(2) << "Found output " << name << ": " << *in << " => " << *out;
+      return Status::OK();
     };
 
   int output_idx = 0;
   const Tensor* gpu_tensor;
   Tensor* output_tensor;
-  std::function<void (const Status&)> output_loop =
-    [&] (const Status& st) {
-      if (!st.ok()) {
-        status = st;
-        notification.Notify();
-        return;
-      }
-      if (++output_idx < output_names.size()) {
-        lookup_output(output_idx, &gpu_tensor, &output_tensor);
-        device_context->CopyDeviceTensorToCPU(gpu_tensor,
-                                              output_names[output_idx],
-                                              device, output_tensor,
-                                              output_loop);
-      }
-      status = Status::OK();
+  std::function<void (const Status&)> output_loop = [&] (const Status& st) {
+    if (!st.ok()) {
+      status = st;
       notification.Notify();
-    };
-
-  int input_idx = 0;
-  const Tensor* cpu_tensor;
-  Tensor* device_tensor;
-  std::function<void (const Status&)> input_loop =
-    [&] (const Status& st) {
-      if (!st.ok()) {
-        status = st;
+      return;
+    }
+    if (++output_idx < output_names.size()) {
+      auto st1 = lookup_output(output_idx, &gpu_tensor, &output_tensor);
+      if (!st1.ok()) {
+        status = st1;
         notification.Notify();
         return;
       }
-      if (++input_idx < inputs.size()) {
-        lookup_input(input_idx, &cpu_tensor, &device_tensor);
-        device_context->CopyCPUTensorToDevice(cpu_tensor, device, device_tensor,
-                                              input_loop);
-        return;
-      }
-
-      VLOG(2) << "Launching CUDA Graph";
-      auto ret = cuGraphLaunch(context.cuda_graph_exec, context.stream);
-      if (ret != CUDA_SUCCESS) {
-        const char* error;
-        cuGetErrorString(ret, &error);
-        status = errors::Internal("Failed to launch CUDA Graph: ", error);
-        notification.Notify();
-        return;
-      }
-      ret = cuStreamSynchronize(context.stream);
-      if (ret != CUDA_SUCCESS) {
-        const char* error;
-        cuGetErrorString(ret, &error);
-        status = errors::Internal(
-          "Failed to synchronize CUDA Graph stream: ", error);
-        notification.Notify();
-        return;
-      }
-
-      VLOG(2) << "Fetching outputs from CUDA Graph";
-      lookup_output(output_idx, &gpu_tensor, &output_tensor);
       device_context->CopyDeviceTensorToCPU(gpu_tensor,
                                             output_names[output_idx],
                                             device, output_tensor,
                                             output_loop);
-    };
+    }
+    status = Status::OK();
+    notification.Notify();
+  };
+
+  int input_idx = 0;
+  const Tensor* cpu_tensor;
+  Tensor* device_tensor;
+  std::function<void (const Status&)> input_loop = [&] (const Status& st) {
+    if (!st.ok()) {
+      status = st;
+      notification.Notify();
+      return;
+    }
+    if (++input_idx < inputs.size()) {
+      auto st1 = lookup_input(input_idx, &cpu_tensor, &device_tensor);
+      if (!st1.ok()) {
+        status = st1;
+        notification.Notify();
+        return;
+      }
+      device_context->CopyCPUTensorToDevice(cpu_tensor, device, device_tensor,
+                                            input_loop);
+      return;
+    }
+
+    VLOG(2) << "Launching CUDA Graph";
+    auto ret = cuGraphLaunch(context.cuda_graph_exec, context.stream);
+    if (ret != CUDA_SUCCESS) {
+      const char* error;
+      cuGetErrorString(ret, &error);
+      status = errors::Internal("Failed to launch CUDA Graph: ", error);
+      notification.Notify();
+      return;
+    }
+    ret = cuStreamSynchronize(context.stream);
+    if (ret != CUDA_SUCCESS) {
+      const char* error;
+      cuGetErrorString(ret, &error);
+      status = errors::Internal(
+        "Failed to synchronize CUDA Graph stream: ", error);
+      notification.Notify();
+      return;
+    }
+
+    VLOG(2) << "Fetching outputs from CUDA Graph";
+    auto st1 = lookup_output(output_idx, &gpu_tensor, &output_tensor);
+    if (!st1.ok()) {
+      status = st1;
+      notification.Notify();
+      return;
+    }
+    device_context->CopyDeviceTensorToCPU(gpu_tensor,
+                                          output_names[output_idx],
+                                          device, output_tensor,
+                                          output_loop);
+  };
 
   VLOG(2) << "Feeding inputs to CUDA Graph";
-  lookup_input(input_idx, &cpu_tensor, &device_tensor);
+  status = lookup_input(input_idx, &cpu_tensor, &device_tensor);
+  if (!status.ok()) {
+    return status;
+  }
   device_context->CopyCPUTensorToDevice(cpu_tensor, device, device_tensor,
                                         input_loop);
 
