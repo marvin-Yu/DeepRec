@@ -85,7 +85,7 @@ bool RemoveReshapeBetweenMatMuls(Graph* graph) {
   return changed;
 }
 
-// Change MatMul->Reshape->BiasAdd->others to MatMul->BiasAdd->Reshape->others
+// Change ->MatMul->Reshape->BiasAdd-> to ->MatMul->BiasAdd->Reshape->
 bool ReorderReshapeAndBiasAdd(Graph* graph) {
   bool changed = false;
 
@@ -629,167 +629,19 @@ bool FuseMatMulsAfterUnpack(Graph* graph) {
     // and remove original matmuls
     int index = 0;
     for (Node* m : matmuls) {
-      std::vector<Node*> out_nodes;
+      std::vector<Node*> dst_nodes;
       std::vector<int> dst_inputs;
       for (const Edge* e : m->out_edges()) {
-        out_nodes.push_back(e->dst());
+        dst_nodes.push_back(e->dst());
         dst_inputs.push_back(e->dst_input());
       }
-      int num = out_nodes.size();
+      int num = dst_nodes.size();
       for (int i = 0; i < num; i++) {
-        graph->UpdateEdge(unpack, index, out_nodes[i], dst_inputs[i]);
+        graph->UpdateEdge(unpack, index, dst_nodes[i], dst_inputs[i]);
       }
       graph->RemoveNode(m);
       index++;
     }
-    changed = true;
-  }
-  return changed;
-}
-
-// Convert Unpack->Shape to Shape->Slice to avoid expensive Unpack op
-bool ConvertUnpackShapeToShapeSlice(Graph* graph) {
-  LOG(INFO) << "ConvertUnpackShapeToShapeSlice";
-  bool changed = false;
-
-  std::vector<Node*> nodes(graph->num_nodes());
-  int i = 0;
-  for (Node* node : graph->nodes()) {
-    nodes[i++] = node;
-  }
-
-  for (Node* node : nodes) {
-    if (!graph->IsValidNode(node).ok()) continue;
-    if (node->type_string() != "Unpack") continue;
-    Node* unpack = node;
-    Node* old_shape = nullptr;
-    for (Node* out : unpack->out_nodes()) {
-      if (out->type_string() == "Shape") {
-        old_shape = out;
-        break;
-      }
-    }
-    if (old_shape == nullptr) continue;
-
-    LOG(INFO) << "ConvertUnpackShapeToShapeSlice: found pattern";
-    Node* unpack_in = nullptr;
-    unpack->input_node(0, &unpack_in);
-
-    // Add a new Shape to get the shape of Unpack's input
-    string shape_name = unpack_in->name() + "/Shape";
-    const Edge* e;
-    unpack->input_edge(0, &e);
-    int src_output = e->src_output();
-    NodeDefBuilder::NodeOut shape_input(unpack_in->name(), src_output,
-                                        unpack->input_type(0));
-    NodeDefBuilder shape_builder(shape_name, "Shape");
-    shape_builder.Input(shape_input);
-    NodeDef shape_node;
-    Status status =
-        shape_builder
-            .Attr("T", unpack->input_type(0))
-            .Attr("out_type", old_shape->output_type(0))
-            .Finalize(&shape_node);
-    if (!status.ok()) {
-      LOG(ERROR) << "Shape node construction failed with" << status;
-      return false;
-    }
-    shape_node.set_device(old_shape->def().device());
-    Node* shape = graph->AddNode(shape_node, &status);
-    shape->set_assigned_device_name(old_shape->assigned_device_name());
-    if (!status.ok()) {
-      LOG(ERROR) << "Adding node failed " << status;
-      return false;
-    }
-    graph->AddEdge(unpack_in, src_output, shape, 0);
- 
-    // Add a Slice to remove the first dimension of the new shape 
-    string slice_name = shape_name + "/Slice";
-    string begin_name = slice_name + "/begin";
-    string size_name = slice_name + "/size";
-
-    NodeDefBuilder begin_builder(begin_name, "Const");
-    NodeDef begin_node;
-    Tensor t_begin(int(1));
-    status =
-        begin_builder
-            .Attr("dtype", t_begin.dtype())
-            .Attr("value", t_begin)
-            .Finalize(&begin_node);
-    if (!status.ok()) {
-      LOG(ERROR) << "Const node construction failed with" << status;
-      return false;
-    }
-    begin_node.set_device(old_shape->def().device());
-    Node* begin = graph->AddNode(begin_node, &status);
-    begin->set_assigned_device_name(old_shape->assigned_device_name());
-    if (!status.ok()) {
-      LOG(ERROR) << "Adding node failed " << status;
-      return false;
-    }
-
-    NodeDefBuilder size_builder(size_name, "Const");
-    NodeDef size_node;
-    Tensor t_size(int(-1));
-    status =
-        size_builder
-            .Attr("dtype", t_size.dtype())
-            .Attr("value", t_size)
-            .Finalize(&size_node);
-    if (!status.ok()) {
-      LOG(ERROR) << "Const node construction failed with" << status;
-      return false;
-    }
-    size_node.set_device(old_shape->def().device());
-    Node* size = graph->AddNode(size_node, &status);
-    size->set_assigned_device_name(old_shape->assigned_device_name());
-    if (!status.ok()) {
-      LOG(ERROR) << "Adding node failed " << status;
-      return false;
-    }
-
-    std::vector<NodeDefBuilder::NodeOut> slice_inputs;
-    slice_inputs.emplace_back(shape_name, 0, old_shape->output_type(0));
-    slice_inputs.emplace_back(begin_name, 0, t_begin.dtype());
-    slice_inputs.emplace_back(size_name, 0, t_size.dtype());
-
-    NodeDefBuilder slice_builder(slice_name, "Slice");
-    slice_builder.Input(slice_inputs[0]);
-    slice_builder.Input(slice_inputs[1]);
-    slice_builder.Input(slice_inputs[2]);
-    NodeDef slice_node;
-    status =
-        slice_builder
-            .Attr("T", unpack->input_type(0))
-            .Attr("out_type", old_shape->output_type(0))
-            .Finalize(&slice_node);
-    if (!status.ok()) {
-      LOG(ERROR) << "Shape node construction failed with" << status;
-      return false;
-    }
-    slice_node.set_device(old_shape->def().device());
-    Node* slice = graph->AddNode(slice_node, &status);
-    slice->set_assigned_device_name(old_shape->assigned_device_name());
-    if (!status.ok()) {
-      LOG(ERROR) << "Adding node failed " << status;
-      return false;
-    }
-    graph->AddEdge(shape, 0, slice, 0);
-    graph->AddEdge(begin, 0, slice, 1);
-    graph->AddEdge(size, 0, slice, 2);
-
-    // Update out edges of old Shape
-    std::vector<Node*> dst_nodes;
-    std::vector<int> dst_inputs;
-    for (const Edge* e : old_shape->out_edges()) {
-      dst_nodes.push_back(e->dst());
-      dst_inputs.push_back(e->dst_input());
-    }
-    int num = dst_nodes.size();
-    for (int i = 0; i < num; i++) {
-      graph->UpdateEdge(slice, 0, dst_nodes[i], dst_inputs[i]);
-    }
-
     changed = true;
   }
   return changed;
@@ -807,34 +659,274 @@ bool RemoveShapeAfterReshape(Graph* graph) {
 
   for (Node* node : nodes) {
     if (!graph->IsValidNode(node).ok()) continue;
-    if (node->type_string() == "Shape") {
-      Node* shape = node;
-      Node* reshape = nullptr;
-      shape->input_node(0, &reshape);
-      if (reshape->type_string() != "Reshape") continue;
-      LOG(INFO) << "RemoveShapeAfterReshape: found pattern";
-      Node* reshape_in_1 = nullptr;
-      reshape->input_node(1, &reshape_in_1);
+    if (node->type_string() != "Shape") continue;
+    Node* shape = node;
+    Node* reshape = nullptr;
+    shape->input_node(0, &reshape);
+    if (reshape->type_string() != "Reshape") continue;
+    LOG(INFO) << "RemoveShapeAfterReshape: found pattern";
+    Node* reshape_in_1 = nullptr;
+    reshape->input_node(1, &reshape_in_1);
 
-      std::vector<Node*> shape_dst_nodes;
-      std::vector<int> shape_dst_inputs;
-      for (const Edge* e : shape->out_edges()) {
-        LOG(INFO) << "e->DebugString(): " << e->DebugString();
-        shape_dst_nodes.push_back(e->dst());
-        shape_dst_inputs.push_back(e->dst_input());
-      }
-
-      const Edge* e;
-      reshape->input_edge(1, &e);
-      int src_output = e->src_output();
-      int num = shape_dst_nodes.size();
-      graph->RemoveNode(shape);
-      for (int i = 0; i < num; i++) {
-        graph->AddEdge(reshape_in_1, src_output,
-                       shape_dst_nodes[i], shape_dst_inputs[i]);
-      }
-      changed = true;
+    std::vector<Node*> shape_dst_nodes;
+    std::vector<int> shape_dst_inputs;
+    for (const Edge* e : shape->out_edges()) {
+      LOG(INFO) << "e->DebugString(): " << e->DebugString();
+      shape_dst_nodes.push_back(e->dst());
+      shape_dst_inputs.push_back(e->dst_input());
     }
+
+    const Edge* e;
+    reshape->input_edge(1, &e);
+    int src_output = e->src_output();
+    int num = shape_dst_nodes.size();
+    graph->RemoveNode(shape);
+    for (int i = 0; i < num; i++) {
+      graph->AddEdge(reshape_in_1, src_output,
+                     shape_dst_nodes[i], shape_dst_inputs[i]);
+    }
+    changed = true;
+  }
+  return changed;
+}
+
+// Change ->Unpack->Reshape-> to ->Reshape->Unpack->
+bool ReorderReshapeAndUnpack(Graph* graph) {
+  LOG(INFO) << "ReorderReshapeAndUnpack";
+  bool changed = false;
+
+  std::vector<Node*> nodes(graph->num_nodes());
+  int i = 0;
+  for (Node* node : graph->nodes()) {
+    nodes[i++] = node;
+  }
+
+  for (Node* node : nodes) {
+    if (!graph->IsValidNode(node).ok()) continue;
+    if (node->type_string() != "Unpack") continue;
+    Node* unpack = node;
+    std::vector<Node*> reshapes;
+    std::vector<Node*> reshape_in_1;
+    for (Node* out : unpack->out_nodes()) {
+      if (out->type_string() != "Reshape") continue;
+      reshapes.push_back(out);
+      Node* n = nullptr;
+      out->input_node(1, &n);
+      reshape_in_1.push_back(n);
+    }
+    if (reshapes.size() < 2) continue; 
+    for (int i = 1; i < reshapes.size(); i++) {
+      if (reshape_in_1[i] != reshape_in_1[0]) continue;
+    }
+    LOG(INFO) << "ReorderReshapeAndUnpack: found pattern";
+    
+    // Add a new Shape to get the shape of Unpack's input
+    const Edge* e0;
+    unpack->input_edge(0, &e0);
+    int src_output = e0->src_output();
+    Node* unpack_in = e0->src();
+    string shape_name = unpack_in->name() + "/Shape";
+    NodeDefBuilder::NodeOut shape_input(unpack_in->name(), src_output,
+                                        unpack->input_type(0));
+    NodeDefBuilder shape_builder(shape_name, "Shape");
+    shape_builder.Input(shape_input);
+    NodeDef shape_node;
+    DataType shape_dtype = reshape_in_1[0]->output_type(0);
+    Status status =
+        shape_builder
+            .Attr("T", unpack->input_type(0))
+            .Attr("out_type", shape_dtype)
+            .Finalize(&shape_node);
+    if (!status.ok()) {
+      LOG(ERROR) << "Shape node construction failed with" << status;
+      return false;
+    }
+    shape_node.set_device(reshape_in_1[0]->def().device());
+    Node* shape = graph->AddNode(shape_node, &status);
+    shape->set_assigned_device_name(reshape_in_1[0]->assigned_device_name());
+    if (!status.ok()) {
+      LOG(ERROR) << "Adding node failed " << status;
+      return false;
+    }
+    graph->AddEdge(unpack_in, src_output, shape, 0);
+ 
+    // Add a Slice to obtain the first element of the new shape 
+    string slice_name = shape_name + "/Slice";
+    string zero_name = slice_name + "/zero";
+    string one_name = slice_name + "/one";
+
+    NodeDefBuilder zero_builder(zero_name, "Const");
+    NodeDef zero_node;
+    Tensor t_zero(DT_INT32, TensorShape({1}));
+    auto zero_data = t_zero.tensor<int, 1>();
+    zero_data(0) = 0;
+    status =
+        zero_builder
+            .Attr("dtype", t_zero.dtype())
+            .Attr("value", t_zero)
+            .Finalize(&zero_node);
+    if (!status.ok()) {
+      LOG(ERROR) << "Const node construction failed with" << status;
+      return false;
+    }
+    zero_node.set_device(reshape_in_1[0]->def().device());
+    Node* zero = graph->AddNode(zero_node, &status);
+    zero->set_assigned_device_name(reshape_in_1[0]->assigned_device_name());
+    if (!status.ok()) {
+      LOG(ERROR) << "Adding node failed " << status;
+      return false;
+    }
+
+    NodeDefBuilder one_builder(one_name, "Const");
+    NodeDef one_node;
+    Tensor t_one(DT_INT32, TensorShape({1}));
+    auto one_data = t_one.tensor<int, 1>();
+    one_data(0) = 1;
+    status =
+        one_builder
+            .Attr("dtype", t_one.dtype())
+            .Attr("value", t_one)
+            .Finalize(&one_node);
+    if (!status.ok()) {
+      LOG(ERROR) << "Const node construction failed with" << status;
+      return false;
+    }
+    one_node.set_device(reshape_in_1[0]->def().device());
+    Node* one = graph->AddNode(one_node, &status);
+    one->set_assigned_device_name(reshape_in_1[0]->assigned_device_name());
+    if (!status.ok()) {
+      LOG(ERROR) << "Adding node failed " << status;
+      return false;
+    }
+
+    std::vector<NodeDefBuilder::NodeOut> slice_inputs;
+    slice_inputs.emplace_back(shape_name, 0, shape_dtype);
+    slice_inputs.emplace_back(zero_name, 0, t_zero.dtype());
+    slice_inputs.emplace_back(one_name, 0, t_one.dtype());
+    NodeDefBuilder slice_builder(slice_name, "Slice");
+    slice_builder.Input(slice_inputs[0]);
+    slice_builder.Input(slice_inputs[1]);
+    slice_builder.Input(slice_inputs[2]);
+    NodeDef slice_node;
+    status =
+        slice_builder
+            .Attr("T", shape_dtype)
+            .Finalize(&slice_node);
+    if (!status.ok()) {
+      LOG(ERROR) << "Slice node construction failed with" << status;
+      return false;
+    }
+    slice_node.set_device(reshape_in_1[0]->def().device());
+    Node* slice = graph->AddNode(slice_node, &status);
+    slice->set_assigned_device_name(reshape_in_1[0]->assigned_device_name());
+    if (!status.ok()) {
+      LOG(ERROR) << "Adding node failed " << status;
+      return false;
+    }
+    graph->AddEdge(shape, 0, slice, 0);
+    graph->AddEdge(zero, 0, slice, 1);
+    graph->AddEdge(one, 0, slice, 2);
+
+    // Add a Concat Op to generate new shape
+    string concat_name = slice_name + reshape_in_1[0]->name();
+    string zero_scalar_name = concat_name + "/concat_dim";
+    NodeDefBuilder zero_scalar_builder(zero_scalar_name, "Const");
+    NodeDef zero_scalar_node;
+    Tensor t_zero_scalar(int(0));
+    status =
+        zero_scalar_builder
+            .Attr("dtype", t_zero_scalar.dtype())
+            .Attr("value", t_zero_scalar)
+            .Finalize(&zero_scalar_node);
+    if (!status.ok()) {
+      LOG(ERROR) << "Const node construction failed with" << status;
+      return false;
+    }
+    zero_scalar_node.set_device(reshape_in_1[0]->def().device());
+    Node* zero_scalar = graph->AddNode(zero_scalar_node, &status);
+    zero_scalar->set_assigned_device_name(reshape_in_1[0]->assigned_device_name());
+    if (!status.ok()) {
+      LOG(ERROR) << "Adding node failed " << status;
+      return false;
+    }
+
+    NodeDefBuilder concat_builder(concat_name, "Concat");
+    NodeDefBuilder::NodeOut concat_dim(zero_scalar->name(), 0, shape_dtype);
+    std::vector<NodeDefBuilder::NodeOut> concat_inputs;
+    concat_inputs.emplace_back(slice_name, 0, shape_dtype);
+    const Edge* e1;
+    reshapes[0]->input_edge(1, &e1);
+    concat_inputs.emplace_back(reshape_in_1[0]->name(), e1->src_output(), shape_dtype);
+    concat_builder.Input(concat_dim);
+    concat_builder.Input(concat_inputs);
+    NodeDef concat_node;
+    status =
+        concat_builder
+            .Attr("N", 2)
+            .Attr("T", shape_dtype)
+            .Finalize(&concat_node);
+    if (!status.ok()) {
+      LOG(ERROR) << "Concat node construction failed with" << status;
+      return false;
+    }
+    concat_node.set_device(reshape_in_1[0]->def().device());
+    Node* concat = graph->AddNode(concat_node, &status);
+    concat->set_assigned_device_name(reshape_in_1[0]->assigned_device_name());
+    if (!status.ok()) {
+      LOG(ERROR) << "Adding node failed " << status;
+      return false;
+    }
+    graph->AddEdge(zero_scalar, 0, concat, 0);
+    graph->AddEdge(slice, 0, concat, 1);
+    graph->AddEdge(reshape_in_1[0], e1->src_output(), concat, 2);
+
+    // Add a new Reshape Op
+    string reshape_name = unpack_in->name() + "/Reshape";
+    NodeDefBuilder reshape_builder(reshape_name, "Reshape");
+    std::vector<NodeDefBuilder::NodeOut> reshape_inputs;
+    reshape_inputs.emplace_back(unpack_in->name(), src_output,
+                                reshapes[0]->input_type(0));
+    reshape_inputs.emplace_back(concat->name(), 0, shape_dtype);
+    reshape_builder.Input(reshape_inputs[0]);
+    reshape_builder.Input(reshape_inputs[1]);
+    NodeDef reshape_node;
+    status =
+        reshape_builder
+            .Attr("T", reshapes[0]->input_type(0))
+            .Attr("Tshape", shape_dtype)
+            .Finalize(&reshape_node);
+    if (!status.ok()) {
+      LOG(ERROR) << "Reshape node construction failed with" << status;
+      return false;
+    }
+    reshape_node.set_device(reshapes[0]->def().device());
+    Node* reshape = graph->AddNode(reshape_node, &status);
+    reshape->set_assigned_device_name(
+        reshapes[0]->assigned_device_name());
+    if (!status.ok()) {
+      LOG(ERROR) << "Adding node failed " << status;
+      return false;
+    }
+    graph->AddEdge(unpack_in, src_output, reshape, 0);
+    graph->AddEdge(concat, 0, reshape, 1);
+ 
+    graph->UpdateEdge(reshape, 0, unpack, 0);
+    int index = 0;
+    for (Node* r : reshapes) {
+      std::vector<Node*> dst_nodes;
+      std::vector<int> dst_inputs;
+      for (const Edge* e : r->out_edges()) {
+        dst_nodes.push_back(e->dst());
+        dst_inputs.push_back(e->dst_input());
+      }
+      int num = dst_nodes.size();
+      for (int i = 0; i < num; i++) {
+        graph->UpdateEdge(unpack, index, dst_nodes[i], dst_inputs[i]);
+      }
+      graph->RemoveNode(r);
+      index++;
+    }
+    changed= true;
   }
   return changed;
 }
@@ -855,8 +947,9 @@ void FuseGemmKernels(Graph* graph) {
         FuseBiasAddsAfterBatchMatMulUnpack(graph) ||
         FuseMatMulsAfterUnpack(graph) ||
         RemoveShapeAfterReshape(graph) ||
-        // ConvertUnpackShapeToShapeSlice(graph) ||
+        ReorderReshapeAndUnpack(graph) ||
         FuseBatchMatMulsAfterUnpack(graph);
+        // RemoveUnpackPackPairs(graph);
     if (!graph_changed) break;
   }
 }
