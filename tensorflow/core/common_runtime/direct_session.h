@@ -101,8 +101,7 @@ class DirectSession : public Session {
 
   ::tensorflow::Status GetAssignedCPUDevice(string* device_name,
                                             Device** device);
-  ::tensorflow::Status GetAssignedGPUDevice(gtl::ArraySlice<string> input_names,
-                                            string* device_name,
+  ::tensorflow::Status GetAssignedGPUDevice(string* device_name,
                                             Device** device);
   ::tensorflow::Status ListDevices(
       std::vector<DeviceAttributes>* response) override;

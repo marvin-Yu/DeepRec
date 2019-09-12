@@ -139,6 +139,10 @@ void SetReferencedTensors(NodeExecStatsInterface* stats,
 
 }  // namespace nodestats
 
+static bool IsGPU(Device* device) {
+  return device->attributes().device_type() == "GPU";
+}
+
 static string ProcessInputName(const string& name) {
   static const string prefix = "_arg_";
   if (name.substr(0, prefix.size()) != prefix) {
@@ -1580,10 +1584,10 @@ void ExecutorState::RunAsync(Executor::DoneCallback done) {
 #ifdef GOOGLE_CUDA
   // Count the number of _Recv operations in the graph. CUDA Graphs
   // can only be captured after all _Recv operations are done.
-  if (device->attributes().device_type() == "GPU" && cuda_graph_) {
+  if (IsGPU(device) && cuda_graph_) {
     int n = 0;
     for (auto node: graph->nodes()) {
-      if (node->type_string() == "_Recv") {
+      if (IsRecv(node)) {
         n++;
       }
     }
@@ -1751,9 +1755,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
     const NodeItem& item = *gview.node(id);
 
 #ifdef GOOGLE_CUDA
-    if (device->attributes().device_type() == "GPU"
-        && cuda_graph_
-        && node->type_string() == "_Send") {
+    if (IsGPU(device) && cuda_graph_ && IsSend(node)) {
       auto stream =
         device->tensorflow_gpu_device_info()->default_context->stream();
       auto cu_stream =
@@ -1868,7 +1870,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
 #ifdef GOOGLE_CUDA
           if (state->ctx.status().ok()
               && cuda_graph_
-              && device->attributes().device_type() == "GPU"
+              && IsGPU(device)
               && IsRecv(state->tagged_node.node)) {
             auto name = state->tagged_node.node->name();
             auto real_name = ProcessInputName(name);
@@ -1916,9 +1918,9 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
 
 #ifdef GOOGLE_CUDA
           if (s.ok()
-              && device->attributes().device_type() == "GPU"
+              && IsGPU(device)
               && cuda_graph_
-              && state->tagged_node.node->type_string() == "_Recv"
+              && IsSend(state->tagged_node.node)
               && num_outstanding_recv_ops_-- == 1) {
             auto stream =
               device->tensorflow_gpu_device_info()->default_context->stream();
@@ -1975,9 +1977,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
           device->Compute(op_kernel, &ctx);
         } else {
 #ifdef GOOGLE_CUDA
-          if (cuda_graph_
-              && device->attributes().device_type() == "GPU"
-              && IsSend(node)) {
+          if (cuda_graph_ && IsGPU(device) && IsSend(node)) {
             auto name = node->name();
             auto real_name = ProcessOutputName(name);
             auto tensor = const_cast<Tensor*>(&ctx.input(0));

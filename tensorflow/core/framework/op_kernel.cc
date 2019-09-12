@@ -736,10 +736,7 @@ Status OpKernelContext::allocate_tensor(
     DataType type, const TensorShape& shape, Tensor* out_tensor,
     AllocatorAttributes attr, const AllocationAttributes& allocation_attr) {
   Allocator* a;
-  Status s = get_allocator(attr, &a);
-  if (!s.ok()) {
-    return s;
-  }
+  TF_RETURN_IF_ERROR(get_allocator(attr, &a));
   Tensor new_tensor(a, type, shape,
                     AllocationAttributes(allocation_attr.no_retry_on_failure,
                                          /* allocation_will_be_logged= */ true,
@@ -827,10 +824,7 @@ Status OpKernelContext::allocate_temp(
       allocate_tensor(type, shape, out_temp, allocator_attr, allocation_attr);
   if (track_allocations() && s.ok() && out_temp->TotalBytes() > 0) {
     Allocator* a;
-    s = get_allocator(allocator_attr, &a);
-    if (!s.ok()) {
-      return s;
-    }
+    TF_RETURN_IF_ERROR(get_allocator(allocator_attr, &a));
     if (a->TracksAllocationSizes()) {
       int64 alloc_size = a->AllocatedSize(out_temp->tensor_data().data());
       record_temp_memory_allocation(alloc_size, *out_temp);
@@ -866,10 +860,7 @@ Status OpKernelContext::allocate_persistent(DataType type,
 
     if (track_allocations()) {
       Allocator* a;
-      s = get_allocator(attr, &a);
-      if (!s.ok()) {
-        return s;
-      }
+      TF_RETURN_IF_ERROR(get_allocator(attr, &a));
       if (a->TracksAllocationSizes()) {
         // Zero-byte Tensors don't use allocators: check and skip tracking.
         AllocationDescription alloc_desc;

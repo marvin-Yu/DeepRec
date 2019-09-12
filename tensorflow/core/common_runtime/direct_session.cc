@@ -816,7 +816,7 @@ Status DirectSession::RunWithCUDAGraph(CUDAGraphContext& context,
         return;
       }
 
-      VLOG(2) << "Fetching output from CUDA Graph";
+      VLOG(2) << "Fetching outputs from CUDA Graph";
       lookup_output(output_idx, &gpu_tensor, &output_tensor);
       device_context->CopyDeviceTensorToCPU(gpu_tensor,
                                             output_names[output_idx],
@@ -932,12 +932,16 @@ Status DirectSession::RunInternal(
   args.persistent_allocator = persistent_allocator;
   args.gpu_id = gpu_id;
   args.cuda_graph = cuda_graph;
-  args.save_input = [saved_inputs](const string& name, Tensor* tensor) {
-    (*saved_inputs)[name].reset(new Tensor(*tensor));
-  };
-  args.save_output = [saved_outputs](const string& name, Tensor* tensor) {
-    (*saved_outputs)[name].reset(new Tensor(*tensor));
-  };
+  if (saved_inputs) {
+    args.save_input = [saved_inputs](const string& name, Tensor* tensor) {
+      (*saved_inputs)[name].reset(new Tensor(*tensor));
+    };
+  }
+  if (saved_outputs) {
+    args.save_output = [saved_outputs](const string& name, Tensor* tensor) {
+      (*saved_outputs)[name].reset(new Tensor(*tensor));
+    };
+  }
 
   const bool do_trace = (run_options.trace_level() > RunOptions::NO_TRACE);
 
@@ -1142,6 +1146,14 @@ Status DirectSession::Run(const RunOptions& run_options,
                 run_metadata);
   }
 
+  string device_name;
+  Device* device;
+  Status st = GetAssignedGPUDevice(&device_name, &device);
+  if (!st.ok()) {
+    return st;
+  }
+  VLOG(2) << "Using device " << device_name << " for CUDA Graphs";
+
   std::vector<string> input_names;
   std::vector<::tensorflow::int64> input_dims;
   input_names.reserve(inputs.size());
@@ -1153,14 +1165,6 @@ Status DirectSession::Run(const RunOptions& run_options,
   string key;
   BuildCUDAGraphKey(input_names, input_dims, output_names, &key);
   VLOG(2) << "CUDA Graph key is " << key;
-
-  string device_name;
-  Device* device;
-  Status st = GetAssignedGPUDevice(input_names, &device_name, &device);
-  if (!st.ok()) {
-    return st;
-  }
-  VLOG(2) << "Using device " << device_name << " for CUDA Graphs";
 
   if (cuda_graph_options.initializing()) {
     auto count = cuda_graph_options.count();
@@ -2300,24 +2304,19 @@ Status DirectSession::GetAssignedCPUDevice(string* device_name,
 #endif
 }
 
-Status DirectSession::GetAssignedGPUDevice(gtl::ArraySlice<string> input_names,
-                                           string* device_name,
+Status DirectSession::GetAssignedGPUDevice(string* device_name,
                                            Device** device) {
 #ifdef GOOGLE_CUDA
   mutex_lock l(graph_state_lock_);
   auto execution_state = execution_state_.get();
-  for (auto& name: input_names) {
-    std::vector<string> parts = str_util::Split(name, ":");
-    auto node = execution_state->get_node_by_name(parts[0]);
-    if (node) {
-      auto name = node->assigned_device_name();
-      Device* candidate;
-      TF_RETURN_IF_ERROR(device_mgr_->LookupDevice(name, &candidate));
-      if (candidate->attributes().device_type() == "GPU") {
-        *device_name = name;
-        *device = candidate;
-        return Status::OK();
-      }
+  for (auto node: execution_state->full_graph()->op_nodes()) {
+    auto name = node->assigned_device_name();
+    Device* candidate;
+    TF_RETURN_IF_ERROR(device_mgr_->LookupDevice(name, &candidate));
+    if (candidate->attributes().device_type() == "GPU") {
+      *device_name = name;
+      *device = candidate;
+      return Status::OK();
     }
   }
   return errors::Internal("Not assigned to any GPU device");
