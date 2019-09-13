@@ -109,7 +109,6 @@ class Executor {
     Runner runner = nullptr;
     // Not owned.
     Allocator* persistent_allocator = nullptr;
-    int gpu_id = -1;
     // Not owned.
     void* cuda_graph;
 

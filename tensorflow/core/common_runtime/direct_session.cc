@@ -864,7 +864,7 @@ Status DirectSession::RunInternal(
     CallFrameInterface* call_frame, ExecutorsAndKeys* executors_and_keys,
     RunMetadata* run_metadata,
     const thread::ThreadPoolOptions& threadpool_options,
-    Allocator* persistent_allocator, int gpu_id, void* cuda_graph,
+    Allocator* persistent_allocator, void* cuda_graph,
     std::map<string, std::unique_ptr<Tensor>>* saved_inputs,
     std::map<string, std::unique_ptr<Tensor>>* saved_outputs) {
   const uint64 start_time_usecs = options_.env->NowMicros();
@@ -953,7 +953,6 @@ Status DirectSession::RunInternal(
   args.sync_on_finish = sync_on_finish_;
   args.user_intra_op_threadpool = threadpool_options.intra_op_threadpool;
   args.persistent_allocator = persistent_allocator;
-  args.gpu_id = gpu_id;
   args.cuda_graph = cuda_graph;
   if (saved_inputs) {
     args.save_input = [saved_inputs](const string& name, Tensor* tensor) {
@@ -1251,7 +1250,7 @@ Status DirectSession::RecordCUDAGraph(
   }
   auto st = Run0(run_options, inputs, output_names, target_nodes,
                  outputs, run_metadata, cuda_graph_context,
-                 persistent_allocator, device_id, cuda_graph,
+                 persistent_allocator, cuda_graph,
                  &cuda_graph_context->inputs, &cuda_graph_context->outputs);
   size_t n;
   ret = cuGraphGetNodes(*cuda_graph, nullptr, &n);
@@ -1308,10 +1307,8 @@ Status DirectSession::Run0(
   const std::vector<string>& output_names,
   const std::vector<string>& target_nodes,
   std::vector<Tensor>* outputs,
-  RunMetadata* run_metadata,
-  CUDAGraphContext* cuda_graph_context,
-  Allocator* persistent_allocator, int device_id,
-  void* cuda_graph,
+  RunMetadata* run_metadata, CUDAGraphContext* cuda_graph_context,
+  Allocator* persistent_allocator, void* cuda_graph,
   std::map<string, std::unique_ptr<Tensor>>* saved_inputs,
   std::map<string, std::unique_ptr<Tensor>>* saved_outputs) {
   TF_RETURN_IF_ERROR(CheckNotClosed());
@@ -1374,7 +1371,7 @@ Status DirectSession::Run0(
   TF_RETURN_IF_ERROR(RunInternal(step_id, run_options, &call_frame,
                                  executors_and_keys, run_metadata,
                                  thread::ThreadPoolOptions(),
-                                 persistent_allocator, device_id, cuda_graph,
+                                 persistent_allocator, cuda_graph,
                                  saved_inputs, saved_outputs));
 
   // Receive outputs.

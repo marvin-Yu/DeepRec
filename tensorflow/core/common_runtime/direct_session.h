@@ -236,8 +236,7 @@ class DirectSession : public Session {
     std::vector<Tensor>* outputs,
     RunMetadata* run_metadata,
     CUDAGraphContext* cuda_graph_context = nullptr,
-    Allocator* persistent_allocator = nullptr,
-    int gpu_id = 0, void* cuda_graph = nullptr,
+    Allocator* persistent_allocator = nullptr, void* cuda_graph = nullptr,
     std::map<string, std::unique_ptr<Tensor>>* saved_inputs = nullptr,
     std::map<string, std::unique_ptr<Tensor>>* saved_outputs = nullptr);
   ::tensorflow::Status RecordCUDAGraph(
@@ -309,8 +308,7 @@ class DirectSession : public Session {
       CallFrameInterface* call_frame, ExecutorsAndKeys* executors_and_keys,
       RunMetadata* run_metadata,
       const thread::ThreadPoolOptions& threadpool_options,
-      Allocator* persistent_allocator = nullptr, int gpu_id = 0,
-      void* cuda_graph = nullptr,
+      Allocator* persistent_allocator = nullptr, void* cuda_graph = nullptr,
       std::map<string, std::unique_ptr<Tensor>>* saved_inputs = nullptr,
       std::map<string, std::unique_ptr<Tensor>>* saved_outputs = nullptr);
 

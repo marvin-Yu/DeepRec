@@ -30,7 +30,6 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/pending_counts.h"
 #include "tensorflow/core/common_runtime/renamed_device.h"
 #include "tensorflow/core/common_runtime/step_stats_collector.h"
-#include "tensorflow/core/common_runtime/gpu/gpu_id_utils.h"
 #include "tensorflow/core/framework/allocation_description.pb.h"
 #include "tensorflow/core/framework/allocator.h"
 #include "tensorflow/core/framework/cancellation.h"
@@ -75,6 +74,7 @@ limitations under the License.
 #include "tensorflow/core/util/tensor_slice_reader_cache.h"
 
 #ifdef GOOGLE_CUDA
+#include "tensorflow/stream_executor/stream_executor.h"
 // NOTE(zhujun): Currently the CUDA Graph support is implemented
 // directly here. This is a bit hacky as it is not well
 // encapsulated. But for now we are aiming to make it work, so we only
@@ -1295,7 +1295,6 @@ class ExecutorState {
   Context context_;
   // Not owned.
   Allocator* persistent_allocator_;
-  int gpu_id_;
   // Not owned.
   void* cuda_graph_;
   Executor::Args::SaveIO save_input_;
@@ -1443,7 +1442,6 @@ ExecutorState::ExecutorState(const Executor::Args& args, ExecutorImpl* impl)
           tracing::GetEventCollector(tracing::EventCategory::kCompute)),
       context_(ContextKind::kThread),
       persistent_allocator_(args.persistent_allocator),
-      gpu_id_(args.gpu_id),
       cuda_graph_(args.cuda_graph),
       save_input_(args.save_input),
       save_output_(args.save_output),
