@@ -3261,7 +3261,9 @@ tf_cuda_library(
         "public/session_options.h",
         "public/version.h",
     ],
-    hdrs = CORE_CPU_LIB_HEADERS,
+    hdrs = CORE_CPU_LIB_HEADERS + if_cuda([
+        "common_runtime/gpu_device_context.h"
+    ]),
     copts = tf_copts(),
     deps = [
         ":bfc_allocator",
@@ -3280,7 +3282,7 @@ tf_cuda_library(
         "//tensorflow/core/grappler/utils:functions",
         "//tensorflow/core/profiler/lib:traceme",
         "//tensorflow/core/profiler/internal:traceme_recorder",
-    ] + mkl_deps() + if_cuda([":gpu_runtime"]),
+    ] + mkl_deps(),
     alwayslink = 1,
 )
 
