@@ -110,7 +110,7 @@ class Executor {
     // Not owned.
     Allocator* persistent_allocator = nullptr;
     // Not owned.
-    void* cuda_graph;
+    void* cuda_graph = nullptr;
 
     typedef std::function<void (const string&, Tensor*)> SaveIO;
     SaveIO save_input = nullptr;
