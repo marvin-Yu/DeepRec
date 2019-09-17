@@ -931,10 +931,189 @@ bool ReorderReshapeAndUnpack(Graph* graph) {
   return changed;
 }
 
-bool FuseBatchMatMulsAfterUnpack(Graph* graph) {
-  LOG(INFO) << "FuseBatchMatMulAfterUnpack";
-  bool changed = false;
 
+// TODO(ylxu): FuseMatMulsAfterUnpack and FuseBatchMatMulsAfterUnpack
+// are similar. Implement them in a single function.
+bool FuseBatchMatMulsAfterUnpack(Graph* graph) {
+  LOG(INFO) << "FuseBatchMatMulsAfterUnpack";
+  bool changed = false;
+  std::vector<Node*> nodes(graph->num_nodes());
+  int i = 0;
+  for (Node* node : graph->nodes()) {
+    nodes[i++] = node;
+  }
+
+  for (Node* node : nodes) {
+    if (!graph->IsValidNode(node).ok()) continue;
+    if (node->type_string() != "Unpack") continue;
+    // group matmuls based on its inputs
+    std::map<Node*, std::vector<Node*>> matmuls;
+    for (Node* out : node->out_nodes()) {
+      if (out->type_string() == "BatchMatMul" ||
+          out->type_string() == "BatchMatMulV2") {
+        for (Node* n : out->in_nodes()) {
+          if (n != node) {
+            if (matmuls.find(n) != matmuls.end()) {
+              matmuls[n].push_back(out); 
+            } else {
+              std::vector<Node*> ins;
+              ins.push_back(out);
+              matmuls[n] = ins;
+            }
+            break;
+          }
+        }
+      }
+    }
+    if (matmuls.size() < 2) continue;
+    LOG(INFO) << "FuseBatchMatMulsAfterUnpack: found pattern";
+
+    // Fuse matmuls in each group.
+    // For each group, do:
+    // (1) add two Pack nodes to stack inputs on both sides respectively,
+    // (2) add a new BatchMatMulV2 node to replace old matmuls, and
+    // (3) add a Unpack node to split result.
+    DataType dtype = node->output_type(0);
+    std::map<Node*, std::vector<Node*>>::iterator iter;
+    iter = matmuls.begin();
+    while (iter != matmuls.end()) {
+      std::vector<Node*>* matmuls_group = &(iter->second);
+      std::sort(matmuls_group->begin(), matmuls_group->end(),
+                [](Node* a, Node* b){
+        const Edge* in_a = nullptr;
+        const Edge* in_b = nullptr;
+        a->input_edge(0, &in_a);  
+        b->input_edge(0, &in_b);
+        return in_a->src_output() < in_b->src_output(); 
+      });
+      if (matmuls_group->size() == 1) continue;
+      std::vector<const Edge*> inputs[2];
+      for (Node* n : *matmuls_group) {
+        for (const Edge* e : n->in_edges()) {
+          inputs[e->dst_input()].push_back(e);
+        }
+      }
+      // Add two Pack nodes to group on two sides, respectively
+      Node* packs[2];
+      string pack_names[2];
+      Status status; 
+	  for (int i = 0; i < 2; i++) {
+        std::vector<NodeDefBuilder::NodeOut> pack_inputs;
+        for (const Edge* e : inputs[i]) {
+          string s = e->src()->name() + std::to_string(e->src_output());
+          pack_names[i] += s;
+          pack_inputs.emplace_back(s, e->src_output(), dtype);
+        }
+        NodeDefBuilder pack_builder(pack_names[i], "Pack");
+        pack_builder.Input(pack_inputs);
+        NodeDef pack_node;
+        status =
+            pack_builder
+                .Attr("N", (int)inputs[i].size())
+                .Attr("T", dtype)
+                .Attr("axis", 0)
+                .Finalize(&pack_node);
+        if (!status.ok()) {
+          LOG(ERROR) << "Pack node construction failed with" << status;
+          return false;
+        }
+        pack_node.set_device(inputs[i][0]->src()->def().device());
+        packs[i] = graph->AddNode(pack_node, &status);
+        packs[i]->set_assigned_device_name(
+            inputs[i][0]->src()->assigned_device_name());
+        if (!status.ok()) {
+          LOG(ERROR) << "Adding node failed " << status;
+          return false;
+        }
+        for (int j = 0; j < inputs[i].size(); j++) {
+          graph->AddEdge(inputs[i][j]->src(), inputs[i][j]->src_output(),
+                         packs[i], j);
+        }
+      }
+      // Add a new BatchMatMulV2
+      string matmul_name;
+      for (Node* m : *matmuls_group) {
+        matmul_name += m->name();
+      }
+      std::vector<NodeDefBuilder::NodeOut> matmul_inputs;
+      matmul_inputs.emplace_back(pack_names[0], 0, dtype);
+      matmul_inputs.emplace_back(pack_names[1], 0, dtype);
+      NodeDefBuilder matmul_builder(matmul_name, "BatchMatMulV2");
+      matmul_builder.Input(matmul_inputs[0]);
+      matmul_builder.Input(matmul_inputs[1]);
+      NodeDef matmul_node;
+      status =
+          matmul_builder
+              .Attr("adj_x",
+                  (*matmuls_group)[0]->def().attr().at("adj_x").b())
+              .Attr("adj_y",
+                  (*matmuls_group)[0]->def().attr().at("adj_y").b())
+              .Attr("T", dtype)
+              .Finalize(&matmul_node);
+      if (!status.ok()) {
+        LOG(ERROR) << "BatchMatMulV2 node construction failed with" << status;
+        return false;
+      }
+      matmul_node.set_device((*matmuls_group)[0]->def().device());
+      Node* matmul = graph->AddNode(matmul_node, &status);
+      matmul->set_assigned_device_name((*matmuls_group)[0]->
+                                       assigned_device_name());
+      if (!status.ok()) {
+        LOG(ERROR) << "Adding node failed " << status;
+        return false;
+      }
+      graph->AddEdge(packs[0], 0, matmul, 0);
+      graph->AddEdge(packs[1], 0, matmul, 1);
+
+      // Add an Unpack node to split result
+      string unpack_name = matmul_name + "/Unpack" ;
+      NodeDefBuilder::NodeOut unpack_input(matmul_name, 0, dtype);
+      NodeDefBuilder unpack_builder(unpack_name, "Unpack");
+      unpack_builder.Input(unpack_input);
+      NodeDef unpack_node;
+      status =
+          unpack_builder
+              .Attr("num", (int)(*matmuls_group).size())
+              .Attr("T", dtype)
+              .Attr("axis", 0)
+              .Finalize(&unpack_node);
+      if (!status.ok()) {
+        LOG(ERROR) << "Unpack node construction failed with" << status;
+        return false;
+      }
+      unpack_node.set_device((*matmuls_group)[0]->def().device());
+      Node* unpack = graph->AddNode(unpack_node, &status);
+      unpack->set_assigned_device_name((*matmuls_group)[0]->
+                                       assigned_device_name());
+      if (!status.ok()) {
+        LOG(ERROR) << "Adding node failed " << status;
+        return false;
+      }
+      graph->AddEdge(matmul, 0, unpack, 0);
+   
+      // Add edges to forward split results to nodes after original matmuls,
+      // and remove original matmuls
+      int index = 0;
+      for (Node* m : *matmuls_group) {
+        std::vector<Node*> dst_nodes;
+        std::vector<int> dst_inputs;
+        for (const Edge* e : m->out_edges()) {
+          dst_nodes.push_back(e->dst());
+          dst_inputs.push_back(e->dst_input());
+        }
+        int num = dst_nodes.size();
+        for (int i = 0; i < num; i++) {
+          graph->UpdateEdge(unpack, index, dst_nodes[i], dst_inputs[i]);
+        }
+        graph->RemoveNode(m);
+        index++;
+      }
+ 
+      changed = true;
+      iter++;
+    }
+  }
+  
   return changed;
 }
 
