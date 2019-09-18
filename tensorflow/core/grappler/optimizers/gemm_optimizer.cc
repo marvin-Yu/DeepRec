@@ -1027,12 +1027,13 @@ void FuseGemmKernels(Graph* graph) {
 
 Status GemmOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
                                GraphDef* optimized_graph) {
+  static int pass = 0;
   LOG(INFO) << "GemmOptimizer";
   std::fstream f;
-  f.open("before_gemm.pbtxt", std::fstream::out);
+  f.open("before_gemm." + std::to_string(pass) + ".pbtxt", std::fstream::out);
   f << item.graph.DebugString();
   f.close();
-  f.open("before_gemm.pb", std::fstream::out | std::fstream::binary);
+  f.open("before_gemm." + std::to_string(pass) + ".pb", std::fstream::out | std::fstream::binary);
   f << item.graph.SerializeAsString();
   f.close();
 
@@ -1046,13 +1047,14 @@ Status GemmOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
   // convert graph to graphdef
   graph.ToGraphDef(optimized_graph);
 
-  f.open("after_gemm.pbtxt", std::fstream::out);
+  f.open("after_gemm." + std::to_string(pass) + ".pbtxt", std::fstream::out);
   f << optimized_graph->DebugString();
   f.close();
-  f.open("after_gemm.pb", std::fstream::out | std::fstream::binary);
+  f.open("after_gemm." + std::to_string(pass) + ".pb", std::fstream::out | std::fstream::binary);
   f << optimized_graph->SerializeAsString();
   f.close();
   LOG(INFO) << "GemmOptimizer";
+  pass++;
   return Status::OK();
 }
 
