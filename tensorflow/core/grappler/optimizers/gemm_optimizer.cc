@@ -136,6 +136,7 @@ bool ReorderReshapeAndBiasAdd(Graph* graph) {
 //    |->MatMul                             |->
 //       ...
 bool FuseMatMuls(Graph* graph) {
+  static int count = 0;
   LOG(INFO) << "FuseMatMuls";
   bool changed = false;
 
@@ -182,11 +183,11 @@ bool FuseMatMuls(Graph* graph) {
 
     LOG(INFO) << "FuseMatMuls: found pattern";
     // Add a Pack node to group weights
-    string pack_name;
+    string prefix = "GemmOptimizer/FuseMatMuls/" + std::to_string(count++);
+    string pack_name = prefix + "/Pack";
     std::vector<NodeDefBuilder::NodeOut> pack_inputs;
     DataType dtype = weights[0]->output_type(0);
     for (Node* w : weights) {
-      pack_name += w->name();
       // TODO(ylxu): src_output may not be 0.
       pack_inputs.emplace_back(w->name(), 0, dtype);
     }
@@ -215,10 +216,7 @@ bool FuseMatMuls(Graph* graph) {
     }
 
     // Add a new node BatchMatMul
-    string matmul_name;
-    for (Node* m : matmuls) {
-      matmul_name += m->name();
-    }
+    string matmul_name = prefix + "/BatchMatMulV2";
     std::vector<NodeDefBuilder::NodeOut> matmul_inputs;
     const Edge* e;
     matmuls[0]->input_edge(0, &e);
@@ -250,7 +248,7 @@ bool FuseMatMuls(Graph* graph) {
     graph->AddEdge(pack, 0, matmul, 1);
 
     // Add an Unpack node to split result
-    string unpack_name = matmul_name + "/Unpack" ;
+    string unpack_name = prefix + "/Unpack";
     NodeDefBuilder::NodeOut unpack_input(matmul_name, 0, dtype);
     NodeDefBuilder unpack_builder(unpack_name, "Unpack");
     unpack_builder.Input(unpack_input);
@@ -302,6 +300,7 @@ bool FuseMatMuls(Graph* graph) {
 //                        ...
 // TODO(ylxu): to support fusing more types of ops after unpack
 bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
+  static int count = 0;
   LOG(INFO) << "FuseBiasAdds";
   bool changed = false;
 
@@ -333,11 +332,12 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
     LOG(INFO) << "FuseBiasAdds: found pattern";
  
     // Add a Pack node to group biases
-    string pack_name;
+    string prefix = "GemmOptimizer/FuseBiasAddsAfterBatchMatMulUnpack/" +
+                    std::to_string(count++);
+    string pack_name = prefix + "/Pack";
     std::vector<NodeDefBuilder::NodeOut> pack_inputs;
     DataType dtype = biases[0]->output_type(0);
     for (Node* b : biases) {
-      pack_name += b->name();
       // TODO(ylxu): src_output may not be 0.
       pack_inputs.emplace_back(b->name(), 0, dtype);
     }
@@ -366,7 +366,7 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
     }
 
     // Add an ExpandDims after Pack
-    string dim_name = pack_name + "/ExpandDims/" + "/axis";
+    string dim_name = prefix + "/ExpandDims/" + "/axis";
     NodeDefBuilder dim_builder(dim_name, "Const");
     NodeDef dim_node;
     Tensor t_dim((int)1);
@@ -387,7 +387,7 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
       return false;
     }
 
-    string expand_name = pack_name + "/ExpandDims" ;
+    string expand_name = prefix + "/ExpandDims" ;
     std::vector<NodeDefBuilder::NodeOut> expand_inputs;
     expand_inputs.emplace_back(pack_name, 0, dtype);
     expand_inputs.emplace_back(dim_name, 0, t_dim.dtype());
@@ -415,10 +415,7 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
     graph->AddEdge(dim, 0, expand, 1);
 
     // Add a new node BiasAdd
-    string biasadd_name;
-    for (Node* b : biasadds) {
-      biasadd_name += b->name();
-    }
+    string biasadd_name = prefix + "/Add";
     std::vector<NodeDefBuilder::NodeOut> biasadd_inputs;
     biasadd_inputs.emplace_back(matmul->name(), 0, dtype);
     biasadd_inputs.emplace_back(expand_name, 0, dtype);
@@ -445,7 +442,7 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
     graph->AddEdge(expand, 0, biasadd, 1);
 
     // Add an Unpack node to split result
-    string unpack_name = biasadd_name + "/Unpack";
+    string unpack_name = prefix + "/Unpack";
     NodeDefBuilder::NodeOut unpack_input(biasadd_name, 0, dtype);
     NodeDefBuilder unpack_builder(unpack_name, "Unpack");
     unpack_builder.Input(unpack_input);
@@ -535,6 +532,7 @@ bool RemoveShapeAfterReshape(Graph* graph) {
 
 // Change ->Unpack->Reshape-> to ->Reshape->Unpack->
 bool ReorderReshapeAndUnpack(Graph* graph) {
+  static int count = 0;
   LOG(INFO) << "ReorderReshapeAndUnpack";
   bool changed = false;
 
@@ -568,7 +566,9 @@ bool ReorderReshapeAndUnpack(Graph* graph) {
     unpack->input_edge(0, &e0);
     int src_output = e0->src_output();
     Node* unpack_in = e0->src();
-    string shape_name = unpack_in->name() + "/Shape";
+    string prefix = "GemmOptimizer/ReorderReshapeAndUnpack/" +
+                    std::to_string(count++);
+    string shape_name = prefix + "/Shape";
     NodeDefBuilder::NodeOut shape_input(unpack_in->name(), src_output,
                                         unpack->input_type(0));
     NodeDefBuilder shape_builder(shape_name, "Shape");
@@ -594,9 +594,9 @@ bool ReorderReshapeAndUnpack(Graph* graph) {
     graph->AddEdge(unpack_in, src_output, shape, 0);
  
     // Add a Slice to obtain the first element of the new shape 
-    string slice_name = shape_name + "/Slice";
-    string zero_name = slice_name + "/zero";
-    string one_name = slice_name + "/one";
+    string slice_name = prefix + "/Slice";
+    string zero_name = prefix + "Slice/zero";
+    string one_name = prefix + "Slice/one";
 
     NodeDefBuilder zero_builder(zero_name, "Const");
     NodeDef zero_node;
@@ -671,7 +671,7 @@ bool ReorderReshapeAndUnpack(Graph* graph) {
     graph->AddEdge(one, 0, slice, 2);
 
     // Add a Concat Op to generate new shape
-    string concat_name = slice_name + reshape_in_1[0]->name();
+    string concat_name = prefix + "/Concat";
     string zero_scalar_name = concat_name + "/concat_dim";
     NodeDefBuilder zero_scalar_builder(zero_scalar_name, "Const");
     NodeDef zero_scalar_node;
@@ -724,7 +724,7 @@ bool ReorderReshapeAndUnpack(Graph* graph) {
     graph->AddEdge(reshape_in_1[0], e1->src_output(), concat, 2);
 
     // Add a new Reshape Op
-    string reshape_name = unpack_in->name() + "/Reshape";
+    string reshape_name = prefix + "/Reshape";
     NodeDefBuilder reshape_builder(reshape_name, "Reshape");
     std::vector<NodeDefBuilder::NodeOut> reshape_inputs;
     reshape_inputs.emplace_back(unpack_in->name(), src_output,
@@ -779,6 +779,7 @@ bool ReorderReshapeAndUnpack(Graph* graph) {
 //          |->MatMul/BatchMatMul
 //             ...
 bool FuseMatMulsAfterUnpack(Graph* graph) {
+  static int count = 0;
   LOG(INFO) << "FuseMatMulsAfterUnpack";
   bool changed = false;
   std::vector<Node*> nodes(graph->num_nodes());
@@ -881,12 +882,15 @@ bool FuseMatMulsAfterUnpack(Graph* graph) {
       // Add two Pack nodes to group on two sides, respectively
       Node* packs[2];
       string pack_names[2];
+      string prefix = "GemmOptimizer/FuseMatMulsAfterUnpack/" +
+                      std::to_string(count++);
+      pack_names[0] = prefix + "/Pack_0";
+      pack_names[1] = prefix + "/Pack_1";
       Status status; 
 	  for (int i = 0; i < 2; i++) {
         std::vector<NodeDefBuilder::NodeOut> pack_inputs;
         for (const Edge* e : inputs[i]) {
           string s = e->src()->name() + std::to_string(e->src_output());
-          pack_names[i] += s;
           pack_inputs.emplace_back(s, e->src_output(), dtype);
         }
         NodeDefBuilder pack_builder(pack_names[i], "Pack");
@@ -916,10 +920,7 @@ bool FuseMatMulsAfterUnpack(Graph* graph) {
         }
       }
       // Add a new BatchMatMulV2
-      string matmul_name;
-      for (Node* m : *matmuls_group) {
-        matmul_name += m->name();
-      }
+      string matmul_name = prefix + "/BatchMatMulV2";
       std::vector<NodeDefBuilder::NodeOut> matmul_inputs;
       matmul_inputs.emplace_back(pack_names[0], 0, dtype);
       matmul_inputs.emplace_back(pack_names[1], 0, dtype);
@@ -958,7 +959,7 @@ bool FuseMatMulsAfterUnpack(Graph* graph) {
       graph->AddEdge(packs[1], 0, matmul, 1);
 
       // Add an Unpack node to split result
-      string unpack_name = matmul_name + "/Unpack" ;
+      string unpack_name = prefix + "/Unpack" ;
       NodeDefBuilder::NodeOut unpack_input(matmul_name, 0, dtype);
       NodeDefBuilder unpack_builder(unpack_name, "Unpack");
       unpack_builder.Input(unpack_input);
