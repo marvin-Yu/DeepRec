@@ -156,15 +156,11 @@ bool FuseMatMuls(Graph* graph) {
     Node* in = nullptr;
     node->input_node(0, &in);
     std::vector<Node*> matmuls;
-    std::vector<Node*> weights;
     std::vector<int> src_outputs;
     for (const Edge* e : in->out_edges()) {
       Node* n = e->dst();
       if (n->type_string() == "MatMul") {
         matmuls.push_back(n);
-        Node* w = nullptr;
-        n->input_node(1, &w);
-        weights.push_back(w);
         src_outputs.push_back(e->src_output());
       }
     }
@@ -182,6 +178,16 @@ bool FuseMatMuls(Graph* graph) {
     // and attrs (transpose_a and transpose_b).
 
     LOG(INFO) << "FuseMatMuls: found pattern";
+    std::sort(matmuls.begin(), matmuls.end(),
+              [node](Node* a, Node* b){
+      return a->name().compare(b->name()) < 0;
+    });
+    std::vector<Node*> weights;
+    for (Node* m : matmuls) {
+      Node* w = nullptr;
+      m->input_node(1, &w);
+      weights.push_back(w);
+    }
     // Add a Pack node to group weights
     string prefix = "GemmOptimizer/FuseMatMuls/" + std::to_string(count++);
     string pack_name = prefix + "/Pack";
