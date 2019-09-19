@@ -53,7 +53,9 @@ void GPUPersistentAllocator::Reset() {
 #ifdef GOOGLE_CUDA
   index_ = 0;
   offset_ = 0;
-  for (auto it = used_large_chunks_.begin(); it != used_large_chunks_.end(); ) {
+  for (auto it = used_large_chunks_.begin();
+       it != used_large_chunks_.end();
+       ++it) {
     auto size = it->first;
     auto& s = free_large_chunks_[size];
     for (auto& c: it->second) { s.push_back(std::move(c)); }
