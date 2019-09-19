@@ -35,6 +35,15 @@ std::set<string> GetOpsWithUnchangedShape() {
   return ops_with_unchanged_shape;
 }
 
+std::set<string> GetUnaryOps() {
+  std::set<string> ops_with_unchanged_shape = {
+      "Softmax",
+      "Sigmoid",
+      "Tanh",
+      "Relu"};
+  return ops_with_unchanged_shape;
+}
+
 // Change MatMul_0->[Reshape]*n->MatMul_1 to MatMul_0->MatMul_1
 bool RemoveReshapeBetweenMatMuls(Graph* graph) {
   bool changed = false; 
@@ -1389,6 +1398,66 @@ bool FuseMatMulsAfterUnpack(Graph* graph) {
   return changed;
 }
 
+bool ReorderUnaryOpAndUnpack(Graph* graph) {
+  LOG(INFO) << "ReorderUnaryOpAndUnpack";
+  bool changed = false;
+
+  std::vector<Node*> nodes(graph->num_nodes());
+  int i = 0;
+  for (Node* node : graph->nodes()) {
+    nodes[i++] = node;
+  }
+
+  std::set<string> unary_op_set = GetUnaryOps();
+  for (Node* node : nodes) {
+    if (!graph->IsValidNode(node).ok()) continue;
+    if (node->type_string() != "Unpack") continue;
+    Node* unpack = node;
+    std::vector<Node*> unary_ops;
+    bool can_reorder = true;
+    string unary_type;
+    for (Node* out : unpack->out_nodes()) {
+      if (unary_type.empty()) {
+        unary_type = out->type_string();
+        if (unary_op_set.find(unary_type) == unary_op_set.end()) {
+          can_reorder = false;
+          break;
+        }
+      }
+      if (out->type_string() != unary_type) {
+        can_reorder = false;
+        break;
+      }
+      unary_ops.push_back(out);
+    }
+    if (!can_reorder || unary_ops.size() < 2) continue;
+    LOG(INFO) << "ReorderUnaryOpAndUnpack: found pattern";
+    int index = 0;
+    for (Node* u : unary_ops) {
+      std::vector<Node*> dst_nodes;
+      std::vector<int> dst_inputs;
+      for (const Edge* e : u->out_edges()) {
+        dst_nodes.push_back(e->dst());
+        dst_inputs.push_back(e->dst_input());
+      }
+      int num = dst_nodes.size();
+      for (int i = 0; i < num; i++) {
+        graph->UpdateEdge(unpack, index, dst_nodes[i], dst_inputs[i]);
+      }
+      if (index != 0) graph->RemoveNode(u);
+      index++;
+    }
+    const Edge* to_unpack = nullptr;
+    unpack->input_edge(0, &to_unpack);
+    graph->UpdateEdge(to_unpack->src(), to_unpack->src_output(),
+                      unary_ops[0], 0);
+    graph->UpdateEdge(unary_ops[0], 0, unpack, 0);
+    changed = true;
+  }
+
+  return changed;
+}
+
 void FuseGemmKernels(Graph* graph) {  
   while(1) {
     bool graph_changed =
@@ -1400,7 +1469,8 @@ void FuseGemmKernels(Graph* graph) {
         ReorderReshapeAndUnpack(graph) ||
         FuseMatMulsAfterUnpack(graph) ||
         ReorderTransposeAndUnpack(graph) ||
-        RemoveUnpackBeforeShape(graph);
+        RemoveUnpackBeforeShape(graph) ||
+        ReorderUnaryOpAndUnpack(graph);
         // RemoveUnpackPackPairs(graph);
     if (!graph_changed) break;
   }
