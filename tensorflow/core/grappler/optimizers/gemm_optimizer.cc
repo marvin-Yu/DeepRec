@@ -325,15 +325,23 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
         (matmul->type_string() != "BatchMatMul")) continue;
     std::vector<Node*> biasadds;
     std::vector<Node*> biases;
+    bool can_fuse = true;
+    LOG(INFO) << "node->DebugString(): " << node->DebugString();
     for (Node* out : node->out_nodes()) {
-      if (out->type_string() == "BiasAdd") {
-        biasadds.push_back(out);
-        Node* bias = nullptr;
-        out->input_node(1, &bias);
-        biases.push_back(bias);
+      LOG(INFO) << "out->DebugString(): " << out->DebugString();
+      if (out->type_string() != "BiasAdd") {
+        LOG(INFO) << "out->type_string(): " << out->type_string();
+        can_fuse = false;
+        break;
       }
+      LOG(INFO) << "out->DebugString(): " << out->DebugString();
+      biasadds.push_back(out);
+      Node* bias = nullptr;
+      out->input_node(1, &bias);
+      biases.push_back(bias);
+      LOG(INFO) << "out->DebugString(): " << out->DebugString();
     }
-    if (biasadds.size() < 2) continue;
+    if (!can_fuse || biases.size() < 2) continue;
 
     LOG(INFO) << "FuseBiasAdds: found pattern";
  
@@ -554,24 +562,28 @@ bool ReorderReshapeAndUnpack(Graph* graph) {
     Node* unpack = node;
     std::vector<Node*> reshapes;
     std::vector<Node*> reshape_in_1;
+    bool can_reorder = true;
     for (Node* out : unpack->out_nodes()) {
-      if (out->type_string() != "Reshape") continue;
+      if (out->type_string() != "Reshape") {
+        can_reorder = false;
+        break;
+      }
       reshapes.push_back(out);
       Node* n = nullptr;
       out->input_node(1, &n);
       reshape_in_1.push_back(n);
     }
-    if (reshapes.size() < 2) continue; 
+    if (!can_reorder || reshapes.size() < 2) continue;
     for (int i = 1; i < reshapes.size(); i++) {
       if (reshape_in_1[i] != reshape_in_1[0]) continue;
     }
     LOG(INFO) << "ReorderReshapeAndUnpack: found pattern";
     
     // Add a new Shape to get the shape of Unpack's input
-    const Edge* e0;
-    unpack->input_edge(0, &e0);
-    int src_output = e0->src_output();
-    Node* unpack_in = e0->src();
+    const Edge* to_unpack;
+    unpack->input_edge(0, &to_unpack);
+    int src_output = to_unpack->src_output();
+    Node* unpack_in = to_unpack->src();
     string prefix = "GemmOptimizer/ReorderReshapeAndUnpack/" +
                     std::to_string(count++);
     string shape_name = prefix + "/Shape";
@@ -773,6 +785,228 @@ bool ReorderReshapeAndUnpack(Graph* graph) {
         graph->UpdateEdge(unpack, index, dst_nodes[i], dst_inputs[i]);
       }
       graph->RemoveNode(r);
+      index++;
+    }
+    changed= true;
+  }
+  return changed;
+}
+
+// Change ->Unpack->Transpose-> to ->Transpose->Unpack->
+bool ReorderTransposeAndUnpack(Graph* graph) {
+  static int count = 0;
+  LOG(INFO) << "ReorderTransposeAndUnpack";
+  bool changed = false;
+
+  std::vector<Node*> nodes(graph->num_nodes());
+  int i = 0;
+  for (Node* node : graph->nodes()) {
+    nodes[i++] = node;
+  }
+
+  for (Node* node : nodes) {
+    if (!graph->IsValidNode(node).ok()) continue;
+    if (node->type_string() != "Unpack") continue;
+    Node* unpack = node;
+    std::vector<Node*> transposes;
+    std::vector<Node*> transpose_in_1;
+    bool can_reorder = true;
+    for (Node* out : unpack->out_nodes()) {
+      if (out->type_string() != "Transpose") {
+        can_reorder = false;
+        break;
+      }
+      transposes.push_back(out);
+      Node* n = nullptr;
+      out->input_node(1, &n);
+      transpose_in_1.push_back(n);
+    }
+    if (!can_reorder || transposes.size() < 2) continue;
+    for (int i = 1; i < transposes.size(); i++) {
+      if (transpose_in_1[i] != transpose_in_1[0]) continue;
+    }
+    LOG(INFO) << "ReorderTransposeAndUnpack: found pattern";
+
+    string prefix = "GemmOptimizer/ReorderTransposeAndUnpack/" +
+                    std::to_string(count++);
+    string one_name = prefix + "Transpose/Add/one";
+    NodeDefBuilder one_builder(one_name, "Const");
+    NodeDef one_node;
+    Tensor t_one(DT_INT32, TensorShape({1}));
+    auto one_data = t_one.tensor<int, 1>();
+    one_data(0) = 1;
+    Status status =
+        one_builder
+            .Attr("dtype", t_one.dtype())
+            .Attr("value", t_one)
+            .Finalize(&one_node);
+    if (!status.ok()) {
+      LOG(ERROR) << "Const node construction failed with" << status;
+      return false;
+    }
+    one_node.set_device(transpose_in_1[0]->def().device());
+    Node* one = graph->AddNode(one_node, &status);
+    one->set_assigned_device_name(transpose_in_1[0]->assigned_device_name());
+    if (!status.ok()) {
+      LOG(ERROR) << "Adding node failed " << status;
+      return false;
+    }
+ 
+    DataType shape_dtype = transpose_in_1[0]->output_type(0);
+    string add_name = prefix + "/Add";
+    std::vector<NodeDefBuilder::NodeOut> add_inputs;
+    const Edge* param_to_transpose = nullptr;
+    transposes[0]->input_edge(1, &param_to_transpose);
+    add_inputs.emplace_back(param_to_transpose->src()->name(),
+                            param_to_transpose->src_output(), shape_dtype);
+    add_inputs.emplace_back(one_name, 0, shape_dtype);
+    NodeDefBuilder add_builder(add_name, "Add");
+    add_builder.Input(add_inputs[0]);
+    add_builder.Input(add_inputs[1]);
+    NodeDef add_node;
+    status =
+        add_builder
+            .Attr("T", shape_dtype)
+            .Finalize(&add_node);
+    if (!status.ok()) {
+      LOG(ERROR) << "BiasAdd node construction failed with" << status;
+      return false;
+    }
+    add_node.set_device(transpose_in_1[0]->def().device());
+    Node* add = graph->AddNode(add_node, &status);
+    add->set_assigned_device_name(transpose_in_1[0]->assigned_device_name());
+    if (!status.ok()) {
+      LOG(ERROR) << "Adding node failed " << status;
+      return false;
+    }
+    graph->AddEdge(param_to_transpose->src(),
+        param_to_transpose->src_output(), add, 0);
+    graph->AddEdge(one, 0, add, 1);
+
+    string zero_name = prefix + "Transpose/Concat/zero";
+    NodeDefBuilder zero_builder(zero_name, "Const");
+    NodeDef zero_node;
+    Tensor t_zero(DT_INT32, TensorShape({1}));
+    auto zero_data = t_zero.tensor<int, 1>();
+    zero_data(0) = 0;
+    status =
+        zero_builder
+            .Attr("dtype", t_zero.dtype())
+            .Attr("value", t_zero)
+            .Finalize(&zero_node);
+    if (!status.ok()) {
+      LOG(ERROR) << "Const node construction failed with" << status;
+      return false;
+    }
+    zero_node.set_device(transpose_in_1[0]->def().device());
+    Node* zero = graph->AddNode(zero_node, &status);
+    zero->set_assigned_device_name(transpose_in_1[0]->assigned_device_name());
+    if (!status.ok()) {
+      LOG(ERROR) << "Adding node failed " << status;
+      return false;
+    }
+
+    // Add a Concat Op to generate new shape
+    string zero_scalar_name = prefix + "/Transpose/Concat/concat_dim";
+    NodeDefBuilder zero_scalar_builder(zero_scalar_name, "Const");
+    NodeDef zero_scalar_node;
+    Tensor t_zero_scalar(int(0));
+    status =
+        zero_scalar_builder
+            .Attr("dtype", t_zero_scalar.dtype())
+            .Attr("value", t_zero_scalar)
+            .Finalize(&zero_scalar_node);
+    if (!status.ok()) {
+      LOG(ERROR) << "Const node construction failed with" << status;
+      return false;
+    }
+    zero_scalar_node.set_device(transpose_in_1[0]->def().device());
+    Node* zero_scalar = graph->AddNode(zero_scalar_node, &status);
+    zero_scalar->set_assigned_device_name(
+        transpose_in_1[0]->assigned_device_name());
+    if (!status.ok()) {
+      LOG(ERROR) << "Adding node failed " << status;
+      return false;
+    }
+
+    string concat_name = prefix + "/Transpose/Concat";
+    NodeDefBuilder concat_builder(concat_name, "Concat");
+    NodeDefBuilder::NodeOut concat_dim(zero_scalar->name(), 0, shape_dtype);
+    std::vector<NodeDefBuilder::NodeOut> concat_inputs;
+    concat_inputs.emplace_back(zero_name, 0, shape_dtype);
+    concat_inputs.emplace_back(add_name, 0, shape_dtype);
+    concat_builder.Input(concat_dim);
+    concat_builder.Input(concat_inputs);
+    NodeDef concat_node;
+    status =
+        concat_builder
+            .Attr("N", 2)
+            .Attr("T", shape_dtype)
+            .Finalize(&concat_node);
+    if (!status.ok()) {
+      LOG(ERROR) << "Concat node construction failed with" << status;
+      return false;
+    }
+    concat_node.set_device(transpose_in_1[0]->def().device());
+    Node* concat = graph->AddNode(concat_node, &status);
+    concat->set_assigned_device_name(
+        transpose_in_1[0]->assigned_device_name());
+    if (!status.ok()) {
+      LOG(ERROR) << "Adding node failed " << status;
+      return false;
+    }
+    graph->AddEdge(zero_scalar, 0, concat, 0);
+    graph->AddEdge(zero, 0, concat, 1);
+    graph->AddEdge(add, 0, concat, 2);
+
+    // Add a new Transpose Op
+    string transpose_name = prefix + "/Transpose";
+    NodeDefBuilder transpose_builder(transpose_name, "Transpose");
+    std::vector<NodeDefBuilder::NodeOut> transpose_inputs;
+    const Edge* to_unpack;
+    unpack->input_edge(0, &to_unpack);
+    int src_output = to_unpack->src_output();
+    Node* unpack_in = to_unpack->src();
+    transpose_inputs.emplace_back(unpack_in->name(), src_output,
+                                  transposes[0]->input_type(0));
+    transpose_inputs.emplace_back(concat->name(), 0, shape_dtype);
+    transpose_builder.Input(transpose_inputs[0]);
+    transpose_builder.Input(transpose_inputs[1]);
+    NodeDef transpose_node;
+    status =
+        transpose_builder
+            .Attr("T", transposes[0]->input_type(0))
+            .Attr("Tperm", shape_dtype)
+            .Finalize(&transpose_node);
+    if (!status.ok()) {
+      LOG(ERROR) << "Reshape node construction failed with" << status;
+      return false;
+    }
+    transpose_node.set_device(transposes[0]->def().device());
+    Node* transpose = graph->AddNode(transpose_node, &status);
+    transpose->set_assigned_device_name(
+        transposes[0]->assigned_device_name());
+    if (!status.ok()) {
+      LOG(ERROR) << "Adding node failed " << status;
+      return false;
+    }
+    graph->AddEdge(unpack_in, src_output, transpose, 0);
+    graph->AddEdge(concat, 0, transpose, 1);
+ 
+    graph->UpdateEdge(transpose, 0, unpack, 0);
+    int index = 0;
+    for (Node* t : transposes) {
+      std::vector<Node*> dst_nodes;
+      std::vector<int> dst_inputs;
+      for (const Edge* e : t->out_edges()) {
+        dst_nodes.push_back(e->dst());
+        dst_inputs.push_back(e->dst_input());
+      }
+      int num = dst_nodes.size();
+      for (int i = 0; i < num; i++) {
+        graph->UpdateEdge(unpack, index, dst_nodes[i], dst_inputs[i]);
+      }
+      graph->RemoveNode(t);
       index++;
     }
     changed= true;
@@ -1025,7 +1259,8 @@ void FuseGemmKernels(Graph* graph) {
         FuseBiasAddsAfterBatchMatMulUnpack(graph) ||
         RemoveShapeAfterReshape(graph) ||
         ReorderReshapeAndUnpack(graph) ||
-        FuseMatMulsAfterUnpack(graph);
+        FuseMatMulsAfterUnpack(graph) ||
+        ReorderTransposeAndUnpack(graph);
         // RemoveUnpackPackPairs(graph);
     if (!graph_changed) break;
   }
