@@ -31,13 +31,6 @@ namespace {
 std::set<string> GetOpsWithUnchangedShape() {
   std::set<string> ops_with_unchanged_shape = {
       "BiasAdd",
-      "Relu"};
-  return ops_with_unchanged_shape;
-}
-
-std::set<string> GetUnaryOps() {
-  std::set<string> ops_with_unchanged_shape = {
-      "Softmax",
       "Sigmoid",
       "Tanh",
       "Relu"};
@@ -1398,6 +1391,15 @@ bool FuseMatMulsAfterUnpack(Graph* graph) {
   return changed;
 }
 
+std::set<string> GetUnaryOps() {
+  std::set<string> ops = {
+      "Softmax",
+      "Sigmoid",
+      "Tanh",
+      "Relu"};
+  return ops;
+}
+
 bool ReorderUnaryOpAndUnpack(Graph* graph) {
   LOG(INFO) << "ReorderUnaryOpAndUnpack";
   bool changed = false;
@@ -1458,6 +1460,105 @@ bool ReorderUnaryOpAndUnpack(Graph* graph) {
   return changed;
 }
 
+std::set<string> GetBinaryOps() {
+  std::set<string> ops = {
+      "Add",
+      "Sub",
+      "Mul"};
+  return ops;
+}
+
+bool ReorderBinaryOpAndUnpack(Graph* graph) {
+  LOG(INFO) << "ReorderBinaryOpAndUnpack";
+  bool changed = false;
+
+  std::vector<Node*> nodes(graph->num_nodes());
+  int i = 0;
+  for (Node* node : graph->nodes()) {
+    nodes[i++] = node;
+  }
+
+  std::set<string> binary_op_set = GetBinaryOps();
+  for (Node* node : nodes) {
+    if (!graph->IsValidNode(node).ok()) continue;
+    if (node->type_string() != "Unpack") continue;
+    Node* unpack = node;
+    std::vector<Node*> binary_ops;
+
+    string binary_type;
+    Node* another_input = nullptr;
+    int another_src_output = -1;
+    int unpack_dst_input = -1;
+    bool can_reorder = true;
+
+    // To fuse, all candidates must
+    // (1) be a binary op listed in binary_op_set,
+    // (2) have the same op type, and
+    // (3) have the same inputs (other than inputs from unpack).
+    for (Node* out : unpack->out_nodes()) {
+      if (binary_type.empty()) {
+        binary_type = out->type_string();
+        if (binary_op_set.find(binary_type) == binary_op_set.end()) {
+          can_reorder = false;
+          break;
+        }
+        for (const Edge* e : out->in_edges()) {
+          if (e->src() == unpack) {
+            unpack_dst_input = e->dst_input();
+            continue;
+          }
+          another_input = e->src();
+          another_src_output = e->src_output();
+        }
+      }
+      // check conditions (1) and (2)
+      if (out->type_string() != binary_type ||
+          another_input == nullptr) {
+        can_reorder = false;
+        break;
+      }
+      // check condition (3)
+      for (const Edge* e : out->in_edges()) {
+        if (e->src() == unpack) continue;
+        if (e->src() != another_input ||
+            e->src_output() != another_src_output) {
+          can_reorder = false;
+          break;
+        }
+      }
+
+      if (!can_reorder) break;
+      binary_ops.push_back(out);
+    }
+
+    if (!can_reorder || binary_ops.size() < 2) continue;
+    LOG(INFO) << "ReorderBinaryOpAndUnpack: found pattern";
+    int index = 0;
+    for (Node* b : binary_ops) {
+      std::vector<Node*> dst_nodes;
+      std::vector<int> dst_inputs;
+      for (const Edge* e : b->out_edges()) {
+        dst_nodes.push_back(e->dst());
+        dst_inputs.push_back(e->dst_input());
+      }
+      int num = dst_nodes.size();
+      for (int i = 0; i < num; i++) {
+        graph->UpdateEdge(unpack, index, dst_nodes[i], dst_inputs[i]);
+      }
+      if (index != 0) graph->RemoveNode(b);
+      index++;
+    }
+    const Edge* to_unpack = nullptr;
+    unpack->input_edge(0, &to_unpack);
+    graph->UpdateEdge(to_unpack->src(), to_unpack->src_output(),
+                      binary_ops[0], unpack_dst_input);
+    graph->UpdateEdge(binary_ops[0], 0, unpack, 0);
+    changed = true;
+  }
+
+  return changed;
+}
+
 void FuseGemmKernels(Graph* graph) {  
   while(1) {
     bool graph_changed =
@@ -1470,7 +1571,8 @@ void FuseGemmKernels(Graph* graph) {
         FuseMatMulsAfterUnpack(graph) ||
         ReorderTransposeAndUnpack(graph) ||
         RemoveUnpackBeforeShape(graph) ||
-        ReorderUnaryOpAndUnpack(graph);
+        ReorderUnaryOpAndUnpack(graph) ||
+        ReorderBinaryOpAndUnpack(graph);
         // RemoveUnpackPackPairs(graph);
     if (!graph_changed) break;
   }
