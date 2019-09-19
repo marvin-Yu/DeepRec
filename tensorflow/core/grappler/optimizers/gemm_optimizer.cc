@@ -326,20 +326,15 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
     std::vector<Node*> biasadds;
     std::vector<Node*> biases;
     bool can_fuse = true;
-    LOG(INFO) << "node->DebugString(): " << node->DebugString();
     for (Node* out : node->out_nodes()) {
-      LOG(INFO) << "out->DebugString(): " << out->DebugString();
       if (out->type_string() != "BiasAdd") {
-        LOG(INFO) << "out->type_string(): " << out->type_string();
         can_fuse = false;
         break;
       }
-      LOG(INFO) << "out->DebugString(): " << out->DebugString();
       biasadds.push_back(out);
       Node* bias = nullptr;
       out->input_node(1, &bias);
       biases.push_back(bias);
-      LOG(INFO) << "out->DebugString(): " << out->DebugString();
     }
     if (!can_fuse || biases.size() < 2) continue;
 
@@ -788,6 +783,150 @@ bool ReorderReshapeAndUnpack(Graph* graph) {
       index++;
     }
     changed= true;
+  }
+  return changed;
+}
+
+bool RemoveUnpackBeforeShape(Graph* graph) {
+  static int count = 0;
+  LOG(INFO) << "RemoveUnpackBeforeShape";
+  bool changed = false;
+
+  std::vector<Node*> nodes(graph->num_nodes());
+  int i = 0;
+  for (Node* node : graph->nodes()) {
+    nodes[i++] = node;
+  }
+
+  for (Node* node : nodes) {
+    if (!graph->IsValidNode(node).ok()) continue;
+    if (node->type_string() != "Shape") continue;
+    Node* unpack = nullptr;
+    node->input_node(0, &unpack);
+    if (unpack->type_string() != "Unpack") continue;
+    LOG(INFO) << "RemoveUnpackBeforeShape: found pattern";
+
+    // Add a new Shape to get the shape of Unpack's input
+    const Edge* to_unpack = nullptr;
+    unpack->input_edge(0, &to_unpack);
+    int src_output = to_unpack->src_output();
+    Node* unpack_in = to_unpack->src();
+    string prefix = "GemmOptimizer/RemoveUnpackBeforeShape/" +
+                    std::to_string(count++);
+    string shape_name = prefix + "/Shape";
+    NodeDefBuilder::NodeOut shape_input(unpack_in->name(), src_output,
+                                        unpack->input_type(0));
+    NodeDefBuilder shape_builder(shape_name, "Shape");
+    shape_builder.Input(shape_input);
+    NodeDef shape_node;
+    DataType shape_dtype = node->output_type(0);
+    Status status =
+        shape_builder
+            .Attr("T", unpack->input_type(0))
+            .Attr("out_type", shape_dtype)
+            .Finalize(&shape_node);
+    if (!status.ok()) {
+      LOG(ERROR) << "Shape node construction failed with" << status;
+      return false;
+    }
+    shape_node.set_device(node->def().device());
+    Node* shape = graph->AddNode(shape_node, &status);
+    shape->set_assigned_device_name(node->assigned_device_name());
+    if (!status.ok()) {
+      LOG(ERROR) << "Adding node failed " << status;
+      return false;
+    }
+    graph->AddEdge(unpack_in, src_output, shape, 0);
+ 
+    string slice_name = prefix + "/Slice";
+    string one_name = prefix + "Slice/one";
+    string minus_one_name = prefix + "Slice/minus_one";
+
+    NodeDefBuilder one_builder(one_name, "Const");
+    NodeDef one_node;
+    Tensor t_one(DT_INT32, TensorShape({1}));
+    auto one_data = t_one.tensor<int, 1>();
+    one_data(0) = 1;
+    status =
+        one_builder
+            .Attr("dtype", t_one.dtype())
+            .Attr("value", t_one)
+            .Finalize(&one_node);
+    if (!status.ok()) {
+      LOG(ERROR) << "Const node construction failed with" << status;
+      return false;
+    }
+    one_node.set_device(node->def().device());
+    Node* one = graph->AddNode(one_node, &status);
+    one->set_assigned_device_name(node->assigned_device_name());
+    if (!status.ok()) {
+      LOG(ERROR) << "Adding node failed " << status;
+      return false;
+    }
+
+    NodeDefBuilder minus_one_builder(minus_one_name, "Const");
+    NodeDef minus_one_node;
+    Tensor t_minus_one(DT_INT32, TensorShape({1}));
+    auto minus_one_data = t_minus_one.tensor<int, 1>();
+    minus_one_data(0) = -1;
+    status =
+        minus_one_builder
+            .Attr("dtype", t_minus_one.dtype())
+            .Attr("value", t_minus_one)
+            .Finalize(&minus_one_node);
+    if (!status.ok()) {
+      LOG(ERROR) << "Const node construction failed with" << status;
+      return false;
+    }
+    minus_one_node.set_device(node->def().device());
+    Node* minus_one = graph->AddNode(minus_one_node, &status);
+    minus_one->set_assigned_device_name(node->assigned_device_name());
+    if (!status.ok()) {
+      LOG(ERROR) << "Adding node failed " << status;
+      return false;
+    }
+
+    std::vector<NodeDefBuilder::NodeOut> slice_inputs;
+    slice_inputs.emplace_back(shape_name, 0, shape_dtype);
+    slice_inputs.emplace_back(one_name, 0, t_one.dtype());
+    slice_inputs.emplace_back(minus_one_name, 0, t_minus_one.dtype());
+    NodeDefBuilder slice_builder(slice_name, "Slice");
+    slice_builder.Input(slice_inputs[0]);
+    slice_builder.Input(slice_inputs[1]);
+    slice_builder.Input(slice_inputs[2]);
+    NodeDef slice_node;
+    status =
+        slice_builder
+            .Attr("T", shape_dtype)
+            .Finalize(&slice_node);
+    if (!status.ok()) {
+      LOG(ERROR) << "Slice node construction failed with" << status;
+      return false;
+    }
+    slice_node.set_device(node->def().device());
+    Node* slice = graph->AddNode(slice_node, &status);
+    slice->set_assigned_device_name(node->assigned_device_name());
+    if (!status.ok()) {
+      LOG(ERROR) << "Adding node failed " << status;
+      return false;
+    }
+    graph->AddEdge(shape, 0, slice, 0);
+    graph->AddEdge(one, 0, slice, 1);
+    graph->AddEdge(minus_one, 0, slice, 2);
+
+    std::vector<Node*> dst_nodes;
+    std::vector<int> dst_inputs;
+    for (const Edge* e : node->out_edges()) {
+      dst_nodes.push_back(e->dst());
+      dst_inputs.push_back(e->dst_input());
+    }
+    int num = dst_nodes.size();
+    for (int i = 0; i < num; i++) {
+      graph->UpdateEdge(slice, 0, dst_nodes[i], dst_inputs[i]);
+    }
+    graph->RemoveNode(node);
+
+    changed = true;
   }
   return changed;
 }
@@ -1260,7 +1399,8 @@ void FuseGemmKernels(Graph* graph) {
         RemoveShapeAfterReshape(graph) ||
         ReorderReshapeAndUnpack(graph) ||
         FuseMatMulsAfterUnpack(graph) ||
-        ReorderTransposeAndUnpack(graph);
+        ReorderTransposeAndUnpack(graph) ||
+        RemoveUnpackBeforeShape(graph);
         // RemoveUnpackPackPairs(graph);
     if (!graph_changed) break;
   }
