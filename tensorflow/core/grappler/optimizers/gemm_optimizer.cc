@@ -1179,7 +1179,8 @@ bool FuseMatMulsAfterUnpack(Graph* graph) {
     bool another_input_from_consts = true;
     for (Node* out : node->out_nodes()) {
       string out_type = out->type_string();
-      if (out_type == "MatMul" ||
+      if (out_type == "Mul" ||
+          out_type == "MatMul" ||
           out_type == "BatchMatMul" ||
           out_type == "BatchMatMulV2") {
         matmuls.push_back(out);
@@ -1301,29 +1302,49 @@ bool FuseMatMulsAfterUnpack(Graph* graph) {
         }
       }
       // Add a new BatchMatMulV2
-      string matmul_name = prefix + "/BatchMatMulV2";
       std::vector<NodeDefBuilder::NodeOut> matmul_inputs;
       matmul_inputs.emplace_back(pack_names[0], 0, dtype);
       matmul_inputs.emplace_back(pack_names[1], 0, dtype);
-      NodeDefBuilder matmul_builder(matmul_name, "BatchMatMulV2");
+      string matmul_name = prefix;
+      string type = (*matmuls_group)[0]->type_string();
+      string new_type;
+      if (type == "MatMul" ||
+          type == "BatchMatMul" ||
+          type == "BatchMatMulV2") {
+        matmul_name += "/BatchMatMulV2";
+        new_type = "BatchMatMulV2";
+      } else {
+        matmul_name += "/" + type;
+        new_type = type;
+      }
+      NodeDefBuilder matmul_builder(matmul_name, new_type);
       matmul_builder.Input(matmul_inputs[0]);
       matmul_builder.Input(matmul_inputs[1]);
       NodeDef matmul_node;
       bool transpose_a = false;
       bool transpose_b = false;
-      if ((*matmuls_group)[0]->type_string() == "MatMul") {
+      if (type == "MatMul") {
         transpose_a = (*matmuls_group)[0]->def().attr().at("transpose_a").b();
         transpose_b = (*matmuls_group)[0]->def().attr().at("transpose_b").b();
-      } else {
+      } else if (type == "BatchMatMul" || type == "BatchMatMulV2") {
         transpose_a = (*matmuls_group)[0]->def().attr().at("adj_x").b();
         transpose_b = (*matmuls_group)[0]->def().attr().at("adj_y").b();
       }
-      status =
-          matmul_builder
-              .Attr("adj_x", transpose_a)
-              .Attr("adj_y", transpose_b)
-              .Attr("T", dtype)
-              .Finalize(&matmul_node);
+      if (type == "MatMul" ||
+          type == "BatchMatMul" ||
+          type == "BatchMatMulV2") {
+        status =
+            matmul_builder
+                .Attr("adj_x", transpose_a)
+                .Attr("adj_y", transpose_b)
+                .Attr("T", dtype)
+                .Finalize(&matmul_node);
+      } else {
+        status =
+            matmul_builder
+                .Attr("T", dtype)
+                .Finalize(&matmul_node);
+      }
       if (!status.ok()) {
         LOG(ERROR) << "BatchMatMulV2 node construction failed with" << status;
         return false;
@@ -1387,7 +1408,7 @@ bool FuseMatMulsAfterUnpack(Graph* graph) {
       iter++;
     }
   }
-  
+ 
   return changed;
 }
 
