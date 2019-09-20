@@ -1258,9 +1258,9 @@ Status DirectSession::RecordCUDAGraph(
   if (ret != CUDA_SUCCESS) {
     const char* error;
     cuGetErrorString(ret, &error);
-    VLOG(2) << "Cannot get number of nodes for CUDA Graph " << *cuda_graph;
+    VLOG(2) << "Cannot get the number of nodes for CUDA Graph " << *cuda_graph;
   } else {
-    VLOG(2) << "Number of nodes in captured CUDA Graph is " << n;
+    VLOG(2) << "Number of nodes in the captured CUDA Graph is " << n;
   }
   std::vector<char> error_buf(1024);
   ret = cuGraphInstantiate(&cuda_graph_context->cuda_graph_exec, *cuda_graph,
