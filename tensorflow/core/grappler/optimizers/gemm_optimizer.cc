@@ -337,12 +337,18 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
       }
       biasadds.push_back(out);
     }
+    // TODO(ylxu): check that each output of Unpack is used only once
     if (!can_fuse || biasadds.size() < 2) continue;
 
     VLOG(1) << "FuseBiasAdds: found pattern";
     std::sort(biasadds.begin(), biasadds.end(),
               [node](Node* a, Node* b){
-      return a->name().compare(b->name()) < 0;
+      const Edge* e = nullptr;
+      a->input_edge(0, &e);
+      int a_src_output = e->src_output();
+      b->input_edge(0, &e);
+      int b_src_output = e->src_output();
+      return a_src_output < b_src_output;
     });
     std::vector<Node*> biases;
     for (Node* n : biasadds) {
@@ -496,9 +502,7 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
         out_nodes.push_back(e->dst());
         dst_inputs.push_back(e->dst_input());
       }
-      int num = out_nodes.size();
-      for (int i = 0; i < num; i++) {
-        // TODO(ylxu): has bug, should not use index
+      for (int i = 0; i < out_nodes.size(); i++) {
         graph->UpdateEdge(unpack, index, out_nodes[i], dst_inputs[i]);
       }
       graph->RemoveNode(b);
@@ -782,7 +786,6 @@ bool ReorderReshapeAndUnpack(Graph* graph) {
     graph->AddEdge(concat, 0, reshape, 1);
  
     graph->UpdateEdge(reshape, 0, unpack, 0);
-    int index = 0;
     for (Node* r : reshapes) {
       std::vector<Node*> dst_nodes;
       std::vector<int> dst_inputs;
@@ -790,12 +793,13 @@ bool ReorderReshapeAndUnpack(Graph* graph) {
         dst_nodes.push_back(e->dst());
         dst_inputs.push_back(e->dst_input());
       }
-      int num = dst_nodes.size();
-      for (int i = 0; i < num; i++) {
-        graph->UpdateEdge(unpack, index, dst_nodes[i], dst_inputs[i]);
+      const Edge* e = nullptr;
+      r->input_edge(0, &e);
+      int src_output = e->src_output();
+      for (int i = 0; i < dst_nodes.size(); i++) {
+        graph->UpdateEdge(unpack, src_output, dst_nodes[i], dst_inputs[i]);
       }
       graph->RemoveNode(r);
-      index++;
     }
     changed= true;
   }
@@ -1151,7 +1155,6 @@ bool ReorderTransposeAndUnpack(Graph* graph) {
     graph->AddEdge(concat, 0, transpose, 1);
  
     graph->UpdateEdge(transpose, 0, unpack, 0);
-    int index = 0;
     for (Node* t : transposes) {
       std::vector<Node*> dst_nodes;
       std::vector<int> dst_inputs;
@@ -1160,11 +1163,13 @@ bool ReorderTransposeAndUnpack(Graph* graph) {
         dst_inputs.push_back(e->dst_input());
       }
       int num = dst_nodes.size();
+      const Edge* e = nullptr;
+      t->input_edge(0, &e);
+      int src_output = e->src_output();
       for (int i = 0; i < num; i++) {
-        graph->UpdateEdge(unpack, index, dst_nodes[i], dst_inputs[i]);
+        graph->UpdateEdge(unpack, src_output, dst_nodes[i], dst_inputs[i]);
       }
       graph->RemoveNode(t);
-      index++;
     }
     changed= true;
   }
@@ -1255,7 +1260,12 @@ bool FuseMatMulsAfterUnpack(Graph* graph) {
       if (matmuls_group->size() < 2) continue;
       std::sort(matmuls_group->begin(), matmuls_group->end(),
                 [node](Node* a, Node* b){
-        return a->name().compare(b->name()) < 0;
+        const Edge* e = nullptr;
+        a->input_edge(0, &e);
+        int a_src_output = e->src_output();
+        b->input_edge(0, &e);
+        int b_src_output = e->src_output();
+        return a_src_output < b_src_output;
       });
       std::vector<const Edge*> inputs[2];
       VLOG(1) << "the following ops are fused: ";
@@ -1400,8 +1410,7 @@ bool FuseMatMulsAfterUnpack(Graph* graph) {
           dst_nodes.push_back(e->dst());
           dst_inputs.push_back(e->dst_input());
         }
-        int num = dst_nodes.size();
-        for (int i = 0; i < num; i++) {
+        for (int i = 0; i < dst_nodes.size(); i++) {
           // TODO(ylxu): has bug, should not use index
           graph->UpdateEdge(unpack, index, dst_nodes[i], dst_inputs[i]);
         }
@@ -1463,7 +1472,7 @@ bool ReorderUnaryOpAndUnpack(Graph* graph) {
     }
     if (!can_reorder || unary_ops.size() < 2) continue;
     VLOG(1) << "ReorderUnaryOpAndUnpack: found pattern";
-    int index = 0;
+    bool is_first = true;
     for (Node* u : unary_ops) {
       std::vector<Node*> dst_nodes;
       std::vector<int> dst_inputs;
@@ -1472,11 +1481,16 @@ bool ReorderUnaryOpAndUnpack(Graph* graph) {
         dst_inputs.push_back(e->dst_input());
       }
       int num = dst_nodes.size();
+      const Edge* e = nullptr;
+      u->input_edge(0, &e);
+      int src_output = e->src_output();
       for (int i = 0; i < num; i++) {
-        graph->UpdateEdge(unpack, index, dst_nodes[i], dst_inputs[i]);
+        graph->UpdateEdge(unpack, src_output, dst_nodes[i], dst_inputs[i]);
       }
-      if (index != 0) graph->RemoveNode(u);
-      index++;
+      if (is_first) {
+        graph->RemoveNode(u);
+        is_first = false;
+      }
     }
     const Edge* to_unpack = nullptr;
     unpack->input_edge(0, &to_unpack);
@@ -1563,9 +1577,10 @@ bool ReorderBinaryOpAndUnpack(Graph* graph) {
       binary_ops.push_back(out);
     }
 
+    // TODO(ylxu): check that each output of Unpack is used only once
     if (!can_reorder || binary_ops.size() < 2) continue;
     VLOG(1) << "ReorderBinaryOpAndUnpack: found pattern";
-    int index = 0;
+    bool is_first = true;
     for (Node* b : binary_ops) {
       std::vector<Node*> dst_nodes;
       std::vector<int> dst_inputs;
@@ -1574,11 +1589,17 @@ bool ReorderBinaryOpAndUnpack(Graph* graph) {
         dst_inputs.push_back(e->dst_input());
       }
       int num = dst_nodes.size();
+      const Edge* e = nullptr;
+      b->input_edge(unpack_dst_input, &e);
+      int src_output = e->src_output();
       for (int i = 0; i < num; i++) {
-        graph->UpdateEdge(unpack, index, dst_nodes[i], dst_inputs[i]);
+        graph->UpdateEdge(unpack, src_output,
+                          dst_nodes[i], dst_inputs[i]);
       }
-      if (index != 0) graph->RemoveNode(b);
-      index++;
+      if (is_first) {
+        graph->RemoveNode(b);
+        is_first = false;
+      }
     }
     const Edge* to_unpack = nullptr;
     unpack->input_edge(0, &to_unpack);
