@@ -186,8 +186,8 @@ static bool SendingGPUToCPU(const Node* node) {
   return IsTransfering(node, "_Send", "GPU", "CPU");
 }
 
-static bool SendingCPUToGPU(const Node* node) {
-  return IsTransfering(node, "_Send", "CPU", "GPU");
+static bool RecvingCPUToGPU(const Node* node) {
+  return IsTransfering(node, "_Recv", "CPU", "GPU");
 }
 
 class ExecutorImpl;
@@ -1919,8 +1919,8 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
             ok = status_.ok();
           }
           if (cuda_graph_ && ok && IsGPU(device) && state->ctx.status().ok()) {
-            auto node_type = state->tagged_node.node->type_string();
-            if (node_type == "_Recv") {
+            auto node = state->tagged_node.node;
+            if (RecvingCPUToGPU(node)) {
 
               auto name = state->tagged_node.node->name();
               auto real_name = ProcessInputName(name);
@@ -1938,7 +1938,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
                     stream->implementation()->GpuStreamHack());
                 state->ctx.SetStatus(BeginStreamCapture(cu_stream));
               }
-            } else if (node_type == "_HostRecv") {
+            } else if (node->type_string() == "_HostRecv") {
               auto st = errors::Internal("_HostRecv is not supported");
               state->ctx.SetStatus(st);
             }
@@ -2022,7 +2022,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
           s = Status::OK();
 #ifdef GOOGLE_CUDA
           if (cuda_graph_ && IsGPU(device)) {
-            if (SendingCPUToGPU(node)) {
+            if (SendingGPUToCPU(node)) {
               auto name = node->name();
               auto real_name = ProcessOutputName(name);
               auto tensor = const_cast<Tensor*>(&ctx.input(0));
