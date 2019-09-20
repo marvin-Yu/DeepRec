@@ -161,6 +161,35 @@ static string ProcessOutputName(const string& name) {
   return (idx == string::npos ? name : name.substr(0, idx)) + ":0";
 }
 
+static bool DeviceMatch(const string& type, const string& name) {
+  auto parts = str_util::Split(name, ":");
+  return parts.size() > 1 && parts[parts.size() - 2] == type;
+}
+
+static bool IsTransfering(const Node* node, const string& type,
+                          const string& src, const string& dst) {
+  string src_1, dst_1;
+  auto st = GetNodeAttr(node->attrs(), "send_device", &src_1);
+  if (!st.ok()) {
+    return false;
+  }
+  st = GetNodeAttr(node->attrs(), "recv_device", &dst_1);
+  if (!st.ok()) {
+    return false;
+  }
+  return (node->type_string() == type
+          && DeviceMatch(src, src_1)
+          && DeviceMatch(dst, dst_1));
+}
+
+static bool SendingGPUToCPU(const Node* node) {
+  return IsTransfering(node, "_Send", "GPU", "CPU");
+}
+
+static bool SendingCPUToGPU(const Node* node) {
+  return IsTransfering(node, "_Send", "CPU", "GPU");
+}
+
 class ExecutorImpl;
 class GraphView;
 
@@ -1765,8 +1794,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
     s = Status::OK();
 #ifdef GOOGLE_CUDA
     if (cuda_graph_ && IsGPU(device)) {
-      auto node_type = node->type_string();
-      if (node_type == "_Send") {
+      if (SendingGPUToCPU(node)) {
         bool ok;
         {
           mutex_lock l(mu_);
@@ -1780,7 +1808,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
           auto cuda_graph = static_cast<CUgraph*>(cuda_graph_);
           s = EndStreamCapture(cu_stream, cuda_graph);
         }
-      } else if (node_type == "_HostSend") {
+      } else if (node->type_string() == "_HostSend") {
         s = errors::Internal("_HostSend is not supported");
       }
     }
@@ -1991,7 +2019,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
           s = Status::OK();
 #ifdef GOOGLE_CUDA
           if (cuda_graph_ && IsGPU(device)) {
-            if (node->type_string() == "_Send") {
+            if (SendingCPUToGPU(node)) {
               auto name = node->name();
               auto real_name = ProcessOutputName(name);
               auto tensor = const_cast<Tensor*>(&ctx.input(0));
