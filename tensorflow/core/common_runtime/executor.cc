@@ -1423,6 +1423,11 @@ class ExecutorState {
                          int64 input_iter) const NO_THREAD_SAFETY_ANALYSIS {
     return input_frame->GetIteration(input_iter)->input_tensors;
   }
+
+#ifdef GOOGLE_CUDA
+  Status BeginStreamCapture(CUstream stream);
+  Status EndStreamCapture(CUstream stream, CUgraph* cuda_graph);
+#endif
 };
 
 ExecutorState::ExecutorState(const Executor::Args& args, ExecutorImpl* impl)
@@ -1585,9 +1590,13 @@ void ExecutorState::RunAsync(Executor::DoneCallback done) {
   if (cuda_graph_ && IsGPU(device)) {
     int n = 0;
     for (auto node: graph->nodes()) {
-      // No _HostRecv here
-      if (node->type_string() == "_Recv") {
+      auto node_type = node->type_string();
+      if (node_type == "_Recv") {
         n++;
+      } else if (node_type == "_HostRecv") {
+        delete this;
+        done(errors::Internal("_HostRecv is not supported"));
+        return;
       }
     }
     num_outstanding_recv_ops_ = n;
@@ -1755,29 +1764,24 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
 
     s = Status::OK();
 #ifdef GOOGLE_CUDA
-    if (cuda_graph_
-        && IsGPU(device)
-        // No _HostSend here
-        && node->type_string() == "_Send") {
-      bool ok;
-      {
-        mutex_lock l(mu_);
-        ok = status_.ok();
-      }
-      if (ok) {
-        auto stream =
-          device->tensorflow_gpu_device_info()->default_context->stream();
-        auto cu_stream =
-          static_cast<CUstream>(stream->implementation()->GpuStreamHack());
-        auto cuda_graph = static_cast<CUgraph*>(cuda_graph_);
-        VLOG(2) << "Ending the capture of stream " << cu_stream;
-        auto ret = cuStreamEndCapture(cu_stream, cuda_graph);
-        if (ret != CUDA_SUCCESS) {
-          const char* error;
-          cuGetErrorString(ret, &error);
-          s = errors::Internal(
-            "Cannot end to capture stream ", cu_stream, ": ", error);
+    if (cuda_graph_ && IsGPU(device)) {
+      auto node_type = node->type_string();
+      if (node_type == "_Send") {
+        bool ok;
+        {
+          mutex_lock l(mu_);
+          ok = status_.ok();
         }
+        if (ok) {
+          auto stream =
+            device->tensorflow_gpu_device_info()->default_context->stream();
+          auto cu_stream =
+            static_cast<CUstream>(stream->implementation()->GpuStreamHack());
+          auto cuda_graph = static_cast<CUgraph*>(cuda_graph_);
+          s = EndStreamCapture(cu_stream, cuda_graph);
+        }
+      } else if (node_type == "_HostSend") {
+        s = errors::Internal("_HostSend is not supported");
       }
     }
 #endif
@@ -1883,37 +1887,29 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
             mutex_lock l(mu_);
             ok = status_.ok();
           }
-          if (cuda_graph_
-              && ok
-              && IsGPU(device)
-              && state->ctx.status().ok()
-              // No _HostRecv here
-              && state->tagged_node.node->type_string() == "_Recv") {
+          if (cuda_graph_ && ok && IsGPU(device) && state->ctx.status().ok()) {
+            auto node_type = state->tagged_node.node->type_string();
+            if (node_type == "_Recv") {
 
-            auto name = state->tagged_node.node->name();
-            auto real_name = ProcessInputName(name);
-            auto tensor = state->ctx.mutable_output(0);
-            VLOG(2) << "Saving input " << real_name << " (" << tensor << ")";
-            save_input_(real_name, tensor);
+              auto name = state->tagged_node.node->name();
+              auto real_name = ProcessInputName(name);
+              auto tensor = state->ctx.mutable_output(0);
+              VLOG(2) << "Saving input " << real_name << " (" << name << ")";
+              save_input_(real_name, tensor);
 
-            auto left = --num_outstanding_recv_ops_;
-            VLOG(2) << "Number of outstanding _Recv operations: " << left;
-            if (left == 0) {
-              auto stream =
-                device->tensorflow_gpu_device_info()->default_context->stream();
-              auto cu_stream =
-                static_cast<CUstream>(
-                  stream->implementation()->GpuStreamHack());
-              VLOG(2) << "Beginning the capture of stream " << cu_stream;
-              auto ret =
-                cuStreamBeginCapture(cu_stream, CU_STREAM_CAPTURE_MODE_RELAXED);
-              if (ret != CUDA_SUCCESS) {
-                const char* error;
-                cuGetErrorString(ret, &error);
-                state->ctx.SetStatus(
-                  errors::Internal(
-                    "Cannot begin to capture stream ", cu_stream, ": ", error));
+              auto left = --num_outstanding_recv_ops_;
+              VLOG(2) << "Number of outstanding _Recv operations: " << left;
+              if (left == 0) {
+                auto stream = device->tensorflow_gpu_device_info()
+                                    ->default_context->stream();
+                auto cu_stream =
+                  static_cast<CUstream>(
+                    stream->implementation()->GpuStreamHack());
+                state->ctx.SetStatus(BeginStreamCapture(cu_stream));
               }
+            } else if (node_type == "_HostRecv") {
+              auto st = errors::Internal("_HostRecv is not supported");
+              state->ctx.SetStatus(st);
             }
           }
 #endif
@@ -1992,26 +1988,32 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
           tracing::ScopedAnnotation annotation(kernel_label);
           device->Compute(op_kernel, &ctx);
         } else {
+          s = Status::OK();
 #ifdef GOOGLE_CUDA
-          if (cuda_graph_
-              && IsGPU(device)
-              // No _HostSend here
-              && node->type_string() == "_Send") {
-            auto name = node->name();
-            auto real_name = ProcessOutputName(name);
-            auto tensor = const_cast<Tensor*>(&ctx.input(0));
-            VLOG(2) << "Saving result " << real_name << " (" << tensor << ")";
-            save_output_(real_name, tensor);
+          if (cuda_graph_ && IsGPU(device)) {
+            if (node->type_string() == "_Send") {
+              auto name = node->name();
+              auto real_name = ProcessOutputName(name);
+              auto tensor = const_cast<Tensor*>(&ctx.input(0));
+              VLOG(2) << "Saving result " << real_name << " (" << name << ")";
+              save_output_(real_name, tensor);
+            } else if (node->type_string() == "_HostSend") {
+              s = errors::Internal("_HostSend is not supported");
+            }
           }
 #endif
 
-          // In the common case, avoid creating any tracing objects.
-          if (op_kernel->IsExpensive()) {
-            KernelTimer timer;
-            device->Compute(op_kernel, &ctx);
-            op_kernel->UpdateCostEstimate(timer.ElapsedCycles());
+          if (s.ok()) {
+            // In the common case, avoid creating any tracing objects.
+            if (op_kernel->IsExpensive()) {
+              KernelTimer timer;
+              device->Compute(op_kernel, &ctx);
+              op_kernel->UpdateCostEstimate(timer.ElapsedCycles());
+            } else {
+              device->Compute(op_kernel, &ctx);
+            }
           } else {
-            device->Compute(op_kernel, &ctx);
+            ctx.SetStatus(s);
           }
         }
 
@@ -2845,6 +2847,45 @@ void ExecutorState::CleanupFramesIterations(FrameState* frame, int64 iter,
     }
   }
 }
+
+#ifdef GOOGLE_CUDA
+Status ExecutorState::BeginStreamCapture(CUstream stream) {
+  VLOG(2) << "Beginning the capture of stream " << stream;
+  auto ret = cuStreamBeginCapture(stream, CU_STREAM_CAPTURE_MODE_RELAXED);
+  if (ret != CUDA_SUCCESS) {
+    const char* error;
+    cuGetErrorString(ret, &error);
+    return errors::Internal(
+      "Cannot begin to capture stream ", stream, ": ", error);
+  }
+  return Status::OK();
+}
+
+Status ExecutorState::EndStreamCapture(CUstream stream, CUgraph* cuda_graph) {
+  CUstreamCaptureStatus capture_status;
+  cuuint64_t id;
+  auto ret = cuStreamGetCaptureInfo(stream, &capture_status, &id);
+  if (ret != CUDA_SUCCESS) {
+    return errors::Internal("Cannot get capture status of stream ", stream);
+  }
+
+  if (capture_status != CU_STREAM_CAPTURE_STATUS_ACTIVE) {
+    return errors::Internal("Stream ", stream, " is not in capture status (",
+                            capture_status, ")");
+  }
+
+  VLOG(2) << "Ending the capture of stream " << stream;
+  ret = cuStreamEndCapture(stream, cuda_graph);
+  if (ret != CUDA_SUCCESS) {
+    const char* error;
+    cuGetErrorString(ret, &error);
+    return errors::Internal(
+      "Cannot end to capture stream ", stream, ": ", error);
+  }
+
+  return Status::OK();
+}
+#endif
 
 void ExecutorState::FrameState::ActivateNodes(const NodeItem* item,
                                               const bool is_dead, int64 iter,

@@ -1248,10 +1248,11 @@ Status DirectSession::RecordCUDAGraph(
     cuGetErrorString(ret, &error);
     return errors::Internal("Failed to create CUDA Graph object: ", error);
   }
-  auto st = Run0(run_options, inputs, output_names, target_nodes,
-                 outputs, run_metadata, cuda_graph_context,
-                 persistent_allocator, cuda_graph,
-                 &cuda_graph_context->inputs, &cuda_graph_context->outputs);
+  TF_RETURN_IF_ERROR(Run0(run_options, inputs, output_names, target_nodes,
+                          outputs, run_metadata, cuda_graph_context,
+                          persistent_allocator, cuda_graph,
+                          &cuda_graph_context->inputs,
+                          &cuda_graph_context->outputs));
   size_t n;
   ret = cuGraphGetNodes(*cuda_graph, nullptr, &n);
   if (ret != CUDA_SUCCESS) {
