@@ -285,7 +285,7 @@ OpKernelContext::OpKernelContext(Params* params, int num_outputs)
       persistent_memory_allocated_(0) {
   params_->ensure_eigen_gpu_device();
   if (params_->eigen_gpu_device != nullptr) {
-    bool invalid = false;
+    bool status_set = false;
     Allocator* eigen_gpu_allocator;
     Status s = get_allocator((params_->allocator_attributes
                               ? *params_->allocator_attributes
@@ -293,12 +293,12 @@ OpKernelContext::OpKernelContext(Params* params, int num_outputs)
                              &eigen_gpu_allocator);
     if (!s.ok()) {
       SetStatus(s);
-      invalid = true;
+      status_set = true;
     }
     s = params_->device->ReinitializeGpuDevice(
         this, params_->eigen_gpu_device, params_->op_device_context,
         eigen_gpu_allocator);
-    if (!invalid && !s.ok()) {
+    if (!status_set && !s.ok()) {
       SetStatus(s);
     }
   }
