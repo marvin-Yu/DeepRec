@@ -139,7 +139,7 @@ bool ReorderReshapeAndBiasAdd(Graph* graph) {
 //       ...
 bool FuseMatMuls(Graph* graph) {
   static int count = 0;
-  LOG(INFO) << "FuseMatMuls";
+  VLOG(1) << "FuseMatMuls";
   bool changed = false;
 
   std::vector<Node*> nodes(graph->num_nodes());
@@ -173,19 +173,21 @@ bool FuseMatMuls(Graph* graph) {
       if (src_outputs[i] != src_outputs[0]) same_input = false;
     }
     if (!same_input) {
-      LOG(INFO) << "Op->MatMuls*n does not have the same input, skip fusion.";
+      VLOG(1) << "Op->MatMuls*n does not have the same input, skip fusion.";
       continue;
     }
     // TODO(ylxu): check the compatibility of shapes (weights)
     // and attrs (transpose_a and transpose_b).
 
-    LOG(INFO) << "FuseMatMuls: found pattern";
+    VLOG(1) << "FuseMatMuls: found pattern";
     std::sort(matmuls.begin(), matmuls.end(),
               [node](Node* a, Node* b){
       return a->name().compare(b->name()) < 0;
     });
     std::vector<Node*> weights;
+    VLOG(1) << "the following ops are fused: ";
     for (Node* m : matmuls) {
+      VLOG(1) << m->name();
       Node* w = nullptr;
       m->input_node(1, &w);
       weights.push_back(w);
@@ -214,11 +216,11 @@ bool FuseMatMuls(Graph* graph) {
     }
     pack_node.set_device(weights[0]->def().device());
     Node* pack = graph->AddNode(pack_node, &status);
-    pack->set_assigned_device_name(weights[0]->assigned_device_name());
     if (!status.ok()) {
       LOG(ERROR) << "Adding node failed " << status;
       return false;
     }
+    pack->set_assigned_device_name(weights[0]->assigned_device_name());
     for (int i = 0; i < weights.size(); i++) {
       graph->AddEdge(weights[i], 0, pack, i);
     }
@@ -247,11 +249,11 @@ bool FuseMatMuls(Graph* graph) {
     }
     matmul_node.set_device(matmuls[0]->def().device());
     Node* matmul = graph->AddNode(matmul_node, &status);
-    matmul->set_assigned_device_name(matmuls[0]->assigned_device_name());
     if (!status.ok()) {
       LOG(ERROR) << "Adding node failed " << status;
       return false;
     }
+    matmul->set_assigned_device_name(matmuls[0]->assigned_device_name());
     graph->AddEdge(in, src_output, matmul, 0);
     graph->AddEdge(pack, 0, matmul, 1);
 
@@ -273,11 +275,11 @@ bool FuseMatMuls(Graph* graph) {
     }
     unpack_node.set_device(matmuls[0]->def().device());
     Node* unpack = graph->AddNode(unpack_node, &status);
-    unpack->set_assigned_device_name(matmuls[0]->assigned_device_name());
     if (!status.ok()) {
       LOG(ERROR) << "Adding node failed " << status;
       return false;
     }
+    unpack->set_assigned_device_name(matmuls[0]->assigned_device_name());
     graph->AddEdge(matmul, 0, unpack, 0);
  
     // Add edges to forward split results to nodes after original matmuls,
@@ -292,6 +294,7 @@ bool FuseMatMuls(Graph* graph) {
       }
       int num = dst_nodes.size();
       for (int i = 0; i < num; i++) {
+        // TODO(ylxu): has bug, should not use index
         graph->UpdateEdge(unpack, index, dst_nodes[i], dst_inputs[i]);
       }
       graph->RemoveNode(m);
@@ -309,7 +312,7 @@ bool FuseMatMuls(Graph* graph) {
 // TODO(ylxu): to support fusing more types of ops after unpack
 bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
   static int count = 0;
-  LOG(INFO) << "FuseBiasAdds";
+  VLOG(1) << "FuseBiasAdds";
   bool changed = false;
 
   std::vector<Node*> nodes(graph->num_nodes());
@@ -326,7 +329,6 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
     if ((matmul->type_string() != "BatchMatMulV2") &&
         (matmul->type_string() != "BatchMatMul")) continue;
     std::vector<Node*> biasadds;
-    std::vector<Node*> biases;
     bool can_fuse = true;
     for (Node* out : node->out_nodes()) {
       if (out->type_string() != "BiasAdd") {
@@ -334,13 +336,20 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
         break;
       }
       biasadds.push_back(out);
+    }
+    if (!can_fuse || biasadds.size() < 2) continue;
+
+    VLOG(1) << "FuseBiasAdds: found pattern";
+    std::sort(biasadds.begin(), biasadds.end(),
+              [node](Node* a, Node* b){
+      return a->name().compare(b->name()) < 0;
+    });
+    std::vector<Node*> biases;
+    for (Node* n : biasadds) {
       Node* bias = nullptr;
-      out->input_node(1, &bias);
+      n->input_node(1, &bias);
       biases.push_back(bias);
     }
-    if (!can_fuse || biases.size() < 2) continue;
-
-    LOG(INFO) << "FuseBiasAdds: found pattern";
  
     // Add a Pack node to group biases
     string prefix = "GemmOptimizer/FuseBiasAddsAfterBatchMatMulUnpack/" +
@@ -367,11 +376,11 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
     }
     pack_node.set_device(biases[0]->def().device());
     Node* pack = graph->AddNode(pack_node, &status);
-    pack->set_assigned_device_name(biases[0]->assigned_device_name());
     if (!status.ok()) {
       LOG(ERROR) << "Adding node failed " << status;
       return false;
     }
+    pack->set_assigned_device_name(biases[0]->assigned_device_name());
     for (int i = 0; i < biases.size(); i++) {
       graph->AddEdge(biases[i], 0, pack, i);
     }
@@ -392,11 +401,11 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
     }
     dim_node.set_device(biases[0]->def().device());
     Node* dim = graph->AddNode(dim_node, &status);
-    dim->set_assigned_device_name(biases[0]->assigned_device_name());
     if (!status.ok()) {
       LOG(ERROR) << "Adding node failed " << status;
       return false;
     }
+    dim->set_assigned_device_name(biases[0]->assigned_device_name());
 
     string expand_name = prefix + "/ExpandDims" ;
     std::vector<NodeDefBuilder::NodeOut> expand_inputs;
@@ -417,11 +426,11 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
     }
     expand_node.set_device(biases[0]->def().device());
     Node* expand = graph->AddNode(expand_node, &status);
-    expand->set_assigned_device_name(biases[0]->assigned_device_name());
     if (!status.ok()) {
       LOG(ERROR) << "Adding node failed " << status;
       return false;
     }
+    expand->set_assigned_device_name(biases[0]->assigned_device_name());
     graph->AddEdge(pack, 0, expand, 0);
     graph->AddEdge(dim, 0, expand, 1);
 
@@ -444,11 +453,11 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
     }
     biasadd_node.set_device(biasadds[0]->def().device());
     Node* biasadd = graph->AddNode(biasadd_node, &status);
-    biasadd->set_assigned_device_name(biasadds[0]->assigned_device_name());
     if (!status.ok()) {
       LOG(ERROR) << "Adding node failed " << status;
       return false;
     }
+    biasadd->set_assigned_device_name(biasadds[0]->assigned_device_name());
     graph->AddEdge(matmul, 0, biasadd, 0);
     graph->AddEdge(expand, 0, biasadd, 1);
 
@@ -470,11 +479,11 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
     }
     unpack_node.set_device(biasadds[0]->def().device());
     Node* unpack = graph->AddNode(unpack_node, &status);
-    unpack->set_assigned_device_name(biasadds[0]->assigned_device_name());
     if (!status.ok()) {
       LOG(ERROR) << "Adding node failed " << status;
       return false;
     }
+    unpack->set_assigned_device_name(biasadds[0]->assigned_device_name());
     graph->AddEdge(biasadd, 0, unpack, 0);
  
     // Add edges to forward split results to nodes after original matmuls,
@@ -489,6 +498,7 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
       }
       int num = out_nodes.size();
       for (int i = 0; i < num; i++) {
+        // TODO(ylxu): has bug, should not use index
         graph->UpdateEdge(unpack, index, out_nodes[i], dst_inputs[i]);
       }
       graph->RemoveNode(b);
@@ -501,7 +511,7 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
 
 // [-, shape]->ReshapeOp->ShapeOp->Op to shape->Op
 bool RemoveShapeAfterReshape(Graph* graph) {
-  LOG(INFO) << "RemoveShapeAfterReshape";
+  VLOG(1) << "RemoveShapeAfterReshape";
   bool changed = false;
   std::vector<Node*> nodes(graph->num_nodes());
   int i = 0;
@@ -516,7 +526,7 @@ bool RemoveShapeAfterReshape(Graph* graph) {
     Node* reshape = nullptr;
     shape->input_node(0, &reshape);
     if (reshape->type_string() != "Reshape") continue;
-    LOG(INFO) << "RemoveShapeAfterReshape: found pattern";
+    VLOG(1) << "RemoveShapeAfterReshape: found pattern";
     Node* reshape_in_1 = nullptr;
     reshape->input_node(1, &reshape_in_1);
 
@@ -542,9 +552,12 @@ bool RemoveShapeAfterReshape(Graph* graph) {
 }
 
 // Change ->Unpack->Reshape-> to ->Reshape->Unpack->
+// TODO(ylxu): has potential bug
+// Add Pack after Unpack, rather than directly
+// reorder Unpack and Reshape.
 bool ReorderReshapeAndUnpack(Graph* graph) {
   static int count = 0;
-  LOG(INFO) << "ReorderReshapeAndUnpack";
+  VLOG(1) << "ReorderReshapeAndUnpack";
   bool changed = false;
 
   std::vector<Node*> nodes(graph->num_nodes());
@@ -574,7 +587,7 @@ bool ReorderReshapeAndUnpack(Graph* graph) {
     for (int i = 1; i < reshapes.size(); i++) {
       if (reshape_in_1[i] != reshape_in_1[0]) continue;
     }
-    LOG(INFO) << "ReorderReshapeAndUnpack: found pattern";
+    VLOG(1) << "ReorderReshapeAndUnpack: found pattern";
     
     // Add a new Shape to get the shape of Unpack's input
     const Edge* to_unpack;
@@ -601,11 +614,11 @@ bool ReorderReshapeAndUnpack(Graph* graph) {
     }
     shape_node.set_device(reshape_in_1[0]->def().device());
     Node* shape = graph->AddNode(shape_node, &status);
-    shape->set_assigned_device_name(reshape_in_1[0]->assigned_device_name());
     if (!status.ok()) {
       LOG(ERROR) << "Adding node failed " << status;
       return false;
     }
+    shape->set_assigned_device_name(reshape_in_1[0]->assigned_device_name());
     graph->AddEdge(unpack_in, src_output, shape, 0);
  
     // Add a Slice to obtain the first element of the new shape 
@@ -629,11 +642,11 @@ bool ReorderReshapeAndUnpack(Graph* graph) {
     }
     zero_node.set_device(reshape_in_1[0]->def().device());
     Node* zero = graph->AddNode(zero_node, &status);
-    zero->set_assigned_device_name(reshape_in_1[0]->assigned_device_name());
     if (!status.ok()) {
       LOG(ERROR) << "Adding node failed " << status;
       return false;
     }
+    zero->set_assigned_device_name(reshape_in_1[0]->assigned_device_name());
 
     NodeDefBuilder one_builder(one_name, "Const");
     NodeDef one_node;
@@ -651,11 +664,11 @@ bool ReorderReshapeAndUnpack(Graph* graph) {
     }
     one_node.set_device(reshape_in_1[0]->def().device());
     Node* one = graph->AddNode(one_node, &status);
-    one->set_assigned_device_name(reshape_in_1[0]->assigned_device_name());
     if (!status.ok()) {
       LOG(ERROR) << "Adding node failed " << status;
       return false;
     }
+    one->set_assigned_device_name(reshape_in_1[0]->assigned_device_name());
 
     std::vector<NodeDefBuilder::NodeOut> slice_inputs;
     slice_inputs.emplace_back(shape_name, 0, shape_dtype);
@@ -676,11 +689,11 @@ bool ReorderReshapeAndUnpack(Graph* graph) {
     }
     slice_node.set_device(reshape_in_1[0]->def().device());
     Node* slice = graph->AddNode(slice_node, &status);
-    slice->set_assigned_device_name(reshape_in_1[0]->assigned_device_name());
     if (!status.ok()) {
       LOG(ERROR) << "Adding node failed " << status;
       return false;
     }
+    slice->set_assigned_device_name(reshape_in_1[0]->assigned_device_name());
     graph->AddEdge(shape, 0, slice, 0);
     graph->AddEdge(zero, 0, slice, 1);
     graph->AddEdge(one, 0, slice, 2);
@@ -702,11 +715,11 @@ bool ReorderReshapeAndUnpack(Graph* graph) {
     }
     zero_scalar_node.set_device(reshape_in_1[0]->def().device());
     Node* zero_scalar = graph->AddNode(zero_scalar_node, &status);
-    zero_scalar->set_assigned_device_name(reshape_in_1[0]->assigned_device_name());
     if (!status.ok()) {
       LOG(ERROR) << "Adding node failed " << status;
       return false;
     }
+    zero_scalar->set_assigned_device_name(reshape_in_1[0]->assigned_device_name());
 
     NodeDefBuilder concat_builder(concat_name, "Concat");
     NodeDefBuilder::NodeOut concat_dim(zero_scalar->name(), 0, shape_dtype);
@@ -729,11 +742,11 @@ bool ReorderReshapeAndUnpack(Graph* graph) {
     }
     concat_node.set_device(reshape_in_1[0]->def().device());
     Node* concat = graph->AddNode(concat_node, &status);
-    concat->set_assigned_device_name(reshape_in_1[0]->assigned_device_name());
     if (!status.ok()) {
       LOG(ERROR) << "Adding node failed " << status;
       return false;
     }
+    concat->set_assigned_device_name(reshape_in_1[0]->assigned_device_name());
     graph->AddEdge(zero_scalar, 0, concat, 0);
     graph->AddEdge(slice, 0, concat, 1);
     graph->AddEdge(reshape_in_1[0], e1->src_output(), concat, 2);
@@ -759,12 +772,12 @@ bool ReorderReshapeAndUnpack(Graph* graph) {
     }
     reshape_node.set_device(reshapes[0]->def().device());
     Node* reshape = graph->AddNode(reshape_node, &status);
-    reshape->set_assigned_device_name(
-        reshapes[0]->assigned_device_name());
     if (!status.ok()) {
       LOG(ERROR) << "Adding node failed " << status;
       return false;
     }
+    reshape->set_assigned_device_name(
+        reshapes[0]->assigned_device_name());
     graph->AddEdge(unpack_in, src_output, reshape, 0);
     graph->AddEdge(concat, 0, reshape, 1);
  
@@ -791,7 +804,7 @@ bool ReorderReshapeAndUnpack(Graph* graph) {
 
 bool RemoveUnpackBeforeShape(Graph* graph) {
   static int count = 0;
-  LOG(INFO) << "RemoveUnpackBeforeShape";
+  VLOG(1) << "RemoveUnpackBeforeShape";
   bool changed = false;
 
   std::vector<Node*> nodes(graph->num_nodes());
@@ -806,7 +819,7 @@ bool RemoveUnpackBeforeShape(Graph* graph) {
     Node* unpack = nullptr;
     node->input_node(0, &unpack);
     if (unpack->type_string() != "Unpack") continue;
-    LOG(INFO) << "RemoveUnpackBeforeShape: found pattern";
+    VLOG(1) << "RemoveUnpackBeforeShape: found pattern";
 
     // Add a new Shape to get the shape of Unpack's input
     const Edge* to_unpack = nullptr;
@@ -833,11 +846,11 @@ bool RemoveUnpackBeforeShape(Graph* graph) {
     }
     shape_node.set_device(node->def().device());
     Node* shape = graph->AddNode(shape_node, &status);
-    shape->set_assigned_device_name(node->assigned_device_name());
     if (!status.ok()) {
       LOG(ERROR) << "Adding node failed " << status;
       return false;
     }
+    shape->set_assigned_device_name(node->assigned_device_name());
     graph->AddEdge(unpack_in, src_output, shape, 0);
  
     string slice_name = prefix + "/Slice";
@@ -860,11 +873,11 @@ bool RemoveUnpackBeforeShape(Graph* graph) {
     }
     one_node.set_device(node->def().device());
     Node* one = graph->AddNode(one_node, &status);
-    one->set_assigned_device_name(node->assigned_device_name());
     if (!status.ok()) {
       LOG(ERROR) << "Adding node failed " << status;
       return false;
     }
+    one->set_assigned_device_name(node->assigned_device_name());
 
     NodeDefBuilder minus_one_builder(minus_one_name, "Const");
     NodeDef minus_one_node;
@@ -882,11 +895,11 @@ bool RemoveUnpackBeforeShape(Graph* graph) {
     }
     minus_one_node.set_device(node->def().device());
     Node* minus_one = graph->AddNode(minus_one_node, &status);
-    minus_one->set_assigned_device_name(node->assigned_device_name());
     if (!status.ok()) {
       LOG(ERROR) << "Adding node failed " << status;
       return false;
     }
+    minus_one->set_assigned_device_name(node->assigned_device_name());
 
     std::vector<NodeDefBuilder::NodeOut> slice_inputs;
     slice_inputs.emplace_back(shape_name, 0, shape_dtype);
@@ -907,11 +920,11 @@ bool RemoveUnpackBeforeShape(Graph* graph) {
     }
     slice_node.set_device(node->def().device());
     Node* slice = graph->AddNode(slice_node, &status);
-    slice->set_assigned_device_name(node->assigned_device_name());
     if (!status.ok()) {
       LOG(ERROR) << "Adding node failed " << status;
       return false;
     }
+    slice->set_assigned_device_name(node->assigned_device_name());
     graph->AddEdge(shape, 0, slice, 0);
     graph->AddEdge(one, 0, slice, 1);
     graph->AddEdge(minus_one, 0, slice, 2);
@@ -934,9 +947,12 @@ bool RemoveUnpackBeforeShape(Graph* graph) {
 }
 
 // Change ->Unpack->Transpose-> to ->Transpose->Unpack->
+// TODO(ylxu): has potential bug
+// Add Pack after Unpack, rather than directly
+// reorder Unpack and Transpose.
 bool ReorderTransposeAndUnpack(Graph* graph) {
   static int count = 0;
-  LOG(INFO) << "ReorderTransposeAndUnpack";
+  VLOG(1) << "ReorderTransposeAndUnpack";
   bool changed = false;
 
   std::vector<Node*> nodes(graph->num_nodes());
@@ -966,7 +982,7 @@ bool ReorderTransposeAndUnpack(Graph* graph) {
     for (int i = 1; i < transposes.size(); i++) {
       if (transpose_in_1[i] != transpose_in_1[0]) continue;
     }
-    LOG(INFO) << "ReorderTransposeAndUnpack: found pattern";
+    VLOG(1) << "ReorderTransposeAndUnpack: found pattern";
 
     string prefix = "GemmOptimizer/ReorderTransposeAndUnpack/" +
                     std::to_string(count++);
@@ -987,11 +1003,11 @@ bool ReorderTransposeAndUnpack(Graph* graph) {
     }
     one_node.set_device(transpose_in_1[0]->def().device());
     Node* one = graph->AddNode(one_node, &status);
-    one->set_assigned_device_name(transpose_in_1[0]->assigned_device_name());
     if (!status.ok()) {
       LOG(ERROR) << "Adding node failed " << status;
       return false;
     }
+    one->set_assigned_device_name(transpose_in_1[0]->assigned_device_name());
  
     DataType shape_dtype = transpose_in_1[0]->output_type(0);
     string add_name = prefix + "/Add";
@@ -1015,11 +1031,11 @@ bool ReorderTransposeAndUnpack(Graph* graph) {
     }
     add_node.set_device(transpose_in_1[0]->def().device());
     Node* add = graph->AddNode(add_node, &status);
-    add->set_assigned_device_name(transpose_in_1[0]->assigned_device_name());
     if (!status.ok()) {
       LOG(ERROR) << "Adding node failed " << status;
       return false;
     }
+    add->set_assigned_device_name(transpose_in_1[0]->assigned_device_name());
     graph->AddEdge(param_to_transpose->src(),
         param_to_transpose->src_output(), add, 0);
     graph->AddEdge(one, 0, add, 1);
@@ -1041,11 +1057,11 @@ bool ReorderTransposeAndUnpack(Graph* graph) {
     }
     zero_node.set_device(transpose_in_1[0]->def().device());
     Node* zero = graph->AddNode(zero_node, &status);
-    zero->set_assigned_device_name(transpose_in_1[0]->assigned_device_name());
     if (!status.ok()) {
       LOG(ERROR) << "Adding node failed " << status;
       return false;
     }
+    zero->set_assigned_device_name(transpose_in_1[0]->assigned_device_name());
 
     // Add a Concat Op to generate new shape
     string zero_scalar_name = prefix + "/Transpose/Concat/concat_dim";
@@ -1063,12 +1079,12 @@ bool ReorderTransposeAndUnpack(Graph* graph) {
     }
     zero_scalar_node.set_device(transpose_in_1[0]->def().device());
     Node* zero_scalar = graph->AddNode(zero_scalar_node, &status);
-    zero_scalar->set_assigned_device_name(
-        transpose_in_1[0]->assigned_device_name());
     if (!status.ok()) {
       LOG(ERROR) << "Adding node failed " << status;
       return false;
     }
+    zero_scalar->set_assigned_device_name(
+        transpose_in_1[0]->assigned_device_name());
 
     string concat_name = prefix + "/Transpose/Concat";
     NodeDefBuilder concat_builder(concat_name, "Concat");
@@ -1090,12 +1106,12 @@ bool ReorderTransposeAndUnpack(Graph* graph) {
     }
     concat_node.set_device(transpose_in_1[0]->def().device());
     Node* concat = graph->AddNode(concat_node, &status);
-    concat->set_assigned_device_name(
-        transpose_in_1[0]->assigned_device_name());
     if (!status.ok()) {
       LOG(ERROR) << "Adding node failed " << status;
       return false;
     }
+    concat->set_assigned_device_name(
+        transpose_in_1[0]->assigned_device_name());
     graph->AddEdge(zero_scalar, 0, concat, 0);
     graph->AddEdge(zero, 0, concat, 1);
     graph->AddEdge(add, 0, concat, 2);
@@ -1125,12 +1141,12 @@ bool ReorderTransposeAndUnpack(Graph* graph) {
     }
     transpose_node.set_device(transposes[0]->def().device());
     Node* transpose = graph->AddNode(transpose_node, &status);
-    transpose->set_assigned_device_name(
-        transposes[0]->assigned_device_name());
     if (!status.ok()) {
       LOG(ERROR) << "Adding node failed " << status;
       return false;
     }
+    transpose->set_assigned_device_name(
+        transposes[0]->assigned_device_name());
     graph->AddEdge(unpack_in, src_output, transpose, 0);
     graph->AddEdge(concat, 0, transpose, 1);
  
@@ -1161,7 +1177,7 @@ bool ReorderTransposeAndUnpack(Graph* graph) {
 //             ...
 bool FuseMatMulsAfterUnpack(Graph* graph) {
   static int count = 0;
-  LOG(INFO) << "FuseMatMulsAfterUnpack";
+  VLOG(1) << "FuseMatMulsAfterUnpack";
   bool changed = false;
   std::vector<Node*> nodes(graph->num_nodes());
   int i = 0;
@@ -1224,7 +1240,7 @@ bool FuseMatMulsAfterUnpack(Graph* graph) {
         }
       }
     }
-    LOG(INFO) << "FuseMatMulsAfterUnpack: found pattern";
+    VLOG(1) << "FuseMatMulsAfterUnpack: found pattern";
 
     // Fuse matmuls in each group.
     // For each group, do:
@@ -1239,25 +1255,13 @@ bool FuseMatMulsAfterUnpack(Graph* graph) {
       if (matmuls_group->size() < 2) continue;
       std::sort(matmuls_group->begin(), matmuls_group->end(),
                 [node](Node* a, Node* b){
-        const Edge* in_a = nullptr;
-        const Edge* in_b = nullptr;
-        for (const Edge* e : a->in_edges()) {
-          if (e->src() == node) {
-            in_a = e;
-            break;
-          }
-        }
-        for (const Edge* e : b->in_edges()) {
-          if (e->src() == node) {
-            in_b = e;
-            break;
-          }
-        }
-        return in_a->src_output() < in_b->src_output(); 
+        return a->name().compare(b->name()) < 0;
       });
       std::vector<const Edge*> inputs[2];
-      for (Node* n : *matmuls_group) {
-        for (const Edge* e : n->in_edges()) {
+      VLOG(1) << "the following ops are fused: ";
+      for (Node* m : *matmuls_group) {
+        VLOG(1) << m->name();
+        for (const Edge* e : m->in_edges()) {
           inputs[e->dst_input()].push_back(e);
         }
       }
@@ -1272,7 +1276,7 @@ bool FuseMatMulsAfterUnpack(Graph* graph) {
 	  for (int i = 0; i < 2; i++) {
         std::vector<NodeDefBuilder::NodeOut> pack_inputs;
         for (const Edge* e : inputs[i]) {
-          string s = e->src()->name() + std::to_string(e->src_output());
+          string s = e->src()->name();
           pack_inputs.emplace_back(s, e->src_output(), dtype);
         }
         NodeDefBuilder pack_builder(pack_names[i], "Pack");
@@ -1290,12 +1294,12 @@ bool FuseMatMulsAfterUnpack(Graph* graph) {
         }
         pack_node.set_device(inputs[i][0]->src()->def().device());
         packs[i] = graph->AddNode(pack_node, &status);
-        packs[i]->set_assigned_device_name(
-            inputs[i][0]->src()->assigned_device_name());
         if (!status.ok()) {
           LOG(ERROR) << "Adding node failed " << status;
           return false;
         }
+        packs[i]->set_assigned_device_name(
+            inputs[i][0]->src()->assigned_device_name());
         for (int j = 0; j < inputs[i].size(); j++) {
           graph->AddEdge(inputs[i][j]->src(), inputs[i][j]->src_output(),
                          packs[i], j);
@@ -1351,12 +1355,12 @@ bool FuseMatMulsAfterUnpack(Graph* graph) {
       }
       matmul_node.set_device((*matmuls_group)[0]->def().device());
       Node* matmul = graph->AddNode(matmul_node, &status);
-      matmul->set_assigned_device_name((*matmuls_group)[0]->
-                                       assigned_device_name());
       if (!status.ok()) {
         LOG(ERROR) << "Adding node failed " << status;
         return false;
       }
+      matmul->set_assigned_device_name((*matmuls_group)[0]->
+                                       assigned_device_name());
       graph->AddEdge(packs[0], 0, matmul, 0);
       graph->AddEdge(packs[1], 0, matmul, 1);
 
@@ -1378,12 +1382,12 @@ bool FuseMatMulsAfterUnpack(Graph* graph) {
       }
       unpack_node.set_device((*matmuls_group)[0]->def().device());
       Node* unpack = graph->AddNode(unpack_node, &status);
-      unpack->set_assigned_device_name((*matmuls_group)[0]->
-                                       assigned_device_name());
       if (!status.ok()) {
         LOG(ERROR) << "Adding node failed " << status;
         return false;
       }
+      unpack->set_assigned_device_name((*matmuls_group)[0]->
+                                       assigned_device_name());
       graph->AddEdge(matmul, 0, unpack, 0);
    
       // Add edges to forward split results to nodes after original matmuls,
@@ -1398,6 +1402,7 @@ bool FuseMatMulsAfterUnpack(Graph* graph) {
         }
         int num = dst_nodes.size();
         for (int i = 0; i < num; i++) {
+          // TODO(ylxu): has bug, should not use index
           graph->UpdateEdge(unpack, index, dst_nodes[i], dst_inputs[i]);
         }
         graph->RemoveNode(m);
@@ -1421,8 +1426,11 @@ std::set<string> GetUnaryOps() {
   return ops;
 }
 
+// TODO(ylxu): has potential bug
+// Add Pack after Unpack, rather than directly
+// reorder Unpack and UnaryOp.
 bool ReorderUnaryOpAndUnpack(Graph* graph) {
-  LOG(INFO) << "ReorderUnaryOpAndUnpack";
+  VLOG(1) << "ReorderUnaryOpAndUnpack";
   bool changed = false;
 
   std::vector<Node*> nodes(graph->num_nodes());
@@ -1454,7 +1462,7 @@ bool ReorderUnaryOpAndUnpack(Graph* graph) {
       unary_ops.push_back(out);
     }
     if (!can_reorder || unary_ops.size() < 2) continue;
-    LOG(INFO) << "ReorderUnaryOpAndUnpack: found pattern";
+    VLOG(1) << "ReorderUnaryOpAndUnpack: found pattern";
     int index = 0;
     for (Node* u : unary_ops) {
       std::vector<Node*> dst_nodes;
@@ -1489,8 +1497,11 @@ std::set<string> GetBinaryOps() {
   return ops;
 }
 
+// TODO(ylxu): has potential bug
+// Add Pack after Unpack, rather than directly
+// reorder Unpack and BinaryOp.
 bool ReorderBinaryOpAndUnpack(Graph* graph) {
-  LOG(INFO) << "ReorderBinaryOpAndUnpack";
+  VLOG(1) << "ReorderBinaryOpAndUnpack";
   bool changed = false;
 
   std::vector<Node*> nodes(graph->num_nodes());
@@ -1553,7 +1564,7 @@ bool ReorderBinaryOpAndUnpack(Graph* graph) {
     }
 
     if (!can_reorder || binary_ops.size() < 2) continue;
-    LOG(INFO) << "ReorderBinaryOpAndUnpack: found pattern";
+    VLOG(1) << "ReorderBinaryOpAndUnpack: found pattern";
     int index = 0;
     for (Node* b : binary_ops) {
       std::vector<Node*> dst_nodes;
@@ -1580,6 +1591,176 @@ bool ReorderBinaryOpAndUnpack(Graph* graph) {
   return changed;
 }
 
+bool RemoveUnpackPackPairs(Graph* graph) {
+  VLOG(1) << "RemoveUnpackPackPairs";
+  bool changed = false;
+  static int count = 0;
+
+  std::vector<Node*> nodes(graph->num_nodes());
+  int i = 0;
+  for (Node* node : graph->nodes()) {
+    nodes[i++] = node;
+  }
+
+  for (Node* node : nodes) {
+    if (!graph->IsValidNode(node).ok()) continue;
+    if (node->type_string() != "Unpack") continue;
+    Node* unpack = node;
+
+    bool can_remove = true;
+    int num_split = -1;
+    int size_per_split = -1;
+    std::map<Node*, int> unpack_split_map;
+    LOG(INFO) << "unpack: " << unpack->DebugString();
+    for (Node* out : unpack->out_nodes()) {
+      if (unpack_split_map.find(out) != unpack_split_map.end()) continue;
+      if (out->type_string() != "Pack") {
+        LOG(INFO) << "unpack: " << unpack->DebugString();
+        can_remove = false;
+        break;
+      }
+      // Check Unpack's outputs are grouped evenly
+      if (num_split == -1) {
+        int unpack_num = unpack->num_outputs();
+        size_per_split = out->num_inputs();
+        num_split = unpack_num / size_per_split;
+        if ((size_per_split *  num_split) != unpack_num) {
+          can_remove = false;
+          LOG(INFO) << "unpack: " << unpack->DebugString();
+          break;
+        }
+      }
+
+      // Make sure each Pack takes a full group of Unpack's outputs.
+      // This is realized by using the following two checks:
+      int src_output = -1;
+      for (int i = 0; i < out->num_inputs(); i++) {
+        const Edge* e = nullptr;
+        out->input_edge(i, &e);
+        LOG(INFO) << "unpack: " << unpack->DebugString();
+        int temp = e->src_output();
+        if (src_output != -1) {
+          // (1) check order
+          if (temp != (src_output + 1)) {
+            can_remove = false;
+            LOG(INFO) << "unpack: " << unpack->DebugString();
+            break;
+          }
+        } else {
+          // (2) check size and begin index
+          if ((temp % size_per_split != 0) ||
+              (out->num_inputs() != size_per_split)) {
+            can_remove = false;
+            LOG(INFO) << "unpack: " << unpack->DebugString();
+            break;
+          }
+          // This Unpack is replaced by Split:(temp/size_per_split)
+          unpack_split_map[out] = temp / size_per_split;
+        }
+        src_output = temp;
+      }
+      LOG(INFO) << "unpack: " << unpack->DebugString();
+      if (!can_remove) break;
+    }
+
+    LOG(INFO) << "unpack: " << unpack->DebugString();
+    if (!can_remove || unpack_split_map.size() == 0) continue;
+    VLOG(1) << "RemoveUnpackPackPairs: found pattern";
+    LOG(INFO) << "unpack: " << unpack;
+    LOG(INFO) << "unpack: " << unpack->DebugString();
+
+    // for Unpack->Pack*n, insert a Split Op, and
+    // repalace Packs' outputs with Split's outputs.
+    const Edge* to_unpack = nullptr;
+    unpack->input_edge(0, &to_unpack);
+    Node* unpack_in = to_unpack->src();
+    int unpack_src_output = to_unpack->src_output();
+    Node* split = nullptr;
+    if (num_split > 1) {
+      string prefix = "GemmOptimizer/RemoveUnpackPackPairs/" +
+                      std::to_string(count++);
+      string zero_name = prefix + "/Split/zero";
+      NodeDefBuilder zero_builder(zero_name, "Const");
+      NodeDef zero_node;
+      Tensor t_zero(int(0));
+      Status status =
+          zero_builder
+              .Attr("dtype", t_zero.dtype())
+              .Attr("value", t_zero)
+              .Finalize(&zero_node);
+      if (!status.ok()) {
+        LOG(ERROR) << "Const node construction failed with" << status;
+        return false;
+      }
+      zero_node.set_device(unpack->def().device());
+      Node* zero = graph->AddNode(zero_node, &status);
+      if (!status.ok()) {
+        LOG(ERROR) << "Adding node failed " << status;
+        return false;
+      }
+      zero->set_assigned_device_name(unpack->assigned_device_name());
+
+      std::vector<NodeDefBuilder::NodeOut> split_inputs;
+      split_inputs.emplace_back(zero_name, 0, t_zero.dtype());
+      split_inputs.emplace_back(unpack_in->name(), unpack_src_output,
+                                unpack_in->output_type(unpack_src_output));
+      string split_name = prefix + "/Split";
+      NodeDefBuilder split_builder(split_name, "Split");
+      split_builder.Input(split_inputs[0]);
+      split_builder.Input(split_inputs[1]);
+      NodeDef split_node;
+      status =
+          split_builder
+              .Attr("T", unpack_in->output_type(unpack_src_output))
+              .Attr("num_split", num_split)
+              .Finalize(&split_node);
+      if (!status.ok()) {
+        LOG(ERROR) << "Split node construction failed with" << status;
+        return false;
+      }
+      split_node.set_device(unpack->def().device());
+      split = graph->AddNode(split_node, &status);
+      if (!status.ok()) {
+        LOG(ERROR) << "Adding node failed " << status;
+        return false;
+      }
+      split->set_assigned_device_name(unpack->assigned_device_name());
+      graph->AddEdge(zero, 0, split, 0);
+      graph->AddEdge(unpack_in, unpack_src_output, split, 1);
+    }
+
+    // for Unpack->Pack pair, update graph directly
+    std::map<Node*, int>::iterator it;
+    for (it = unpack_split_map.begin();
+         it != unpack_split_map.end(); it++) {
+      Node* pack = it->first;
+      LOG(INFO) << "pack: " << pack;
+      LOG(INFO) << "pack: " << pack->DebugString();
+
+      std::vector<Node*> dst_nodes;
+      std::vector<int> dst_inputs;
+      for (const Edge* e : pack->out_edges()) {
+        dst_nodes.push_back(e->dst());
+        dst_inputs.push_back(e->dst_input());
+      }
+      for (int i = 0; i < dst_nodes.size(); i++) {
+        if (num_split == 1) {
+         graph->UpdateEdge(unpack_in, unpack_src_output,
+                           dst_nodes[i], dst_inputs[i]);
+        } else {
+         graph->UpdateEdge(split, it->second,
+                           dst_nodes[i], dst_inputs[i]);
+
+        }
+      }
+      graph->RemoveNode(pack);
+    }
+    changed = true;
+  }
+
+  return changed;
+}
+
 void FuseGemmKernels(Graph* graph) {  
   while(1) {
     bool graph_changed =
@@ -1594,7 +1775,7 @@ void FuseGemmKernels(Graph* graph) {
         RemoveUnpackBeforeShape(graph) ||
         ReorderUnaryOpAndUnpack(graph) ||
         ReorderBinaryOpAndUnpack(graph);
-        // RemoveUnpackPackPairs(graph);
+        RemoveUnpackPackPairs(graph);
     if (!graph_changed) break;
   }
 }
@@ -1603,7 +1784,7 @@ void FuseGemmKernels(Graph* graph) {
 Status GemmOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
                                GraphDef* optimized_graph) {
   static int pass = 0;
-  LOG(INFO) << "GemmOptimizer";
+  VLOG(1) << "GemmOptimizer";
   std::fstream f;
   f.open("before_gemm." + std::to_string(pass) + ".pbtxt", std::fstream::out);
   f << item.graph.DebugString();
@@ -1628,7 +1809,7 @@ Status GemmOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
   f.open("after_gemm." + std::to_string(pass) + ".pb", std::fstream::out | std::fstream::binary);
   f << optimized_graph->SerializeAsString();
   f.close();
-  LOG(INFO) << "GemmOptimizer";
+  VLOG(1) << "GemmOptimizer";
   pass++;
   return Status::OK();
 }
