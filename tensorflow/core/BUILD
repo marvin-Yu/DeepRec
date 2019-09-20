@@ -3264,7 +3264,7 @@ tf_cuda_library(
     hdrs = CORE_CPU_LIB_HEADERS + if_cuda([
         "common_runtime/gpu_device_context.h"
     ]),
-    copts = tf_copts(),
+    copts = tf_copts() + ["-g"],
     deps = [
         ":bfc_allocator",
         ":graph",
@@ -3390,7 +3390,7 @@ tf_cuda_library(
         "common_runtime/direct_session.h",
         "util/env_var.h",
     ],
-    copts = tf_copts(),
+    copts = tf_copts() + ["-g"],
     deps = [
         ":core_cpu_internal",
         ":framework",
