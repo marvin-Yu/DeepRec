@@ -1361,6 +1361,8 @@ class ExecutorState {
 
   mutex mu_;
   Status status_ GUARDED_BY(mu_);
+  enum GraphCaptureStatus { NEW, CAPTURING, CAPTURED };
+  GraphCaptureStatus graph_capture_status_;
 
   // Mapping from frame name to outstanding frames. A new frame is created
   // at some iteration of an active frame. So the unique key for the new
@@ -1629,6 +1631,7 @@ void ExecutorState::RunAsync(Executor::DoneCallback done) {
       }
     }
     num_outstanding_recv_ops_ = n;
+    graph_capture_status_ = GraphCaptureStatus::NEW;
   }
 #endif
 
@@ -2878,6 +2881,8 @@ void ExecutorState::CleanupFramesIterations(FrameState* frame, int64 iter,
 
 #ifdef GOOGLE_CUDA
 Status ExecutorState::BeginStreamCapture(CUstream stream) {
+  mutex_lock l(mu_);
+  graph_capture_status_ = GraphCaptureStatus::CAPTURING;
   VLOG(2) << "Beginning the capture of stream " << stream;
   auto ret = cuStreamBeginCapture(stream, CU_STREAM_CAPTURE_MODE_RELAXED);
   if (ret != CUDA_SUCCESS) {
@@ -2890,27 +2895,23 @@ Status ExecutorState::BeginStreamCapture(CUstream stream) {
 }
 
 Status ExecutorState::EndStreamCapture(CUstream stream, CUgraph* cuda_graph) {
-  CUstreamCaptureStatus capture_status;
-  cuuint64_t id;
-  auto ret = cuStreamGetCaptureInfo(stream, &capture_status, &id);
-  if (ret != CUDA_SUCCESS) {
-    return errors::Internal("Cannot get capture status of stream ", stream);
+  mutex_lock l(mu_);
+  if (graph_capture_status_ == GraphCaptureStatus::NEW) {
+    return errors::Internal("Stream ", stream, " is not being captured");
   }
-
-  if (capture_status != CU_STREAM_CAPTURE_STATUS_ACTIVE) {
-    return errors::Internal("Stream ", stream, " is not in capture status (",
-                            capture_status, ")");
+  if (graph_capture_status_ == GraphCaptureStatus::CAPTURED) {
+    return Status::OK();
   }
-
+  // graph_capture_status_ == GraphCaptureStatus::CAPTURING
+  graph_capture_status_ = GraphCaptureStatus::CAPTURED;
   VLOG(2) << "Ending the capture of stream " << stream;
-  ret = cuStreamEndCapture(stream, cuda_graph);
+  auto ret = cuStreamEndCapture(stream, cuda_graph);
   if (ret != CUDA_SUCCESS) {
     const char* error;
     cuGetErrorString(ret, &error);
     return errors::Internal(
       "Cannot end to capture stream ", stream, ": ", error);
   }
-
   return Status::OK();
 }
 #endif
