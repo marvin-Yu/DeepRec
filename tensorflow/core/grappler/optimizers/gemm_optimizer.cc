@@ -1488,8 +1488,9 @@ bool ReorderUnaryOpAndUnpack(Graph* graph) {
         graph->UpdateEdge(unpack, src_output, dst_nodes[i], dst_inputs[i]);
       }
       if (is_first) {
-        graph->RemoveNode(u);
         is_first = false;
+      } else {
+        graph->RemoveNode(u);
       }
     }
     const Edge* to_unpack = nullptr;
@@ -1597,8 +1598,9 @@ bool ReorderBinaryOpAndUnpack(Graph* graph) {
                           dst_nodes[i], dst_inputs[i]);
       }
       if (is_first) {
-        graph->RemoveNode(b);
         is_first = false;
+      } else {
+        graph->RemoveNode(b);
       }
     }
     const Edge* to_unpack = nullptr;
