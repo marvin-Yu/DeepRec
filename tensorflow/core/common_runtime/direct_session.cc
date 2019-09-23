@@ -1197,8 +1197,9 @@ Status DirectSession::Run(const RunOptions& run_options,
       TF_RETURN_IF_ERROR(
         device_context->BorrowAllocator(k, &persistent_allocator));
       CUDAGraphContext* context = new CUDAGraphContext(k);
-      VLOG(2) << "Creating instance " << k << " of CUDA Graph context for key "
-              << key << ", persistent allocator is " << persistent_allocator;
+      LOG(INFO) << "Creating instance " << k
+                << " of CUDA Graph context for key " << key
+                << ", persistent allocator is " << persistent_allocator;
       auto st = RecordCUDAGraph(run_options, inputs, output_names, target_nodes,
                                 outputs, run_metadata, context,
                                 persistent_allocator,
@@ -1213,7 +1214,7 @@ Status DirectSession::Run(const RunOptions& run_options,
         delete context;
       }
     }
-    VLOG(2) << "Finished creating CUDA Graphs";
+    LOG(INFO) << "Finished creating CUDA Graphs";
     return Status::OK();
   }
 
