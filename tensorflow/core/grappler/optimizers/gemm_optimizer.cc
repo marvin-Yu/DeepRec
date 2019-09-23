@@ -217,8 +217,6 @@ bool FuseMatMuls(Graph* graph) {
       if (src_outputs[i] != src_outputs[0]) same_input = false;
     }
     if (!same_input) continue;
-    // TODO(ylxu): check the compatibility of shapes (weights)
-    // and attrs (transpose_a and transpose_b).
 
     VLOG(1) << "FuseMatMuls: found pattern";
     std::sort(matmuls.begin(), matmuls.end(),
@@ -270,7 +268,6 @@ bool FuseMatMuls(Graph* graph) {
     std::vector<NodeDefBuilder::NodeOut> pack_inputs;
     DataType dtype = weights[0]->output_type(0);
     for (Node* w : weights) {
-      // TODO(ylxu): src_output may not be 0.
       pack_inputs.emplace_back(w->name(), 0, dtype);
     }
     NodeDefBuilder pack_builder(pack_name, "Pack");
@@ -365,7 +362,6 @@ bool FuseMatMuls(Graph* graph) {
         dst_inputs.push_back(e->dst_input());
       }
       for (unsigned int i = 0; i < dst_nodes.size(); i++) {
-        // TODO(ylxu): has bug, should not use index
         graph->UpdateEdge(unpack, index, dst_nodes[i], dst_inputs[i]);
       }
       graph->RemoveNode(m);
