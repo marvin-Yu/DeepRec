@@ -191,9 +191,7 @@ bool FuseMatMuls(Graph* graph) {
     for (unsigned int i = 1; i < src_outputs.size(); i++) {
       if (src_outputs[i] != src_outputs[0]) same_input = false;
     }
-    if (!same_input) {
-      continue;
-    }
+    if (!same_input) continue;
     // TODO(ylxu): check the compatibility of shapes (weights)
     // and attrs (transpose_a and transpose_b).
 
@@ -204,14 +202,45 @@ bool FuseMatMuls(Graph* graph) {
     });
     std::vector<Node*> weights;
     VLOG(1) << "the following ops are fused: ";
+    string weight_shape;
+    bool can_fuse = true;
     for (Node* m : matmuls) {
       VLOG(1) << m->name();
       Node* w = nullptr;
       m->input_node(1, &w);
+
+      // Check all weights
+      // (1) are Const ops, and
+      // (2) have the same shape.
+      if (w->type_string() != "Const") {
+        can_fuse = false;
+        break;
+      }
+      TensorShapeProto s = w->def().attr().at("value").
+                           tensor().tensor_shape();
+      string temp;
+      for (int i = 0; i < s.dim_size(); i++) {
+        temp += std::to_string(s.dim(i).size()) + ",";
+      }
+      if (temp.empty()) {
+        can_fuse = false;
+        break;
+      }
+      if (weight_shape.empty()) {
+        weight_shape = temp;
+      } else {
+        if (temp != weight_shape) {
+          can_fuse = false;
+          break;
+        }
+      }
+
       weights.push_back(w);
     }
+    if (!can_fuse) continue;
     // Add a Pack node to group weights
-    string prefix = "GemmOptimizer/FuseMatMuls/" + std::to_string(count++);
+    string prefix = "GemmOptimizer/FuseMatMuls/" +
+                    std::to_string(count++);
     string pack_name = prefix + "/Pack";
     std::vector<NodeDefBuilder::NodeOut> pack_inputs;
     DataType dtype = weights[0]->output_type(0);
@@ -374,12 +403,41 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
       return a_src_output < b_src_output;
     });
     std::vector<Node*> biases;
+    string bias_shape;
     for (Node* n : biasadds) {
       Node* bias = nullptr;
       n->input_node(1, &bias);
+
+      // Check all biases
+      // (1) are Const ops, and
+      // (2) have the same shape.
+      if (bias->type_string() != "Const") {
+        can_fuse = false;
+        break;
+      }
+      TensorShapeProto s = bias->def().attr().at("value").
+                           tensor().tensor_shape();
+      string temp;
+      for (int i = 0; i < s.dim_size(); i++) {
+        temp += std::to_string(s.dim(i).size()) + ",";
+      }
+      if (temp.empty()) {
+        can_fuse = false;
+        break;
+      }
+      if (bias_shape.empty()) {
+        bias_shape = temp;
+      } else {
+        if (temp != bias_shape) {
+          can_fuse = false; 
+          break;
+        }
+      }
+
       biases.push_back(bias);
     }
- 
+    if (!can_fuse) continue;
+
     // Add a Pack node to group biases
     string prefix = "GemmOptimizer/FuseBiasAddsAfterBatchMatMulUnpack/" +
                     std::to_string(count++);
@@ -1255,9 +1313,11 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
           if (another_input_from_unpack) {
             key = n->name();
           } else {
-            // key = n->def().attr().at("value").at("tensor_shape").DebugString();
-            // TODO(ylxu): use tensor_shape as key
-            key = "Const";
+            TensorShapeProto s = n->def().attr().at("value").
+                                 tensor().tensor_shape();
+            for (int i = 0; i < s.dim_size(); i++) {
+              key += std::to_string(s.dim(i).size()) + ",";
+            }
           }
           if (binary_ops_m.find(key) != binary_ops_m.end()) {
             binary_ops_m[key].push_back(b);
