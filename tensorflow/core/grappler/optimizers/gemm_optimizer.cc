@@ -21,6 +21,7 @@ limitations under the License.
 #include "tensorflow/core/graph/graph.h"
 #include "tensorflow/core/graph/graph_constructor.h"
 #include "tensorflow/core/grappler/grappler_item.h"
+#include "tensorflow/core/util/env_var.h"
 
 namespace tensorflow {
 namespace grappler {
@@ -1868,8 +1869,10 @@ bool RemoveUnpacksAndPacks(Graph* graph) {
   return changed;
 }
 
-
 void FuseGemmKernels(Graph* graph) {  
+  bool gemm_fusion = true;
+  ReadBoolFromEnvVar("TF_ENABLE_GEMM_FUSION", true, &gemm_fusion);
+  if (!gemm_fusion) return;
   while(1) {
     bool graph_changed =
         ReorderReshapeAndBiasAdd(graph) ||
