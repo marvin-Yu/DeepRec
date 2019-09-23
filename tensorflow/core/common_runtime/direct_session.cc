@@ -786,6 +786,7 @@ Status DirectSession::RunWithCUDAGraph(CUDAGraphContext& context,
                                             output_names[output_idx],
                                             device, output_tensor,
                                             output_loop);
+      return;
     }
     status = Status::OK();
     notification.Notify();
