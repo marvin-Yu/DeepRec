@@ -42,6 +42,8 @@ class GPUPersistentAllocator : public Allocator {
   size_t offset_ = 0;
   size_t allocated_size_ = 0, allocated_large_size_ = 0;
 
+  mutex mu_;
+
   void LogAllocations();
   void* AllocateLarge(size_t size);
   void* AllocateNormal(size_t size);

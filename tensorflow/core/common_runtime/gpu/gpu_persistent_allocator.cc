@@ -140,6 +140,7 @@ void* GPUPersistentAllocator::AllocateNormal(size_t size) {
 
 void* GPUPersistentAllocator::AllocateRaw(size_t alignment, size_t num_bytes) {
 #ifdef GOOGLE_CUDA
+  mutex_lock l(mu_);
   num_bytes = (num_bytes + alignment_ - 1) / alignment_ * alignment_;
   return (num_bytes >= large_chunk_size_
           ? AllocateLarge(num_bytes)
