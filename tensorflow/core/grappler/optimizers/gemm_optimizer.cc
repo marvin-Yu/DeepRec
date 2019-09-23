@@ -58,7 +58,7 @@ std::set<string> GetBinaryOps() {
 }
 
 // Change MatMul_0->[Reshape]*n->MatMul_1 to MatMul_0->MatMul_1
-bool RemoveReshapeBetweenMatMuls(Graph* graph) {
+bool RemoveReshapesBeforeMatMul(Graph* graph) {
   bool changed = false; 
   std::vector<Node*> nodes(graph->num_nodes());
   int i = 0;
@@ -66,38 +66,63 @@ bool RemoveReshapeBetweenMatMuls(Graph* graph) {
     nodes[i++] = node;
   }
 
+  std::set<string> ops_with_unchanged_shape = GetOpsWithUnchangedShape();
   for (Node* node : nodes) {
     if (!graph->IsValidNode(node).ok()) continue;
-    if (node->type_string() == "MatMul") {
-      Node* current = nullptr;
-      node->input_node(0, &current);
-      string op = current->type_string();
-      if (op != "Reshape") continue;
+    if (node->type_string() != "MatMul") continue;
+    Node* current = nullptr;
+    node->input_node(0, &current);
+    string type = current->type_string();
+    if (type != "Reshape") continue;
 
-      Node* non_reshape_before_matmul_1 = nullptr;
-      std::set<string> ops_with_unchanged_shape = GetOpsWithUnchangedShape();
-      while (op == "Reshape" || (ops_with_unchanged_shape.find(op) !=
+    Node* non_reshape_before_matmul_1 = nullptr;
+    while (type == "Reshape" || (ops_with_unchanged_shape.find(type) !=
                                  ops_with_unchanged_shape.end())) {
-        if (op != "Reshape") non_reshape_before_matmul_1 = current;
-        Node* temp = nullptr;
-        current->input_node(0, &temp);
-        current = temp;
-        op = current->type_string();
+      if (type != "Reshape") non_reshape_before_matmul_1 = current;
+      Node* temp = nullptr;
+      current->input_node(0, &temp);
+      current = temp;
+      type = current->type_string();
+    }
+    if (type != "MatMul") continue;
+
+    // Check shape compatibility of two MatMuls.
+    // If compatible, Reshapes before the second MatMul can be skipped;
+    Node* matmuls[2];
+    matmuls[0] = current;
+    matmuls[1] = node;
+    bool can_remove = true;
+    int w_shapes[2][2];
+    for (int i = 0; i < 2; i++) {
+      Node* w = nullptr;
+      matmuls[i]->input_node(1, &w);
+      if (w->type_string() != "Const") {
+        can_remove = false;
+        break;
       }
-      if (op == "MatMul") {
-        Node* matmul_1 = node;
-        Node* matmul_0 = current;
-        // TODO(ylxu): check shape compatibility using matmul weights
-        if (non_reshape_before_matmul_1 == nullptr) {
-          non_reshape_before_matmul_1 = matmul_0;
+      bool transpose_b = matmuls[i]->def().attr().at("transpose_b").b();
+      TensorShapeProto s = w->def().attr().at("value").
+                           tensor().tensor_shape();
+      if (transpose_b) {
+        for (int j = s.dim_size() - 1; j >= 0; j--) {
+          w_shapes[i][j] = s.dim(j).size();
         }
-        const Edge* e;
-        matmul_1->input_edge(0, &e);
-        graph->RemoveEdge(e);
-        graph->AddEdge(non_reshape_before_matmul_1, 0, matmul_1, 0);
-        changed = true;
+      } else {
+        for (int j = 0; j < s.dim_size(); j++) {
+          w_shapes[i][j] = s.dim(j).size();
+        }
       }
     }
+    if (!can_remove || w_shapes[0][1] != w_shapes[1][0]) continue;
+
+    if (non_reshape_before_matmul_1 == nullptr) {
+      non_reshape_before_matmul_1 = matmuls[0];
+    }
+    const Edge* e;
+    matmuls[1]->input_edge(0, &e);
+    graph->RemoveEdge(e);
+    graph->AddEdge(non_reshape_before_matmul_1, 0, matmuls[1], 0);
+    changed = true;
   }
   return changed;
 }
@@ -389,7 +414,6 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
       biasadds.push_back(out);
       src_outputs.insert(src_output);
     }
-    // TODO(ylxu): check that each output of Unpack is used only once
     if (!can_fuse || biasadds.size() < 2) continue;
 
     VLOG(1) << "FuseBiasAdds: found pattern";
@@ -445,7 +469,6 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
     std::vector<NodeDefBuilder::NodeOut> pack_inputs;
     DataType dtype = biases[0]->output_type(0);
     for (Node* b : biases) {
-      // TODO(ylxu): src_output may not be 0.
       pack_inputs.emplace_back(b->name(), 0, dtype);
     }
     NodeDefBuilder pack_builder(pack_name, "Pack");
@@ -1496,7 +1519,6 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
           dst_inputs.push_back(e->dst_input());
         }
         for (unsigned int i = 0; i < dst_nodes.size(); i++) {
-          // TODO(ylxu): has bug, should not use index
           graph->UpdateEdge(unpack, index, dst_nodes[i], dst_inputs[i]);
         }
         graph->RemoveNode(b);
@@ -1640,7 +1662,6 @@ bool FuseBinaryOpsSharingCommonInputAfterUnpack(Graph* graph) {
       binary_ops.push_back(out);
     }
 
-    // TODO(ylxu): check that each output of Unpack is used only once
     if (!can_reorder || binary_ops.size() < 2) continue;
     VLOG(1) << "FuseBinaryOpsSharingCommonInputAfterUnpack: found pattern";
     bool is_first = true;
@@ -1856,7 +1877,7 @@ void FuseGemmKernels(Graph* graph) {
   while(1) {
     bool graph_changed =
         ReorderReshapeAndBiasAdd(graph) ||
-        RemoveReshapeBetweenMatMuls(graph) ||
+        RemoveReshapesBeforeMatMul(graph) ||
         FuseMatMuls(graph) ||
         FuseBiasAddsAfterBatchMatMulUnpack(graph) ||
         RemoveShapeAfterReshape(graph) ||
