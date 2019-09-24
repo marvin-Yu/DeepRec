@@ -18,6 +18,7 @@ limitations under the License.
 #include <atomic>
 #include <deque>
 #include <memory>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -188,6 +189,11 @@ static bool SendingGPUToCPU(const Node* node) {
 
 static bool RecvingCPUToGPU(const Node* node) {
   return IsTransfering(node, "_Recv", "CPU", "GPU");
+}
+
+static bool CUDAGraphPreOps(const Node* node) {
+  static std::set<string> pre_ops { "NoOp", "_Recv", "Const" };
+  return pre_ops.find(node->type_string()) != pre_ops.end();
 }
 
 class ExecutorImpl;
@@ -1374,7 +1380,7 @@ class ExecutorState {
   // Number of outstanding _Recv operations. When the number drops
   // down to zero, we can start to capture the compute stream to build
   // a CUDA Graph.
-  std::atomic_int_fast32_t num_outstanding_recv_ops_;
+  int num_outstanding_recv_ops_ GUARDED_BY(mu_);
 
   // The unique name of a frame.
   inline string MakeFrameName(FrameState* frame, int64 iter_id,
@@ -1630,7 +1636,10 @@ void ExecutorState::RunAsync(Executor::DoneCallback done) {
         return;
       }
     }
-    num_outstanding_recv_ops_ = n;
+    {
+      mutex_lock l(mu_);
+      num_outstanding_recv_ops_ = n;
+    }
     graph_capture_status_ = GraphCaptureStatus::NEW;
   }
 #endif
@@ -1797,22 +1806,33 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
     s = Status::OK();
 #ifdef GOOGLE_CUDA
     if (cuda_graph_ && IsGPU(device)) {
-      if (SendingGPUToCPU(node)) {
-        bool ok;
-        {
+      if (!CUDAGraphPreOps(node)) {
+        while (true) {
           mutex_lock l(mu_);
-          ok = status_.ok();
+          if (num_outstanding_recv_ops_ == 0) {
+            break;
+          }
         }
-        if (ok) {
-          auto stream =
-            device->tensorflow_gpu_device_info()->default_context->stream();
-          auto cu_stream =
-            static_cast<CUstream>(stream->implementation()->GpuStreamHack());
-          auto cuda_graph = static_cast<CUgraph*>(cuda_graph_);
-          s = EndStreamCapture(cu_stream, cuda_graph);
+      }
+
+      if (s.ok()) {
+        if (SendingGPUToCPU(node)) {
+          bool ok;
+          {
+            mutex_lock l(mu_);
+            ok = status_.ok();
+          }
+          if (ok) {
+            auto stream =
+              device->tensorflow_gpu_device_info()->default_context->stream();
+            auto cu_stream =
+              static_cast<CUstream>(stream->implementation()->GpuStreamHack());
+            auto cuda_graph = static_cast<CUgraph*>(cuda_graph_);
+            s = EndStreamCapture(cu_stream, cuda_graph);
+          }
+        } else if (node->type_string() == "_HostSend") {
+          s = errors::Internal("_HostSend is not supported");
         }
-      } else if (node->type_string() == "_HostSend") {
-        s = errors::Internal("_HostSend is not supported");
       }
     }
 #endif
@@ -1928,7 +1948,11 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
               VLOG(2) << "Saving input " << real_name << " (" << name << ")";
               save_input_(real_name, tensor);
 
-              auto left = --num_outstanding_recv_ops_;
+              int left;
+              {
+                mutex_lock l(mu_);
+                left = --num_outstanding_recv_ops_;
+              }
               VLOG(2) << "Number of outstanding _Recv operations: " << left;
               if (left == 0) {
                 auto stream = device->tensorflow_gpu_device_info()
