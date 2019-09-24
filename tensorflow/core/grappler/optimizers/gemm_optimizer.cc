@@ -53,6 +53,7 @@ std::set<string> GetBinaryOps() {
       "BatchMatMul",
       "BatchMatMulV2",
       "Add",
+      "AddV2",
       "Sub",
       "Mul"};
   return ops;
