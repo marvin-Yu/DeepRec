@@ -2199,9 +2199,21 @@ port::Status CUDABlas::DoBlasGemmBatchedInternal(
     c = DeviceMemory<CUDA_T *>(*c_temporary->mutable_device_memory());
   }
 
-  if (!stream->ThenMemcpy(&a, a_raw_ptrs.data(), size).ok() ||
-      !stream->ThenMemcpy(&b, b_raw_ptrs.data(), size).ok() ||
-      !stream->ThenMemcpy(&c, c_raw_ptrs.data(), size).ok()) {
+  auto arg_saver = (scratch_allocator
+                    ? scratch_allocator->GetArgSaver()
+                    : nullptr);
+  auto a1 = (arg_saver
+             ? arg_saver->SaveArray(a_raw_ptrs.data(), batch_count)
+             : a_raw_ptrs.data());
+  auto b1 = (arg_saver
+             ? arg_saver->SaveArray(b_raw_ptrs.data(), batch_count)
+             : b_raw_ptrs.data());
+  auto c1 = (arg_saver
+             ? arg_saver->SaveArray(c_raw_ptrs.data(), batch_count)
+             : c_raw_ptrs.data());
+  if (!stream->ThenMemcpy(&a, a1, size).ok() ||
+      !stream->ThenMemcpy(&b, b1, size).ok() ||
+      !stream->ThenMemcpy(&c, c1, size).ok()) {
     return port::Status(port::error::INTERNAL,
                         "failed to copy memory from host to device in "
                         "CUDABlas::DoBlasGemmBatched");

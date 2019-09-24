@@ -978,6 +978,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":lib",
+        ":ptr_util",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:optional",
         "//third_party/eigen3",

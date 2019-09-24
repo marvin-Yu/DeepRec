@@ -460,6 +460,7 @@ cc_library(
     srcs = ["scratch_allocator.cc"],
     hdrs = ["scratch_allocator.h"],
     deps = [
+        "//tensorflow/core:allocator",
         ":device_memory",
         ":stream_header",
         ":temporary_device_memory",

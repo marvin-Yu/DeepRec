@@ -117,6 +117,8 @@ class Executor {
     SaveIO save_output = nullptr;
 
     int cuda_graph_capture_timeout_secs = 0;
+
+    ArgSaver* arg_saver = nullptr;
   };
   typedef std::function<void(const Status&)> DoneCallback;
   virtual void RunAsync(const Args& args, DoneCallback done) = 0;

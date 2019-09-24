@@ -18,6 +18,7 @@ limitations under the License.
 
 #include <memory>
 
+#include "tensorflow/core/framework/allocator.h"
 #include "tensorflow/stream_executor/device_memory.h"
 #include "tensorflow/stream_executor/lib/statusor.h"
 #include "tensorflow/stream_executor/platform/port.h"
@@ -49,6 +50,9 @@ class ScratchAllocator {
   // deallocating at some known-safe point. See the class comment above.
   virtual port::StatusOr<DeviceMemory<uint8>> AllocateBytes(
       int64 byte_size) = 0;
+
+  // Returns an ArgSaver.
+  virtual ::tensorflow::ArgSaver* GetArgSaver() { return nullptr; }
 };
 
 // Allocates a single temporary memory allocation -- this memory is deallocated

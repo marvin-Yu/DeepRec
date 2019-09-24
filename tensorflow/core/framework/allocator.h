@@ -20,6 +20,8 @@ limitations under the License.
 
 #include <functional>
 #include <limits>
+#include <memory>
+#include <vector>
 
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
@@ -27,6 +29,7 @@ limitations under the License.
 #include "tensorflow/core/framework/type_traits.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/macros.h"
+#include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/numa.h"
 #include "tensorflow/core/platform/types.h"
 
@@ -374,6 +377,25 @@ class SubAllocator {
 
   const std::vector<Visitor> alloc_visitors_;
   const std::vector<Visitor> free_visitors_;
+};
+
+// A special kind of allocator that keeps copied CPU arguments to
+// various device operations, releasing them at destruction. This is
+// introduced to support CUDA Graph capture.
+class ArgSaver {
+ public:
+  template<typename T>
+  T* SaveSingle(T arg) {
+    return reinterpret_cast<T*>(Save(&arg, sizeof(T)));
+  }
+  template<typename T>
+  T* SaveArray(const T* p, size_t n) {
+    return reinterpret_cast<T*>(Save(p, n * sizeof(T)));
+  }
+ private:
+  mutex mu_;
+  void* Save(const void* p, size_t size);
+  std::vector<std::unique_ptr<string>> saved_args_;
 };
 
 }  // namespace tensorflow

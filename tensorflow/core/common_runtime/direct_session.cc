@@ -140,6 +140,8 @@ class DirectSession::CUDAGraphDeviceContext {
 
   Device* device() { return device_; }
 
+  ArgSaver* arg_saver() { return &arg_saver_; }
+
  private:
 
   uint64 wait_time_in_microseconds(const CUDAGraphOptions& options) {
@@ -192,6 +194,8 @@ class DirectSession::CUDAGraphDeviceContext {
   const uint64 wait_time_;
 
   std::vector<Instance> instances_ GUARDED_BY(mu_);
+
+  ArgSaver arg_saver_;
 };
 
 DirectSession::CUDAGraphContext::~CUDAGraphContext() {
@@ -868,7 +872,7 @@ Status DirectSession::RunInternal(
     Allocator* persistent_allocator, void* cuda_graph,
     std::map<string, std::unique_ptr<Tensor>>* saved_inputs,
     std::map<string, std::unique_ptr<Tensor>>* saved_outputs,
-    int cuda_graph_capture_timeout_secs) {
+    int cuda_graph_capture_timeout_secs, ArgSaver* arg_saver) {
   const uint64 start_time_usecs = options_.env->NowMicros();
   const int64 executor_step_count = executors_and_keys->step_count.fetch_add(1);
   RunState run_state(step_id, &devices_);
@@ -967,6 +971,7 @@ Status DirectSession::RunInternal(
     };
   }
   args.cuda_graph_capture_timeout_secs = cuda_graph_capture_timeout_secs;
+  args.arg_saver = arg_saver;
 
   const bool do_trace = (run_options.trace_level() > RunOptions::NO_TRACE);
 
@@ -1205,7 +1210,8 @@ Status DirectSession::Run(const RunOptions& run_options,
       auto st = RecordCUDAGraph(run_options, inputs, output_names, target_nodes,
                                 outputs, run_metadata, context,
                                 persistent_allocator,
-                                device_context->device_id());
+                                device_context->device_id(),
+                                device_context->arg_saver());
       device_context->ReturnAllocator(k, persistent_allocator);
       if (!st.ok()) {
         delete context;
@@ -1243,7 +1249,7 @@ Status DirectSession::RecordCUDAGraph(
   const std::vector<string>& output_names,
   const std::vector<string>& target_nodes, std::vector<Tensor>* outputs,
   RunMetadata* run_metadata, CUDAGraphContext* cuda_graph_context,
-  Allocator* persistent_allocator, int device_id) {
+  Allocator* persistent_allocator, int device_id, ArgSaver* arg_saver) {
 #ifdef GOOGLE_CUDA
   auto cuda_graph = &cuda_graph_context->cuda_graph;
   auto ret = cuGraphCreate(cuda_graph, 0);
@@ -1262,7 +1268,7 @@ Status DirectSession::RecordCUDAGraph(
                           persistent_allocator, cuda_graph,
                           &cuda_graph_context->inputs,
                           &cuda_graph_context->outputs,
-                          capture_timeout_secs));
+                          capture_timeout_secs, arg_saver));
   size_t n;
   ret = cuGraphGetNodes(*cuda_graph, nullptr, &n);
   if (ret != CUDA_SUCCESS) {
@@ -1323,7 +1329,7 @@ Status DirectSession::Run0(
   Allocator* persistent_allocator, void* cuda_graph,
   std::map<string, std::unique_ptr<Tensor>>* saved_inputs,
   std::map<string, std::unique_ptr<Tensor>>* saved_outputs,
-  int cuda_graph_capture_timeout_secs) {
+  int cuda_graph_capture_timeout_secs, ArgSaver* arg_saver) {
   TF_RETURN_IF_ERROR(CheckNotClosed());
   TF_RETURN_IF_ERROR(CheckGraphCreated("Run()"));
   direct_session_runs->GetCell()->IncrementBy(1);
@@ -1386,7 +1392,7 @@ Status DirectSession::Run0(
                                  thread::ThreadPoolOptions(),
                                  persistent_allocator, cuda_graph,
                                  saved_inputs, saved_outputs,
-                                 cuda_graph_capture_timeout_secs));
+                                 cuda_graph_capture_timeout_secs, arg_saver));
 
   // Receive outputs.
   if (outputs) {

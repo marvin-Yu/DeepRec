@@ -239,17 +239,13 @@ class DirectSession : public Session {
     Allocator* persistent_allocator = nullptr, void* cuda_graph = nullptr,
     std::map<string, std::unique_ptr<Tensor>>* saved_inputs = nullptr,
     std::map<string, std::unique_ptr<Tensor>>* saved_outputs = nullptr,
-    int cuda_graph_capture_timeout_secs = 10);
+    int cuda_graph_capture_timeout_secs = 10, ArgSaver* arg_saver = nullptr);
   ::tensorflow::Status RecordCUDAGraph(
-    const ::tensorflow::RunOptions& run_options,
-    const NamedTensorList& inputs,
+    const ::tensorflow::RunOptions& run_options, const NamedTensorList& inputs,
     const std::vector<string>& output_names,
-    const std::vector<string>& target_nodes,
-    std::vector<Tensor>* outputs,
-    RunMetadata* run_metadata,
-    CUDAGraphContext* cuda_graph_context,
-    Allocator* persistent_allocator,
-    int device_id);
+    const std::vector<string>& target_nodes, std::vector<Tensor>* outputs,
+    RunMetadata* run_metadata, CUDAGraphContext* cuda_graph_context,
+    Allocator* persistent_allocator, int device_id, ArgSaver* arg_saver);
 
   ::tensorflow::Status RecordCUDAGraph(
     const ::tensorflow::RunOptions& run_options, const NamedTensorList& inputs,
@@ -312,7 +308,7 @@ class DirectSession : public Session {
       Allocator* persistent_allocator = nullptr, void* cuda_graph = nullptr,
       std::map<string, std::unique_ptr<Tensor>>* saved_inputs = nullptr,
       std::map<string, std::unique_ptr<Tensor>>* saved_outputs = nullptr,
-      int cuda_graph_capture_timeout_secs = 10);
+      int cuda_graph_capture_timeout_secs = 10, ArgSaver* arg_saver = nullptr);
 
   // Returns whether inter-op execution uses a global pool or the input
   // `run_options` requests being run on inter_op_thread_pool = 0 in case

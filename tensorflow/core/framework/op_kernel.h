@@ -739,6 +739,9 @@ class OpKernelContext {
     // Allocator attributes to use.
     std::shared_ptr<AllocatorAttributes> allocator_attributes;
 
+    // ArgSaver to use.
+    ArgSaver* arg_saver = nullptr;
+
     const AllocatorAttributes* get_output_attr_array() {
       return (real_output_attr_array
               ? real_output_attr_array.get()
@@ -1305,6 +1308,9 @@ class OpKernelContext {
   }
 
   Status get_allocator(AllocatorAttributes attr, Allocator** allocator);
+
+  ArgSaver* get_arg_saver() { return params_->arg_saver; }
+
  private:
   bool record_memory_consumption_ = false;
 

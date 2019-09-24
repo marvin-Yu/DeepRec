@@ -1336,6 +1336,7 @@ class ExecutorState {
   Executor::Args::SaveIO save_input_;
   Executor::Args::SaveIO save_output_;
   std::chrono::seconds cuda_graph_capture_timeout_;
+  ArgSaver* arg_saver_;
 
   // QUESTION: Make it a checkpoint::TensorSliceReaderCacheWrapper
   // instead of a pointer?  (avoids having to delete).
@@ -1492,6 +1493,7 @@ ExecutorState::ExecutorState(const Executor::Args& args, ExecutorImpl* impl)
       save_output_(args.save_output),
       cuda_graph_capture_timeout_(std::chrono::seconds(
                                     args.cuda_graph_capture_timeout_secs)),
+      arg_saver_(args.arg_saver),
       slice_reader_cache_(new checkpoint::TensorSliceReaderCacheWrapper),
       call_frame_(args.call_frame),
       impl_(impl),
@@ -1792,6 +1794,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
     if (finish_when_deferred_ops_done) Finish();
   };
   params.persistent_allocator = persistent_allocator_;
+  params.arg_saver = arg_saver_;
 
   Status s;
   NodeExecStatsInterface* stats = nullptr;
