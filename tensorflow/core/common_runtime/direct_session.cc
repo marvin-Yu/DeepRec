@@ -867,7 +867,8 @@ Status DirectSession::RunInternal(
     const thread::ThreadPoolOptions& threadpool_options,
     Allocator* persistent_allocator, void* cuda_graph,
     std::map<string, std::unique_ptr<Tensor>>* saved_inputs,
-    std::map<string, std::unique_ptr<Tensor>>* saved_outputs) {
+    std::map<string, std::unique_ptr<Tensor>>* saved_outputs,
+    int cuda_graph_capture_timeout_secs) {
   const uint64 start_time_usecs = options_.env->NowMicros();
   const int64 executor_step_count = executors_and_keys->step_count.fetch_add(1);
   RunState run_state(step_id, &devices_);
@@ -965,6 +966,7 @@ Status DirectSession::RunInternal(
       (*saved_outputs)[name].reset(new Tensor(*tensor));
     };
   }
+  args.cuda_graph_capture_timeout_secs = cuda_graph_capture_timeout_secs;
 
   const bool do_trace = (run_options.trace_level() > RunOptions::NO_TRACE);
 
@@ -1250,11 +1252,17 @@ Status DirectSession::RecordCUDAGraph(
     cuGetErrorString(ret, &error);
     return errors::Internal("Failed to create CUDA Graph object: ", error);
   }
+  auto capture_timeout_secs =
+    run_options.cuda_graph_options().capture_timeout_secs();
+  if (capture_timeout_secs <= 0) {
+    capture_timeout_secs = 10;
+  }
   TF_RETURN_IF_ERROR(Run0(run_options, inputs, output_names, target_nodes,
                           outputs, run_metadata, cuda_graph_context,
                           persistent_allocator, cuda_graph,
                           &cuda_graph_context->inputs,
-                          &cuda_graph_context->outputs));
+                          &cuda_graph_context->outputs,
+                          capture_timeout_secs));
   size_t n;
   ret = cuGraphGetNodes(*cuda_graph, nullptr, &n);
   if (ret != CUDA_SUCCESS) {
@@ -1314,7 +1322,8 @@ Status DirectSession::Run0(
   RunMetadata* run_metadata, CUDAGraphContext* cuda_graph_context,
   Allocator* persistent_allocator, void* cuda_graph,
   std::map<string, std::unique_ptr<Tensor>>* saved_inputs,
-  std::map<string, std::unique_ptr<Tensor>>* saved_outputs) {
+  std::map<string, std::unique_ptr<Tensor>>* saved_outputs,
+  int cuda_graph_capture_timeout_secs) {
   TF_RETURN_IF_ERROR(CheckNotClosed());
   TF_RETURN_IF_ERROR(CheckGraphCreated("Run()"));
   direct_session_runs->GetCell()->IncrementBy(1);
@@ -1376,7 +1385,8 @@ Status DirectSession::Run0(
                                  executors_and_keys, run_metadata,
                                  thread::ThreadPoolOptions(),
                                  persistent_allocator, cuda_graph,
-                                 saved_inputs, saved_outputs));
+                                 saved_inputs, saved_outputs,
+                                 cuda_graph_capture_timeout_secs));
 
   // Receive outputs.
   if (outputs) {

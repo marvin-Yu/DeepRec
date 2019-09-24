@@ -562,6 +562,8 @@ message CUDAGraphOptions {
   // When allocating persistent memory, chunks with sizes greater than
   // this value will be deemed large.
   int32 large_chunk_size_mb = 6;
+  // Timeout while capturing CUDA Graph
+  int32 capture_timeout_secs = 7;
 };
 
 // Options for a single Run() call.

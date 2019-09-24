@@ -16,6 +16,7 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/executor.h"
 
 #include <atomic>
+#include <chrono>
 #include <deque>
 #include <memory>
 #include <set>
@@ -1334,6 +1335,7 @@ class ExecutorState {
   void* cuda_graph_;
   Executor::Args::SaveIO save_input_;
   Executor::Args::SaveIO save_output_;
+  std::chrono::seconds cuda_graph_capture_timeout_;
 
   // QUESTION: Make it a checkpoint::TensorSliceReaderCacheWrapper
   // instead of a pointer?  (avoids having to delete).
@@ -1464,6 +1466,7 @@ class ExecutorState {
 #ifdef GOOGLE_CUDA
   Status BeginStreamCapture(CUstream stream);
   Status EndStreamCapture(CUstream stream, CUgraph* cuda_graph);
+  Status WaitForRecvOps();
 #endif
 };
 
@@ -1487,6 +1490,8 @@ ExecutorState::ExecutorState(const Executor::Args& args, ExecutorImpl* impl)
       cuda_graph_(args.cuda_graph),
       save_input_(args.save_input),
       save_output_(args.save_output),
+      cuda_graph_capture_timeout_(std::chrono::seconds(
+                                    args.cuda_graph_capture_timeout_secs)),
       slice_reader_cache_(new checkpoint::TensorSliceReaderCacheWrapper),
       call_frame_(args.call_frame),
       impl_(impl),
@@ -1807,12 +1812,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
 #ifdef GOOGLE_CUDA
     if (cuda_graph_ && IsGPU(device)) {
       if (!CUDAGraphPreOps(node)) {
-        while (true) {
-          mutex_lock l(mu_);
-          if (num_outstanding_recv_ops_ == 0) {
-            break;
-          }
-        }
+        s = WaitForRecvOps();
       }
 
       if (s.ok()) {
@@ -2935,6 +2935,22 @@ Status ExecutorState::EndStreamCapture(CUstream stream, CUgraph* cuda_graph) {
     cuGetErrorString(ret, &error);
     return errors::Internal(
       "Cannot end to capture stream ", stream, ": ", error);
+  }
+  return Status::OK();
+}
+
+Status ExecutorState::WaitForRecvOps() {
+  auto bef = std::chrono::system_clock::now();
+  while (true) {
+    mutex_lock l(mu_);
+    if (num_outstanding_recv_ops_ == 0) {
+      break;
+    }
+    auto now = std::chrono::system_clock::now();
+    auto ela = std::chrono::duration_cast<std::chrono::seconds>(now - bef);
+    if (ela >= cuda_graph_capture_timeout_) {
+      return errors::Internal("Timed out while capturing CUDA graph");
+    }
   }
   return Status::OK();
 }

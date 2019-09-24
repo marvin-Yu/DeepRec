@@ -115,6 +115,8 @@ class Executor {
     typedef std::function<void (const string&, Tensor*)> SaveIO;
     SaveIO save_input = nullptr;
     SaveIO save_output = nullptr;
+
+    int cuda_graph_capture_timeout_secs = 0;
   };
   typedef std::function<void(const Status&)> DoneCallback;
   virtual void RunAsync(const Args& args, DoneCallback done) = 0;
