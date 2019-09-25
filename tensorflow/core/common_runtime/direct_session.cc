@@ -30,8 +30,6 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/executor.h"
 #include "tensorflow/core/common_runtime/executor_factory.h"
 #include "tensorflow/core/common_runtime/function.h"
-#include "tensorflow/core/common_runtime/gpu/gpu_device.h"
-#include "tensorflow/core/common_runtime/gpu/gpu_persistent_allocator.h"
 #include "tensorflow/core/common_runtime/graph_optimizer.h"
 #include "tensorflow/core/common_runtime/memory_types.h"
 #include "tensorflow/core/common_runtime/metrics.h"
@@ -86,6 +84,9 @@ limitations under the License.
 // directly here. This is a bit hacky as it is not well
 // encapsulated. But for now we are aiming to make it work, so we only
 // want to clean this up in the future.
+#include "tensorflow/core/common_runtime/gpu/gpu_device.h"
+#include "tensorflow/core/common_runtime/gpu/gpu_persistent_allocator.h"
+
 #include "third_party/gpus/cuda/include/cuda.h"
 #include "third_party/gpus/cuda/include/cuda_runtime_api.h"
 #endif
