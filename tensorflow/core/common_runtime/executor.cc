@@ -1813,6 +1813,9 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
 
     s = Status::OK();
 #ifdef GOOGLE_CUDA
+    if (IsGPU(device)) {
+      VLOG(1) << "Scheduling " << SummarizeNode(*node);
+    }
     if (cuda_graph_ && IsGPU(device)) {
       if (!CUDAGraphPreOps(node)) {
         s = WaitForRecvOps();
