@@ -179,9 +179,345 @@ bool ReorderReshapeAndBiasAdd(Graph* graph) {
   return changed;
 }
 
-// op--->MatMul to op->BatchMatMul->Unstack--->
-//    |->MatMul                             |->
-//    |->MatMul                             |->
+// Change (A*B+C)*D+E to A*(B*C)+(C*D)+E when B, C, D and E are consts,
+// such that B*C, and (C*D)+E can be folded to consts.
+bool ConstantFoldingForContinuousMatMuls(Graph* graph) {
+  VLOG(1) << "ConstantFoldingForContinuousMatMuls";
+  static int count = 0;
+  bool changed = false;
+  std::vector<Node*> nodes(graph->num_nodes());
+  int i = 0;
+  for (Node* node : graph->nodes()) {
+    nodes[i++] = node;
+  }
+
+  for (Node* node : nodes) {
+    if (!graph->IsValidNode(node).ok()) continue;
+
+    Node* matmuls[2];
+    Node* biasadds[2];
+    Node* weights[2];
+    Node* biases[2];
+    for (int i = 0; i < 2; i++) {
+      matmuls[i] = nullptr;
+      biasadds[i] = nullptr;
+      weights[i] = nullptr;
+      biases[i] = nullptr;
+    }
+
+    // find pattern
+    if (node->type_string() != "MatMul") continue;
+    matmuls[1] = node;
+    for (Node* n : matmuls[1]->out_nodes()) {
+      if (n->type_string() == "BiasAdd") {
+        biasadds[1] = n;
+        break;
+      }
+    }
+    Node* temp = nullptr;
+    matmuls[1]->input_node(0, &temp);
+    if (temp->type_string() == "BiasAdd") {
+      biasadds[0] = temp;
+      biasadds[0]->input_node(0, &matmuls[0]);
+      if (matmuls[0]->type_string() != "MatMul") continue;
+    } else if (temp->type_string() == "MatMul") {
+      matmuls[0] = temp;
+    } else {
+      continue;
+    }
+
+    // check weights are consts
+    bool can_fold = true;
+    for (int i = 0; i < 2; i++) {
+      if (biasadds[i]) {
+        biasadds[i]->input_node(1, &biases[i]);
+        if (biases[i]->type_string() != "Const") {
+          can_fold = false;
+          break;
+        }
+      }
+      matmuls[i]->input_node(1, &weights[i]);
+      if (weights[i]->type_string() != "Const") {
+        can_fold = false;
+        break;
+      }
+    }
+    if (!can_fold) continue;
+
+    VLOG(1) << "ConstantFoldingForContinuousMatMuls: found pattern";
+    Node* temps[5];
+    for (int i = 0; i < 5; i++) {
+      temps[i] = nullptr;
+    }
+
+    string prefix = "GemmOptimizer/ConstantFoldingForContinuousMatMuls/" +
+                    matmuls[0]->name() + "/" + std::to_string(count++);
+
+    // Do constant folding as follows:
+    // T0 = (B*D)
+    // T1 = A*T0
+    // T2 = C*D
+    // T3 = T2+E
+    // T4 = T1+T3
+
+    // T0 = (B*D)
+    string temp0_name = prefix + "/temp0";
+    std::vector<NodeDefBuilder::NodeOut> temp0_inputs;
+    DataType dtype = weights[0]->output_type(0);
+    temp0_inputs.emplace_back(weights[0]->name(), 0, dtype);
+    temp0_inputs.emplace_back(weights[1]->name(), 0, dtype);
+    NodeDefBuilder temp0_builder(temp0_name, "MatMul");
+    temp0_builder.Input(temp0_inputs[0]);
+    temp0_builder.Input(temp0_inputs[1]);
+    NodeDef temp0_node;
+    Status status =
+        temp0_builder
+            .Attr("transpose_a",
+                  matmuls[0]->def().attr().at("transpose_b").b())
+            .Attr("transpose_b",
+                  matmuls[1]->def().attr().at("transpose_b").b())
+            .Attr("T", dtype)
+            .Finalize(&temp0_node);
+    if (!status.ok()) {
+      LOG(ERROR) << "MatMul node construction failed with" << status;
+      return false;
+    }
+    temp0_node.set_device(weights[0]->def().device());
+    temps[0] = graph->AddNode(temp0_node, &status);
+    if (!status.ok()) {
+      LOG(ERROR) << "Adding node failed " << status;
+      return false;
+    }
+    temps[0]->set_assigned_device_name(weights[0]->assigned_device_name());
+    graph->AddEdge(weights[0], 0, temps[0], 0);
+    graph->AddEdge(weights[1], 0, temps[0], 1);
+
+    // T1 = A*T0
+    string temp1_name = prefix + "/temp1";
+    std::vector<NodeDefBuilder::NodeOut> temp1_inputs;
+    const Edge* e = nullptr;
+    matmuls[0]->input_edge(0, &e);
+    temp1_inputs.emplace_back(e->src()->name(), e->src_output(), dtype);
+    temp1_inputs.emplace_back(temp0_name, 0, dtype);
+    NodeDefBuilder temp1_builder(temp1_name, "MatMul");
+    temp1_builder.Input(temp1_inputs[0]);
+    temp1_builder.Input(temp1_inputs[1]);
+    NodeDef temp1_node;
+    status =
+        temp1_builder
+            .Attr("transpose_a",
+                  matmuls[0]->def().attr().at("transpose_a").b())
+            .Attr("transpose_b", false)
+            .Attr("T", dtype)
+            .Finalize(&temp1_node);
+    if (!status.ok()) {
+      LOG(ERROR) << "MatMul node construction failed with" << status;
+      return false;
+    }
+    temp1_node.set_device(matmuls[0]->def().device());
+    temps[1] = graph->AddNode(temp1_node, &status);
+    if (!status.ok()) {
+      LOG(ERROR) << "Adding node failed " << status;
+      return false;
+    }
+    temps[1]->set_assigned_device_name(matmuls[0]->assigned_device_name());
+    graph->AddEdge(e->src(), e->src_output(), temps[1], 0);
+    graph->AddEdge(temps[0], 0, temps[1], 1);
+
+    // T2 = C*D
+    if (biasadds[0]) {
+      string temp2_name = prefix + "/temp2";
+
+      string dim_name = temp2_name + "/ExpandDims" + "/axis";
+      NodeDefBuilder dim_builder(dim_name, "Const");
+      NodeDef dim_node;
+      Tensor t_dim((int)0);
+      status =
+          dim_builder
+              .Attr("dtype", t_dim.dtype())
+              .Attr("value", t_dim)
+              .Finalize(&dim_node);
+      if (!status.ok()) {
+        LOG(ERROR) << "Const node construction failed with" << status;
+        return false;
+      }
+      dim_node.set_device(biases[0]->def().device());
+      Node* dim = graph->AddNode(dim_node, &status);
+      if (!status.ok()) {
+        LOG(ERROR) << "Adding node failed " << status;
+        return false;
+      }
+      dim->set_assigned_device_name(biases[0]->assigned_device_name());
+
+      string expand_name = temp2_name + "/ExpandDims";
+      std::vector<NodeDefBuilder::NodeOut> expand_inputs;
+      expand_inputs.emplace_back(biases[0]->name(), 0, dtype);
+      expand_inputs.emplace_back(dim_name, 0, t_dim.dtype());
+      NodeDefBuilder expand_builder(expand_name, "ExpandDims");
+      expand_builder.Input(expand_inputs[0]);
+      expand_builder.Input(expand_inputs[1]);
+      NodeDef expand_node;
+      status =
+          expand_builder
+              .Attr("T", dtype)
+              .Attr("Tdim", t_dim.dtype())
+              .Finalize(&expand_node);
+      if (!status.ok()) {
+        LOG(ERROR) << "ExpandDims node construction failed with" << status;
+        return false;
+      }
+      expand_node.set_device(biases[0]->def().device());
+      Node* expand = graph->AddNode(expand_node, &status);
+      if (!status.ok()) {
+        LOG(ERROR) << "Adding node failed " << status;
+        return false;
+      }
+      expand->set_assigned_device_name(biases[0]->assigned_device_name());
+      graph->AddEdge(biases[0], 0, expand, 0);
+      graph->AddEdge(dim, 0, expand, 1);
+
+      string matmul_name = temp2_name + "/MatMul";
+      std::vector<NodeDefBuilder::NodeOut> matmul_inputs;
+      matmul_inputs.emplace_back(expand_name, 0, dtype);
+      matmul_inputs.emplace_back(weights[1]->name(), 0, dtype);
+      NodeDefBuilder matmul_builder(matmul_name, "MatMul");
+      matmul_builder.Input(matmul_inputs[0]);
+      matmul_builder.Input(matmul_inputs[1]);
+      NodeDef matmul_node;
+      status =
+          matmul_builder
+              .Attr("transpose_a", false)
+              .Attr("transpose_b",
+                    matmuls[1]->def().attr().at("transpose_b").b())
+              .Attr("T", dtype)
+              .Finalize(&matmul_node);
+      if (!status.ok()) {
+        LOG(ERROR) << "MatMul node construction failed with" << status;
+        return false;
+      }
+      matmul_node.set_device(weights[1]->def().device());
+      Node* matmul = graph->AddNode(matmul_node, &status);
+      if (!status.ok()) {
+        LOG(ERROR) << "Adding node failed " << status;
+        return false;
+      }
+      matmul->set_assigned_device_name(
+          weights[1]->assigned_device_name());
+      graph->AddEdge(expand, 0, matmul, 0);
+      graph->AddEdge(weights[1], 0, matmul, 1);
+
+      string squeeze_name = temp2_name + "/Squeeze";
+      NodeDefBuilder::NodeOut squeeze_input(matmul->name(), 0, dtype);
+      NodeDefBuilder squeeze_builder(squeeze_name, "Squeeze");
+      squeeze_builder.Input(squeeze_input);
+      NodeDef squeeze_node;
+      status =
+          squeeze_builder
+              .Attr("T", dtype)
+              .Finalize(&squeeze_node);
+      if (!status.ok()) {
+        LOG(ERROR) << "Squeeze node construction failed with" << status;
+        return false;
+      }
+      squeeze_node.set_device(weights[1]->def().device());
+      temps[2] = graph->AddNode(squeeze_node, &status);
+      if (!status.ok()) {
+        LOG(ERROR) << "Adding node failed " << status;
+        return false;
+      }
+      temps[2]->set_assigned_device_name(
+          weights[1]->assigned_device_name());
+      graph->AddEdge(matmul, 0, temps[2], 0);
+    }
+    // T3 = T2+E
+    if (biasadds[0] && biasadds[1]) {
+      string temp3_name = prefix + "/temp3";
+      std::vector<NodeDefBuilder::NodeOut> temp3_inputs;
+      temp3_inputs.emplace_back(temps[2]->name(), 0, dtype);
+      temp3_inputs.emplace_back(biases[1]->name(), 0, dtype);
+      NodeDefBuilder temp3_builder(temp3_name, "Add");
+      temp3_builder.Input(temp3_inputs[0]);
+      temp3_builder.Input(temp3_inputs[1]);
+      NodeDef temp3_node;
+      status =
+          temp3_builder
+              .Attr("T", dtype)
+              .Finalize(&temp3_node);
+      if (!status.ok()) {
+        LOG(ERROR) << "BiasAdd node construction failed with" << status;
+        return false;
+      }
+      temp3_node.set_device(biases[1]->def().device());
+      temps[3] = graph->AddNode(temp3_node, &status);
+      if (!status.ok()) {
+        LOG(ERROR) << "Adding node failed " << status;
+        return false;
+      }
+      temps[3]->set_assigned_device_name(biases[1]->assigned_device_name());
+      graph->AddEdge(temps[2], 0, temps[3], 0);
+      graph->AddEdge(biases[1], 0, temps[3], 1);
+    }
+    if (biasadds[0] && !biasadds[1]) {
+      temps[3] = temps[2];
+    }
+    if (!biasadds[0] && biasadds[1]) {
+      temps[3] = biases[1]; 
+    }
+    // T4 = T1+T3
+    if (temps[3]) {
+      string temp4_name = prefix + "/temp4";
+      std::vector<NodeDefBuilder::NodeOut> temp4_inputs;
+      temp4_inputs.emplace_back(temps[1]->name(), 0, dtype);
+      temp4_inputs.emplace_back(temps[3]->name(), 0, dtype);
+      NodeDefBuilder temp4_builder(temp4_name, "BiasAdd");
+      temp4_builder.Input(temp4_inputs[0]);
+      temp4_builder.Input(temp4_inputs[1]);
+      NodeDef temp4_node;
+      status =
+          temp4_builder
+              .Attr("T", dtype)
+              .Finalize(&temp4_node);
+      if (!status.ok()) {
+        LOG(ERROR) << "Add node construction failed with" << status;
+        return false;
+      }
+      temp4_node.set_device(temps[3]->def().device());
+      temps[4] = graph->AddNode(temp4_node, &status);
+      if (!status.ok()) {
+        LOG(ERROR) << "Adding node failed " << status;
+        return false;
+      }
+      temps[4]->set_assigned_device_name(temps[3]->assigned_device_name());
+      graph->AddEdge(temps[1], 0, temps[4], 0);
+      graph->AddEdge(temps[3], 0, temps[4], 1);
+    } else {
+      temps[4] = temps[1];
+    }
+
+    Node* last_node = nullptr;
+    if (biasadds[1]) {
+      last_node = biasadds[1];
+    } else {
+      last_node = matmuls[1];
+    } 
+    std::vector<Node*> dst_nodes;
+    std::vector<int> dst_inputs;
+    for (const Edge* e : last_node->out_edges()) {
+      dst_nodes.push_back(e->dst());
+      dst_inputs.push_back(e->dst_input());
+    }
+    for (unsigned int i = 0; i < dst_nodes.size(); i++) {
+      graph->UpdateEdge(temps[4], 0, dst_nodes[i], dst_inputs[i]);
+    }
+    graph->RemoveNode(last_node);
+    changed = true;
+  }
+  return changed;
+}
+
+// op--->MatMul to op->BatchMatMul->Unpack--->
+//    |->MatMul                            |->
+//    |->MatMul                            |->
 //       ...
 bool FuseMatMuls(Graph* graph) {
   static int count = 0;
@@ -542,7 +878,7 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
     graph->AddEdge(pack, 0, expand, 0);
     graph->AddEdge(dim, 0, expand, 1);
 
-    // Add a new node BiasAdd
+    // Add a new node Add
     string biasadd_name = prefix + "/Add";
     std::vector<NodeDefBuilder::NodeOut> biasadd_inputs;
     biasadd_inputs.emplace_back(matmul->name(), 0, dtype);
@@ -615,7 +951,7 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
   return changed;
 }
 
-// [-, shape]->ReshapeOp->ShapeOp->Op to shape->Op
+// [-, shape_param]->Reshape->Shape->Op to [shape_param]->Op
 bool RemoveShapeAfterReshape(Graph* graph) {
   VLOG(1) << "RemoveShapeAfterReshape";
   bool changed = false;
@@ -656,7 +992,7 @@ bool RemoveShapeAfterReshape(Graph* graph) {
   return changed;
 }
 
-// Change ->Unpack->Reshape-> to ->Reshape->Unpack->
+// Change ->Unpack->Reshape*n-> to ->Reshape->Unpack->
 bool FuseReshapesAfterUnpack(Graph* graph) {
   static int count = 0;
   VLOG(1) << "FuseReshapesAfterUnpack";
@@ -904,6 +1240,8 @@ bool FuseReshapesAfterUnpack(Graph* graph) {
   return changed;
 }
 
+// Change op->Unpack->Shape to op->Shape->Slice,
+// such that memory-intensive Unpack can be avoided.
 bool RemoveUnpackBeforeShape(Graph* graph) {
   static int count = 0;
   VLOG(1) << "RemoveUnpackBeforeShape";
@@ -1047,7 +1385,7 @@ bool RemoveUnpackBeforeShape(Graph* graph) {
   return changed;
 }
 
-// Change ->Unpack->Transpose-> to ->Transpose->Unpack->
+// Change ->Unpack->Transpose*n-> to ->Transpose->Unpack->
 bool FuseTransposesAfterUnpack(Graph* graph) {
   static int count = 0;
   VLOG(1) << "FuseTransposesAfterUnpack";
@@ -1269,16 +1607,13 @@ bool FuseTransposesAfterUnpack(Graph* graph) {
   return changed;
 }
 
-bool FuseBinaryOpsSharingCommonInputAfterUnpack(Graph* graph);
+bool FuseBinaryOpsSharingACommonInputAfterUnpack(Graph* graph);
 
-// ->Unpack--->BinaryOp to ->BinaryOp->Unpack
-//          |->BinaryOp
-//          |->BinaryOp
-//             ...
+// ->Unpack->BinaryOp*n to ->BinaryOp->Unpack
 bool FuseBinaryOpsAfterUnpack(Graph* graph) {
   static int count = 0;
   VLOG(1) << "FuseBinaryOpsAfterUnpack";
-  bool changed = FuseBinaryOpsSharingCommonInputAfterUnpack(graph);
+  bool changed = FuseBinaryOpsSharingACommonInputAfterUnpack(graph);
   std::vector<Node*> nodes(graph->num_nodes());
   int i = 0;
   for (Node* node : graph->nodes()) {
@@ -1531,7 +1866,7 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
   return changed;
 }
 
-
+// ->Unpack->UnaryOp*n to ->UnaryOp->Unpack
 bool FuseUnaryOpsAfterUnpack(Graph* graph) {
   VLOG(1) << "FuseUnaryOpsAfterUnpack";
   bool changed = false;
@@ -1597,8 +1932,9 @@ bool FuseUnaryOpsAfterUnpack(Graph* graph) {
   return changed;
 }
 
-bool FuseBinaryOpsSharingCommonInputAfterUnpack(Graph* graph) {
-  VLOG(1) << "FuseBinaryOpsSharingCommonInputAfterUnpack";
+// ->Unpack->BinaryOp*n to ->BinaryOp->Unpack
+bool FuseBinaryOpsSharingACommonInputAfterUnpack(Graph* graph) {
+  VLOG(1) << "FuseBinaryOpsSharingACommonInputAfterUnpack";
   bool changed = false;
 
   std::vector<Node*> nodes(graph->num_nodes());
@@ -1661,7 +1997,7 @@ bool FuseBinaryOpsSharingCommonInputAfterUnpack(Graph* graph) {
     }
 
     if (!can_reorder || binary_ops.size() < 2) continue;
-    VLOG(1) << "FuseBinaryOpsSharingCommonInputAfterUnpack: found pattern";
+    VLOG(1) << "FuseBinaryOpsSharingACommonInputAfterUnpack: found pattern";
     bool is_first = true;
     for (Node* b : binary_ops) {
       std::vector<Node*> dst_nodes;
@@ -1878,6 +2214,7 @@ void FuseGemmKernels(Graph* graph) {
     bool graph_changed =
         ReorderReshapeAndBiasAdd(graph) ||
         RemoveReshapesBeforeMatMul(graph) ||
+        ConstantFoldingForContinuousMatMuls(graph) ||
         FuseMatMuls(graph) ||
         FuseBiasAddsAfterBatchMatMulUnpack(graph) ||
         RemoveShapeAfterReshape(graph) ||
