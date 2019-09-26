@@ -390,6 +390,7 @@ inline bool HasControlFaninOrFanout(const utils::MutableNodeView& node_view) {
          node_view.NumControlledFanouts() > 0;
 }
 
+// Returns true if at most one fanout reads output at port 0 (output used once).
 inline bool HasAtMostOneFanoutAtPort0(const utils::MutableNodeView& node_view) {
   return node_view.GetRegularFanout(0).size() <= 1;
 }
@@ -398,7 +399,7 @@ inline bool HasAtMostOneFanoutAtPort0(const utils::MutableNodeView& node_view) {
 // (output used once for any data computation).
 inline bool HasAtMostOneDataFanoutAtPort0(
     const utils::MutableNodeView& node_view) {
-  const auto predicate = [](const utils::MutableFaninView& fanout) -> bool {
+  const auto predicate = [](const auto& fanout) -> bool {
     const NodeDef* node = fanout.node_view()->node();
     return !IsShape(*node) && !IsRank(*node);
   };
