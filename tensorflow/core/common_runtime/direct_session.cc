@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <algorithm>
 #include <atomic>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -27,6 +28,7 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/debugger_state_interface.h"
 #include "tensorflow/core/common_runtime/device_factory.h"
 #include "tensorflow/core/common_runtime/device_resolver_local.h"
+#include "tensorflow/core/common_runtime/dma_helper.h"
 #include "tensorflow/core/common_runtime/executor.h"
 #include "tensorflow/core/common_runtime/executor_factory.h"
 #include "tensorflow/core/common_runtime/function.h"
@@ -728,6 +730,44 @@ Status DirectSession::DecorateAndPublishGraphForDebug(
   return Status::OK();
 }
 
+#ifdef GOOGLE_CUDA
+static void* CPUBase(const Tensor* tensor) {
+  return const_cast<void*>(DMAHelper::base(tensor));
+}
+
+static CUdeviceptr GPUBase(const Tensor* tensor) {
+  return reinterpret_cast<CUdeviceptr>(DMAHelper::base(tensor));
+}
+
+static Status CopyTensorCPUToGPU(CUstream stream, const Tensor* in,
+                                 Tensor* out) {
+  CUdeviceptr dst = GPUBase(out);
+  const void* src = CPUBase(in);
+  size_t size = in->TotalBytes();
+  auto ret = cuMemcpyHtoD(dst, src, size);
+  if (ret != CUDA_SUCCESS) {
+    const char* error;
+    cuGetErrorString(ret, &error);
+    return errors::Internal("Failed to copy tensor to GPU: ", error);
+  }
+  return Status::OK();
+}
+
+static Status CopyTensorGPUToCPU(CUstream stream, const Tensor* in,
+                                 Tensor* out) {
+  void* dst = CPUBase(out);
+  CUdeviceptr src = GPUBase(in);
+  size_t size = in->TotalBytes();
+  auto ret = cuMemcpyDtoH(dst, src, size);
+  if (ret != CUDA_SUCCESS) {
+    const char* error;
+    cuGetErrorString(ret, &error);
+    return errors::Internal("Failed to copy tensor to CPU: ", error);
+  }
+  return Status::OK();
+}
+#endif
+
 Status DirectSession::RunWithCUDAGraph(CUDAGraphContext& context,
                                        const NamedTensorList& inputs,
                                        const std::vector<string>& output_names,
@@ -739,127 +779,84 @@ Status DirectSession::RunWithCUDAGraph(CUDAGraphContext& context,
   AllocatorAttributes aa;
   auto cpu_allocator = cpu_device->GetAllocator(aa);
 
-  Status status;
-  Notification notification;
-  auto device = context.device;
-  auto device_context =
-    context.device->tensorflow_gpu_device_info()->default_context;
-
-  std::function<Status (int idx, const Tensor**, Tensor**)> lookup_input =
-    [&] (int idx, const Tensor** in, Tensor** out) {
-      auto& entry = inputs[idx];
-      auto& name = std::get<0>(entry);
-      *in = &std::get<1>(entry);
-      *out = context.inputs[name].get();
-      if ((*in)->shape() != (*out)->shape()) {
-        return errors::InvalidArgument(
-          "Mismatched shapes for input ", name, ": expected ",
-          (*out)->shape(), ", provided ", (*in)->shape());
-      }
-      VLOG(2) << "Found input " << name << ": " << *in << " => " << *out;
-      return Status::OK();
-    };
-
-  outputs->resize(output_names.size());
-  std::function<Status (int idx, const Tensor**, Tensor**)> lookup_output =
-    [&] (int idx, const Tensor** in, Tensor** out) {
-      auto& name = output_names[idx];
-      *in = context.outputs[name].get();
-      *out = &(*outputs)[idx];
-      **out = Tensor(cpu_allocator, (*in)->dtype(), (*in)->shape());
-      VLOG(2) << "Found output " << name << ": " << *in << " => " << *out;
-      return Status::OK();
-    };
-
-  int output_idx = 0;
-  const Tensor* gpu_tensor;
-  Tensor* output_tensor;
-  std::function<void (const Status&)> output_loop = [&] (const Status& st) {
-    if (!st.ok()) {
-      status = st;
-      notification.Notify();
-      return;
-    }
-    if (++output_idx < output_names.size()) {
-      auto st1 = lookup_output(output_idx, &gpu_tensor, &output_tensor);
-      if (!st1.ok()) {
-        status = st1;
-        notification.Notify();
-        return;
-      }
-      device_context->CopyDeviceTensorToCPU(gpu_tensor,
-                                            output_names[output_idx],
-                                            device, output_tensor,
-                                            output_loop);
-      return;
-    }
-    status = Status::OK();
-    notification.Notify();
-  };
-
-  int input_idx = 0;
-  const Tensor* cpu_tensor;
-  Tensor* device_tensor;
-  std::function<void (const Status&)> input_loop = [&] (const Status& st) {
-    if (!st.ok()) {
-      status = st;
-      notification.Notify();
-      return;
-    }
-    if (++input_idx < inputs.size()) {
-      auto st1 = lookup_input(input_idx, &cpu_tensor, &device_tensor);
-      if (!st1.ok()) {
-        status = st1;
-        notification.Notify();
-        return;
-      }
-      device_context->CopyCPUTensorToDevice(cpu_tensor, device, device_tensor,
-                                            input_loop);
-      return;
-    }
-
-    VLOG(2) << "Launching CUDA Graph";
-    auto ret = cuGraphLaunch(context.cuda_graph_exec, context.stream);
-    if (ret != CUDA_SUCCESS) {
-      const char* error;
-      cuGetErrorString(ret, &error);
-      status = errors::Internal("Failed to launch CUDA Graph: ", error);
-      notification.Notify();
-      return;
-    }
-    ret = cuStreamSynchronize(context.stream);
-    if (ret != CUDA_SUCCESS) {
-      const char* error;
-      cuGetErrorString(ret, &error);
-      status = errors::Internal(
-        "Failed to synchronize CUDA Graph stream: ", error);
-      notification.Notify();
-      return;
-    }
-
-    VLOG(2) << "Fetching outputs from CUDA Graph";
-    auto st1 = lookup_output(output_idx, &gpu_tensor, &output_tensor);
-    if (!st1.ok()) {
-      status = st1;
-      notification.Notify();
-      return;
-    }
-    device_context->CopyDeviceTensorToCPU(gpu_tensor,
-                                          output_names[output_idx],
-                                          device, output_tensor,
-                                          output_loop);
-  };
-
-  VLOG(2) << "Feeding inputs to CUDA Graph";
-  status = lookup_input(input_idx, &cpu_tensor, &device_tensor);
-  if (!status.ok()) {
-    return status;
+  // Check inputs and outputs.
+  std::set<string> all;
+  for (const auto& e: context.inputs) {
+    all.insert(e.first);
   }
-  device_context->CopyCPUTensorToDevice(cpu_tensor, device, device_tensor,
-                                        input_loop);
+  for (int i = 0; i < inputs.size(); i++) {
+    auto& entry = inputs[i];
+    auto& name = std::get<0>(entry);
+    auto it = context.inputs.find(name);
+    if (it == context.inputs.end()) {
+      return errors::InvalidArgument("Input not found: ", name);
+    }
+    const Tensor* in = &std::get<1>(entry);
+    Tensor* out = it->second.get();
+    if (in->shape() != out->shape()) {
+      return errors::InvalidArgument(
+        "Mismatched shapes for input ", name, ": expected ",
+        out->shape(), ", provided ", in->shape());
+    }
+    all.erase(name);
+  }
+  if (!all.empty()) {
+    return errors::InvalidArgument("Missing input: ", *all.begin());
+  }
 
-  notification.WaitForNotification();
-  return status;
+  for (const auto& e: context.outputs) {
+    all.insert(e.first);
+  }
+  for (int i = 0; i < output_names.size(); i++) {
+    auto& name = output_names[i];
+    auto it = context.outputs.find(name);
+    if (it == context.outputs.end()) {
+      return errors::InvalidArgument("Output not found: ", name);
+    }
+    all.erase(name);
+  }
+  if (!all.empty()) {
+    return errors::InvalidArgument("Missing output: ", *all.begin());
+  }
+
+  CUresult ret;
+  auto stream = context.stream;
+
+  VLOG(3) << "Feeding inputs to CUDA Graph";
+  for (int i = 0; i < inputs.size(); i++) {
+    auto& entry = inputs[i];
+    auto& name = std::get<0>(entry);
+    const Tensor* in = &std::get<1>(entry);
+    Tensor* out = context.inputs[name].get();
+    TF_RETURN_IF_ERROR(CopyTensorCPUToGPU(stream, in, out));
+  }
+
+  VLOG(3) << "Launching CUDA Graph";
+  ret = cuGraphLaunch(context.cuda_graph_exec, stream);
+  if (ret != CUDA_SUCCESS) {
+    const char* error;
+    cuGetErrorString(ret, &error);
+    return errors::Internal("Failed to launch CUDA Graph: ", error);
+  }
+
+  VLOG(3) << "Fetching outputs from CUDA Graph";
+  outputs->resize(output_names.size());
+  for (int i = 0; i < output_names.size(); i++) {
+    auto& name = output_names[i];
+    const Tensor* in = context.outputs[name].get();
+    Tensor* out = &(*outputs)[i];
+    *out = Tensor(cpu_allocator, in->dtype(), in->shape());
+    TF_RETURN_IF_ERROR(CopyTensorGPUToCPU(stream, in, out));
+  }
+
+  ret = cuStreamSynchronize(stream);
+  if (ret != CUDA_SUCCESS) {
+    const char* error;
+    cuGetErrorString(ret, &error);
+    return errors::Internal("Failed to synchronize CUDA Graph stream: ", error);
+  }
+
+  return Status::OK();
 #else
   return Status::OK();
 #endif
