@@ -21,6 +21,7 @@ limitations under the License.
 #include <memory>
 #include <set>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -1814,7 +1815,8 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
     s = Status::OK();
 #ifdef GOOGLE_CUDA
     if (IsGPU(device)) {
-      VLOG(1) << "Scheduling " << SummarizeNode(*node);
+      VLOG(1) << "Scheduling on 0x" << std::hex << std::this_thread::get_id()
+              << std::dec << ": " << SummarizeNode(*node);
     }
     if (cuda_graph_ && IsGPU(device)) {
       if (!CUDAGraphPreOps(node)) {
