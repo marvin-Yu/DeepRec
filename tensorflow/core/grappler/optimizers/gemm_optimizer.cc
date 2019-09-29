@@ -181,10 +181,24 @@ bool ReorderReshapeAndBiasAdd(Graph* graph) {
 
 // Change (A*B+C)*D+E to A*(B*C)+(C*D)+E when B, C, D and E are consts,
 // such that B*C, and (C*D)+E can be folded to consts.
+bool ConstantFoldingForContinuousMatMulsOnePass(Graph* graph);
 bool ConstantFoldingForContinuousMatMuls(Graph* graph) {
   VLOG(1) << "ConstantFoldingForContinuousMatMuls";
+  bool changed = false;
+  while (1) {
+    if (ConstantFoldingForContinuousMatMulsOnePass(graph)) {
+      changed = true;
+    } else {
+      break;
+    }
+  }
+  return changed;
+}
+
+bool ConstantFoldingForContinuousMatMulsOnePass(Graph* graph) {
   static int count = 0;
   bool changed = false;
+
   std::vector<Node*> nodes(graph->num_nodes());
   int i = 0;
   for (Node* node : graph->nodes()) {
@@ -225,24 +239,12 @@ bool ConstantFoldingForContinuousMatMuls(Graph* graph) {
     } else {
       continue;
     }
-
-    // check weights are consts
-    bool can_fold = true;
     for (int i = 0; i < 2; i++) {
       if (biasadds[i]) {
         biasadds[i]->input_node(1, &biases[i]);
-        if (biases[i]->type_string() != "Const") {
-          can_fold = false;
-          break;
-        }
       }
       matmuls[i]->input_node(1, &weights[i]);
-      if (weights[i]->type_string() != "Const") {
-        can_fold = false;
-        break;
-      }
     }
-    if (!can_fold) continue;
 
     VLOG(1) << "ConstantFoldingForContinuousMatMuls: found pattern";
     Node* temps[5];
@@ -2244,12 +2246,20 @@ Status GemmOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
   // convert graphdef to graph
   FunctionLibraryDefinition flib(OpRegistry::Global(), item.graph.library());
   Graph graph(flib);
-  TF_RETURN_IF_ERROR(ConvertGraphDefToGraph(GraphConstructorOptions(),
-                                            item.graph, &graph));
+  Status status = ConvertGraphDefToGraph(GraphConstructorOptions(),
+                                         item.graph, &graph);
+  if (!status.ok()) {
+    LOG(WARNING) << "ConvertGraphDefToGraph failed: " << status.ToString();
+    *optimized_graph = item.graph;
+    pass++;
+    return Status::OK();
+  }
+
   FuseGemmKernels(&graph);
 
   // convert graph to graphdef
   graph.ToGraphDef(optimized_graph);
+  *optimized_graph->mutable_versions() = item.graph.versions();
 
   f.open("after_gemm." + std::to_string(pass) + ".pbtxt", std::fstream::out);
   f << optimized_graph->DebugString();
