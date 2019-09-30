@@ -1,6 +1,7 @@
 load(
     "//tensorflow:tensorflow.bzl",
     "tf_cc_test",
+    "tf_cc_test_mkl",
     "tf_copts",
     "tf_cuda_library",
 )
@@ -289,6 +290,18 @@ cc_library(
         "//tensorflow/core:mkl_graph_util",
     ],
     alwayslink = 1,
+)
+
+tf_cc_test_mkl(
+    name = "mkl_eager_op_rewrite_test",
+    srcs = ["mkl_eager_op_rewrite_test.cc"],
+    deps = [
+        ":execute",
+        ":mkl_eager_op_rewrite",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+    ],
 )
 
 cc_library(
