@@ -104,12 +104,24 @@ static const char* kMklQuantizedOpLabelPattern = "label='QuantizedMklOp'";
 
 // Prefix that we add to Tensorflow op name to construct Mkl op name.
 static const char* const kMklOpPrefix = "_Mkl";
+// TODO(intel-tf): PR review feedback (penpornk)
+// Can we add eager_mode (or is_eager) as an op attribute instead?
+// This way we don't need to rename the op just to pass eager_mode
+// through template parameter.
+static const char* const kMklEagerOpPrefix = "_MklEager";
 
 // Get the name of Mkl op from original TensorFlow op
 // We prefix 'Mkl' to the original op to get Mkl op.
 inline string GetMklOpName(const string& name) {
   return string(kMklOpPrefix) + name;
 }
+
+// Get the name of Mkl Eager op from original TensorFlow op
+// We prefix 'MklEager' to the original op to get Mkl Eager op.
+inline string GetMklEagerOpName(const string& name) {
+  return string(kMklEagerOpPrefix) + name;
+}
+
 // Check whether opname with type T is registered as MKL operator
 // that can accept input tensors in MKL layout.
 //
@@ -177,6 +189,11 @@ static inline bool IsMklOp(const string& op_name, DataType T) {
   return IsMklLayoutDependentOp(op_name, T) || IsMklNameChangeOp(op_name, T);
 }
 
+static inline bool IsMklOp(const Node* n) {
+  DataType T;
+  return GetNodeAttr(n->def(), "T", &T).ok() && IsMklOp(n->type_string(), T);
+}
+
 // Check whether opname with type T is registered as MKL-compliant and
 // is element-wise.
 //
@@ -189,6 +206,7 @@ static inline bool IsMklElementWiseOp(const string& op_name, DataType T) {
     return false;
   }
   bool result = (0 == op_name.compare(GetMklOpName("Add")) ||
+                 0 == op_name.compare(GetMklOpName("AddV2")) ||
                  0 == op_name.compare(GetMklOpName("Sub")) ||
                  0 == op_name.compare(GetMklOpName("Mul")) ||
                  0 == op_name.compare(GetMklOpName("Maximum")) ||

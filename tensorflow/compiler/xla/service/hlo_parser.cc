@@ -1678,6 +1678,9 @@ bool HloParser::ParseInstructionRhs(HloComputation::Builder* builder,
       optional<std::vector<int64>> slice_sizes;
       attrs["slice_sizes"] = {/*required=*/true, AttrTy::kBracedInt64List,
                               &slice_sizes};
+      optional<bool> indices_are_sorted = false;
+      attrs["indices_are_sorted"] = {/*required=*/false, AttrTy::kBool,
+                                     &indices_are_sorted};
 
       if (!ParseOperands(&operands, /*expected_size=*/2) ||
           !ParseAttributes(attrs)) {
@@ -1693,7 +1696,7 @@ bool HloParser::ParseInstructionRhs(HloComputation::Builder* builder,
 
       instruction = builder->AddInstruction(HloInstruction::CreateGather(
           shape, /*operand=*/operands[0], /*start_indices=*/operands[1],
-          dim_numbers, *slice_sizes));
+          dim_numbers, *slice_sizes, indices_are_sorted.value()));
       break;
     }
     case HloOpcode::kScatter: {
@@ -1714,6 +1717,9 @@ bool HloParser::ParseInstructionRhs(HloComputation::Builder* builder,
       optional<HloComputation*> update_computation;
       attrs["to_apply"] = {/*required=*/true, AttrTy::kHloComputation,
                            &update_computation};
+      optional<bool> indices_are_sorted = false;
+      attrs["indices_are_sorted"] = {/*required=*/false, AttrTy::kBool,
+                                     &indices_are_sorted};
 
       if (!ParseOperands(&operands, /*expected_size=*/3) ||
           !ParseAttributes(attrs)) {
@@ -1729,7 +1735,8 @@ bool HloParser::ParseInstructionRhs(HloComputation::Builder* builder,
 
       instruction = builder->AddInstruction(HloInstruction::CreateScatter(
           shape, /*operand=*/operands[0], /*scatter_indices=*/operands[1],
-          /*updates=*/operands[2], *update_computation, dim_numbers));
+          /*updates=*/operands[2], *update_computation, dim_numbers,
+          indices_are_sorted.value()));
       break;
     }
     case HloOpcode::kDomain: {
@@ -2344,6 +2351,20 @@ bool HloParser::ParseDenseLiteral(Literal* literal, const Shape& shape) {
         }
         elems_seen_per_dim[0] = shape.dimensions(0);
         lexer_.Lex();
+        // Fill data with deterministic (garbage) values. Use static to avoid
+        // creating identical constants which could potentially got CSE'ed
+        // away. This is a best-effort approach to make sure replaying a HLO
+        // gives us same optimized HLO graph.
+        static uint32 data = 0;
+        uint32* raw_data = static_cast<uint32*>(literal->untyped_data());
+        for (int64 i = 0; i < literal->size_bytes() / 4; ++i) {
+          raw_data[i] = data++;
+        }
+        uint8* raw_data_int8 = static_cast<uint8*>(literal->untyped_data());
+        static uint8 data_int8 = 0;
+        for (int64 i = 0; i < literal->size_bytes() % 4; ++i) {
+          raw_data_int8[literal->size_bytes() / 4 + i] = data_int8++;
+        }
         break;
       }
       case TokKind::kComma:

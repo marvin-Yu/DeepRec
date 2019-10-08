@@ -1,7 +1,12 @@
 load(
     "//tensorflow:tensorflow.bzl",
     "tf_cc_test",
+    "tf_copts",
     "tf_cuda_library",
+)
+load(
+    "//third_party/mkl:build_defs.bzl",
+    "if_mkl",
 )
 
 package(
@@ -264,8 +269,23 @@ cc_library(
             "//tensorflow/core:protos_all_cc",
             "//tensorflow/core/distributed_runtime/eager:eager_client",
             "//tensorflow/core/distributed_runtime/eager:remote_execute_node",
+            "//tensorflow/core/distributed_runtime/eager:remote_copy_node",
         ],
-    }),
+    }) + if_mkl([":mkl_eager_op_rewrite"]),
+)
+
+cc_library(
+    name = "mkl_eager_op_rewrite",
+    srcs = ["mkl_eager_op_rewrite.cc"],
+    copts = tf_copts(),
+    nocopts = "-fno-exceptions",
+    deps = [
+        ":eager_op_rewrite_registry",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:graph",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:mkl_graph_util",
+    ],
 )
 
 cc_library(
