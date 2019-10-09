@@ -598,7 +598,6 @@ cc_library(
         ":graph_optimizer",
         ":implementation_selector",
         ":gemm_optimizer",
-        ":kernel_fusion_optimizer",
         ":loop_optimizer",
         ":memory_optimizer",
         ":model_pruner",
@@ -1184,25 +1183,6 @@ cc_library(
     name = "gemm_optimizer",
     srcs = ["gemm_optimizer.cc"],
     hdrs = ["gemm_optimizer.h",],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":graph_optimizer",
-        "//tensorflow/core:framework",
-        "//tensorflow/core:graph",
-        "//tensorflow/core/grappler:grappler_item",
-    ],
-)
-
-cc_library(
-    name = "kernel_fusion_optimizer",
-    srcs = ["fusion_pattern.cc",
-            "graph_rewriter.cc",
-            "kernel_fusion_optimizer.cc"],
-    hdrs = ["common_defines.h",
-            "fusion_pattern.h",
-            "graph_rewriter.h",
-            "kernel_fusion_optimizer.h",
-            ],
     visibility = ["//visibility:public"],
     deps = [
         ":graph_optimizer",

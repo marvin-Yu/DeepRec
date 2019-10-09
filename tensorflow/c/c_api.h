@@ -130,8 +130,6 @@ typedef struct TF_SessionOptions TF_SessionOptions;
 
 // Return a new options object.
 TF_CAPI_EXPORT extern TF_SessionOptions* TF_NewSessionOptions(void);
-TF_CAPI_EXPORT extern void TF_AllowSoftDevicePlacement(TF_SessionOptions* opt);
-TF_CAPI_EXPORT extern void TF_EnableXLA(TF_SessionOptions* opt);
 
 // Set the target in TF_SessionOptions.options.
 // target can be empty, a single entry, or a comma separated list of entries.

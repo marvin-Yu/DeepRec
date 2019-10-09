@@ -51,6 +51,10 @@ limitations under the License.
 extern "C" {
 #endif
 
+TF_CAPI_EXPORT extern void TF_EnableSoftDevicePlacement(TF_SessionOptions* opt,
+    unsigned char enable);
+TF_CAPI_EXPORT extern void TF_EnableGemmOptimization(TF_SessionOptions* opt,
+                                                     unsigned char enable);
 // When `enable` is true, set
 // tensorflow.ConfigProto.OptimizerOptions.global_jit_level to ON_1, and also
 // set XLA flag values to prepare for XLA compilation. Otherwise set

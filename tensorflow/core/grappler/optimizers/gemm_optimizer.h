@@ -28,10 +28,12 @@ class GemmOptimizer : public GraphOptimizer {
 
   string name() const override { return "gemm"; };
 
-  virtual Status Optimize(Cluster* cluster, const GrapplerItem& item,
+  bool UsesFunctionLibrary() const override { return false; }
+
+  Status Optimize(Cluster* cluster, const GrapplerItem& item,
                           GraphDef* optimized_graph) override;
 
-  virtual void Feedback(Cluster* cluster, const GrapplerItem& item,
+  void Feedback(Cluster* cluster, const GrapplerItem& item,
                         const GraphDef& optimized_graph, double result) override;
 };
 

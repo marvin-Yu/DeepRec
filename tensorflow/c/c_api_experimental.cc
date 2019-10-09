@@ -52,6 +52,23 @@ static TF_Operation* ToTF_Operation(Node* node) {
   return static_cast<TF_Operation*>(static_cast<void*>(node));
 }
 
+void TF_EnableSoftDevicePlacement(TF_SessionOptions* options,
+                                  unsigned char enable) {
+  options->options.config.set_allow_soft_placement(enable);
+}
+
+void TF_EnableGemmOptimization(TF_SessionOptions* options,
+                               unsigned char enable) {
+  tensorflow::ConfigProto& config = options->options.config;
+  auto* rewrite_config =
+      config.mutable_graph_options()->mutable_rewrite_options();
+  if (enable) {
+    rewrite_config->set_gemm_optimization(tensorflow::RewriterConfig::ON);
+  } else {
+    rewrite_config->set_gemm_optimization(tensorflow::RewriterConfig::OFF);
+  }
+}
+
 void TF_EnableXLACompilation(TF_SessionOptions* options, unsigned char enable) {
   tensorflow::ConfigProto& config = options->options.config;
   auto* optimizer_options =
