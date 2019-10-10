@@ -170,6 +170,31 @@ TF_Buffer* TF_CreateRunOptions(unsigned char enable_full_trace) {
   return ret;
 }
 
+void TF_EnableCudaGraph(TF_Buffer* run_options, unsigned char enable,
+                        unsigned char init, int count, TF_Status* status) {
+  tensorflow::RunOptions run_options_proto;
+  if (run_options != nullptr &&
+      !run_options_proto.ParseFromArray(run_options->data,
+                                        run_options->length)) {
+    status->status = InvalidArgument("Unparseable RunOptions proto");
+    return;
+  }
+  if (run_options->data_deallocator != nullptr) {
+    (*run_options->data_deallocator)(const_cast<void*>(run_options->data),
+                                     run_options->length);
+  }
+  run_options->data = nullptr;
+  run_options->length = 0;
+
+  run_options_proto.mutable_cuda_graph_options()->set_enable(enable);
+  run_options_proto.mutable_cuda_graph_options()->set_initializing(init);
+  if (count != -1) {
+    run_options_proto.mutable_cuda_graph_options()->set_count(count);
+  }
+  TF_CHECK_OK(MessageToBuffer(run_options_proto, run_options));
+  status->status = Status::OK();
+}
+
 const char* TF_GraphDebugString(TF_Graph* graph, size_t* len) {
   tensorflow::mutex_lock c(graph->mu);
   const auto& debug_str = graph->graph.ToGraphDefDebug().DebugString();

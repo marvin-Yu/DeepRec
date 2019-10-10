@@ -103,6 +103,10 @@ TF_CAPI_EXPORT extern TF_Buffer* TF_CreateConfig(
 TF_CAPI_EXPORT extern TF_Buffer* TF_CreateRunOptions(
     unsigned char enable_full_trace);
 
+TF_CAPI_EXPORT extern void TF_EnableCudaGraph(
+    TF_Buffer* run_options, unsigned char enable,
+    unsigned char init, int count, TF_Status* status);
+
 // Returns the graph content in a human-readable format, with length set in
 // `len`. The format is subject to change in the future.
 // The returned string is heap-allocated, and caller should call free() on it.
