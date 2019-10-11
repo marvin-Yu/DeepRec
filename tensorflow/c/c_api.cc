@@ -689,7 +689,19 @@ void TF_GraphSetDevice(TF_Graph* graph,
   mutex_lock l(graph->mu);
   Graph* g = &(graph->graph);
   for (Node* node : g->nodes()) {
-    node->set_requested_device(device);
+    std::string requested_device = node->requested_device();
+    // To improve performance, users may manually place
+    // some memory-intensive nodes on CPU
+    // (e.g., Concat after Placeholder(s)).
+    // In this case, we respect such placement.
+    // Also, for these manually specified nodes, we turn off
+    // XLA compilation since XLA may ignore such placement.
+    if (requested_device.find("CPU") == std::string::npos &&
+        requested_device.find("cpu") == std::string::npos) {
+      node->set_requested_device(device);
+    } else {
+      node->AddAttr("_XlaCompile", false);
+    }
   }
 }
 
