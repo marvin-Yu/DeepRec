@@ -21,6 +21,7 @@ limitations under the License.
 #include "tensorflow/core/graph/graph.h"
 #include "tensorflow/core/graph/graph_constructor.h"
 #include "tensorflow/core/grappler/grappler_item.h"
+#include "tensorflow/core/util/dump_graph.h"
 #include "tensorflow/core/util/env_var.h"
 
 namespace tensorflow {
@@ -2235,13 +2236,10 @@ Status GemmOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
                                GraphDef* optimized_graph) {
   static int pass = 0;
   VLOG(1) << "GemmOptimizer";
-  std::fstream f;
-  f.open("before_gemm." + std::to_string(pass) + ".pbtxt", std::fstream::out);
-  f << item.graph.DebugString();
-  f.close();
-  f.open("before_gemm." + std::to_string(pass) + ".pb", std::fstream::out | std::fstream::binary);
-  f << item.graph.SerializeAsString();
-  f.close();
+  if (VLOG_IS_ON(1)) {
+    DumpGraphDefToFile("before_gemm." + std::to_string(pass),
+                       item.graph);
+  }
 
   // convert graphdef to graph
   FunctionLibraryDefinition flib(OpRegistry::Global(), item.graph.library());
@@ -2261,13 +2259,10 @@ Status GemmOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
   graph.ToGraphDef(optimized_graph);
   *optimized_graph->mutable_versions() = item.graph.versions();
 
-  f.open("after_gemm." + std::to_string(pass) + ".pbtxt", std::fstream::out);
-  f << optimized_graph->DebugString();
-  f.close();
-  f.open("after_gemm." + std::to_string(pass) + ".pb", std::fstream::out | std::fstream::binary);
-  f << optimized_graph->SerializeAsString();
-  f.close();
-  VLOG(1) << "GemmOptimizer";
+  if (VLOG_IS_ON(1)) {
+    DumpGraphDefToFile("after_gemm." + std::to_string(pass),
+                       *optimized_graph);
+  }
   pass++;
   return Status::OK();
 }
