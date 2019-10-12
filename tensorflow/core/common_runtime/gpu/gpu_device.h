@@ -152,6 +152,7 @@ class BaseGPUDevice : public LocalDevice {
   TfGpuId tf_gpu_id_;
   const bool sync_every_op_ = false;
   const int32 max_streams_;
+  size_t serving_stream_ = 0;
   EventMgr* em_ = nullptr;
   std::unique_ptr<thread::ThreadPool> thread_pool_;
   std::unique_ptr<GPUKernelTracker> kernel_tracker_;
@@ -159,6 +160,8 @@ class BaseGPUDevice : public LocalDevice {
   bool timestamped_allocator_ = false;
 
   bool enable_cuda_graph_ = false;
+
+  bool serving_ = true;
 
   // Initialize scractch buffers used by Eigen.
   Status InitScratchBuffers();
