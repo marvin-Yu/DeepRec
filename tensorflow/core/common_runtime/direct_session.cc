@@ -168,22 +168,7 @@ class DirectSession::CUDAGraphDeviceContext {
             Instance** instance, CUDAGraphContext** context):
       instances_(instances), key_(key), instance_(instance), context_(context)
       { }
-    bool check() {
-      for (auto& inst: *instances_) {
-        if (inst.status == Instance::Status::READY) {
-          auto& contexts = inst.contexts;
-          auto it = contexts.find(*key_);
-          if (it != contexts.end()) {
-            *instance_ = &inst;
-            *context_ = it->second;
-            return true;
-          }
-        }
-      }
-      *instance_ = nullptr;
-      *context_ = nullptr;
-      return false;
-    }
+    bool check();
   };
 
   mutex mu_;
@@ -199,6 +184,15 @@ class DirectSession::CUDAGraphDeviceContext {
   std::vector<Instance> instances_ GUARDED_BY(mu_);
 
   ArgSaver arg_saver_;
+};
+
+struct DirectSession::CUDAGraphArgs {
+  Allocator* persistent_allocator = nullptr;
+  CUgraph* cuda_graph = nullptr;
+  std::map<string, std::unique_ptr<Tensor>>* saved_inputs = nullptr;
+  std::map<string, std::unique_ptr<Tensor>>* saved_outputs = nullptr;
+  ArgSaver* arg_saver = nullptr;
+  int capture_timeout_secs = 10;
 };
 
 DirectSession::CUDAGraphContext::~CUDAGraphContext() {
@@ -318,9 +312,27 @@ void DirectSession::CUDAGraphDeviceContext::ReturnAllocator(
   allocator->Reset();
   mu_.unlock();
 }
+
+bool DirectSession::CUDAGraphDeviceContext::Checker::check() {
+  for (auto& inst: *instances_) {
+    if (inst.status == Instance::Status::READY) {
+      auto& contexts = inst.contexts;
+      auto it = contexts.find(*key_);
+      if (it != contexts.end()) {
+        *instance_ = &inst;
+        *context_ = it->second;
+        return true;
+      }
+    }
+  }
+  *instance_ = nullptr;
+  *context_ = nullptr;
+  return false;
+}
 #else
 struct DirectSession::CUDAGraphContext { };
 struct DirectSession::CUDAGraphDeviceContext { };
+struct DirectSession::CUDAGraphArgs { };
 #endif
 
 namespace {
@@ -867,10 +879,7 @@ Status DirectSession::RunInternal(
     CallFrameInterface* call_frame, ExecutorsAndKeys* executors_and_keys,
     RunMetadata* run_metadata,
     const thread::ThreadPoolOptions& threadpool_options,
-    Allocator* persistent_allocator, void* cuda_graph,
-    std::map<string, std::unique_ptr<Tensor>>* saved_inputs,
-    std::map<string, std::unique_ptr<Tensor>>* saved_outputs,
-    int cuda_graph_capture_timeout_secs, ArgSaver* arg_saver) {
+    CUDAGraphArgs* cuda_graph_args) {
   const uint64 start_time_usecs = options_.env->NowMicros();
   const int64 executor_step_count = executors_and_keys->step_count.fetch_add(1);
   RunState run_state(step_id, &devices_);
@@ -956,20 +965,21 @@ Status DirectSession::RunInternal(
   args.step_container = &run_state.step_container;
   args.sync_on_finish = sync_on_finish_;
   args.user_intra_op_threadpool = threadpool_options.intra_op_threadpool;
-  args.persistent_allocator = persistent_allocator;
-  args.cuda_graph = cuda_graph;
-  if (saved_inputs) {
+  if (cuda_graph_args) {
+    args.persistent_allocator = cuda_graph_args->persistent_allocator;
+    args.cuda_graph = cuda_graph_args->cuda_graph;
+    auto saved_inputs = cuda_graph_args->saved_inputs;
     args.save_input = [saved_inputs](const string& name, Tensor* tensor) {
       (*saved_inputs)[name].reset(new Tensor(*tensor));
     };
-  }
-  if (saved_outputs) {
+    auto saved_outputs = cuda_graph_args->saved_outputs;
     args.save_output = [saved_outputs](const string& name, Tensor* tensor) {
       (*saved_outputs)[name].reset(new Tensor(*tensor));
     };
+    args.cuda_graph_capture_timeout_secs =
+      cuda_graph_args->capture_timeout_secs;
+    args.arg_saver = cuda_graph_args->arg_saver;
   }
-  args.cuda_graph_capture_timeout_secs = cuda_graph_capture_timeout_secs;
-  args.arg_saver = arg_saver;
 
   const bool do_trace = (run_options.trace_level() > RunOptions::NO_TRACE);
 
@@ -1261,12 +1271,16 @@ Status DirectSession::RecordCUDAGraph(
   if (capture_timeout_secs <= 0) {
     capture_timeout_secs = 10;
   }
+  CUDAGraphArgs cuda_graph_args;
+  cuda_graph_args.persistent_allocator = persistent_allocator;
+  cuda_graph_args.cuda_graph = cuda_graph;
+  cuda_graph_args.saved_inputs = &cuda_graph_context->inputs;
+  cuda_graph_args.saved_outputs = &cuda_graph_context->outputs;
+  cuda_graph_args.arg_saver = arg_saver;
+  cuda_graph_args.capture_timeout_secs = capture_timeout_secs;
   TF_RETURN_IF_ERROR(Run0(run_options, inputs, output_names, target_nodes,
                           outputs, run_metadata, cuda_graph_context,
-                          persistent_allocator, cuda_graph,
-                          &cuda_graph_context->inputs,
-                          &cuda_graph_context->outputs,
-                          capture_timeout_secs, arg_saver));
+                          &cuda_graph_args));
   size_t n;
   ret = cuGraphGetNodes(*cuda_graph, nullptr, &n);
   if (ret != CUDA_SUCCESS) {
@@ -1324,10 +1338,7 @@ Status DirectSession::Run0(
   const std::vector<string>& target_nodes,
   std::vector<Tensor>* outputs,
   RunMetadata* run_metadata, CUDAGraphContext* cuda_graph_context,
-  Allocator* persistent_allocator, void* cuda_graph,
-  std::map<string, std::unique_ptr<Tensor>>* saved_inputs,
-  std::map<string, std::unique_ptr<Tensor>>* saved_outputs,
-  int cuda_graph_capture_timeout_secs, ArgSaver* arg_saver) {
+  CUDAGraphArgs* cuda_graph_args) {
   TF_RETURN_IF_ERROR(CheckNotClosed());
   TF_RETURN_IF_ERROR(CheckGraphCreated("Run()"));
   direct_session_runs->GetCell()->IncrementBy(1);
@@ -1387,10 +1398,7 @@ Status DirectSession::Run0(
 
   TF_RETURN_IF_ERROR(RunInternal(step_id, run_options, &call_frame,
                                  executors_and_keys, run_metadata,
-                                 thread::ThreadPoolOptions(),
-                                 persistent_allocator, cuda_graph,
-                                 saved_inputs, saved_outputs,
-                                 cuda_graph_capture_timeout_secs, arg_saver));
+                                 thread::ThreadPoolOptions(), cuda_graph_args));
 
   // Receive outputs.
   if (outputs) {
