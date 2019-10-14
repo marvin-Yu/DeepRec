@@ -15,7 +15,7 @@ cc_library(
     deps = [
         "//tensorflow/core:framework",
         ":gru_op",
-    ],
+   ],
     alwayslink = 1,
 )
 
@@ -32,5 +32,9 @@ tf_kernel_library(
     ],
     deps = [
         "//tensorflow/core/kernels:eigen_helpers",
-    ],
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "@com_google_absl//absl/base",
+        "@com_google_absl//absl/strings",
+     ],
 )
