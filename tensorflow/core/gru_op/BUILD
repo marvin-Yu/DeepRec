@@ -33,8 +33,8 @@ tf_kernel_library(
     deps = [
         "//tensorflow/core/kernels:eigen_helpers",
         "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/strings",
-        "@com_google_protobuf//:protobuf",
      ],
 )
