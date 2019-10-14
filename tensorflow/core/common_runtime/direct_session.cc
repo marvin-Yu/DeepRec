@@ -2289,7 +2289,7 @@ Status DirectSession::BorrowCUDAGraphContext(const string& device,
   return device_context->BorrowContext(key, context);
 #else
   *context = nullptr;
-  return Status.OK();
+  return Status::OK();
 #endif
 }
 

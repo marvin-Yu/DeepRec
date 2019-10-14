@@ -29,7 +29,6 @@ limitations under the License.
 #include "absl/strings/string_view.h"
 #include "tensorflow/core/common_runtime/costmodel_manager.h"
 #include "tensorflow/core/common_runtime/executor_factory.h"
-#include "tensorflow/core/common_runtime/gpu_device_context.h"
 #include "tensorflow/core/common_runtime/pending_counts.h"
 #include "tensorflow/core/common_runtime/renamed_device.h"
 #include "tensorflow/core/common_runtime/step_stats_collector.h"
@@ -77,12 +76,14 @@ limitations under the License.
 #include "tensorflow/core/util/tensor_slice_reader_cache.h"
 
 #ifdef GOOGLE_CUDA
-#include "tensorflow/stream_executor/stream_executor.h"
 // NOTE(zhujun): Currently the CUDA Graph support is implemented
 // directly here. This is a bit hacky as it is not well
 // encapsulated. But for now we are aiming to make it work, so we only
 // want to clean this up in the future.
 #include "third_party/gpus/cuda/include/cuda.h"
+#include "tensorflow/stream_executor/stream_executor.h"
+
+#include "tensorflow/core/common_runtime/gpu_device_context.h"
 #endif
 
 namespace tensorflow {
@@ -142,6 +143,7 @@ void SetReferencedTensors(NodeExecStatsInterface* stats,
 
 }  // namespace nodestats
 
+#ifdef GOOGLE_CUDA
 static bool IsGPU(Device* device) {
   return device->attributes().device_type() == "GPU";
 }
@@ -197,6 +199,7 @@ static bool CUDAGraphPreOps(const Node* node) {
   static std::set<string> pre_ops { "NoOp", "_Recv", "Const" };
   return pre_ops.find(node->type_string()) != pre_ops.end();
 }
+#endif
 
 class ExecutorImpl;
 class GraphView;
