@@ -785,6 +785,13 @@ Status DirectSession::RunWithCUDAGraph(CUDAGraphContext& context,
                                        const std::vector<string>& output_names,
                                        std::vector<Tensor>* outputs) {
 #ifdef GOOGLE_CUDA
+  auto device_id = reinterpret_cast<BaseGPUDevice*>(context.device)->gpu_id();
+  auto ret0 = cudaSetDevice(device_id);
+  if (ret0 != cudaSuccess) {
+    return errors::Internal("Cannot set to the desired device (", device_id,
+                            "): ", cudaGetErrorString(ret0));
+  }
+
   string cpu_device_name;
   Device* cpu_device;
   TF_RETURN_IF_ERROR(GetAssignedCPUDevice(&cpu_device_name, &cpu_device));
