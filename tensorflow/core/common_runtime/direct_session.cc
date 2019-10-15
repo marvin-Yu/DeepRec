@@ -2180,7 +2180,7 @@ Status DirectSession::BorrowOrCreateCUDAGraphDeviceContext(
     cuda_graph_lock_.unlock();
     return Status::OK();
   }
-  auto cond = Condition(&checker, &Checker::Check);
+  Condition cond(&checker, &Checker::Check);
   if (cuda_graph_lock_.AwaitWithDeadline(cond, timeout)) {
     cuda_graph_lock_.unlock();
     return Status::OK();
@@ -2240,7 +2240,7 @@ Status DirectSession::BorrowCUDAGraphContext(
     cuda_graph_lock_.unlock();
     return Status::OK();
   }
-  auto cond = Condition(&finder, &Finder::Find);
+  Condition cond(&finder, &Finder::Find);
   if (cuda_graph_lock_.AwaitWithDeadline(cond, timeout)) {
     (*device_context)->SetState(CUDAGraphDeviceContext::State::BORROWED);
     cuda_graph_lock_.unlock();
