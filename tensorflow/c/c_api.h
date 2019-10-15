@@ -1234,6 +1234,14 @@ TF_CAPI_EXPORT extern TF_Session* TF_LoadSessionFromSavedModel(
     const char* export_dir, const char* const* tags, int tags_len,
     TF_Graph* graph, TF_Buffer* meta_graph_def, TF_Status* status);
 
+TF_CAPI_EXPORT extern TF_Buffer* TF_ReadGraphDefFromFile(
+    const char* graph_def_path,
+    TF_Status* status);
+
+TF_CAPI_EXPORT extern TF_Buffer* TF_ReadMetaGraphDefFromFile(
+    const char* graph_def_path,
+    TF_Status* status);
+
 // Get input and output names in MetaGraphDef
 // - `meta_graph_def` serialized MetaGraphDef protobuf message buffer
 // - `method_name` use mthod name to lookup signature map
@@ -1242,7 +1250,8 @@ TF_CAPI_EXPORT extern TF_Session* TF_LoadSessionFromSavedModel(
 // - `noutput` output number
 // - `output_names` output names, memory are managered by function caller
 TF_CAPI_EXPORT extern void TF_GetIONamesFromMetaGraphDef(
-    const TF_Buffer* meta_graph_def, const char* method_name,
+    const TF_Buffer* meta_graph_def,
+    bool use_method_name, const char* method_name,
     int* ninput, char*** input_names,
     int* noutput, char*** output_names, TF_Status* status);
 

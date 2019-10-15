@@ -65,6 +65,7 @@ limitations under the License.
 #include "tensorflow/core/lib/gtl/array_slice.h"
 #include "tensorflow/core/lib/strings/str_util.h"
 #include "tensorflow/core/lib/strings/strcat.h"
+#include "tensorflow/core/platform/env.h"
 #include "tensorflow/core/platform/mem.h"
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/protobuf.h"
@@ -78,6 +79,7 @@ limitations under the License.
 using tensorflow::AllocationDescription;
 using tensorflow::DataType;
 using tensorflow::ExtendSessionGraphHelper;
+using tensorflow::Env;
 using tensorflow::Graph;
 using tensorflow::GraphDef;
 using tensorflow::mutex_lock;
@@ -2337,8 +2339,65 @@ TF_Session* TF_LoadSessionFromSavedModel(
 #endif  // defined(IS_MOBILE_PLATFORM) || defined(IS_SLIM_BUILD)
 }
 
+namespace {
+Status ReadGraphDefFromFile(const string& graph_def_path, GraphDef* result) {
+  Status status;
+  if (!ReadBinaryProto(Env::Default(), graph_def_path, result).ok()) {
+    return ReadTextProto(Env::Default(), graph_def_path, result);
+  }
+  return status;
+}
+
+Status ReadMetaGraphDefFromFile(const string& graph_def_path,
+                                MetaGraphDef* result) {
+  Status status;
+  if (!ReadBinaryProto(Env::Default(), graph_def_path, result).ok()) {
+    return ReadTextProto(Env::Default(), graph_def_path, result);
+  }
+  return status;
+}
+}
+
+TF_CAPI_EXPORT extern TF_Buffer* TF_ReadGraphDefFromFile(
+    const char* graph_def_path,
+    TF_Status* status) {
+  GraphDef graph_def;
+  status->status = ReadGraphDefFromFile(
+      graph_def_path, &graph_def);
+  if (!status->status.ok()) {
+    return nullptr;
+  }
+  TF_Buffer* ret = TF_NewBuffer();
+  status->status = MessageToBuffer(graph_def, ret);
+  if (!status->status.ok()) {
+    return nullptr;
+  } else {
+    return ret;
+  }
+}
+
+TF_CAPI_EXPORT extern TF_Buffer* TF_ReadMetaGraphDefFromFile(
+    const char* graph_def_path,
+    TF_Status* status) {
+  MetaGraphDef graph_def;
+  status->status = ReadMetaGraphDefFromFile(
+      graph_def_path, &graph_def);
+  if (!status->status.ok()) {
+    return nullptr;
+  }
+  TF_Buffer* ret = TF_NewBuffer();
+  status->status = MessageToBuffer(graph_def, ret);
+  if (!status->status.ok()) {
+    return nullptr;
+  } else {
+    return ret;
+  }
+}
+
 void TF_GetIONamesFromMetaGraphDef(
-    const TF_Buffer* meta_graph_def, const char* method_name,
+    const TF_Buffer* meta_graph_def,
+	bool use_method_name,
+	const char* method_name,
     int* ninput, char*** input_names,
     int* noutput, char*** output_names, TF_Status* status) {
   MetaGraphDef meta_graph_def_obj;
@@ -2350,11 +2409,21 @@ void TF_GetIONamesFromMetaGraphDef(
     status->status = InvalidArgument("MetaGraphDef Object Parse From Array Failed!");
     return;
   }
+
   const auto& signature_def_map = meta_graph_def_obj.signature_def();
-  auto sig_iter = signature_def_map.find(method_name);
-  if (sig_iter == signature_def_map.end()) {
-    status->status = InvalidArgument("Method Name not Contained in Signature Map");
+  if (signature_def_map.size() == 0) {
+    status->status = InvalidArgument("MetaGraphDef does not contain signature_def!");
     return;
+  }
+
+  auto sig_iter = signature_def_map.begin();
+  if (use_method_name) {
+    sig_iter = signature_def_map.find(method_name);
+    if (sig_iter == signature_def_map.end()) {
+      status->status = InvalidArgument(
+          "Method name is not contained in signature map");
+      return;
+    }
   }
   const auto& signature_def = sig_iter->second;
   int input_num = signature_def.inputs().size();
