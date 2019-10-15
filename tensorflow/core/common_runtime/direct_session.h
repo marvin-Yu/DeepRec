@@ -290,7 +290,7 @@ class DirectSession : public Session {
                          string* key);
   ::tensorflow::Status BorrowOrCreateCUDAGraphDeviceContext(
     const string& device_name, const string& key, int id, uint64 timeout,
-    BaseGPUDevice* device, const CUDAGraphOptions& options,
+    GPU_DEVICE_T device, const CUDAGraphOptions& options,
     CUDAGraphDeviceContext** context);
   ::tensorflow::Status BorrowCUDAGraphContext(
     const string& device_name, const string& key, uint64 timeout,

@@ -879,6 +879,7 @@ Status DirectSession::RunInternal(
   args.step_container = &run_state.step_container;
   args.sync_on_finish = sync_on_finish_;
   args.user_intra_op_threadpool = threadpool_options.intra_op_threadpool;
+#ifdef GOOGLE_CUDA
   if (cuda_graph_device_context && cuda_graph_context) {
     args.persistent_allocator =
       cuda_graph_device_context->persistent_allocator();
@@ -895,6 +896,7 @@ Status DirectSession::RunInternal(
       = cuda_graph_args->capture_timeout_secs;
     args.arg_saver = cuda_graph_device_context->arg_saver();
   }
+#endif
 
   const bool do_trace = (run_options.trace_level() > RunOptions::NO_TRACE);
 
@@ -2133,7 +2135,7 @@ void DirectSession::BuildCUDAGraphKey(
 
 Status DirectSession::BorrowOrCreateCUDAGraphDeviceContext(
   const string& device_name, const string& key, int id, uint64 timeout,
-  BaseGPUDevice* device, const CUDAGraphOptions& options,
+  GPU_DEVICE_T device, const CUDAGraphOptions& options,
   CUDAGraphDeviceContext** context) {
 #ifdef GOOGLE_CUDA
   struct Checker {
