@@ -52,6 +52,9 @@ limitations under the License.
 // encapsulated. But for now we are aiming to make it work, so we only
 // want to clean this up in the future.
 #include "tensorflow/core/common_runtime/gpu/gpu_device.h"
+using GPU_DEVICE_T = tensorflow::BaseGPUDevice*;
+#else
+using GPU_DEVICE_T = void*;
 #endif
 
 namespace tensorflow {
@@ -110,7 +113,7 @@ class DirectSession : public Session {
   ::tensorflow::Status GetAssignedCPUDevice(string* device_name,
                                             Device** device);
   ::tensorflow::Status GetAssignedGPUDevice(string* device_name,
-                                            BaseGPUDevice** device);
+                                            GPU_DEVICE_T* device);
   ::tensorflow::Status ListDevices(
       std::vector<DeviceAttributes>* response) override;
   ::tensorflow::Status Close() override;

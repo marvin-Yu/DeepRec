@@ -2293,7 +2293,7 @@ Status DirectSession::GetAssignedCPUDevice(string* device_name,
 }
 
 Status DirectSession::GetAssignedGPUDevice(string* device_name,
-                                           BaseGPUDevice** device) {
+                                           GPU_DEVICE_T* device) {
 #ifdef GOOGLE_CUDA
   mutex_lock l(graph_state_lock_);
   auto execution_state = execution_state_.get();
