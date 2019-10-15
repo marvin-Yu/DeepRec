@@ -486,33 +486,6 @@ Status BaseGPUDevice::FillContextMap(const Graph* graph,
   if (num_streams == 1) {
     return Status::OK();
   }
-
-  TF_RETURN_IF_ERROR(
-      ReadBoolFromEnvVar("TF_GPU_STREAM_MAPPING_FOR_SERVING", true,
-                         &serving_));
-  // Assign a stream for each ExecutorState::RunAsync,
-  // such that multiple serving threads that share a Session can use
-  // multiple GPU streams. This behaviour can be turned off
-  // by setting env var `TF_GPU_STREAM_MAPPING_FOR_SERVING=false`.
-  // Note that the default max_streams is also changed from 1 to 8
-  // when creating GPU devices, and is configrable
-  // by setting env var `TF_GPU_MAX_STREAMS`.
-  if (serving_) {
-    size_t assigned_stream = (serving_stream_++) % num_streams;
-    // Fill in the context map.  It is OK for this map to contain
-    // duplicate DeviceContexts so long as we increment the refcount.
-    device_context_map->resize(graph->num_node_ids());
-    auto ctx = device_contexts_[assigned_stream];
-    for (Node* n : graph->nodes()) {
-      VLOG(3) << "Assigned stream " << assigned_stream
-              << " ==> stream[" << ctx->stream_id() << "] for node id " << n->id()
-              << " " << n->type_string() << " " << n->name();
-      ctx->Ref();
-      (*device_context_map)[n->id()] = ctx;
-    }
-    return Status::OK();
-  }
-
   const int64 before = Env::Default()->NowMicros();
   gpu_stream_util::AssignStreamsOpts opts;
   opts.max_streams = static_cast<int32>(num_streams);
@@ -570,7 +543,7 @@ void BaseGPUDevice::Compute(OpKernel* op_kernel, OpKernelContext* context) {
   }
 
   const auto num_streams = streams_.size();
-  if (!serving_ && num_streams > 1) {
+  if (num_streams > 1) {
     // If this op's device context is different from the other contexts,
     // we must wait on the stream.
     for (int i = 0; i < context->num_inputs(); ++i) {

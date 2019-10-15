@@ -4,6 +4,8 @@
 load(
     "//tensorflow:tensorflow.bzl",
     "tf_cc_test",
+    "tf_cc_binary",
+    "tf_copts",
 )
 
 package(
@@ -39,5 +41,32 @@ tf_cc_test(
         "//tensorflow/core:test",
         "//tensorflow/core:test_main",
         "//tensorflow/core:testlib",
+    ],
+)
+
+cc_library(
+    name = "graph_editor",
+    srcs = ["graph_editor.cc"],
+    hdrs = ["graph_editor.h"],
+    copts = tf_copts(),
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_google_absl//absl/strings:str_format",
+        "//tensorflow/core:core_cpu",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core:error_codes_proto_cc",
+        "//tensorflow/tools/graph_transforms:transform_graph_main_lib",
+    ],
+)
+
+tf_cc_binary(
+    name = "graph_editor_test",
+    srcs = ["graph_editor_test.cc"],
+    copts = tf_copts(),
+    linkstatic = 1,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":graph_editor",
     ],
 )
