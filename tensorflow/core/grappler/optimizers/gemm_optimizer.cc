@@ -30,8 +30,8 @@ namespace grappler {
 namespace {
 
 // TODO(ylxu): add all ops that do not change tensor shapes
-std::set<string> GetOpsWithUnchangedShape() {
-  std::set<string> ops_with_unchanged_shape = {
+std::unordered_set<string> GetOpsWithUnchangedShape() {
+  static std::unordered_set<string> ops_with_unchanged_shape = {
       "BiasAdd",
       "Sigmoid",
       "Tanh",
@@ -39,8 +39,8 @@ std::set<string> GetOpsWithUnchangedShape() {
   return ops_with_unchanged_shape;
 }
 
-std::set<string> GetUnaryOps() {
-  std::set<string> ops = {
+std::unordered_set<string> GetUnaryOps() {
+  static std::unordered_set<string> ops = {
       "Softmax",
       "Sigmoid",
       "Tanh",
@@ -48,8 +48,8 @@ std::set<string> GetUnaryOps() {
   return ops;
 }
 
-std::set<string> GetBinaryOps() {
-  std::set<string> ops = {
+std::unordered_set<string> GetBinaryOps() {
+  std::unordered_set<string> ops = {
       "MatMul",
       "BatchMatMul",
       "BatchMatMulV2",
@@ -69,7 +69,8 @@ bool RemoveReshapesBeforeMatMul(Graph* graph) {
     nodes[i++] = node;
   }
 
-  std::set<string> ops_with_unchanged_shape = GetOpsWithUnchangedShape();
+  const std::unordered_set<string> ops_with_unchanged_shape =
+      GetOpsWithUnchangedShape();
   for (Node* node : nodes) {
     if (!graph->IsValidNode(node).ok()) continue;
     if (node->type_string() != "MatMul") continue;
@@ -1623,7 +1624,7 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
     nodes[i++] = node;
   }
 
-  std::set<string> binary_op_set = GetBinaryOps();
+  const std::unordered_set<string> binary_op_set = GetBinaryOps();
   for (Node* node : nodes) {
     if (!graph->IsValidNode(node).ok()) continue;
     if (node->type_string() != "Unpack") continue;
@@ -1880,7 +1881,7 @@ bool FuseUnaryOpsAfterUnpack(Graph* graph) {
     nodes[i++] = node;
   }
 
-  std::set<string> unary_op_set = GetUnaryOps();
+  const std::unordered_set<string> unary_op_set = GetUnaryOps();
   for (Node* node : nodes) {
     if (!graph->IsValidNode(node).ok()) continue;
     if (node->type_string() != "Unpack") continue;
@@ -1946,7 +1947,7 @@ bool FuseBinaryOpsSharingACommonInputAfterUnpack(Graph* graph) {
     nodes[i++] = node;
   }
 
-  std::set<string> binary_op_set = GetBinaryOps();
+  const std::unordered_set<string> binary_op_set = GetBinaryOps();
   for (Node* node : nodes) {
     if (!graph->IsValidNode(node).ok()) continue;
     if (node->type_string() != "Unpack") continue;
@@ -2209,10 +2210,335 @@ bool RemoveUnpacksAndPacks(Graph* graph) {
   return changed;
 }
 
+// TODO(ylxu): use a better heuristic?
+std::unordered_set<string> GetNonComputeIntensiveNodes() {
+  std::unordered_set<string> ops = {
+      //"ExpandDims",
+      //"Gather",
+      //"GatherV2",
+      //"GatherNd",
+      //"Identity",
+      //"Pack",
+      "Reshape",
+      //"Slice",
+      //"Squeeze",
+      //"StridedSlice",
+      //"Split",
+      //"SplitV",
+      //"TakeAxis",
+      //"Tile",
+      //"Transpose",
+      //"Unpack",
+      //"Where",
+      "Concat",
+      "ConcatV2"};
+  return ops;
+}
+
+int InsertToCPUSet(Node* node,
+                   const std::unordered_set<string>& candidates,
+                   std::unordered_set<Node*>* cpu_nodes) {
+  // Place node that satisfies some conditions on CPU.
+
+  // Put Placeholders on CPU
+  if (node->type_string() == "Placeholder" ||
+      node->type_string() == "PlaceholderV2") {
+    VLOG(1) << "InsertToCPUSet: " << node->DebugString();
+    return cpu_nodes->insert(node).second;
+  }
+
+  // Put INT32/INT64 node, which is the input of CPU nodes, on CPU.  
+  DataType output_type = node->output_type(0);
+  if (output_type == DT_INT32 || output_type == DT_INT64) {
+    for (const Edge* e : node->out_edges()) {
+      Node* n = e->dst();
+      if (cpu_nodes->find(n) != cpu_nodes->end()) {
+        VLOG(1) << "InsertToCPUSet: " << n->DebugString();
+        return cpu_nodes->insert(n).second;
+      }
+    }
+    return 0;
+  }
+
+  // Put Concats/Reshapes after placeholders on CPU
+  if (candidates.find(node->type_string()) == candidates.end()) {
+    return 0;
+  }
+  std::vector<Node*> int_inputs;
+  for (const Edge* e : node->in_edges()) {
+    Node* n = e->src();
+    DataType type = n->output_type(e->src_output());
+    if (type == DT_INT32 || type == DT_INT64) {
+      int_inputs.emplace_back(n);
+      continue;
+    }
+    if (cpu_nodes->find(n) == cpu_nodes->end()) return 0;
+  }
+  int new_insertion = 0;
+  for (Node* n : int_inputs) {
+    VLOG(1) << "InsertToCPUSet: " << n->DebugString();
+    if (cpu_nodes->insert(n).second) new_insertion++;
+  }
+  VLOG(1) << "InsertToCPUSet: " << node->DebugString();
+  if (cpu_nodes->insert(node).second) new_insertion++;
+  return new_insertion;
+}
+
+void AutoPlaceConcats(Graph* graph) {
+  // To improve CPU-GPU memcpy and GPU compute efficiency,
+  // we place some memory intensive nodes to run on CPU.
+  // Traverse from placeholders, mark cheap nodes
+  // after placeholders to run on CPU.
+  std::unordered_set<Node*> cpu_nodes;
+  std::unordered_set<string> candidates =
+      GetNonComputeIntensiveNodes();
+  while(1) {
+    int new_insertion = 0;
+    for (Node* node : graph->nodes()) {
+      VLOG(1) << "Check node: " << node->DebugString();
+      new_insertion += InsertToCPUSet(node, candidates, &cpu_nodes);
+      VLOG(1) << "Check node: new_insertion = " << new_insertion;
+    }
+    if (new_insertion == 0) break;
+  }
+
+  for (Node* node : cpu_nodes) {
+    node->set_requested_device("/job:localhost/replica:0/task:0/device:CPU:0");
+    VLOG(1) << "Place on CPU: " << node->DebugString();
+  }
+}
+
+void OptimizeConcats(Graph* graph) {
+  // 0. Place concats after placeholders on CPU
+  AutoPlaceConcats(graph);
+
+  // 1. Get all GPU concats
+  std::vector<Node*> gpu_concats;
+  for (Node* node : graph->nodes()) {
+    if (node->type_string() == "Concat" ||
+        node->type_string() == "ConcatV2") {
+      std::string device = node->requested_device();
+      if (device.find("GPU") != std::string::npos ||
+          device.find("gpu") != std::string::npos) {
+        VLOG(1) << "Found a OptimizeConcats candidate: "
+                  << node->DebugString();
+        gpu_concats.emplace_back(node);
+      }
+    }
+  }
+
+  // 2. Split the concats whose inputs are from different devices
+  //    into multiple concats
+  for (Node* concat : gpu_concats) {
+    VLOG(1) << "Try to split concat: " << concat->DebugString();
+    // 2.1. Group inputs of each concat into clusters
+    int num_inputs = concat->num_inputs();
+    std::vector<const Edge*> inputs(num_inputs);
+    std::vector<std::string> devices(num_inputs);
+
+    bool all_inputs_are_int = true;
+    for (const Edge* e : concat->in_edges()) {
+      Node* src = e->src();
+      int dst_input = e->dst_input();
+      inputs[dst_input] = e;
+      std::string device = src->requested_device();
+      devices[dst_input] = device;
+      if (concat->input_type(dst_input) != DT_INT32 &&
+          concat->input_type(dst_input) != DT_INT64) {
+        all_inputs_are_int = false;
+      }
+    }
+    if (all_inputs_are_int) continue;
+
+    int axis_input = 0;
+    if (concat->type_string() == "ConcatV2") {
+      axis_input = inputs.size() - 1;
+    }
+
+    std::vector<std::vector<const Edge*>> cluster_inputs;
+    std::vector<std::string> cluster_devices;
+    std::vector<const Edge*> temp0;
+    cluster_inputs.emplace_back(temp0);
+    int cluster_idx = 0;
+
+    int begin = 0, end = num_inputs;
+    if (axis_input == 0) {
+      begin = 1;
+    } else {
+      end = num_inputs - 1;
+    }
+ 
+    std::string device = devices[begin];
+    cluster_inputs[0].emplace_back(inputs[begin]);
+    cluster_devices.emplace_back(device);
+    VLOG(1) << "Clustering, cluster " << cluster_idx
+              << ", on " << cluster_devices[cluster_idx]
+              << " includes: "
+              << inputs[begin]->DebugString();
+    for (int i = begin + 1; i < end; i++) {
+      if (devices[i] != device ||
+          (devices[i].find("GPU") != std::string::npos ||
+           devices[i].find("gpu") != std::string::npos)) {
+        std::vector<const Edge*> temp1;
+        cluster_inputs.emplace_back(temp1);
+        device = devices[i];
+        cluster_devices.emplace_back(device);
+        cluster_idx++;
+      }
+      VLOG(1) << "Clustering, cluster " << cluster_idx
+                << ", on " << cluster_devices[cluster_idx]
+                << " includes: "
+                << inputs[i]->DebugString();
+      cluster_inputs[cluster_idx].emplace_back(inputs[i]);
+    }
+    int num_clusters = cluster_inputs.size();
+    CHECK(num_clusters <= num_inputs - 1);
+    if (num_clusters == 1 || num_clusters == num_inputs - 1) {
+      VLOG(1) << "Do not split concat " << concat->DebugString();
+      continue;
+    }
+
+    VLOG(1) << "Split concat: " << concat->DebugString();
+    std::vector<Node*> new_inputs(num_clusters);
+    std::vector<int> new_input_src_outputs(num_clusters);
+    std::string concat_name = concat->name();
+    DataType type = concat->input_type(1);
+
+    const Edge* axis_edge = inputs[axis_input];
+    Node* axis = axis_edge->src();
+    std::string axis_name = axis->name();
+    int axis_src_output = axis_edge->src_output(); 
+    DataType axis_type = axis->output_type(axis_src_output);
+    NodeDefBuilder::NodeOut concat_axis =
+        {axis_name, axis_src_output, axis_type};
+
+    // 2.2. Add a new concat for each cluster
+    for (int i = 0; i < num_clusters; i++) {
+      VLOG(1) << "Splitting, cluster " << i
+                << ", on " << cluster_devices[i]
+                << " includes: ";
+      std::vector<const Edge*> cluster = cluster_inputs[i];
+      if (cluster.size() == 1) {
+        new_inputs[i] = cluster[0]->src();
+        new_input_src_outputs[i] = cluster[0]->src_output();
+        VLOG(1) << "node: " << new_inputs[i]->DebugString();
+      } else {
+        // add a new concat
+        NodeDefBuilder concat_builder(
+            concat_name + "_cluster_" + std::to_string(i), "ConcatV2");
+        std::vector<NodeDefBuilder::NodeOut> concat_inputs;
+        for (unsigned int j = 0; j < cluster.size(); j++) {
+          Node* src = cluster[j]->src();
+          VLOG(1) << "node: " << src->DebugString();
+          int src_output = cluster[j]->src_output();
+          concat_inputs.emplace_back(src->name(), src_output, type);
+        }
+        concat_builder.Input(concat_inputs);
+        concat_builder.Input(concat_axis);
+        NodeDef concat_node;
+        Status status =
+            concat_builder
+                .Attr("N", (int)cluster.size())
+                .Attr("T", type)
+                .Attr("Tidx", axis_type)
+                .Finalize(&concat_node);
+        if (!status.ok()) {
+          LOG(ERROR) << "Concat node construction failed with" << status;
+          return;
+        }
+        concat_node.set_device(cluster_devices[i]);
+        Node* cluster_concat = graph->AddNode(concat_node, &status);
+        if (!status.ok()) {
+          LOG(ERROR) << "Adding node failed " << status;
+          return;
+        }
+        cluster_concat->set_assigned_device_name(
+            cluster[0]->src()->assigned_device_name());
+        for (unsigned int j = 0; j < cluster.size(); j++) {
+          graph->AddEdge(cluster[j]->src(), cluster[j]->src_output(),
+                         cluster_concat, j);
+        }
+        graph->AddEdge(axis, axis_src_output,
+			           cluster_concat, cluster.size());
+        new_inputs[i] = cluster_concat;
+        new_input_src_outputs[i] = 0;
+      }
+    }
+
+    // 2.3. Add a new concat to concat all clusters
+    NodeDefBuilder concat_builder(
+        concat_name + "_new", "ConcatV2");
+    std::vector<NodeDefBuilder::NodeOut> concat_inputs;
+    for (unsigned int i = 0; i < new_inputs.size(); i++) {
+      concat_inputs.emplace_back(new_inputs[i]->name(),
+                                 new_input_src_outputs[i], type);
+    }
+    concat_builder.Input(concat_inputs);
+    concat_builder.Input(concat_axis);
+    NodeDef concat_node;
+    Status status =
+        concat_builder
+            .Attr("N", (int)new_inputs.size())
+            .Attr("T", type)
+            .Attr("Tidx", axis_type)
+            .Finalize(&concat_node);
+    if (!status.ok()) {
+      LOG(ERROR) << "Concat node construction failed with" << status;
+      return;
+    }
+    concat_node.set_device(concat->def().device());
+    Node* new_concat = graph->AddNode(concat_node, &status);
+    if (!status.ok()) {
+      LOG(ERROR) << "Adding node failed " << status;
+      return;
+    }
+    new_concat->set_assigned_device_name(concat->assigned_device_name());
+    for (unsigned int i = 0; i < new_inputs.size(); i++) {
+      graph->AddEdge(new_inputs[i], new_input_src_outputs[i],
+                     new_concat, i);
+    }
+    graph->AddEdge(axis, axis_src_output, new_concat, new_inputs.size());
+ 
+    // 2.4. Remove old concat
+    std::vector<Node*> dst_nodes;
+    std::vector<int> dst_inputs;
+    for (const Edge* e : concat->out_edges()) {
+      dst_nodes.push_back(e->dst());
+      dst_inputs.push_back(e->dst_input());
+    }
+    for (unsigned int i = 0; i < dst_nodes.size(); i++) {
+      graph->UpdateEdge(new_concat, 0, dst_nodes[i], dst_inputs[i]);
+    }
+    graph->RemoveNode(concat);
+  }
+}
+
+void SetXlaCompileFlag(Graph* graph) {
+  for (Node* node : graph->nodes()) {
+    std::string requested_device = node->requested_device();
+    VLOG(1) << "node: " << node->DebugString();
+    VLOG(1) << "node requested_device: " << node->requested_device();
+    VLOG(1) << "node device: " << node->def().device();
+    VLOG(1) << "node assigned_device_name: " << node->assigned_device_name();
+    if (requested_device.find("CPU") != std::string::npos ||
+        requested_device.find("cpu") != std::string::npos) {
+      VLOG(1) << "node: " << node->DebugString();
+      node->AddAttr("_XlaCompile", false);
+    }
+  }
+}
+
 void FuseGemmKernels(Graph* graph) {  
   bool gemm_fusion = true;
   ReadBoolFromEnvVar("TF_ENABLE_GEMM_FUSION", true, &gemm_fusion);
   if (!gemm_fusion) return;
+  bool optimize_concat = true;
+  ReadBoolFromEnvVar("TF_OPTIMIZE_CONCAT", true, &optimize_concat);
+  if (optimize_concat) {
+    if (VLOG_IS_ON(1)) DumpGraphToFile("before_placement", *graph);
+    OptimizeConcats(graph);
+    if (VLOG_IS_ON(1)) DumpGraphToFile("after_placement", *graph);
+  }
   while(1) {
     bool graph_changed =
         ReorderReshapeAndBiasAdd(graph) ||
@@ -2229,16 +2555,15 @@ void FuseGemmKernels(Graph* graph) {
         RemoveUnpacksAndPacks(graph);
     if (!graph_changed) break;
   }
+  SetXlaCompileFlag(graph);
 }
 }  // end namespace
 
 Status GemmOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
                                GraphDef* optimized_graph) {
-  static int pass = 0;
   VLOG(1) << "GemmOptimizer";
   if (VLOG_IS_ON(1)) {
-    DumpGraphDefToFile("before_gemm." + std::to_string(pass),
-                       item.graph);
+    DumpGraphDefToFile("before_gemm", item.graph);
   }
 
   // convert graphdef to graph
@@ -2249,7 +2574,6 @@ Status GemmOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
   if (!status.ok()) {
     LOG(WARNING) << "ConvertGraphDefToGraph failed: " << status.ToString();
     *optimized_graph = item.graph;
-    pass++;
     return Status::OK();
   }
 
@@ -2260,10 +2584,8 @@ Status GemmOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
   *optimized_graph->mutable_versions() = item.graph.versions();
 
   if (VLOG_IS_ON(1)) {
-    DumpGraphDefToFile("after_gemm." + std::to_string(pass),
-                       *optimized_graph);
+    DumpGraphDefToFile("after_gemm", *optimized_graph);
   }
-  pass++;
   return Status::OK();
 }
 
