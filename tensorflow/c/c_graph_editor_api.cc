@@ -13,6 +13,7 @@ using tensorflow::BypassGather;
 using tensorflow::GraphDef;
 using tensorflow::InsertConcatOp;
 using tensorflow::MessageToBuffer;
+using tensorflow::OptimizeDien;
 using tensorflow::ReplaceWithBlazeGRU;
 using tensorflow::SaveGraphDef;
 using tensorflow::Status;
@@ -98,9 +99,8 @@ void TF_InsertConcatOp(const char* concat_op, const char* valid_mask,
     memcpy(temp_concat_op, temp_comcat.c_str(), temp_comcat.size() + 1);
   }
 }
-void TF_TagCPUDevice(const char** inputs, int n_inputs,
-                     const char** outputs, int n_outputs,
-                     const char** split_nodes, int n_split_nodes,
+void TF_TagCPUDevice(const char** inputs, int n_inputs, const char** outputs,
+                     int n_outputs, const char** split_nodes, int n_split_nodes,
                      TF_Buffer* graph_def, TF_Status* status) {
   std::vector<string> input_names;
   for (int i = 0; i < n_inputs; i++) {
@@ -122,6 +122,18 @@ void TF_TagCPUDevice(const char** inputs, int n_inputs,
   }
   status->status =
       TagCPUDevice(input_names, output_names, splits_names, &graphDef);
+  if (TF_GetCode(status) != TF_OK) return;
+  status->status = MessageToBuffer(graphDef, graph_def);
+}
+
+void TF_OptimizeDienMode(TF_Buffer* graph_def, TF_Status* status) {
+  GraphDef graphDef;
+  if (!tensorflow::ParseProtoUnlimited(&graphDef, graph_def->data,
+                                       graph_def->length)) {
+    status->status = InvalidArgument("Invalid GraphDef");
+    return;
+  }
+  status->status = OptimizeDien(&graphDef);
   if (TF_GetCode(status) != TF_OK) return;
   status->status = MessageToBuffer(graphDef, graph_def);
 }
