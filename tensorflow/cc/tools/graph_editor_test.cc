@@ -6,15 +6,29 @@
 
 int main(int argc, char** argv) {
   using namespace tensorflow;
-  std::string base_path =
-      "/home/xianjie.qxj/dien_model/dien_1006_private/frozen_graph.pb";
-  std::string edit_path =
-      "/home/xianjie.qxj/dien_model/dien_1006_private/new_model.pb";
+  if (argc != 3) {
+    std::cerr << "Usage: " << argv[0]
+              << " <input_frozen_graph_path> <output_model_path>" << std::endl;
+    return -1;
+  }
+  std::string frozen_model_path = argv[1];
+  std::string opt_model_path = argv[2];
   tensorflow::GraphDef graphDef;
-  tensorflow::ReadGraphDef(base_path, &graphDef);
+  auto status = tensorflow::ReadGraphDef(frozen_model_path, &graphDef);
+  if (status != Status::OK()) {
+    LOG(ERROR) << status.error_message();
+    return -1;
+  }
 
-  tensorflow::OptimizeDien(&graphDef);
+  status = tensorflow::OptimizeDien(&graphDef);
+  if (status != Status::OK()) {
+    LOG(ERROR) << status.error_message();
+  }
 
-  tensorflow::SaveGraphDef(edit_path, graphDef, true, true);
+  status = tensorflow::SaveGraphDef(opt_model_path, graphDef, true, true);
+  if (status != Status::OK()) {
+    LOG(ERROR) << status.error_message();
+    return -1;
+  }
   return 0;
 }
