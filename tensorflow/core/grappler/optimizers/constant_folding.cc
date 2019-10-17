@@ -1993,8 +1993,9 @@ Status ConstantFolding::SimplifyNode(bool use_shape_info, NodeDef* node,
   SET_AND_RETURN_IF_MODIFIED(PartialConstPropThroughIdentityN(node));
   SET_AND_RETURN_IF_MODIFIED(
       PartialAssocOpConstFolding(optimized_graph, properties, node));
-  SET_AND_RETURN_IF_MODIFIED(
-      MergeConcat(use_shape_info, optimized_graph, node));
+  // TODO(ylxu): avoid merging concats running on different devices
+  // SET_AND_RETURN_IF_MODIFIED(
+  //     MergeConcat(use_shape_info, optimized_graph, node));
   SET_AND_RETURN_IF_MODIFIED(
       PartialConcatConstFolding(optimized_graph, properties, node));
 

@@ -340,6 +340,8 @@ def freeze_graph(input_graph,
   if input_meta_graph:
     input_meta_graph_def = _parse_input_meta_graph_proto(
         input_meta_graph, input_binary)
+    if not input_graph_def:
+        input_graph_def = input_meta_graph_def.graph_def
   input_saver_def = None
   if input_saver:
     input_saver_def = _parse_input_saver_proto(input_saver, input_binary)

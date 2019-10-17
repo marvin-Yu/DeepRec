@@ -196,6 +196,10 @@ typedef struct TF_Function TF_Function;
 // Function definition options. TODO(iga): Define and implement
 typedef struct TF_FunctionOptions TF_FunctionOptions;
 
+// Sets the device attrs of nodes in graph to `device`.
+TF_CAPI_EXPORT extern void TF_GraphSetDevice(TF_Graph* graph,
+                                             const char* device);
+
 // Sets the shape of the Tensor referenced by `output` in `graph` to
 // the shape described by `dims` and `num_dims`.
 //
@@ -1201,6 +1205,23 @@ TF_CAPI_EXPORT extern TF_Session* TF_NewSession(TF_Graph* graph,
 // Any NULL and non-NULL value combinations for (`run_options, `meta_graph_def`)
 // are valid.
 //
+// - `export_dir` must be set to the path of the exported checkpoint.
+// - `graph` must be a graph newly allocated with TF_NewGraph().
+//
+// If successful, populates `graph` with the contents of the Graph and
+// `meta_graph_def` with the MetaGraphDef of the loaded model.
+TF_CAPI_EXPORT extern TF_Session* TF_LoadSessionFromCheckpoint(
+    const TF_SessionOptions* session_options, const TF_Buffer* run_options,
+    const char* export_dir, TF_Graph* graph, TF_Buffer* meta_graph_def,
+    TF_Status* status);
+
+// This function creates a new TF_Session (which is created on success) using
+// `session_options`, and then initializes state (restoring tensors and other
+// assets) using `run_options`.
+//
+// Any NULL and non-NULL value combinations for (`run_options, `meta_graph_def`)
+// are valid.
+//
 // - `export_dir` must be set to the path of the exported SavedModel.
 // - `tags` must include the set of tags used to identify one MetaGraphDef in
 //    the SavedModel.
@@ -1212,6 +1233,27 @@ TF_CAPI_EXPORT extern TF_Session* TF_LoadSessionFromSavedModel(
     const TF_SessionOptions* session_options, const TF_Buffer* run_options,
     const char* export_dir, const char* const* tags, int tags_len,
     TF_Graph* graph, TF_Buffer* meta_graph_def, TF_Status* status);
+
+TF_CAPI_EXPORT extern TF_Buffer* TF_ReadGraphDefFromFile(
+    const char* graph_def_path,
+    TF_Status* status);
+
+TF_CAPI_EXPORT extern TF_Buffer* TF_ReadMetaGraphDefFromFile(
+    const char* graph_def_path,
+    TF_Status* status);
+
+// Get input and output names in MetaGraphDef
+// - `meta_graph_def` serialized MetaGraphDef protobuf message buffer
+// - `method_name` use mthod name to lookup signature map
+// - `ninput` input number
+// - `input_names` input names, memory are managered by function caller
+// - `noutput` output number
+// - `output_names` output names, memory are managered by function caller
+TF_CAPI_EXPORT extern void TF_GetIONamesFromMetaGraphDef(
+    const TF_Buffer* meta_graph_def,
+    bool use_method_name, const char* method_name,
+    int* ninput, char*** input_names,
+    int* noutput, char*** output_names, TF_Status* status);
 
 // Close a session.
 //

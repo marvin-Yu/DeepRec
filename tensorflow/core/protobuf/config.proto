@@ -547,6 +547,23 @@ message ConfigProto {
   // Next: 17
 }
 
+// CUDA Graph options.
+message CUDAGraphOptions {
+  // Whether to enable CUDA Graph.
+  bool enable = 1;
+  // Whether to initialize CUDA Graphs.
+  bool initializing = 2;
+  // Number of CUDA graph instances per instances per session.
+  int32 count = 3;
+  // Wait time when contexts are not available. Default value is 100.
+  int32 wait_time_in_microseconds = 4;
+  // When allocating persistent memory, chunks with sizes greater than
+  // this value will be deemed large.
+  int32 large_chunk_size_mb = 5;
+  // Timeout while capturing CUDA Graph
+  int32 capture_timeout_secs = 6;
+};
+
 // Options for a single Run() call.
 message RunOptions {
   // TODO(pbar) Turn this into a TraceOptions proto which allows
@@ -601,6 +618,8 @@ message RunOptions {
   };
 
   Experimental experimental = 8;
+
+  CUDAGraphOptions cuda_graph_options = 500;
 
   reserved 4;
 }

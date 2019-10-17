@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "tensorflow/cc/saved_model/reader.h"
 
+#include <fstream>
 #include <unordered_set>
 
 #include "tensorflow/cc/saved_model/constants.h"
@@ -26,6 +27,46 @@ limitations under the License.
 
 namespace tensorflow {
 namespace {
+
+Status ReadCheckpoint(const string& export_dir, MetaGraphDef* meta_graph_def) {
+  LOG(INFO) << "Reading checkpoint from: " << export_dir;
+
+  // Read the file named checkpoint to choose a metagraph (.meta) to load.
+  string ckpt_file_path = io::JoinPath(export_dir, "checkpoint");
+  std::ifstream ckpt_file(ckpt_file_path);
+  if (!ckpt_file) {
+    return Status(error::Code::NOT_FOUND,
+                  "Could not find checkpoint at supplied export "
+                  "directory path: " +
+                      export_dir);
+  }
+  string line;
+  std::getline(ckpt_file, line);
+  std::string::size_type begin = line.find("\"");
+  std::string::size_type end = line.rfind("\"");
+  if ((begin == std::string::npos) || (end == std::string::npos)) {
+    return Status(error::Code::INVALID_ARGUMENT,
+                  "Bad checkpoint file at directory path: " +
+                      export_dir);
+  }
+  string meta_graph_prefix = line.substr(begin + 1, end - begin - 1);
+  if (meta_graph_prefix == ".") {
+    return Status(error::Code::INVALID_ARGUMENT,
+                  "Bad checkpoint file at directory path: " +
+                      export_dir);
+  }
+  const string meta_graph_path =
+      io::JoinPath(export_dir, meta_graph_prefix + ".meta");
+
+  if (Env::Default()->FileExists(meta_graph_path).ok()) {
+    return ReadBinaryProto(Env::Default(), meta_graph_path,
+                           meta_graph_def);
+  }
+  return Status(error::Code::NOT_FOUND,
+                "Could not find .meta at supplied export "
+                "directory path: " +
+                    export_dir);
+}
 
 Status ReadSavedModel(const string& export_dir, SavedModel* saved_model_proto) {
   LOG(INFO) << "Reading SavedModel from: " << export_dir;
@@ -75,6 +116,12 @@ Status FindMetaGraphDef(const SavedModel& saved_model_proto,
 }
 
 }  // namespace
+
+Status ReadMetaGraphDefFromCheckpoint(const string& export_dir,
+                                      MetaGraphDef* const meta_graph_def) {
+  TF_RETURN_IF_ERROR(ReadCheckpoint(export_dir, meta_graph_def));
+  return Status::OK();
+}
 
 Status ReadMetaGraphDefFromSavedModel(const string& export_dir,
                                       const std::unordered_set<string>& tags,

@@ -24,6 +24,7 @@ limitations under the License.
 #include "tensorflow/core/platform/mem.h"
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/types.h"
+#include "tensorflow/core/util/ptr_util.h"
 
 namespace tensorflow {
 
@@ -100,4 +101,14 @@ void SubAllocator::VisitFree(void* ptr, int index, size_t num_bytes) {
     free_visitors_[i](ptr, index, num_bytes);
   }
 }
+
+void* ArgSaver::Save(const void* p, size_t size) {
+  auto copy = MakeUnique<string>();
+  copy->resize(size);
+  memcpy(&(*copy)[0], p, size);
+  mutex_lock l(mu_);
+  saved_args_.push_back(std::move(copy));
+  return &(*saved_args_.back())[0];
+}
+
 }  // namespace tensorflow

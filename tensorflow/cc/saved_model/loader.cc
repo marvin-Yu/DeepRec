@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "tensorflow/cc/saved_model/loader.h"
 
+#include <fstream>
 #include <unordered_set>
 
 #include "tensorflow/cc/saved_model/constants.h"
@@ -194,6 +195,65 @@ Status GetInitOp(const string& export_dir, const MetaGraphDef& meta_graph_def,
   return Status::OK();
 }
 
+Status RunRestoreCheckpoint(const RunOptions& run_options, const string& export_dir,
+                            const StringPiece restore_op_name,
+                            const StringPiece variable_filename_const_op_name,
+                            const std::vector<AssetFileDef>& asset_file_defs,
+                            Session* session) {
+  LOG(INFO) << "Restoring SavedModel bundle.";
+
+  // Read the file named checkpoint to choose a metagraph (.meta) to load.
+  string ckpt_file_path = io::JoinPath(export_dir, "checkpoint");
+  std::ifstream ckpt_file(ckpt_file_path);
+  if (!ckpt_file) {
+    return Status(error::Code::NOT_FOUND,
+                  "Could not find checkpoint at supplied export "
+                  "directory path: " +
+                      export_dir);
+  }
+  string line;
+  std::getline(ckpt_file, line);
+  std::string::size_type begin = line.find("\"");
+  std::string::size_type end = line.rfind("\"");
+  if ((begin == std::string::npos) || (end == std::string::npos)) {
+    return Status(error::Code::INVALID_ARGUMENT,
+                  "Bad checkpoint file at directory path: " +
+                      export_dir);
+  }
+  string prefix = line.substr(begin + 1, end - begin - 1);
+  if (prefix == ".") {
+    return Status(error::Code::INVALID_ARGUMENT,
+                  "Bad checkpoint file at directory path: " +
+                      export_dir);
+  }
+
+  // Check for saver checkpoints in v2 format. Models exported in the checkpoint
+  // v2 format will have a .index file. The corresponding
+  // variables are stored in the .data-?????-of-????? files.
+  const string variables_index_path = io::JoinPath(
+      export_dir, MetaFilename(prefix));
+  if (!Env::Default()->FileExists(variables_index_path).ok()) {
+    LOG(INFO) << "The specified SavedModel has no variables; no checkpoints "
+                 "were restored. File does not exist: "
+              << variables_index_path;
+    return Status::OK();
+  }
+  const string variables_path = io::JoinPath(export_dir, prefix);
+
+  // Add variables to the graph.
+  Tensor variables_path_tensor(DT_STRING, TensorShape({}));
+  variables_path_tensor.scalar<string>()() = variables_path;
+
+  std::vector<std::pair<string, Tensor>> inputs = {
+      {string(variable_filename_const_op_name), variables_path_tensor}};
+
+  AddAssetsTensorsToInputs(export_dir, asset_file_defs, &inputs);
+
+  RunMetadata run_metadata;
+  return RunOnce(run_options, inputs, {}, {string(restore_op_name)},
+                 nullptr /* outputs */, &run_metadata, session);
+}
+
 Status RunRestore(const RunOptions& run_options, const string& export_dir,
                   const StringPiece restore_op_name,
                   const StringPiece variable_filename_const_op_name,
@@ -257,6 +317,45 @@ Status GetAssetFileDefs(const MetaGraphDef& meta_graph_def,
   return Status::OK();
 }
 
+Status LoadCheckpointInternal(const SessionOptions& session_options,
+                              const RunOptions& run_options,
+                              const string& export_dir,
+                              SavedModelBundle* const bundle) {
+  const uint64 read_start_microseconds = Env::Default()->NowMicros();
+  TF_RETURN_IF_ERROR(ReadMetaGraphDefFromCheckpoint(export_dir,
+                                                    &bundle->meta_graph_def));
+
+  TF_RETURN_IF_ERROR(LoadMetaGraphIntoSession(
+      bundle->meta_graph_def, session_options, &bundle->session));
+
+  std::vector<AssetFileDef> asset_file_defs;
+  TF_RETURN_IF_ERROR(
+      GetAssetFileDefs(bundle->meta_graph_def, &asset_file_defs));
+  TF_RETURN_IF_ERROR(
+      RunRestoreCheckpoint(run_options, export_dir,
+                           bundle->meta_graph_def.saver_def().restore_op_name(),
+                           bundle->meta_graph_def.saver_def().filename_tensor_name(),
+                           asset_file_defs, bundle->session.get()));
+  // Record walltime spent in restoring graph from disk, but postpone metric
+  // increments until graph init finishes.
+  const uint64 restore_graph_walltime =
+      GetLatencyMicroseconds(read_start_microseconds);
+
+  const uint64 graph_init_start_microseconds = Env::Default()->NowMicros();
+  string init_op_name;
+  TF_RETURN_IF_ERROR(
+      GetInitOp(export_dir, bundle->meta_graph_def, &init_op_name));
+  TF_RETURN_IF_ERROR(RunInitOp(run_options, export_dir, bundle->meta_graph_def,
+                               asset_file_defs, bundle->session.get(),
+                               init_op_name));
+  load_latency_by_stage->GetCell(export_dir, "restore_graph")
+      ->Add(restore_graph_walltime);
+  // Record wall time spent in init op.
+  load_latency_by_stage->GetCell(export_dir, "init_graph")
+      ->Add(GetLatencyMicroseconds(graph_init_start_microseconds));
+  return Status::OK();
+}
+
 Status LoadSavedModelInternal(const SessionOptions& session_options,
                               const RunOptions& run_options,
                               const string& export_dir,
@@ -298,6 +397,28 @@ Status LoadSavedModelInternal(const SessionOptions& session_options,
 }
 
 }  // namespace
+
+Status LoadCheckpoint(const SessionOptions& session_options,
+                      const RunOptions& run_options, const string& export_dir,
+                      SavedModelBundle* const bundle) {
+  // TODO(robson): Add tests for the counters.
+  const uint64 start_microseconds = Env::Default()->NowMicros();
+  const Status status = LoadCheckpointInternal(session_options, run_options,
+                                               export_dir, bundle);
+  auto log_and_count = [&](const string& status_str) {
+    LOG(INFO) << "Load checkpoint; Status: " << status_str << ". Took "
+              << GetLatencyMicroseconds(start_microseconds) << " microseconds.";
+    load_attempt_count->GetCell(export_dir, status_str)->IncrementBy(1);
+  };
+  if (status.ok()) {
+    log_and_count(kLoadAttemptSuccess);
+  } else {
+    log_and_count(kLoadAttemptFail);
+  }
+  load_latency->GetCell(export_dir)
+      ->IncrementBy(GetLatencyMicroseconds(start_microseconds));
+  return status;
+}
 
 Status LoadSavedModel(const SessionOptions& session_options,
                       const RunOptions& run_options, const string& export_dir,

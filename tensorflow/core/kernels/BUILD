@@ -3633,6 +3633,7 @@ MATH_DEPS = [
     ":bounds_check",
     ":fill_functor",
     "//tensorflow/core:core_cpu",
+    "//tensorflow/core:cuda_device_functions",
     "//tensorflow/core:framework",
     "//tensorflow/core:lib",
     "//tensorflow/core:lib_internal",
