@@ -30,6 +30,17 @@ limitations under the License.
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/macros.h"
 
+#ifdef GOOGLE_CUDA
+// NOTE(zhujun): Currently the CUDA Graph support is implemented
+// directly here. This is a bit hacky as it is not well
+// encapsulated. But for now we are aiming to make it work, so we only
+// want to clean this up in the future.
+#include "third_party/gpus/cuda/include/cuda.h"
+using P_CUDA_GRAPH_T = CUgraph*;
+#else
+using P_CUDA_GRAPH_T = void*;
+#endif
+
 namespace tensorflow {
 
 class StepStatsCollector;
@@ -110,7 +121,7 @@ class Executor {
     // Not owned.
     Allocator* persistent_allocator = nullptr;
     // Not owned.
-    void* cuda_graph = nullptr;
+    P_CUDA_GRAPH_T cuda_graph = nullptr;
 
     typedef std::function<void (const string&, Tensor*)> SaveIO;
     SaveIO save_input = nullptr;
