@@ -23,6 +23,14 @@ using tensorflow::errors::InvalidArgument;
 
 extern "C" {
 
+Status WrapBuffer(const GraphDef& graphDef, TF_Buffer* buffer) {
+  if (buffer->data != nullptr) {
+    TF_DeleteBuffer(buffer);
+    buffer = TF_NewBuffer();
+  }
+  return MessageToBuffer(graphDef, buffer);
+}
+
 void TF_WriteGraphDefToFile(const char* graph_def_path,
                             const TF_Buffer* graph_def, TF_Status* status,
                             bool as_text) {
@@ -55,7 +63,7 @@ void TF_BypassGather(const char** bypass_op_names, int n_opnames,
   status->status =
       BypassGather(bypass_op_name_strings, bypass_blacklist_strings, &graphDef);
   if (TF_GetCode(status) != TF_OK) return;
-  status->status = MessageToBuffer(graphDef, graph_def);
+  status->status = WrapBuffer(graphDef, graph_def);
 }
 void TF_ReplaceWithBlazeGRU(const char* custom_op, const char** input_keys,
                             const char** input_values, int n_inputs,
@@ -72,7 +80,7 @@ void TF_ReplaceWithBlazeGRU(const char* custom_op, const char** input_keys,
   }
   status->status = ReplaceWithBlazeGRU(custom_op, input_map, &graphDef);
   if (TF_GetCode(status) != TF_OK) return;
-  status->status = MessageToBuffer(graphDef, graph_def);
+  status->status = WrapBuffer(graphDef, graph_def);
 }
 
 void TF_InsertConcatOp(const char* concat_op, const char* valid_mask,
@@ -93,7 +101,7 @@ void TF_InsertConcatOp(const char* concat_op, const char* valid_mask,
   status->status = InsertConcatOp(concat_op, valid_mask, valid_input_string,
                                   &temp_comcat, &graphDef);
   if (TF_GetCode(status) != TF_OK) return;
-  status->status = MessageToBuffer(graphDef, graph_def);
+  status->status = WrapBuffer(graphDef, graph_def);
   if (TF_GetCode(status) == TF_OK) {
     temp_concat_op = new char[temp_comcat.size() + 1];
     memcpy(temp_concat_op, temp_comcat.c_str(), temp_comcat.size() + 1);
@@ -123,7 +131,7 @@ void TF_TagCPUDevice(const char** inputs, int n_inputs, const char** outputs,
   status->status =
       TagCPUDevice(input_names, output_names, splits_names, &graphDef);
   if (TF_GetCode(status) != TF_OK) return;
-  status->status = MessageToBuffer(graphDef, graph_def);
+  status->status = WrapBuffer(graphDef, graph_def);
 }
 
 void TF_OptimizeDienMode(TF_Buffer* graph_def, TF_Status* status) {
@@ -135,6 +143,6 @@ void TF_OptimizeDienMode(TF_Buffer* graph_def, TF_Status* status) {
   }
   status->status = OptimizeDien(&graphDef);
   if (TF_GetCode(status) != TF_OK) return;
-  status->status = MessageToBuffer(graphDef, graph_def);
+  status->status = WrapBuffer(graphDef, graph_def);
 }
 }
