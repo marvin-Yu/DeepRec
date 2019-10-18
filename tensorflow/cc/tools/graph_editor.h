@@ -36,6 +36,7 @@ Status TagCPUDevice(const std::vector<string>& inputs,
                     const std::vector<string>& outputs,
                     const std::vector<string>& split_nodes, GraphDef* graphDef);
 
+Status OptimizeDien(GraphDef* graphDef);
 }  // namespace tensorflow
 
 #endif  // TENSORFLOW_GRAPH_EDITOR_H
