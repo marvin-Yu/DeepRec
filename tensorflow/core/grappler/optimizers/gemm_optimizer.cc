@@ -2254,7 +2254,7 @@ int InsertToCPUSet(Node* node,
       Node* n = e->dst();
       if (cpu_nodes->find(n) != cpu_nodes->end()) {
         VLOG(1) << "InsertToCPUSet: " << n->DebugString();
-        return cpu_nodes->insert(n).second;
+        return cpu_nodes->insert(node).second;
       }
     }
     return 0;
