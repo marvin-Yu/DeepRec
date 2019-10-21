@@ -99,15 +99,15 @@ Status ReplaceWithBlazeGRU(const string& custom_op,
   for (auto& node : graphDef->node()) {
     node_names.insert(node.name());
   }
-  //check
-  if (node_names.count(custom_op) == 0){
+  // check
+  if (node_names.count(custom_op) == 0) {
     return errors::NotFound("gru output nod found.");
   }
-  if (inputs.empty()){
+  if (inputs.empty()) {
     return errors::NotFound("No custom gru input.");
   }
   for (auto& i : inputs) {
-    if(node_names.count(i.second) == 0) {
+    if (node_names.count(i.second) == 0) {
       return errors::NotFound("gru input " + i.second + " not found");
     }
   }
@@ -147,10 +147,10 @@ Status InsertConcatOp(const string& old_concat_op_name,
     }
     node_names.insert(node.name());
   }
-  if(old_concat_op == nullptr || old_concat_axis_op == nullptr) {
+  if (old_concat_op == nullptr || old_concat_axis_op == nullptr) {
     return errors::NotFound("old concat op nod found.");
   }
-  if(valid_inputs.empty() && valid_mask.empty()) {
+  if (valid_inputs.empty() && valid_mask.empty()) {
     return errors::NotFound("valid_inputs nod found.");
   }
   // function to create concat node
@@ -210,6 +210,21 @@ Status InsertConcatOp(const string& old_concat_op_name,
   concat2_inputs[0] = concat1;
   auto concat2 = create_concat(concat2_inputs);
   TF_RETURN_IF_ERROR(ReplaceInput(old_concat_op_name, concat2, graphDef));
+  return Status::OK();
+}
+
+Status TransformGraoh(const std::vector<string>& inputs,
+                      const std::vector<string>& outputs, GraphDef* graphDef) {
+  if (inputs.empty() || outputs.empty()) {
+    return errors::InvalidArgument("TransformGraoh error.");
+  }
+  string transforms =
+      "strip_unused_nodes remove_nodes(op=Identity, op=CheckNumerics)";
+  graph_transforms::TransformParameters parameters;
+  TF_RETURN_IF_ERROR(
+      graph_transforms::ParseTransformParameters(transforms, &parameters));
+  TF_RETURN_IF_ERROR(
+      graph_transforms::TransformGraph(inputs, outputs, parameters, graphDef));
   return Status::OK();
 }
 
@@ -274,16 +289,6 @@ Status OptimizeDien(GraphDef* graphDef) {
   TF_RETURN_IF_ERROR(
       ReplaceWithBlazeGRU(cnxh_gru_output, cnxh_gru_inputs, graphDef));
 
-  // Insert concat
-  string concat_op = "concat_5";
-  std::unordered_set<string> valid_ops = {"item", "cate", "shop",
-                                          "node", "prod", "brand"};
-  string valid_mask = "a_";
-  string temp_concat_op;
-  TF_RETURN_IF_ERROR(InsertConcatOp(concat_op, valid_mask, valid_ops,
-                                    &temp_concat_op, graphDef));
-
-  // TagCPUDevice
   std::vector<string> inputs = {
       "a_141_1",     "a_201",     "a_203",     "a_204",     "item",
       "cate",        "shop",      "node",      "a_210",     "a_212",
@@ -310,11 +315,8 @@ Status OptimizeDien(GraphDef* graphDef) {
       "cate_2",      "node_2",    "shop_2",    "brand_2",   "prod_2",
       "Placeholder", "u_124",     "u_125",     "u_126",     "u_127",
       "u_128",       "u_129"};
-  std::vector<string> split_nodes = {"concat", "concat_1", "concat_3",
-                                     "concat_4"};
-  split_nodes.push_back(temp_concat_op);
   std::vector<string> outputs = {"add_1"};
-  TF_RETURN_IF_ERROR(TagCPUDevice(inputs, outputs, split_nodes, graphDef));
+  TF_RETURN_IF_ERROR(TransformGraoh(inputs, outputs, graphDef));
   return Status::OK();
 }
 }  // namespace tensorflow

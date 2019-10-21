@@ -25,7 +25,7 @@ int main(int argc, char** argv) {
     LOG(ERROR) << status.error_message();
   }
 
-  status = tensorflow::SaveGraphDef(opt_model_path, graphDef, true, true);
+  status = tensorflow::SaveGraphDef(opt_model_path, graphDef);
   if (status != Status::OK()) {
     LOG(ERROR) << status.error_message();
     return -1;
