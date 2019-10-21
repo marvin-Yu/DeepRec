@@ -65,7 +65,7 @@ int calc_offset(int elts, int slot_per_block, int slot_per_batch,
 }
 
 __forceinline__ __device__ float sigmoidf(float x) {
-  return 1.0 / (1.0 + expf(-x));
+  return 0.5 + 0.5 * tanhf(0.5 * x);
 }
 
 template <const int weights_per_thread>
