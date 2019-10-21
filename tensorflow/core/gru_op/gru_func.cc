@@ -87,7 +87,7 @@ void GRUFunctor<CPUDevice, T>::operator()(const CPUDevice& d, OpKernelContext* c
                             int batch_size, int rounds, int elts,
                             T* y, const T* x,
                             const T* h2h, const T* i2h, const T* h2hBias, const T* i2hBias) {
-  LOG(INFO) << "=== CPU GRUFunctor ===";
+  VLOG(2) << "=== CPU GRUFunctor ===";
 
   Tensor act, preact;
   if (std::is_same<float, T>::value) {
