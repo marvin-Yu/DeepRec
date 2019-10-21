@@ -23,8 +23,6 @@ class GRUOp : public OpKernel {
     const Tensor& i2h     = context->input(2);
     const Tensor& h2hBias = context->input(3);
     const Tensor& i2hBias = context->input(4);
-    // const Tensor& init_h  = context->input(5);
-    // const Tensor& sequence_lengths = context->input(6);
 
     int batch_size = x.dim_size(0);
     int rounds     = x.dim_size(1);
@@ -41,8 +39,6 @@ class GRUOp : public OpKernel {
     const T* i2h_p     = i2h.flat<T>().data();
     const T* h2hBias_p = h2hBias.flat<T>().data();
     const T* i2hBias_p = i2hBias.flat<T>().data();
-    // const T* init_h_p  = init_h.flat<T>().data();
-    // const int* sequence_lengths_p = sequence_lengths.flat<int>().data();
 
     // Do the computation.
     GRUFunctor<Device, T>()(

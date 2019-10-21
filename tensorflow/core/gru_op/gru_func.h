@@ -5,6 +5,11 @@
 
 namespace tensorflow {
 
+
+const int gru_weights_per_thread = 8;
+const int gru_threads_per_block = 96;
+#define alignN(n, a) ((((n) + (a) - 1) / (a)) * (a))
+
 template <typename Device, typename T>
 struct GRUFunctor {
   void operator()(const Device& d, OpKernelContext* context,

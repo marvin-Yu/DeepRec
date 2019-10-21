@@ -24,7 +24,9 @@ tf_kernel_library(
     srcs = [
       "gru_func.h",
       "gru_kernel.cc",
-      "gru_func.cc"
+      "gru_func.cc",
+      "vml.h",
+      "vml.cc"
     ],
     gpu_srcs = [
       "gru_func.h",

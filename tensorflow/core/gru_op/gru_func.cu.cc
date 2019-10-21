@@ -6,11 +6,6 @@
 
 namespace tensorflow {
 
-
-const int gru_weights_per_thread = 8;
-const int gru_threads_per_block = 96;
-#define alignN(n, a) ((((n) + (a) - 1) / (a)) * (a))
-
 __global__ void GRUPadZeros(float* x, float* y, int* padded_iterations,
                             const int round, const int elts) {
   const int batch_idx = blockIdx.x;
@@ -204,6 +199,8 @@ void GRUFunctor<Eigen::GpuDevice, T>::operator()(const Eigen::GpuDevice& d, OpKe
                             int batch_size, int rounds, int elts,
                             T* y, const T* x, 
                             const T* h2h, const T* i2h, const T* h2hBias, const T* i2hBias) {
+  LOG(INFO) <<"== GPU GRUFunctor ===";
+  
   Tensor finished;
   OP_REQUIRES_OK(context, context->allocate_temp(DT_UINT32, TensorShape({batch_size}), &finished));
 
