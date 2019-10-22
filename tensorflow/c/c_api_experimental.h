@@ -51,10 +51,6 @@ limitations under the License.
 extern "C" {
 #endif
 
-TF_CAPI_EXPORT extern void TF_EnableSoftDevicePlacement(TF_SessionOptions* opt,
-    unsigned char enable);
-TF_CAPI_EXPORT extern void TF_EnableGemmOptimization(TF_SessionOptions* opt,
-                                                     unsigned char enable);
 // When `enable` is true, set
 // tensorflow.ConfigProto.OptimizerOptions.global_jit_level to ON_1, and also
 // set XLA flag values to prepare for XLA compilation. Otherwise set
@@ -102,10 +98,6 @@ TF_CAPI_EXPORT extern TF_Buffer* TF_CreateConfig(
 // otherwise.
 TF_CAPI_EXPORT extern TF_Buffer* TF_CreateRunOptions(
     unsigned char enable_full_trace);
-
-TF_CAPI_EXPORT extern void TF_EnableCudaGraph(
-    TF_Buffer* run_options, unsigned char enable,
-    unsigned char init, int count, TF_Status* status);
 
 // Returns the graph content in a human-readable format, with length set in
 // `len`. The format is subject to change in the future.
