@@ -65,7 +65,7 @@ int calc_offset(int elts, int slot_per_block, int slot_per_batch,
 }
 
 __forceinline__ __device__ float sigmoidf(float x) {
-  return 1.0 / (1.0 + expf(-x));
+  return 0.5 + 0.5 * tanhf(0.5 * x);
 }
 
 template <const int weights_per_thread>
@@ -199,7 +199,7 @@ void GRUFunctor<Eigen::GpuDevice, T>::operator()(const Eigen::GpuDevice& d, OpKe
                             int batch_size, int rounds, int elts,
                             T* y, const T* x, 
                             const T* h2h, const T* i2h, const T* h2hBias, const T* i2hBias) {
-  LOG(INFO) <<"== GPU GRUFunctor ===";
+  VLOG(2) <<"== GPU GRUFunctor ===";
   
   Tensor finished;
   OP_REQUIRES_OK(context, context->allocate_temp(DT_UINT32, TensorShape({batch_size}), &finished));
