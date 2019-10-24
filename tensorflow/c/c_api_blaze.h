@@ -141,6 +141,14 @@ TF_CAPI_EXPORT extern void TF_EnableSoftDevicePlacement(
 TF_CAPI_EXPORT extern void TF_EnableGemmOptimization(
     TF_SessionOptions* opt,
     unsigned char enable);
+TF_CAPI_EXPORT extern void TF_EnableVirtualGPUDevices(
+    TF_SessionOptions* opt,
+    int num_virtual_gpus_per_device,
+    int memory_limit_mb_per_virtual_gpus,
+    int num_phisical_gpus);
+TF_CAPI_EXPORT extern void TF_EnablePerSessionThreadPool(
+    TF_SessionOptions* opt,
+    int num_threads_per_session);
 TF_CAPI_EXPORT extern void TF_EnableGPUMemoryAllowGrowth(
     TF_SessionOptions* opt,
     unsigned char enable);

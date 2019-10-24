@@ -393,6 +393,33 @@ void TF_EnableGemmOptimization(TF_SessionOptions* options,
   }
 }
 
+TF_CAPI_EXPORT extern void TF_EnableVirtualGPUDevices(
+    TF_SessionOptions* options,
+    int num_virtual_gpus_per_device,
+    int memory_limit_mb_per_virtual_gpu,
+    int num_phisical_gpus) {
+  auto* gpu_options = options->options.config.mutable_gpu_options();
+  for (int i = 0; i < num_phisical_gpus; i++) {
+    auto virtual_devices =
+        gpu_options->mutable_experimental()->add_virtual_devices();
+    for (int j = 0; j < num_virtual_gpus_per_device; j++) {
+      virtual_devices->add_memory_limit_mb(
+          memory_limit_mb_per_virtual_gpu);
+    }
+  }
+}
+
+TF_CAPI_EXPORT extern void TF_EnablePerSessionThreadPool(
+    TF_SessionOptions* options,
+    int num_threads_per_session) {
+  static int count = 0;
+  std::string name = "pool:" + std::to_string(count++);
+  auto* pool_config = options->options.config.
+                      add_session_inter_op_thread_pool();
+  pool_config->set_num_threads(num_threads_per_session);
+  pool_config->set_global_name(name);
+}
+
 void TF_EnableGPUMemoryAllowGrowth(TF_SessionOptions* options,
                                    unsigned char enable) {
   auto* gpu_options = options->options.config.mutable_gpu_options();
