@@ -16,7 +16,7 @@ limitations under the License.
 // See docs in ../ops/math_ops.cc.
 
 #define EIGEN_USE_THREADS
-
+#define GOOGLE_CUDA 1
 #include "tensorflow/core/kernels/matmul_op.h"
 
 #include "tensorflow/core/framework/op.h"
