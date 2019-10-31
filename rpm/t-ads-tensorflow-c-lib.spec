@@ -35,6 +35,10 @@ Alimama alogserver for display ads
 %build
 WORK_DIR=$OLDPWD/../
 cd $WORK_DIR
+wget http://211619.oss-cn-hangzhou-zmf.aliyuncs.com/public/cache_115_rc1.tgz\
+     && mkdir -p $WORK_DIR/.cache/bazel/_bazel_admin/ \
+     && tar -zxvf cache_115_rc1.tgz -C $WORK_DIR/.cache/bazel/_bazel_admin/\
+     && rm -rf cache_115_rc1.tgz
 env PYTHON_BIN_PATH=/opt/conda/bin/python \
     PYTHON_LIB_PATH="/opt/conda/lib/python3.7/site-packages" \
     TF_ENABLE_XLA=1 TF_NEED_OPENCL_SYCL=0 TF_NEED_ROCM=0 \
