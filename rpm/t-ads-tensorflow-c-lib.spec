@@ -33,7 +33,7 @@ Alimama alogserver for display ads
 %prep
 
 %build
-sudo ln -s /usr/local/nvidia/lib64/libcuda.so /usr/lib64
+sudo ln -s -f /usr/local/cuda-10.1/lib64/stubs/libcuda.so /usr/lib64
 sudo ln -s libcuda.so /usr/local/cuda-10.1/lib64/stubs/libcuda.so.1
 WORK_DIR=$OLDPWD/../
 cd $WORK_DIR
