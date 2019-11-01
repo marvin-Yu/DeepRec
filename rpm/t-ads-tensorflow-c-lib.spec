@@ -50,7 +50,7 @@ env PYTHON_BIN_PATH=/opt/conda/bin/python \
     TF_SET_ANDROID_WORKSPACE=0 ./configure
 export LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/local/cuda/extras/CUPTI/lib64/:"
 sh build_tflib.sh
-/usr/bin/strip bazel-bin/tensorflow/libtensorflow.so.1.15.0
+sudo /usr/bin/strip bazel-bin/tensorflow/libtensorflow.so.1.15.0
 
 %install
 export DONT_STRIP=1
