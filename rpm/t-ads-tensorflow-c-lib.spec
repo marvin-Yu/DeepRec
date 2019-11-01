@@ -55,10 +55,11 @@ sudo /usr/bin/strip bazel-bin/tensorflow/libtensorflow.so.1.15.0
 %install
 export DONT_STRIP=1
 
-mkdir -p .%{_prefix}/tensorflow/include
+mkdir -p .%{_prefix}/tensorflow/include/tensorflow/c/
 mkdir -p .%{_prefix}/tensorflow/lib
 
-cp -r $OLDPWD/../tensorflow/c/* .%{_prefix}/tensorflow/include/
+cp $OLDPWD/../tensorflow/c/c*h .%{_prefix}/tensorflow/include/tensorflow/c/
+cp -r $OLDPWD/../tensorflow/c/eager .%{_prefix}/tensorflow/include/tensorflow/c/
 cp $OLDPWD/../bazel-bin/tensorflow/libtensorflow.so* .%{_prefix}/tensorflow/lib/
 
 %files
