@@ -58,7 +58,7 @@ export DONT_STRIP=1
 mkdir -p .%{_prefix}/tensorflow/include/tensorflow/c/
 mkdir -p .%{_prefix}/tensorflow/lib
 
-cp $OLDPWD/../tensorflow/c/c*h .%{_prefix}/tensorflow/include/tensorflow/c/
+cp $OLDPWD/../tensorflow/c/*.h .%{_prefix}/tensorflow/include/tensorflow/c/
 cp -r $OLDPWD/../tensorflow/c/eager .%{_prefix}/tensorflow/include/tensorflow/c/
 cp $OLDPWD/../bazel-bin/tensorflow/libtensorflow.so* .%{_prefix}/tensorflow/lib/
 
