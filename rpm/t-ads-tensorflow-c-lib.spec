@@ -33,8 +33,8 @@ Alimama alogserver for display ads
 %prep
 
 %build
-ln -s /usr/local/nvidia/lib64/libcuda.so /usr/lib64
-ln -s libcuda.so /usr/local/cuda-10.1/lib64/stubs/libcuda.so.1
+sudo ln -s /usr/local/nvidia/lib64/libcuda.so /usr/lib64
+sudo ln -s libcuda.so /usr/local/cuda-10.1/lib64/stubs/libcuda.so.1
 WORK_DIR=$OLDPWD/../
 cd $WORK_DIR
 export TEST_TMPDIR=/home/admin/.cache/bazel/
