@@ -155,10 +155,10 @@ class MklAddNOp : public OpKernel {
       auto cpu_engine = engine(ENGINE_CPU, 0);
       std::vector<float> coeff(num_inputs, 1.0);
       std::vector<MEMORY_PRIMITIVE_DESC> srcs_pd;
+      std::vector<MklDnnData<T>> srcs(num_inputs, MklDnnData<T>(&cpu_engine));
       std::vector<memory> inputs;
 
       MklDnnData<T> dst(&cpu_engine);
-      MklDnnData<T> src(&cpu_engine);
       bool has_mkl_input = false;
       int mkl_input_index = FindMKLInputIndex(ctx);
       MKL_TENSOR_FORMAT mkl_data_format;
@@ -208,9 +208,9 @@ class MklAddNOp : public OpKernel {
           }
         }
         srcs_pd.push_back(memory::desc(md));
-        src.SetUsrMem(md, &src_tensor);
-        src.SetUsrMemDataHandle(&src_tensor, fwd_cpu_stream);
-        inputs.push_back(src.GetOpMem());
+        srcs[src_idx].SetUsrMem(md, &src_tensor);
+        srcs[src_idx].SetUsrMem(md, &src_tensor);
+        inputs.push_back(srcs[src_idx].GetOpMem());
       }
 
       auto sum_pd = sum::primitive_desc(coeff, srcs_pd, cpu_engine);
