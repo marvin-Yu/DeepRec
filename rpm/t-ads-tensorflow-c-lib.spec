@@ -4,7 +4,7 @@
 ##############################################################
 Name: %(echo t-ads-tensorflow-c-lib${SUFFIX})
 Packager:xianjie.qxj
-Version:1.15.0
+Version:1.15.4
 # if you want get version number from outside, use like this
 Release:%(echo $RELEASE)%{?dist}
 
@@ -35,6 +35,7 @@ Alimama alogserver for display ads
 %build
 WORK_DIR=$OLDPWD/../
 cd $WORK_DIR
+export TEST_TMPDIR=/home/admin/.cache/bazel/
 env PYTHON_BIN_PATH=/opt/conda/bin/python \
     PYTHON_LIB_PATH="/opt/conda/lib/python3.7/site-packages" \
     TF_ENABLE_XLA=1 TF_NEED_OPENCL_SYCL=0 TF_NEED_ROCM=0 \
@@ -45,18 +46,21 @@ env PYTHON_BIN_PATH=/opt/conda/bin/python \
     TF_CUDA_COMPUTE_CAPABILITIES="6.0,7.5" \
     LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/local/cuda/extras/CUPTI/lib64/:" \
     TF_SET_ANDROID_WORKSPACE=0 ./configure
-
+export LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/local/cuda/extras/CUPTI/lib64/:"
 sh build_tflib.sh
-/usr/bin/strip bazel-bin/tensorflow/libtensorflow.so.1.15.0
+sudo /usr/bin/strip bazel-bin/tensorflow/libtensorflow.so.1.15.0
+ln -s libtensorflow.so.1.15.0 bazel-bin/tensorflow/libtensorflow.so
+ln -s libtensorflow.so.1.15.0 bazel-bin/tensorflow/libtensorflow.so.1
 
 %install
 export DONT_STRIP=1
 
-mkdir -p .%{_prefix}/tensorflow/include
+mkdir -p .%{_prefix}/tensorflow/include/tensorflow/c/
 mkdir -p .%{_prefix}/tensorflow/lib
 
-cp -r $OLDPWD/../tensorflow/c/* .%{_prefix}/tensorflow/include/
-cp $OLDPWD/../bazel-bin/tensorflow/libtensorflow.so* .%{_prefix}/tensorflow/lib/
+cp $OLDPWD/../tensorflow/c/*.h .%{_prefix}/tensorflow/include/tensorflow/c/
+cp -r $OLDPWD/../tensorflow/c/eager .%{_prefix}/tensorflow/include/tensorflow/c/
+cp -a $OLDPWD/../bazel-bin/tensorflow/libtensorflow.so* .%{_prefix}/tensorflow/lib/
 
 %files
 %defattr(-,ads,users)
