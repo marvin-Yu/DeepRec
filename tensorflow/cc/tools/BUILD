@@ -8,6 +8,8 @@ load(
     "tf_copts",
 )
 
+load("@local_config_cuda//cuda:build_defs.bzl", "if_cuda")
+
 package(
     default_visibility = ["//visibility:public"],
     licenses = ["notice"],  # Apache 2.0
@@ -61,9 +63,10 @@ cc_library(
 )
 
 tf_cc_binary(
-    name = "graph_editor_test",
+    name = "graph_editor_tool",
     srcs = ["graph_editor_test.cc"],
     copts = tf_copts(),
+    linkopts = [] + if_cuda(["-lcuda"]),
     linkstatic = 1,
     visibility = ["//visibility:public"],
     deps = [

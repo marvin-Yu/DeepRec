@@ -76,6 +76,9 @@ Status BypassGather(const std::unordered_set<string>& bypass_op_names,
       }
     }
   }
+  if (bypass_map.empty()) {
+    return errors::NotFound("bypass_op_names nod found.");
+  }
   for (NodeDef& node : *(graphDef->mutable_node())) {
     for (string& input : *(node.mutable_input())) {
       if (bypass_op_names.find(input) != bypass_op_names.end() &&
@@ -95,6 +98,18 @@ Status ReplaceWithBlazeGRU(const string& custom_op,
   std::unordered_set<string> node_names;
   for (auto& node : graphDef->node()) {
     node_names.insert(node.name());
+  }
+  // check
+  if (node_names.count(custom_op) == 0) {
+    return errors::NotFound("gru output nod found.");
+  }
+  if (inputs.empty()) {
+    return errors::NotFound("No custom gru input.");
+  }
+  for (auto& i : inputs) {
+    if (node_names.count(i.second) == 0) {
+      return errors::NotFound("gru input " + i.second + " not found");
+    }
   }
   NodeDef* blaze_gru_node = graphDef->add_node();
   // find valid names
@@ -132,8 +147,12 @@ Status InsertConcatOp(const string& old_concat_op_name,
     }
     node_names.insert(node.name());
   }
-  CHECK(old_concat_op != nullptr);
-  CHECK(old_concat_axis_op != nullptr);
+  if (old_concat_op == nullptr || old_concat_axis_op == nullptr) {
+    return errors::NotFound("old concat op nod found.");
+  }
+  if (valid_inputs.empty() && valid_mask.empty()) {
+    return errors::NotFound("valid_inputs nod found.");
+  }
   // function to create concat node
   auto create_concat = [&](std::vector<string> inputs) -> string {
     // create name
@@ -194,10 +213,28 @@ Status InsertConcatOp(const string& old_concat_op_name,
   return Status::OK();
 }
 
+Status TransformGraoh(const std::vector<string>& inputs,
+                      const std::vector<string>& outputs, GraphDef* graphDef) {
+  if (inputs.empty() || outputs.empty()) {
+    return errors::InvalidArgument("TransformGraoh error.");
+  }
+  string transforms =
+      "strip_unused_nodes remove_nodes(op=Identity, op=CheckNumerics)";
+  graph_transforms::TransformParameters parameters;
+  TF_RETURN_IF_ERROR(
+      graph_transforms::ParseTransformParameters(transforms, &parameters));
+  TF_RETURN_IF_ERROR(
+      graph_transforms::TransformGraph(inputs, outputs, parameters, graphDef));
+  return Status::OK();
+}
+
 Status TagCPUDevice(const std::vector<string>& inputs,
                     const std::vector<string>& outputs,
                     const std::vector<string>& split_nodes,
                     GraphDef* graphDef) {
+  if (inputs.empty() || outputs.empty() || split_nodes.empty()) {
+    return errors::InvalidArgument("TagCPUDevice error.");
+  }
   string transforms =
       "strip_unused_nodes remove_nodes(op=Identity, op=CheckNumerics)";
   GraphDef copy_graph = *graphDef;
@@ -232,36 +269,26 @@ Status OptimizeDien(GraphDef* graphDef) {
 
   // Replace global_gru
   std::unordered_map<string, string> global_gru_inputs = {
-      {"x", "TakeAxis:0"},
-      {"h2h", "global_gru/rnn/mx_gru_cell/h2h_weight:0"},
-      {"i2h", "global_gru/rnn/mx_gru_cell/i2h_weight:0"},
-      {"h2h_bias", "global_gru/rnn/mx_gru_cell/h2h_bias:0"},
-      {"i2h_bias", "global_gru/rnn/mx_gru_cell/i2h_bias:0"}};
+      {"x", "TakeAxis"},
+      {"h2h", "global_gru/rnn/mx_gru_cell/h2h_weight"},
+      {"i2h", "global_gru/rnn/mx_gru_cell/i2h_weight"},
+      {"h2h_bias", "global_gru/rnn/mx_gru_cell/h2h_bias"},
+      {"i2h_bias", "global_gru/rnn/mx_gru_cell/i2h_bias"}};
   string global_gru_output = "global_gru/rnn/transpose_1";
   TF_RETURN_IF_ERROR(
       ReplaceWithBlazeGRU(global_gru_output, global_gru_inputs, graphDef));
 
   // Replace cnxh_gru
   std::unordered_map<string, string> cnxh_gru_inputs = {
-      {"x", "TakeAxis_1:0"},
-      {"h2h", "cnxh_gru/rnn/mx_gru_cell/h2h_weight:0"},
-      {"i2h", "cnxh_gru/rnn/mx_gru_cell/i2h_weight:0"},
-      {"h2h_bias", "cnxh_gru/rnn/mx_gru_cell/h2h_bias:0"},
-      {"i2h_bias", "cnxh_gru/rnn/mx_gru_cell/i2h_bias:0"}};
+      {"x", "TakeAxis_1"},
+      {"h2h", "cnxh_gru/rnn/mx_gru_cell/h2h_weight"},
+      {"i2h", "cnxh_gru/rnn/mx_gru_cell/i2h_weight"},
+      {"h2h_bias", "cnxh_gru/rnn/mx_gru_cell/h2h_bias"},
+      {"i2h_bias", "cnxh_gru/rnn/mx_gru_cell/i2h_bias"}};
   string cnxh_gru_output = "cnxh_gru/rnn/transpose_1";
   TF_RETURN_IF_ERROR(
       ReplaceWithBlazeGRU(cnxh_gru_output, cnxh_gru_inputs, graphDef));
 
-  // Insert concat
-  string concat_op = "concat_5";
-  std::unordered_set<string> valid_ops = {"item", "cate", "shop",
-                                          "node", "prod", "brand"};
-  string valid_mask = "a_";
-  string temp_concat_op;
-  TF_RETURN_IF_ERROR(InsertConcatOp(concat_op, valid_mask, valid_ops,
-                                    &temp_concat_op, graphDef));
-
-  // TagCPUDevice
   std::vector<string> inputs = {
       "a_141_1",     "a_201",     "a_203",     "a_204",     "item",
       "cate",        "shop",      "node",      "a_210",     "a_212",
@@ -288,11 +315,8 @@ Status OptimizeDien(GraphDef* graphDef) {
       "cate_2",      "node_2",    "shop_2",    "brand_2",   "prod_2",
       "Placeholder", "u_124",     "u_125",     "u_126",     "u_127",
       "u_128",       "u_129"};
-  std::vector<string> split_nodes = {"concat", "concat_1", "concat_3",
-                                     "concat_4"};
-  split_nodes.push_back(temp_concat_op);
   std::vector<string> outputs = {"add_1"};
-  TF_RETURN_IF_ERROR(TagCPUDevice(inputs, outputs, split_nodes, graphDef));
+  TF_RETURN_IF_ERROR(TransformGraoh(inputs, outputs, graphDef));
   return Status::OK();
 }
 }  // namespace tensorflow

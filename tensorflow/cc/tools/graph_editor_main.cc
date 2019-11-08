@@ -19,6 +19,7 @@ int main(int argc, char** argv) {
     LOG(ERROR) << status.error_message();
     return -1;
   }
+  //
 
   status = tensorflow::OptimizeDien(&graphDef);
   if (status != Status::OK()) {

@@ -2219,17 +2219,19 @@ std::unordered_set<string> GetNonComputeIntensiveNodes() {
       //"GatherNd",
       //"Identity",
       //"Pack",
-      "Reshape",
       //"Slice",
       //"Squeeze",
       //"StridedSlice",
       //"Split",
       //"SplitV",
-      //"TakeAxis",
       //"Tile",
       //"Transpose",
       //"Unpack",
       //"Where",
+      "TakeAxis",
+      "Sum",
+      "NotEqual",
+      "Reshape",
       "Concat",
       "ConcatV2"};
   return ops;
@@ -2246,7 +2248,6 @@ int InsertToCPUSet(Node* node,
     VLOG(1) << "InsertToCPUSet: " << node->DebugString();
     return cpu_nodes->insert(node).second;
   }
-
   // Put INT32/INT64 node, which is the input of CPU nodes, on CPU.  
   DataType output_type = node->output_type(0);
   if (output_type == DT_INT32 || output_type == DT_INT64) {
@@ -2254,7 +2255,7 @@ int InsertToCPUSet(Node* node,
       Node* n = e->dst();
       if (cpu_nodes->find(n) != cpu_nodes->end()) {
         VLOG(1) << "InsertToCPUSet: " << n->DebugString();
-        return cpu_nodes->insert(n).second;
+        return cpu_nodes->insert(node).second;
       }
     }
     return 0;
@@ -2264,18 +2265,21 @@ int InsertToCPUSet(Node* node,
   if (candidates.find(node->type_string()) == candidates.end()) {
     return 0;
   }
-  std::vector<Node*> int_inputs;
+  std::vector<Node*> int_or_const_inputs;
   for (const Edge* e : node->in_edges()) {
     Node* n = e->src();
     DataType type = n->output_type(e->src_output());
-    if (type == DT_INT32 || type == DT_INT64) {
-      int_inputs.emplace_back(n);
+    if (type == DT_INT32 || type == DT_INT64 ||
+        n->type_string() == "Const") {
+      int_or_const_inputs.emplace_back(n);
       continue;
     }
-    if (cpu_nodes->find(n) == cpu_nodes->end()) return 0;
+    if (cpu_nodes->find(n) == cpu_nodes->end()) {
+      return 0;
+    }
   }
   int new_insertion = 0;
-  for (Node* n : int_inputs) {
+  for (Node* n : int_or_const_inputs) {
     VLOG(1) << "InsertToCPUSet: " << n->DebugString();
     if (cpu_nodes->insert(n).second) new_insertion++;
   }
@@ -2562,8 +2566,14 @@ void FuseGemmKernels(Graph* graph) {
 Status GemmOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
                                GraphDef* optimized_graph) {
   VLOG(1) << "GemmOptimizer";
+  static int pass = 0;
   if (VLOG_IS_ON(1)) {
     DumpGraphDefToFile("before_gemm", item.graph);
+    std::fstream f;
+    f.open("before_gemm_" + std::to_string(pass) + ".pb",
+           std::fstream::out | std::fstream::binary);
+    f << item.graph.SerializeAsString();
+    f.close();
   }
 
   // convert graphdef to graph
@@ -2585,7 +2595,13 @@ Status GemmOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
 
   if (VLOG_IS_ON(1)) {
     DumpGraphDefToFile("after_gemm", *optimized_graph);
+    std::fstream f;
+    f.open("after_gemm_" + std::to_string(pass) + ".pb",
+           std::fstream::out | std::fstream::binary);
+    f << optimized_graph->SerializeAsString();
+    f.close();
   }
+  pass++;
   return Status::OK();
 }
 

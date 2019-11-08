@@ -16,7 +16,6 @@ limitations under the License.
 #include "tensorflow/c/c_api.h"
 
 #include <algorithm>
-#include <fstream>
 #include <limits>
 #include <memory>
 #include <vector>
@@ -43,7 +42,6 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/shape_refiner.h"
 #include "tensorflow/core/framework/allocation_description.pb.h"
 #include "tensorflow/core/framework/kernel_def.pb.h"
-#include "tensorflow/core/protobuf/meta_graph.pb.h"
 #include "tensorflow/core/framework/log_memory.h"
 #include "tensorflow/core/framework/node_def_util.h"
 #include "tensorflow/core/framework/op_kernel.h"
@@ -65,7 +63,6 @@ limitations under the License.
 #include "tensorflow/core/lib/gtl/array_slice.h"
 #include "tensorflow/core/lib/strings/str_util.h"
 #include "tensorflow/core/lib/strings/strcat.h"
-#include "tensorflow/core/platform/env.h"
 #include "tensorflow/core/platform/mem.h"
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/protobuf.h"
@@ -79,7 +76,6 @@ limitations under the License.
 using tensorflow::AllocationDescription;
 using tensorflow::DataType;
 using tensorflow::ExtendSessionGraphHelper;
-using tensorflow::Env;
 using tensorflow::Graph;
 using tensorflow::GraphDef;
 using tensorflow::mutex_lock;
@@ -108,7 +104,6 @@ using tensorflow::errors::FailedPrecondition;
 using tensorflow::errors::InvalidArgument;
 using tensorflow::gtl::ArraySlice;
 using tensorflow::strings::StrCat;
-using tensorflow::MetaGraphDef;
 
 extern "C" {
 
@@ -685,27 +680,6 @@ void TFOutputsFromOutputs(const std::vector<tensorflow::Output>& outputs,
 #endif  // !defined(IS_MOBILE_PLATFORM) && !defined(IS_SLIM_BUILD)
 
 }  // namespace
-
-void TF_GraphSetDevice(TF_Graph* graph,
-                       const char* device) {
-  mutex_lock l(graph->mu);
-  Graph* g = &(graph->graph);
-  for (Node* node : g->nodes()) {
-    std::string requested_device = node->requested_device();
-    // To improve performance, users may manually place
-    // some memory-intensive nodes on CPU
-    // (e.g., Concat after Placeholder(s)).
-    // In this case, we respect such placement.
-    // Also, for these manually specified nodes, we turn off
-    // XLA compilation since XLA may ignore such placement.
-    if (requested_device.find("CPU") == std::string::npos &&
-        requested_device.find("cpu") == std::string::npos) {
-      node->set_requested_device(device);
-    } else {
-      node->AddAttr("_XlaCompile", false);
-    }
-  }
-}
 
 // Shape functions -----------------------------------------------------------
 
@@ -2199,74 +2173,6 @@ TF_Session* TF_NewSession(TF_Graph* graph, const TF_SessionOptions* opt,
   }
 }
 
-TF_Session* TF_LoadSessionFromCheckpoint(
-    const TF_SessionOptions* session_options, const TF_Buffer* run_options,
-    const char* export_dir, TF_Graph* graph, TF_Buffer* meta_graph_def,
-    TF_Status* status) {
-// TODO(sjr): Remove the IS_MOBILE_PLATFORM guard. This will require ensuring
-// that the tensorflow/cc/saved_model:loader build target is mobile friendly.
-#if defined(IS_MOBILE_PLATFORM) || defined(IS_SLIM_BUILD)
-  status->status = tensorflow::errors::Unimplemented(
-      "Loading a SavedModel is not supported on mobile. File a bug at "
-      "https://github.com/tensorflow/tensorflow/issues if this feature is "
-      "important to you");
-  return nullptr;
-#else
-  mutex_lock l(graph->mu);
-  if (!graph->name_map.empty()) {
-    status->status = InvalidArgument("Graph is non-empty.");
-    return nullptr;
-  }
-
-  RunOptions run_options_proto;
-  if (run_options != nullptr && !run_options_proto.ParseFromArray(
-                                    run_options->data, run_options->length)) {
-    status->status = InvalidArgument("Unparseable RunOptions proto");
-    return nullptr;
-  }
-
-  tensorflow::SavedModelBundle bundle;
-  status->status =
-      tensorflow::LoadCheckpoint(session_options->options, run_options_proto,
-                                 export_dir, &bundle);
-  if (TF_GetCode(status) != TF_OK) return nullptr;
-
-  // Create a TF_Graph from the MetaGraphDef. This is safe as long as Session
-  // extends using GraphDefs. The Graph instance is different, but equivalent
-  // to the one used to create the session.
-  //
-  // TODO(jhseu): When Session is modified to take Graphs instead of
-  // GraphDefs, return the Graph generated in LoadSavedModel().
-  TF_ImportGraphDefOptions* import_opts = TF_NewImportGraphDefOptions();
-  TF_ImportGraphDefResults results;
-  GraphImportGraphDefLocked(graph, bundle.meta_graph_def.graph_def(),
-                            import_opts, &results, status);
-  TF_DeleteImportGraphDefOptions(import_opts);
-  if (TF_GetCode(status) != TF_OK) return nullptr;
-
-  if (meta_graph_def != nullptr) {
-    status->status = MessageToBuffer(bundle.meta_graph_def, meta_graph_def);
-    if (TF_GetCode(status) != TF_OK) return nullptr;
-  }
-
-  if (VLOG_IS_ON(1)) {
-    std::fstream f;
-    f.open("ckpt.metagraph.pbtxt", std::fstream::out);
-	f << bundle.meta_graph_def.DebugString();
-    f.close();
-    f.open("ckpt.graph.pb", std::fstream::out | std::fstream::binary);
-    f << bundle.meta_graph_def.graph_def().SerializeAsString();
-    f.close();
-  }
-
-  TF_Session* session = new TF_Session(bundle.session.release(), graph);
-
-  graph->sessions[session] = "";
-  session->last_num_graph_nodes = graph->graph.num_node_ids();
-  return session;
-#endif  // defined(IS_MOBILE_PLATFORM) || defined(IS_SLIM_BUILD)
-}
-
 TF_Session* TF_LoadSessionFromSavedModel(
     const TF_SessionOptions* session_options, const TF_Buffer* run_options,
     const char* export_dir, const char* const* tags, int tags_len,
@@ -2322,136 +2228,12 @@ TF_Session* TF_LoadSessionFromSavedModel(
     if (TF_GetCode(status) != TF_OK) return nullptr;
   }
 
-  if (VLOG_IS_ON(1)) {
-    std::fstream f;
-    f.open("savedmodel.metagraph.pbtxt", std::fstream::out);
-	f << bundle.meta_graph_def.DebugString();
-    f.close();
-    f.open("savedmodel.graph.pb", std::fstream::out | std::fstream::binary);
-    f << bundle.meta_graph_def.graph_def().SerializeAsString();
-    f.close();
-  }
   TF_Session* session = new TF_Session(bundle.session.release(), graph);
 
   graph->sessions[session] = "";
   session->last_num_graph_nodes = graph->graph.num_node_ids();
   return session;
 #endif  // defined(IS_MOBILE_PLATFORM) || defined(IS_SLIM_BUILD)
-}
-
-namespace {
-Status ReadGraphDefFromFile(const string& graph_def_path, GraphDef* result) {
-  Status status;
-  if (!ReadBinaryProto(Env::Default(), graph_def_path, result).ok()) {
-    return ReadTextProto(Env::Default(), graph_def_path, result);
-  }
-  return status;
-}
-
-Status ReadMetaGraphDefFromFile(const string& graph_def_path,
-                                MetaGraphDef* result) {
-  Status status;
-  if (!ReadBinaryProto(Env::Default(), graph_def_path, result).ok()) {
-    return ReadTextProto(Env::Default(), graph_def_path, result);
-  }
-  return status;
-}
-}
-
-TF_CAPI_EXPORT extern TF_Buffer* TF_ReadGraphDefFromFile(
-    const char* graph_def_path,
-    TF_Status* status) {
-  GraphDef graph_def;
-  status->status = ReadGraphDefFromFile(
-      graph_def_path, &graph_def);
-  if (!status->status.ok()) {
-    return nullptr;
-  }
-  TF_Buffer* ret = TF_NewBuffer();
-  status->status = MessageToBuffer(graph_def, ret);
-  if (!status->status.ok()) {
-    return nullptr;
-  } else {
-    return ret;
-  }
-}
-
-TF_CAPI_EXPORT extern TF_Buffer* TF_ReadMetaGraphDefFromFile(
-    const char* graph_def_path,
-    TF_Status* status) {
-  MetaGraphDef graph_def;
-  status->status = ReadMetaGraphDefFromFile(
-      graph_def_path, &graph_def);
-  if (!status->status.ok()) {
-    return nullptr;
-  }
-  TF_Buffer* ret = TF_NewBuffer();
-  status->status = MessageToBuffer(graph_def, ret);
-  if (!status->status.ok()) {
-    return nullptr;
-  } else {
-    return ret;
-  }
-}
-
-void TF_GetIONamesFromMetaGraphDef(
-    const TF_Buffer* meta_graph_def,
-	bool use_method_name,
-	const char* method_name,
-    int* ninput, char*** input_names,
-    int* noutput, char*** output_names, TF_Status* status) {
-  MetaGraphDef meta_graph_def_obj;
-  if (meta_graph_def == nullptr) {
-    status->status = InvalidArgument("MetaGraphDef Ptr is Null"); 
-    return;
-  }
-  if (!meta_graph_def_obj.ParseFromArray(meta_graph_def->data, meta_graph_def->length)) {
-    status->status = InvalidArgument("MetaGraphDef Object Parse From Array Failed!");
-    return;
-  }
-
-  const auto& signature_def_map = meta_graph_def_obj.signature_def();
-  if (signature_def_map.size() == 0) {
-    status->status = InvalidArgument("MetaGraphDef does not contain signature_def!");
-    return;
-  }
-
-  auto sig_iter = signature_def_map.begin();
-  if (use_method_name) {
-    sig_iter = signature_def_map.find(method_name);
-    if (sig_iter == signature_def_map.end()) {
-      status->status = InvalidArgument(
-          "Method name is not contained in signature map");
-      return;
-    }
-  }
-  const auto& signature_def = sig_iter->second;
-  int input_num = signature_def.inputs().size();
-  *ninput = input_num;
-  *input_names = (char**)malloc(sizeof(char*) * input_num);
-  int i = 0;
-  for (auto iter = signature_def.inputs().begin();
-       iter != signature_def.inputs().end(); ++iter) {
-    const auto& input_tensor_info = iter->second;
-    const std::string& name = input_tensor_info.name();
-    (*input_names)[i] = (char*)malloc(sizeof(char) * (name.length() + 1));
-    strcpy((*input_names)[i], name.c_str());
-    ++i;
-  }
-
-  int output_num = signature_def.outputs().size();
-  *noutput = output_num;
-  *output_names = (char**)malloc(sizeof(char*) * output_num);
-  i = 0;
-  for (auto iter = signature_def.outputs().begin();
-       iter != signature_def.outputs().end(); ++iter) {
-    const auto& output_tensor_info = iter->second;
-    const std::string& name = output_tensor_info.name();
-    (*output_names)[i] = (char*)malloc(sizeof(char) * (name.length() + 1));
-    strcpy((*output_names)[i], name.c_str());
-    ++i;
-  }
-  status->status = Status::OK();
 }
 
 void TF_CloseSession(TF_Session* s, TF_Status* status) {
