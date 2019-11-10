@@ -1006,6 +1006,7 @@ cc_library(
         ":ir_emitter",
         ":multi_output_fusion",
         ":partition_assignment",
+        ":slice_fusion",
         ":stream_assignment",
         ":stream_executor_util",
         ":target_constants",
@@ -1540,3 +1541,24 @@ tf_cc_test(
         "//tensorflow/stream_executor:dnn",
     ],
 )
+
+cc_library(
+    name = "slice_fusion",
+    srcs = ["slice_fusion.cc"],
+    hdrs = ["slice_fusion.h"],
+    deps = [
+        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/service:hlo_casting_utils",
+        "//tensorflow/compiler/xla/service:hlo_creation_utils",
+        "//tensorflow/compiler/xla/service:hlo_evaluator",
+        "//tensorflow/compiler/xla/service:hlo_pass",
+        "//tensorflow/compiler/xla/service:pattern_matcher",
+        "//tensorflow/compiler/xla/service:shape_inference",
+        "//tensorflow/compiler/xla:status_macros",
+        "//tensorflow/compiler/xla:statusor",
+        "//tensorflow/core:lib",
+        "//tensorflow/stream_executor/lib",
+        "@com_google_absl//absl/memory",
+    ],
+)
+
