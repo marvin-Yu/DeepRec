@@ -94,6 +94,31 @@ class SliceFusionVisitor : public DfsHloRewriteVisitor {
       : computation_(computation) {}
 
   Status HandleReduce(HloInstruction* reduce) override {
+    HloInstruction *multiply, *broadcast1, *broadcast2, *op1, *op2;
+    if (Match(reduce,
+              m::Reduce(
+                  m::Multiply(&multiply, m::Broadcast(&broadcast1, m::Op(&op1)),
+                              m::Broadcast(&broadcast2, m::Op(&op2))),
+                  m::Constant()))) {
+      VLOG(10) << "Matched reduce(mutliply(broadcast))";
+      if (broadcast1->dimensions() == std::vector<int64>({0, 2, 3}) &&
+          broadcast2->dimensions() == std::vector<int64>({0, 1, 2})) {
+        VLOG(10) << "Convert broadcast->multiply->reduce to dot.";
+        DotDimensionNumbers dimensionNumbers;
+        dimensionNumbers.add_lhs_batch_dimensions(0);
+        dimensionNumbers.add_rhs_batch_dimensions(0);
+        dimensionNumbers.add_lhs_contracting_dimensions(2);
+        dimensionNumbers.add_rhs_contracting_dimensions(1);
+        PrecisionConfig precision_config;
+        precision_config.mutable_operand_precision()->Resize(
+            2, PrecisionConfig::DEFAULT);
+        auto new_dot = computation_->AddInstruction(HloInstruction::CreateDot(
+            reduce->shape(), op2, op1, dimensionNumbers, precision_config));
+        changed_ = true;
+        return computation_->ReplaceInstruction(reduce, new_dot);
+      }
+    }
+
     auto concat = reduce->mutable_operand(0);
     if (concat->opcode() != HloOpcode::kConcatenate) {
       return Status::OK();
@@ -102,7 +127,7 @@ class SliceFusionVisitor : public DfsHloRewriteVisitor {
     if (reshape->opcode() != HloOpcode::kReshape) {
       return Status::OK();
     }
-    HloInstruction *slice, *multiply;
+    HloInstruction* slice;
     if (Match(reshape, m::Reshape(m::Slice(&slice, m::Op(&multiply))))) {
       VLOG(10) << "Matched";
       // check only concat the last dimension
@@ -158,7 +183,6 @@ class SliceFusionVisitor : public DfsHloRewriteVisitor {
       } else {
         LOG(ERROR) << "Invalid reduce dimension";
       }
-      return Status::OK();
     }
     return Status::OK();
   }
