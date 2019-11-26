@@ -32,6 +32,7 @@ limitations under the License.
 #include "tensorflow/core/grappler/optimizers/debug_stripper.h"
 #include "tensorflow/core/grappler/optimizers/dependency_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/function_optimizer.h"
+#include "tensorflow/core/grappler/optimizers/gemm_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/generic_layout_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/implementation_selector.h"
 #include "tensorflow/core/grappler/optimizers/loop_optimizer.h"
@@ -152,6 +153,7 @@ std::unique_ptr<GraphOptimizer> MetaOptimizer::MakeNewOptimizer(
                                       cfg_.scoped_allocator_opts()));
   MK_OPT("pin_to_host",
          new PinToHostOptimizer(cfg_.pin_to_host_optimization()));
+  MK_OPT("gemm", new GemmOptimizer());
 
   return std::unique_ptr<GraphOptimizer>();
 }
@@ -234,6 +236,9 @@ Status MetaOptimizer::InitializeOptimizers(
   if (cfg_.scoped_allocator_optimization()) {
     optimizers->push_back(MakeUnique<ScopedAllocatorOptimizer>(
         cfg_.scoped_allocator_optimization(), cfg_.scoped_allocator_opts()));
+  }
+  if (cfg_.gemm_optimization() != RewriterConfig::OFF) {
+    optimizers->push_back(MakeUnique<GemmOptimizer>());
   }
   return InitializeCustomGraphOptimizers(std::set<string>(), optimizers);
 }
@@ -814,6 +819,7 @@ bool MetaOptimizerEnabled(const ConfigProto& cfg) {
          rewrite_cfg.debug_stripper() == RewriterConfig::ON ||
          rewrite_cfg.scoped_allocator_optimization() == RewriterConfig::ON ||
          rewrite_cfg.pin_to_host_optimization() == RewriterConfig::ON ||
+         rewrite_cfg.gemm_optimization() != RewriterConfig::OFF;
          AutoMixedPrecisionEnabled(rewrite_cfg.auto_mixed_precision()) ||
          !rewrite_cfg.optimizers().empty() ||
          !rewrite_cfg.custom_optimizers().empty();

@@ -597,6 +597,7 @@ cc_library(
         ":generic_layout_optimizer",
         ":graph_optimizer",
         ":implementation_selector",
+        ":gemm_optimizer",
         ":loop_optimizer",
         ":memory_optimizer",
         ":model_pruner",
@@ -1175,5 +1176,18 @@ tf_cc_test(
         "//tensorflow/core:test_main",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_library(
+    name = "gemm_optimizer",
+    srcs = ["gemm_optimizer.cc"],
+    hdrs = ["gemm_optimizer.h",],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":graph_optimizer",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:graph",
+        "//tensorflow/core/grappler:grappler_item",
     ],
 )

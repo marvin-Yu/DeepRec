@@ -272,6 +272,60 @@ tf_cuda_library(
     ],
 )
 
+tf_cuda_library(
+    name = "c_api_blaze",
+    srcs = [
+        "c_api_blaze.cc",
+    ],
+    hdrs = [
+        "c_api_blaze.h",
+    ],
+    copts = tf_copts(),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":c_api",
+        ":c_api_experimental",
+        ":c_api_internal",
+        ":checkpoint_reader",
+        "//tensorflow/c/eager:c_api",
+        "//tensorflow/c/eager:c_api_internal",
+        "//tensorflow/compiler/jit:flags",
+        "//tensorflow/core:core_cpu",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core/common_runtime/eager:attr_builder",
+        "//tensorflow/core/distributed_runtime/rpc:grpc_server_lib",
+        "//tensorflow/core/platform",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+tf_cuda_library(
+    name = "c_graph_editor",
+    srcs = [
+        "c_graph_editor_api.cc",
+    ],
+    hdrs = [
+        "c_graph_editor_api.h",
+    ],
+    copts = tf_copts(),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":c_api",
+        ":c_api_internal",
+        ":checkpoint_reader",
+        "//tensorflow/c/eager:c_api",
+        "//tensorflow/c/eager:c_api_internal",
+        "//tensorflow/core:core_cpu",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core/platform",
+        "//tensorflow/cc/tools:graph_editor",
+    ],
+)
+
 exports_files(
     [
         "version_script.lds",

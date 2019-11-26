@@ -1,0 +1,1 @@
+#include "tensorflow/core/grappler/optimizers/pattern_register.h"

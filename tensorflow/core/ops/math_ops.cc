@@ -137,6 +137,19 @@ REGISTER_OP("BatchMatMulV2")
     .Attr("adj_y: bool = false")
     .SetShapeFn(shape_inference::BatchMatMulV2Shape);
 
+REGISTER_OP("ParallelGemm")
+    .Input("x: T")
+    .Input("y: T")
+    .Input("c: T")
+    .Output("output: T")
+    .Attr("T: {float, double}")
+//    .Attr("transpose_a: bool = false")
+//    .Attr("transpose_b: bool = false")
+    .Attr("alpha: float = 1.0")
+    .Attr("beta: float = 1.0")
+    .Attr("parallel_num: int = 1")
+    .SetShapeFn(shape_inference::UnknownShape);
+
 #ifdef INTEL_MKL
 REGISTER_OP("_MklBatchMatMul")
     .Input("x: T")

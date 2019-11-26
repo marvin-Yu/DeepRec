@@ -1,0 +1,3 @@
+t-ads-tensorflow-c-lib:
+  pkgpara:
+    DOCKER: reg.docker.alibaba-inc.com/blaze/tensorflow-base:1.15
