@@ -102,7 +102,8 @@ class SliceFusionVisitor : public DfsHloRewriteVisitor {
                   m::Constant()))) {
       VLOG(10) << "Matched reduce(mutliply(broadcast))";
       if (broadcast1->dimensions() == std::vector<int64>({0, 2, 3}) &&
-          broadcast2->dimensions() == std::vector<int64>({0, 1, 2})) {
+          broadcast2->dimensions() == std::vector<int64>({0, 1, 2}) &&
+          reduce->dimensions() == std::vector<int64>({2})) {
         VLOG(10) << "Convert broadcast->multiply->reduce to dot.";
         DotDimensionNumbers dimensionNumbers;
         dimensionNumbers.add_lhs_batch_dimensions(0);
