@@ -154,6 +154,7 @@ bool ReorderReshapeAndBiasAdd(Graph* graph) {
         reshape_out = n;
         break;
       }
+      if (reshape_out == nullptr) continue;
 
       Node* reshape = node;
       Node* matmul = reshape_in;
