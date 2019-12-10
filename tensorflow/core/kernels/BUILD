@@ -3679,6 +3679,7 @@ cc_library(
         ":cwise_op",
         ":fft_ops",
         ":histogram_op",
+        ":indicator_matmul_op",
         ":matmul_op",
         ":nextafter_op",
         ":population_count_op",
@@ -3709,6 +3710,17 @@ tf_kernel_library(
     deps = MATH_DEPS + [":eigen_contraction_kernel"] + if_mkl_ml([
         "//third_party/mkl:intel_binary_blob",
     ]),
+)
+
+tf_kernel_library(
+    name = "indicator_matmul_op",
+    hdrs = ["indicator_matmul_op.h"],
+    srcs = ["indicator_matmul_op.cc"],
+    gpu_srcs = [
+      "indicator_matmul_op.h",
+      "indicator_matmul_op_gpu.cu.cc",
+    ],
+    deps = MATH_DEPS,
 )
 
 tf_mkl_kernel_library(

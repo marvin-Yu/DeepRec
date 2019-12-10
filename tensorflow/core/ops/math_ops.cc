@@ -66,8 +66,8 @@ REGISTER_OP("AddN")
           } else if (shapes_and_types && shapes_and_types_i) {
             if (shapes_and_types_i->size() != shapes_and_types->size()) {
               return errors::InvalidArgument(
-                  "shapes_and_types[", i, "].size() == ",
-                  shapes_and_types_i->size(),
+                  "shapes_and_types[", i,
+                  "].size() == ", shapes_and_types_i->size(),
                   " != shapes_and_types[0].size() == ",
                   shapes_and_types->size());
             }
@@ -137,18 +137,36 @@ REGISTER_OP("BatchMatMulV2")
     .Attr("adj_y: bool = false")
     .SetShapeFn(shape_inference::BatchMatMulV2Shape);
 
-REGISTER_OP("ParallelGemm")
+REGISTER_OP("IndicatorMatMul")
     .Input("x: T")
     .Input("y: T")
-    .Input("c: T")
+    .Input("indicator: int32")
     .Output("output: T")
-    .Attr("T: {float, double}")
-//    .Attr("transpose_a: bool = false")
-//    .Attr("transpose_b: bool = false")
-    .Attr("alpha: float = 1.0")
-    .Attr("beta: float = 1.0")
-    .Attr("parallel_num: int = 1")
-    .SetShapeFn(shape_inference::UnknownShape);
+    .Attr("T: {bfloat16, half, float, double, int32, int64}")
+    .Attr("transpose_a: bool = false")
+    .Attr("transpose_b: bool = false")
+    .SetShapeFn([](InferenceContext* c) {
+      ShapeHandle a;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 3, &a));
+      ShapeHandle b;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 3, &b));
+      ShapeHandle ind;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &ind));
+      bool transpose_a, transpose_b;
+      TF_RETURN_IF_ERROR(c->GetAttr("transpose_a", &transpose_a));
+      TF_RETURN_IF_ERROR(c->GetAttr("transpose_b", &transpose_b));
+      DimensionHandle output_rows = transpose_a ? c->Dim(a, 2) : c->Dim(a, 1);
+      DimensionHandle output_cols = transpose_b ? c->Dim(b, 1) : c->Dim(b, 2);
+
+      // Validate that the inner shapes are compatible.
+      DimensionHandle inner_a = transpose_a ? c->Dim(a, 1) : c->Dim(a, 2);
+      DimensionHandle inner_b = transpose_b ? c->Dim(b, 2) : c->Dim(b, 1);
+      DimensionHandle merged;
+      TF_RETURN_IF_ERROR(c->Merge(inner_a, inner_b, &merged));
+      DimensionHandle batch_shape = c->Dim(b, 0);
+      c->set_output(0, c->MakeShape({batch_shape, output_rows, output_cols}));
+      return Status::OK();
+    });
 
 #ifdef INTEL_MKL
 REGISTER_OP("_MklBatchMatMul")
@@ -1407,12 +1425,12 @@ Status RangeSize(const Tensor* start_t, const Tensor* limit_t,
   T limit = limit_t->scalar<T>()();
   T delta = delta_t->scalar<T>()();
   if (start > limit && delta > 0) {
-    return errors::InvalidArgument("Requires start <= limit when delta > 0: ",
-                                   start, "/", limit);
+    return errors::InvalidArgument(
+        "Requires start <= limit when delta > 0: ", start, "/", limit);
   }
   if (start < limit && delta < 0) {
-    return errors::InvalidArgument("Requires start >= limit when delta < 0: ",
-                                   start, "/", limit);
+    return errors::InvalidArgument(
+        "Requires start >= limit when delta < 0: ", start, "/", limit);
   }
   if (delta == 0) {
     return errors::InvalidArgument("Requires delta != 0");
