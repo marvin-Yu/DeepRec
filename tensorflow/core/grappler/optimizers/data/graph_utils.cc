@@ -284,7 +284,7 @@ Status GetDatasetOutputTypesAttr(const NodeDef& node,
                                  DataTypeVector* output_types) {
   // We don't name the output_types attr consistently, so should check for both.
   for (const string& attr_name : {"output_types", "Toutput_types"}) {
-    if (node.attr().contains(attr_name)) {
+    if (node.attr().find(attr_name) != node.attr().end()) {
       return GetNodeAttr(node, attr_name, output_types);
     }
   }

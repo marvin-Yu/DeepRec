@@ -1,22 +1,15 @@
-diff --git a/BUILD b/BUILD
-index 2fb26050..c2744d5b 100644
---- a/BUILD
-+++ b/BUILD
-@@ -19,7 +19,7 @@ config_setting(
- # ZLIB configuration
- ################################################################################
- 
--ZLIB_DEPS = ["@zlib//:zlib"]
-+ZLIB_DEPS = ["@zlib_archive//:zlib"]
- 
- ################################################################################
- # Protobuf Runtime Library
-@@ -218,7 +218,7 @@ cc_library(
- # TODO(keveman): Remove this target once the support gets added to Bazel.
- cc_library(
-     name = "protobuf_headers",
--    hdrs = glob(["src/**/*.h"]),
-+    hdrs = glob(["src/**/*.h", "src/**/*.inc"]),
-     includes = ["src/"],
-     visibility = ["//visibility:public"],
- )
+diff --git a/protobuf.bzl b/protobuf.bzl
+index 78f19c6..4226a14 100644
+--- a/protobuf.bzl
++++ b/protobuf.bzl
+@@ -266,8 +266,8 @@ def internal_gen_well_known_protos_java(srcs):
+   Args:
+     srcs: the well known protos
+   """
+-  root = Label("%s//protobuf_java" % (REPOSITORY_NAME)).workspace_root
+-  pkg = PACKAGE_NAME + "/" if PACKAGE_NAME else ""
++  root = Label("%s//protobuf_java" % (native.repository_name())).workspace_root
++  pkg = native.package_name() + "/" if native.package_name() else ""
+   if root == "":
+     include = " -I%ssrc " % pkg
+   else:
