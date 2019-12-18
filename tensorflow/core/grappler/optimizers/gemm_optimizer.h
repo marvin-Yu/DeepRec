@@ -16,7 +16,7 @@ limitations under the License.
 #ifndef TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_GEMM_OPTIMIZER_H_
 #define TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_GEMM_OPTIMIZER_H_
 
-#include "tensorflow/core/grappler/optimizers/kernel_fusion_optimizer.h"
+#include "tensorflow/core/grappler/optimizers/graph_optimizer.h"
 
 namespace tensorflow {
 namespace grappler {
@@ -31,10 +31,10 @@ class GemmOptimizer : public GraphOptimizer {
   bool UsesFunctionLibrary() const override { return false; }
 
   Status Optimize(Cluster* cluster, const GrapplerItem& item,
-                          GraphDef* optimized_graph) override;
+                  GraphDef* optimized_graph) override;
 
   void Feedback(Cluster* cluster, const GrapplerItem& item,
-                        const GraphDef& optimized_graph, double result) override;
+                const GraphDef& optimized_graph, double result) override;
 };
 
 }  // end namespace grappler
