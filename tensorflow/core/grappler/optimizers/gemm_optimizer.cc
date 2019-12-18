@@ -2238,6 +2238,101 @@ std::unordered_set<string> GetNonComputeIntensiveNodes() {
   return ops;
 }
 
+bool FuseGatherBeforeMatMul(Graph* graph) {
+  VLOG(1) << "FuseGatherBeforeMatMul";
+  
+  static int count = 0;
+  bool changed = false;
+  std::vector<Node*> nodes(graph->num_nodes());
+  int i = 0;
+  for (Node* node : graph->nodes()) {
+    nodes[i++] = node;
+  }
+  for (Node* node : nodes) {
+    if (node->type_string() != "BatchMatMulV2") continue;
+    Node *matmul = node;
+    // Check Gather
+    Node *gather = nullptr;
+    matmul->input_node(0, &gather);
+    if (!graph->IsValidNode(gather).ok()) continue;
+    string type = gather->type_string();
+    if (type != "GatherV2") continue;
+    // Check axis
+    Node* axis = nullptr;
+    gather->input_node(2, &axis);
+    if (!axis) continue;
+    type = axis->type_string();
+    if (type != "Const") continue;
+    if (axis->def().attr().at("value").i() != 0) continue;
+
+    // Prepare op name
+    string prefix = "GemmOptimizer/FuseGatherBeforeMatMul/" + matmul->name();
+    string op_name = prefix + "/IndicatorMatMul_" + std::to_string(count++);
+
+    // Build NodeDef
+    std::vector<NodeDefBuilder::NodeOut> ind_matmul_inputs;
+    Node *input_nodes[3] = {nullptr, nullptr, nullptr};
+    gather->input_node(0, &input_nodes[0]);
+    node->input_node(1, &input_nodes[1]);
+    gather->input_node(1, &input_nodes[2]);
+    if (!input_nodes[0] || !input_nodes[1] || !input_nodes[2]) continue;
+    DataType dtype = input_nodes[0]->output_type(0);
+    DataType ind_dtype = input_nodes[2]->output_type(0);
+    ind_matmul_inputs.emplace_back(input_nodes[0]->name(), 0, dtype);
+    ind_matmul_inputs.emplace_back(input_nodes[1]->name(), 0, dtype);
+    ind_matmul_inputs.emplace_back(input_nodes[2]->name(), 0, ind_dtype);
+    NodeDefBuilder ind_matmul_builder(op_name, "IndicatorMatMul");
+    ind_matmul_builder.Input(ind_matmul_inputs[0]);
+    ind_matmul_builder.Input(ind_matmul_inputs[1]);
+    ind_matmul_builder.Input(ind_matmul_inputs[2]);
+
+    NodeDef ind_matmul_def;
+    bool transpose_a = false, transpose_b = false;
+    if (matmul->def().attr().find("transpose_a") != matmul->def().attr().end()) {
+      transpose_a = matmul->def().attr().at("transpose_a").b();
+    }
+    if (matmul->def().attr().find("transpose_b") != matmul->def().attr().end()) {
+      transpose_b = matmul->def().attr().at("transpose_b").b();
+    }
+    Status status = ind_matmul_builder
+        .Attr("transpose_a", transpose_a)
+        .Attr("transpose_b", transpose_b)
+        .Attr("T", dtype)
+        .Device(matmul->def().device())
+        .Finalize(&ind_matmul_def);
+    if (!status.ok()) {
+      LOG(ERROR) << "IndicatorMatMul node construction failed with " << status;
+      return false;
+    }
+
+    // Insert IndicatorMatMul node
+    Node *ind_matmul_node = graph->AddNode(ind_matmul_def, &status);
+    if (!status.ok()) {
+      LOG(ERROR) << "Adding node failed " << status;
+      return false;
+    }
+    // Update input edge
+    graph->AddEdge(input_nodes[0], 0, ind_matmul_node, 0);
+    graph->AddEdge(input_nodes[1], 0, ind_matmul_node, 1);
+    graph->AddEdge(input_nodes[2], 0, ind_matmul_node, 2);
+    // Update output edge
+    const EdgeSet& out_edges = matmul->out_edges();
+    std::vector<const Edge*> edge_vector(out_edges.begin(), out_edges.end());
+    for (const Edge* edge : edge_vector) {
+      Node* out_node = edge->dst();
+      int dst_idx = edge->dst_input();
+      graph->AddEdge(ind_matmul_node, 0, out_node, dst_idx);
+    }
+    // Remove useless node
+    graph->RemoveNode(axis);
+    graph->RemoveNode(gather);
+    graph->RemoveNode(matmul);
+
+    changed = true;
+  }
+  return changed;
+}
+
 int InsertToCPUSet(Node* node,
                    const std::unordered_set<string>& candidates,
                    std::unordered_set<Node*>* cpu_nodes) {
@@ -2546,6 +2641,7 @@ void FuseGemmKernels(Graph* graph) {
   }
   while(1) {
     bool graph_changed =
+        FuseGatherBeforeMatMul(graph) ||
         ReorderReshapeAndBiasAdd(graph) ||
         RemoveReshapesBeforeMatMul(graph) ||
         ConstantFoldingForContinuousMatMuls(graph) ||
