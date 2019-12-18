@@ -46,17 +46,6 @@ limitations under the License.
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/public/session.h"
 
-#ifdef GOOGLE_CUDA
-// NOTE(zhujun): Currently the CUDA Graph support is implemented
-// directly here. This is a bit hacky as it is not well
-// encapsulated. But for now we are aiming to make it work, so we only
-// want to clean this up in the future.
-#include "tensorflow/core/common_runtime/gpu/gpu_device.h"
-using GPU_DEVICE_T = tensorflow::BaseGPUDevice*;
-#else
-using GPU_DEVICE_T = void*;
-#endif
-
 namespace tensorflow {
 
 class CostModel;
@@ -113,7 +102,7 @@ class DirectSession : public Session {
   ::tensorflow::Status GetAssignedCPUDevice(string* device_name,
                                             Device** device);
   ::tensorflow::Status GetAssignedGPUDevice(string* device_name,
-                                            GPU_DEVICE_T* device);
+                                            Device** device);
   ::tensorflow::Status ListDevices(
       std::vector<DeviceAttributes>* response) override;
   ::tensorflow::Status Close() override;
@@ -239,8 +228,6 @@ class DirectSession : public Session {
   };
 
   struct CUDAGraphContext;
-  struct CUDAGraphArgs;
-  struct CUDAGraphDeviceContext;
   ::tensorflow::Status Run0(
     const ::tensorflow::RunOptions& run_options,
     const NamedTensorList& inputs,
@@ -248,16 +235,23 @@ class DirectSession : public Session {
     const std::vector<string>& target_nodes,
     std::vector<Tensor>* outputs,
     RunMetadata* run_metadata,
-    CUDAGraphDeviceContext* cuda_graph_device_context = nullptr,
     CUDAGraphContext* cuda_graph_context = nullptr,
-    CUDAGraphArgs* cuda_graph_args = nullptr);
+    Allocator* persistent_allocator = nullptr, void* cuda_graph = nullptr,
+    std::map<string, std::unique_ptr<Tensor>>* saved_inputs = nullptr,
+    std::map<string, std::unique_ptr<Tensor>>* saved_outputs = nullptr,
+    int cuda_graph_capture_timeout_secs = 10, ArgSaver* arg_saver = nullptr);
   ::tensorflow::Status RecordCUDAGraph(
     const ::tensorflow::RunOptions& run_options, const NamedTensorList& inputs,
     const std::vector<string>& output_names,
     const std::vector<string>& target_nodes, std::vector<Tensor>* outputs,
-    RunMetadata* run_metadata,
-    CUDAGraphDeviceContext* cuda_graph_device_context,
-    CUDAGraphContext* cuda_graph_context);
+    RunMetadata* run_metadata, CUDAGraphContext* cuda_graph_context,
+    Allocator* persistent_allocator, int device_id, ArgSaver* arg_saver);
+
+  ::tensorflow::Status RecordCUDAGraph(
+    const ::tensorflow::RunOptions& run_options, const NamedTensorList& inputs,
+    const std::vector<string>& output_names,
+    const std::vector<string>& target_nodes, std::vector<Tensor>* outputs,
+    RunMetadata* run_metadata, const string& device, CUDAGraphContext* context);
 
   // Retrieves an already existing set of executors to run 'inputs' and
   // 'outputs', or creates and caches them for future use.
@@ -288,18 +282,20 @@ class DirectSession : public Session {
                          gtl::ArraySlice<::tensorflow::int64> input_dims,
                          gtl::ArraySlice<string> outputs,
                          string* key);
-  ::tensorflow::Status BorrowOrCreateCUDAGraphDeviceContext(
-    const string& device_name, const string& key, int id, uint64 timeout,
-    GPU_DEVICE_T device, const CUDAGraphOptions& options,
+  struct CUDAGraphDeviceContext;
+  ::tensorflow::Status GetOrCreateCUDAGraphDeviceContext(
+    const string& device_name, Device* device, const CUDAGraphOptions& options,
     CUDAGraphDeviceContext** context);
-  ::tensorflow::Status BorrowCUDAGraphContext(
-    const string& device_name, const string& key, uint64 timeout,
-    CUDAGraphDeviceContext** device_context, CUDAGraphContext** context);
-  void ReturnCUDAGraphDeviceContext(const string& device_name,
-                                    CUDAGraphDeviceContext* device_context);
+  ::tensorflow::Status GetCUDAGraphDeviceContext(
+    const string& device_name, CUDAGraphDeviceContext** context);
+  ::tensorflow::Status BorrowCUDAGraphContext(const string& device_name,
+                                              const string& key,
+                                              CUDAGraphContext** context);
+  ::tensorflow::Status ReturnCUDAGraphContext(const string& device_name,
+                                              const string& key,
+                                              CUDAGraphContext* context);
 
-  ::tensorflow::Status RunWithCUDAGraph(CUDAGraphDeviceContext& device_context,
-                                        CUDAGraphContext& context,
+  ::tensorflow::Status RunWithCUDAGraph(CUDAGraphContext& context,
                                         const NamedTensorList& inputs,
                                         const std::vector<string>& output_names,
                                         std::vector<Tensor>* outputs);
@@ -309,9 +305,10 @@ class DirectSession : public Session {
       CallFrameInterface* call_frame, ExecutorsAndKeys* executors_and_keys,
       RunMetadata* run_metadata,
       const thread::ThreadPoolOptions& threadpool_options,
-      CUDAGraphDeviceContext* cuda_graph_device_context = nullptr,
-      CUDAGraphContext* cuda_graph_context = nullptr,
-      CUDAGraphArgs* cuda_graph_args = nullptr);
+      Allocator* persistent_allocator = nullptr, void* cuda_graph = nullptr,
+      std::map<string, std::unique_ptr<Tensor>>* saved_inputs = nullptr,
+      std::map<string, std::unique_ptr<Tensor>>* saved_outputs = nullptr,
+      int cuda_graph_capture_timeout_secs = 10, ArgSaver* arg_saver = nullptr);
 
   // Returns whether inter-op execution uses a global pool or the input
   // `run_options` requests being run on inter_op_thread_pool = 0 in case
@@ -410,11 +407,8 @@ class DirectSession : public Session {
       GUARDED_BY(executor_lock_);
 
   mutex cuda_graph_lock_; // protects cuda_graph_device_contexts_
-  using CUDAGraphDeviceContexts =
-    std::unordered_map<string,
-                       std::vector<std::unique_ptr<CUDAGraphDeviceContext>>>;
-  CUDAGraphDeviceContexts cuda_graph_device_contexts_
-      GUARDED_BY(cuda_graph_lock_);
+  std::unordered_map<string, std::unique_ptr<CUDAGraphDeviceContext>>
+  cuda_graph_device_contexts_ GUARDED_BY(cuda_graph_lock_);
 
   class RunCallableCallFrame;
   struct Callable {

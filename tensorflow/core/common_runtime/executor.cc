@@ -80,6 +80,7 @@ limitations under the License.
 // directly here. This is a bit hacky as it is not well
 // encapsulated. But for now we are aiming to make it work, so we only
 // want to clean this up in the future.
+#include "third_party/gpus/cuda/include/cuda.h"
 #include "tensorflow/stream_executor/stream_executor.h"
 
 #include "tensorflow/core/common_runtime/gpu_device_context.h"
