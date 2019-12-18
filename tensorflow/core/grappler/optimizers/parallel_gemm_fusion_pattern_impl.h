@@ -13,9 +13,6 @@ class ParallelGemmFusionPatternImpl : public FusionPatternImpl {
   virtual bool Match(std::vector<Node*>& nodes, Graph* graph) override;
 
   virtual bool GraphRewrite(std::vector<Node*>& nodes, Graph* graph) override;
-
- protected:
-  std::vector<Node*> candidate_gemm_nodes_;
 };
 
 
