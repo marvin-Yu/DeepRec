@@ -17,7 +17,6 @@ limitations under the License.
 #define TENSORFLOW_CORE_COMMON_RUNTIME_DIRECT_SESSION_H_
 
 #include <atomic>
-#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -99,10 +98,6 @@ class DirectSession : public Session {
   // If 'containers' is empty, then Reset clears the default container.
   ::tensorflow::Status Reset(const std::vector<string>& containers);
 
-  ::tensorflow::Status GetAssignedCPUDevice(string* device_name,
-                                            Device** device);
-  ::tensorflow::Status GetAssignedGPUDevice(string* device_name,
-                                            Device** device);
   ::tensorflow::Status ListDevices(
       std::vector<DeviceAttributes>* response) override;
   ::tensorflow::Status Close() override;
@@ -227,32 +222,6 @@ class DirectSession : public Session {
     int64 collective_graph_key = BuildGraphOptions::kNoCollectiveGraphKey;
   };
 
-  struct CUDAGraphContext;
-  ::tensorflow::Status Run0(
-    const ::tensorflow::RunOptions& run_options,
-    const NamedTensorList& inputs,
-    const std::vector<string>& output_names,
-    const std::vector<string>& target_nodes,
-    std::vector<Tensor>* outputs,
-    RunMetadata* run_metadata,
-    CUDAGraphContext* cuda_graph_context = nullptr,
-    Allocator* persistent_allocator = nullptr, void* cuda_graph = nullptr,
-    std::map<string, std::unique_ptr<Tensor>>* saved_inputs = nullptr,
-    std::map<string, std::unique_ptr<Tensor>>* saved_outputs = nullptr,
-    int cuda_graph_capture_timeout_secs = 10, ArgSaver* arg_saver = nullptr);
-  ::tensorflow::Status RecordCUDAGraph(
-    const ::tensorflow::RunOptions& run_options, const NamedTensorList& inputs,
-    const std::vector<string>& output_names,
-    const std::vector<string>& target_nodes, std::vector<Tensor>* outputs,
-    RunMetadata* run_metadata, CUDAGraphContext* cuda_graph_context,
-    Allocator* persistent_allocator, int device_id, ArgSaver* arg_saver);
-
-  ::tensorflow::Status RecordCUDAGraph(
-    const ::tensorflow::RunOptions& run_options, const NamedTensorList& inputs,
-    const std::vector<string>& output_names,
-    const std::vector<string>& target_nodes, std::vector<Tensor>* outputs,
-    RunMetadata* run_metadata, const string& device, CUDAGraphContext* context);
-
   // Retrieves an already existing set of executors to run 'inputs' and
   // 'outputs', or creates and caches them for future use.
   ::tensorflow::Status GetOrCreateExecutors(
@@ -278,37 +247,11 @@ class DirectSession : public Session {
       RunStateArgs* run_state_args, DataTypeVector* input_types,
       DataTypeVector* output_types, int64* collective_graph_key);
 
-  void BuildCUDAGraphKey(gtl::ArraySlice<string> inputs,
-                         gtl::ArraySlice<::tensorflow::int64> input_dims,
-                         gtl::ArraySlice<string> outputs,
-                         string* key);
-  struct CUDAGraphDeviceContext;
-  ::tensorflow::Status GetOrCreateCUDAGraphDeviceContext(
-    const string& device_name, Device* device, const CUDAGraphOptions& options,
-    CUDAGraphDeviceContext** context);
-  ::tensorflow::Status GetCUDAGraphDeviceContext(
-    const string& device_name, CUDAGraphDeviceContext** context);
-  ::tensorflow::Status BorrowCUDAGraphContext(const string& device_name,
-                                              const string& key,
-                                              CUDAGraphContext** context);
-  ::tensorflow::Status ReturnCUDAGraphContext(const string& device_name,
-                                              const string& key,
-                                              CUDAGraphContext* context);
-
-  ::tensorflow::Status RunWithCUDAGraph(CUDAGraphContext& context,
-                                        const NamedTensorList& inputs,
-                                        const std::vector<string>& output_names,
-                                        std::vector<Tensor>* outputs);
-
   ::tensorflow::Status RunInternal(
       int64 step_id, const RunOptions& run_options,
       CallFrameInterface* call_frame, ExecutorsAndKeys* executors_and_keys,
       RunMetadata* run_metadata,
-      const thread::ThreadPoolOptions& threadpool_options,
-      Allocator* persistent_allocator = nullptr, void* cuda_graph = nullptr,
-      std::map<string, std::unique_ptr<Tensor>>* saved_inputs = nullptr,
-      std::map<string, std::unique_ptr<Tensor>>* saved_outputs = nullptr,
-      int cuda_graph_capture_timeout_secs = 10, ArgSaver* arg_saver = nullptr);
+      const thread::ThreadPoolOptions& threadpool_options);
 
   // Returns whether inter-op execution uses a global pool or the input
   // `run_options` requests being run on inter_op_thread_pool = 0 in case
@@ -405,10 +348,6 @@ class DirectSession : public Session {
   // same ExecutorsAndKey object.
   std::unordered_map<string, std::shared_ptr<ExecutorsAndKeys>> executors_
       GUARDED_BY(executor_lock_);
-
-  mutex cuda_graph_lock_; // protects cuda_graph_device_contexts_
-  std::unordered_map<string, std::unique_ptr<CUDAGraphDeviceContext>>
-  cuda_graph_device_contexts_ GUARDED_BY(cuda_graph_lock_);
 
   class RunCallableCallFrame;
   struct Callable {

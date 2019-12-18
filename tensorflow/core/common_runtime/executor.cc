@@ -16,12 +16,9 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/executor.h"
 
 #include <atomic>
-#include <chrono>
 #include <deque>
 #include <memory>
-#include <set>
 #include <string>
-#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -74,17 +71,6 @@ limitations under the License.
 #include "tensorflow/core/profiler/internal/traceme_recorder.h"
 #include "tensorflow/core/profiler/lib/traceme.h"
 #include "tensorflow/core/util/tensor_slice_reader_cache.h"
-
-#ifdef GOOGLE_CUDA
-// NOTE(zhujun): Currently the CUDA Graph support is implemented
-// directly here. This is a bit hacky as it is not well
-// encapsulated. But for now we are aiming to make it work, so we only
-// want to clean this up in the future.
-#include "third_party/gpus/cuda/include/cuda.h"
-#include "tensorflow/stream_executor/stream_executor.h"
-
-#include "tensorflow/core/common_runtime/gpu_device_context.h"
-#endif
 
 namespace tensorflow {
 namespace {
@@ -142,64 +128,6 @@ void SetReferencedTensors(NodeExecStatsInterface* stats,
 }
 
 }  // namespace nodestats
-
-#ifdef GOOGLE_CUDA
-static bool IsGPU(Device* device) {
-  return device->attributes().device_type() == "GPU";
-}
-
-static string ProcessInputName(const string& name) {
-  static const string prefix = "_arg_";
-  if (name.substr(0, prefix.size()) != prefix) {
-    return name + ":0";
-  }
-  string name1 = name.substr(prefix.size());
-  std::vector<string> parts = str_util::Split(name1, "_");
-  for (auto i = 0; i < 3; i++) {
-    parts.pop_back();
-  }
-  return absl::StrJoin(parts, "_") + ":0";
-}
-
-static string ProcessOutputName(const string& name) {
-  auto idx = name.find_last_of('/');
-  return (idx == string::npos ? name : name.substr(0, idx)) + ":0";
-}
-
-static bool DeviceMatch(const string& type, const string& name) {
-  auto parts = str_util::Split(name, ":");
-  return parts.size() > 1 && parts[parts.size() - 2] == type;
-}
-
-static bool IsTransfering(const Node* node, const string& type,
-                          const string& src, const string& dst) {
-  string src_1, dst_1;
-  auto st = GetNodeAttr(node->attrs(), "send_device", &src_1);
-  if (!st.ok()) {
-    return false;
-  }
-  st = GetNodeAttr(node->attrs(), "recv_device", &dst_1);
-  if (!st.ok()) {
-    return false;
-  }
-  return (node->type_string() == type
-          && DeviceMatch(src, src_1)
-          && DeviceMatch(dst, dst_1));
-}
-
-static bool SendingGPUToCPU(const Node* node) {
-  return IsTransfering(node, "_Send", "GPU", "CPU");
-}
-
-static bool RecvingCPUToGPU(const Node* node) {
-  return IsTransfering(node, "_Recv", "CPU", "GPU");
-}
-
-static bool CUDAGraphPreOps(const Node* node) {
-  static std::set<string> pre_ops { "NoOp", "_Recv", "Const" };
-  return pre_ops.find(node->type_string()) != pre_ops.end();
-}
-#endif
 
 class ExecutorImpl;
 class GraphView;
@@ -1333,14 +1261,6 @@ class ExecutorState {
   StepStatsCollectorInterface* const stats_collector_;
   const tracing::EventCollector* const event_collector_;
   Context context_;
-  // Not owned.
-  Allocator* persistent_allocator_;
-  // Not owned.
-  void* cuda_graph_;
-  Executor::Args::SaveIO save_input_;
-  Executor::Args::SaveIO save_output_;
-  std::chrono::seconds cuda_graph_capture_timeout_;
-  ArgSaver* arg_saver_;
 
   // QUESTION: Make it a checkpoint::TensorSliceReaderCacheWrapper
   // instead of a pointer?  (avoids having to delete).
@@ -1374,8 +1294,6 @@ class ExecutorState {
 
   mutex mu_;
   Status status_ GUARDED_BY(mu_);
-  enum GraphCaptureStatus { NEW, CAPTURING, CAPTURED };
-  GraphCaptureStatus graph_capture_status_;
 
   // Mapping from frame name to outstanding frames. A new frame is created
   // at some iteration of an active frame. So the unique key for the new
@@ -1383,11 +1301,6 @@ class ExecutorState {
   // number at which the parent frame is creating the new frame, and the
   // name of the new frame from nodedef.
   gtl::FlatMap<string, FrameState*> outstanding_frames_ GUARDED_BY(mu_);
-
-  // Number of outstanding _Recv operations. When the number drops
-  // down to zero, we can start to capture the compute stream to build
-  // a CUDA Graph.
-  int num_outstanding_recv_ops_ GUARDED_BY(mu_);
 
   // The unique name of a frame.
   inline string MakeFrameName(FrameState* frame, int64 iter_id,
@@ -1467,12 +1380,6 @@ class ExecutorState {
                          int64 input_iter) const NO_THREAD_SAFETY_ANALYSIS {
     return input_frame->GetIteration(input_iter)->input_tensors;
   }
-
-#ifdef GOOGLE_CUDA
-  Status BeginStreamCapture(CUstream stream);
-  Status EndStreamCapture(CUstream stream, CUgraph* cuda_graph);
-  Status WaitForRecvOps();
-#endif
 };
 
 ExecutorState::ExecutorState(const Executor::Args& args, ExecutorImpl* impl)
@@ -1491,13 +1398,6 @@ ExecutorState::ExecutorState(const Executor::Args& args, ExecutorImpl* impl)
       event_collector_(
           tracing::GetEventCollector(tracing::EventCategory::kCompute)),
       context_(ContextKind::kThread),
-      persistent_allocator_(args.persistent_allocator),
-      cuda_graph_(args.cuda_graph),
-      save_input_(args.save_input),
-      save_output_(args.save_output),
-      cuda_graph_capture_timeout_(std::chrono::seconds(
-                                    args.cuda_graph_capture_timeout_secs)),
-      arg_saver_(args.arg_saver),
       slice_reader_cache_(new checkpoint::TensorSliceReaderCacheWrapper),
       call_frame_(args.call_frame),
       impl_(impl),
@@ -1631,29 +1531,6 @@ void ExecutorState::RunAsync(Executor::DoneCallback done) {
     done(fill_status);
     return;
   }
-
-#ifdef GOOGLE_CUDA
-  // Count the number of _Recv operations in the graph. CUDA Graphs
-  // can only be captured after all _Recv operations are done.
-  if (cuda_graph_ && IsGPU(device)) {
-    int n = 0;
-    for (auto node: graph->nodes()) {
-      auto node_type = node->type_string();
-      if (node_type == "_Recv") {
-        n++;
-      } else if (node_type == "_HostRecv") {
-        delete this;
-        done(errors::Internal("_HostRecv is not supported"));
-        return;
-      }
-    }
-    {
-      mutex_lock l(mu_);
-      num_outstanding_recv_ops_ = n;
-    }
-    graph_capture_status_ = GraphCaptureStatus::NEW;
-  }
-#endif
 
   // Initialize the ready queue.
   for (const Node* n : impl_->root_nodes_) {
@@ -1797,8 +1674,6 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
     // deferred ops, or in ScheduleFinish if there aren't any deferred ops.
     if (finish_when_deferred_ops_done) Finish();
   };
-  params.persistent_allocator = persistent_allocator_;
-  params.arg_saver = arg_saver_;
 
   Status s;
   NodeExecStatsInterface* stats = nullptr;
@@ -1814,39 +1689,6 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
     const int64 input_iter = tagged_node.input_iter;
     const int id = node->id();
     const NodeItem& item = *gview.node(id);
-
-    s = Status::OK();
-#ifdef GOOGLE_CUDA
-    if (IsGPU(device)) {
-      VLOG(1) << "Scheduling on 0x" << std::hex << std::this_thread::get_id()
-              << std::dec << ": " << SummarizeNode(*node);
-    }
-    if (cuda_graph_ && IsGPU(device)) {
-      if (!CUDAGraphPreOps(node)) {
-        s = WaitForRecvOps();
-      }
-
-      if (s.ok()) {
-        if (SendingGPUToCPU(node)) {
-          bool ok;
-          {
-            mutex_lock l(mu_);
-            ok = status_.ok();
-          }
-          if (ok) {
-            auto stream =
-              device->tensorflow_gpu_device_info()->default_context->stream();
-            auto cu_stream =
-              static_cast<CUstream>(stream->implementation()->GpuStreamHack());
-            auto cuda_graph = static_cast<CUgraph*>(cuda_graph_);
-            s = EndStreamCapture(cu_stream, cuda_graph);
-          }
-        } else if (node->type_string() == "_HostSend") {
-          s = errors::Internal("_HostSend is not supported");
-        }
-      }
-    }
-#endif
 
     // TODO(misard) Replace with a finer-grain enabling flag once we
     // add better optional debugging support.
@@ -1892,11 +1734,8 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
     } else {
       // Prepares inputs.
       bool is_input_dead = false;
-      if (s.ok()) {
-        s = PrepareInputs(item, first_input, &inputs, &input_device_contexts,
-                          &input_alloc_attrs, &is_input_dead);
-      }
-
+      s = PrepareInputs(item, first_input, &inputs, &input_device_contexts,
+                        &input_alloc_attrs, &is_input_dead);
       if (!s.ok()) {
         // Clear inputs.
         int num_inputs = item.num_inputs;
@@ -1914,20 +1753,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
       params.op_kernel = op_kernel;
       params.frame_iter = FrameAndIter(input_frame->frame_id, input_iter);
       params.is_input_dead = is_input_dead;
-      if (persistent_allocator_) {
-        auto p = new AllocatorAttributes[item.num_outputs];
-        memcpy(p, item.output_attrs(),
-               sizeof(AllocatorAttributes) * item.num_outputs);
-        for (int k = 0; k < item.num_outputs; k++) {
-          p[k].set_persistent(true);
-        }
-        params.real_output_attr_array.reset(p);
-        p = new AllocatorAttributes;
-        p->set_persistent(true);
-        params.allocator_attributes.reset(p);
-      } else {
-        params.output_attr_array = item.output_attrs();
-      }
+      params.output_attr_array = item.output_attrs();
       params.forward_from_array = item.forward_from();
 
       if (item.kernel_is_async) {
@@ -1942,43 +1768,6 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
           Device* device = impl_->params_.device;
           NodeExecStatsInterface* stats = state->stats;  // Shorthand
           Entry* first_input = state->first_input;       // Shorthand
-
-#ifdef GOOGLE_CUDA
-          bool ok;
-          {
-            mutex_lock l(mu_);
-            ok = status_.ok();
-          }
-          if (cuda_graph_ && ok && IsGPU(device) && state->ctx.status().ok()) {
-            auto node = state->tagged_node.node;
-            if (RecvingCPUToGPU(node)) {
-
-              auto name = state->tagged_node.node->name();
-              auto real_name = ProcessInputName(name);
-              auto tensor = state->ctx.mutable_output(0);
-              VLOG(2) << "Saving input " << real_name << " (" << name << ")";
-              save_input_(real_name, tensor);
-
-              int left;
-              {
-                mutex_lock l(mu_);
-                left = --num_outstanding_recv_ops_;
-              }
-              VLOG(2) << "Number of outstanding _Recv operations: " << left;
-              if (left == 0) {
-                auto stream = device->tensorflow_gpu_device_info()
-                                    ->default_context->stream();
-                auto cu_stream =
-                  static_cast<CUstream>(
-                    stream->implementation()->GpuStreamHack());
-                state->ctx.SetStatus(BeginStreamCapture(cu_stream));
-              }
-            } else if (node->type_string() == "_HostRecv") {
-              auto st = errors::Internal("_HostRecv is not supported");
-              state->ctx.SetStatus(st);
-            }
-          }
-#endif
 
           nodestats::SetOpEnd(stats);
           EntryVector outputs;
@@ -2015,7 +1804,6 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
             device->ConsumeListOfAccessedTensors(state->ctx.op_device_context(),
                                                  accessed);
           }
-
           const bool completed =
               NodeDone(s, state->item->node, ready, stats, nullptr);
           delete state;
@@ -2054,32 +1842,13 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
           tracing::ScopedAnnotation annotation(kernel_label);
           device->Compute(op_kernel, &ctx);
         } else {
-          s = Status::OK();
-#ifdef GOOGLE_CUDA
-          if (cuda_graph_ && IsGPU(device)) {
-            if (SendingGPUToCPU(node)) {
-              auto name = node->name();
-              auto real_name = ProcessOutputName(name);
-              auto tensor = const_cast<Tensor*>(&ctx.input(0));
-              VLOG(2) << "Saving result " << real_name << " (" << name << ")";
-              save_output_(real_name, tensor);
-            } else if (node->type_string() == "_HostSend") {
-              s = errors::Internal("_HostSend is not supported");
-            }
-          }
-#endif
-
-          if (s.ok()) {
-            // In the common case, avoid creating any tracing objects.
-            if (op_kernel->IsExpensive()) {
-              KernelTimer timer;
-              device->Compute(op_kernel, &ctx);
-              op_kernel->UpdateCostEstimate(timer.ElapsedCycles());
-            } else {
-              device->Compute(op_kernel, &ctx);
-            }
+          // In the common case, avoid creating any tracing objects.
+          if (op_kernel->IsExpensive()) {
+            KernelTimer timer;
+            device->Compute(op_kernel, &ctx);
+            op_kernel->UpdateCostEstimate(timer.ElapsedCycles());
           } else {
-            ctx.SetStatus(s);
+            device->Compute(op_kernel, &ctx);
           }
         }
 
@@ -2676,10 +2445,8 @@ void ExecutorState::DumpState() {
       FrameState* frame_state = frame.second;
       mutex_lock frame_lock(frame_state->mu);
       for (IterationState* iteration : frame_state->iterations) {
-        if (iteration) {
-          LOG(WARNING) << "  Iteration:";
-          DumpIterationState(frame_state, iteration);
-        }
+        LOG(WARNING) << "  Iteration:";
+        DumpIterationState(frame_state, iteration);
       }
     }
     dumped_on_error_ = true;
@@ -2913,59 +2680,6 @@ void ExecutorState::CleanupFramesIterations(FrameState* frame, int64 iter,
     }
   }
 }
-
-#ifdef GOOGLE_CUDA
-Status ExecutorState::BeginStreamCapture(CUstream stream) {
-  mutex_lock l(mu_);
-  graph_capture_status_ = GraphCaptureStatus::CAPTURING;
-  VLOG(2) << "Beginning the capture of stream " << stream;
-  auto ret = cuStreamBeginCapture(stream, CU_STREAM_CAPTURE_MODE_RELAXED);
-  if (ret != CUDA_SUCCESS) {
-    const char* error;
-    cuGetErrorString(ret, &error);
-    return errors::Internal(
-      "Cannot begin to capture stream ", stream, ": ", error);
-  }
-  return Status::OK();
-}
-
-Status ExecutorState::EndStreamCapture(CUstream stream, CUgraph* cuda_graph) {
-  mutex_lock l(mu_);
-  if (graph_capture_status_ == GraphCaptureStatus::NEW) {
-    return errors::Internal("Stream ", stream, " is not being captured");
-  }
-  if (graph_capture_status_ == GraphCaptureStatus::CAPTURED) {
-    return Status::OK();
-  }
-  // graph_capture_status_ == GraphCaptureStatus::CAPTURING
-  graph_capture_status_ = GraphCaptureStatus::CAPTURED;
-  VLOG(2) << "Ending the capture of stream " << stream;
-  auto ret = cuStreamEndCapture(stream, cuda_graph);
-  if (ret != CUDA_SUCCESS) {
-    const char* error;
-    cuGetErrorString(ret, &error);
-    return errors::Internal(
-      "Cannot end to capture stream ", stream, ": ", error);
-  }
-  return Status::OK();
-}
-
-Status ExecutorState::WaitForRecvOps() {
-  auto bef = std::chrono::system_clock::now();
-  while (true) {
-    mutex_lock l(mu_);
-    if (num_outstanding_recv_ops_ == 0) {
-      break;
-    }
-    auto now = std::chrono::system_clock::now();
-    auto ela = std::chrono::duration_cast<std::chrono::seconds>(now - bef);
-    if (ela >= cuda_graph_capture_timeout_) {
-      return errors::Internal("Timed out while capturing CUDA graph");
-    }
-  }
-  return Status::OK();
-}
-#endif
 
 void ExecutorState::FrameState::ActivateNodes(const NodeItem* item,
                                               const bool is_dead, int64 iter,

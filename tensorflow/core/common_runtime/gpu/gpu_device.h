@@ -158,8 +158,6 @@ class BaseGPUDevice : public LocalDevice {
   int32 pending_cap_ = 0;
   bool timestamped_allocator_ = false;
 
-  bool enable_cuda_graph_ = false;
-
   // Initialize scractch buffers used by Eigen.
   Status InitScratchBuffers();
 
@@ -177,10 +175,6 @@ class BaseGPUDevice : public LocalDevice {
   Status MaybeCopyTensorToGPU(const AllocatorAttributes& alloc_attrs,
                               const Tensor& from, Tensor* to,
                               StatusCallback done);
-
-  int32 get_max_streams() {
-    return enable_cuda_graph_ ? 1 : max_streams_;
-  }
 };
 
 // A per-compute-stream utility that keeps track of kernels that have been

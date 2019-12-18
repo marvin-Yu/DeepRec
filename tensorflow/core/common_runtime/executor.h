@@ -18,7 +18,6 @@ limitations under the License.
 
 #include "tensorflow/core/common_runtime/device.h"
 #include "tensorflow/core/common_runtime/rendezvous_mgr.h"
-#include "tensorflow/core/framework/allocator.h"
 #include "tensorflow/core/framework/rendezvous.h"
 #include "tensorflow/core/framework/session_state.h"
 #include "tensorflow/core/framework/tensor.h"
@@ -107,18 +106,6 @@ class Executor {
     typedef std::function<void()> Closure;
     typedef std::function<void(Closure)> Runner;
     Runner runner = nullptr;
-    // Not owned.
-    Allocator* persistent_allocator = nullptr;
-    // Not owned.
-    void* cuda_graph = nullptr;
-
-    typedef std::function<void (const string&, Tensor*)> SaveIO;
-    SaveIO save_input = nullptr;
-    SaveIO save_output = nullptr;
-
-    int cuda_graph_capture_timeout_secs = 0;
-
-    ArgSaver* arg_saver = nullptr;
   };
   typedef std::function<void(const Status&)> DoneCallback;
   virtual void RunAsync(const Args& args, DoneCallback done) = 0;
