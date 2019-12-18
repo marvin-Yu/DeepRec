@@ -16,7 +16,7 @@ limitations under the License.
 #ifndef TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_GEMM_OPTIMIZER_H_
 #define TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_GEMM_OPTIMIZER_H_
 
-#include "tensorflow/core/grappler/optimizers/graph_optimizer.h"
+#include "tensorflow/core/grappler/optimizers/kernel_fusion_optimizer.h"
 
 namespace tensorflow {
 namespace grappler {
@@ -37,7 +37,7 @@ class GemmOptimizer : public GraphOptimizer {
                         const GraphDef& optimized_graph, double result) override;
 };
 
-}  // namespace grappler
-}  // namespace tensorflow
+}  // end namespace grappler
+}  // end namespace tensorflow
 
 #endif  // TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_GEMM_OPTIMIZER_H_

@@ -1185,7 +1185,6 @@ cc_library(
     hdrs = ["gemm_optimizer.h",],
     visibility = ["//visibility:public"],
     deps = [
-        ":graph_optimizer",
         "//tensorflow/core:framework",
         "//tensorflow/core:graph",
         "//tensorflow/core/grappler:grappler_item",
