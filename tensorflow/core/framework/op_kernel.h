@@ -678,6 +678,8 @@ class OpKernelContext {
     const std::function<Status(const int64, const DeviceMgr*, Rendezvous** r)>*
         create_rendezvous;
 
+    Rendezvous* global_rendezvous = nullptr;
+
     // Mechanism for executing a collective op that needs to coordinate
     // with parallel instances running on other devices.
     CollectiveExecutor* collective_executor = nullptr;
@@ -1135,6 +1137,7 @@ class OpKernelContext {
   // An op kernel communicates with outside environment through
   // Rendezvous Send() and Recv().
   Rendezvous* rendezvous() const { return params_->rendezvous; }
+  Rendezvous* global_rendezvous() const { return params_->global_rendezvous; }
   Status create_rendezvous(const int64 step_id, const DeviceMgr* device_mgr,
                            Rendezvous** r) const {
     return (*params_->create_rendezvous)(step_id, device_mgr, r);
@@ -1229,6 +1232,7 @@ class OpKernelContext {
   // For control flow.
   FrameAndIter frame_iter() const { return params_->frame_iter; }
   bool is_input_dead() const { return params_->is_input_dead; }
+  bool* is_output_dead() { return &is_output_dead_; }
 
   // May be used, e.g., to get GPU handles, etc.
   // TODO(tucker): Add example usage.
@@ -1358,6 +1362,7 @@ class OpKernelContext {
 
   // Constructed only if <params->record_tensor_accesses>.
   ManualConstructor<UniqueTensorReferences> referenced_tensors_ GUARDED_BY(mu_);
+  bool is_output_dead_ = false;
 
   // The following data members are only used when allocation tracking is
   // enabled.
@@ -1425,6 +1430,12 @@ Status CreateOpKernel(DeviceType device_type, DeviceBase* device,
                       Allocator* allocator, FunctionLibraryRuntime* flib,
                       const NodeDef& def, int graph_def_version,
                       OpKernel** kernel);
+
+Status CreateOpKernel(DeviceType device_type, DeviceBase* device,
+                      Allocator* allocator, FunctionLibraryRuntime* flib,
+                      const NodeDef& node_def, int graph_def_version,
+                      OpKernel** kernel,
+                      const std::function<Status(OpKernelConstruction*, OpKernel**)> &factory);
 
 // Returns into 'device_types' the subset of prioritized_types that this
 // binary has registered for the given NodeDef.

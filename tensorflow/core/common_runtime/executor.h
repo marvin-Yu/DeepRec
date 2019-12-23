@@ -106,7 +106,12 @@ class Executor {
     typedef std::function<void()> Closure;
     typedef std::function<void(Closure)> Runner;
     Runner runner = nullptr;
+    typedef std::function<Status(const string& node_name, const int output_slot,
+                                 const Tensor* tensor, const bool is_ref,
+                                 OpKernelContext* ctx)>
+        NodeOutputsCallback;
   };
+
   typedef std::function<void(const Status&)> DoneCallback;
   virtual void RunAsync(const Args& args, DoneCallback done) = 0;
 
@@ -145,6 +150,7 @@ struct LocalExecutorParams {
   std::function<void(OpKernel*)> delete_kernel;
 
   Executor::RendezvousFactory rendezvous_factory;
+  Executor::Args::NodeOutputsCallback node_outputs_cb;
 };
 ::tensorflow::Status NewLocalExecutor(const LocalExecutorParams& params,
                                       std::unique_ptr<const Graph> graph,

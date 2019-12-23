@@ -51,6 +51,7 @@ class CostModel;
 class DebugGateway;
 class Device;
 class DirectSessionFactory;
+class CallbackFrame;
 
 class DirectSession : public Session {
  public:
@@ -126,6 +127,23 @@ class DirectSession : public Session {
   ::tensorflow::Status ReleaseCallable(CallableHandle handle) override;
 
   const SessionOptions& options() const { return options_; }
+  void RunAsync(const RunOptions& run_options,
+      const NamedTensorList& inputs,
+      const std::vector<string>& output_names,
+      const std::vector<string>& target_nodes,
+      std::vector<Tensor>* outputs,
+      RunMetadata* run_metadata,
+      StatusCallback done) override;
+
+  void RunAsync(const RunOptions& run_options,
+      const NamedTensorList& inputs,
+      const std::vector<string>& output_names,
+      const std::vector<string>& target_nodes,
+      std::vector<Tensor>* outputs,
+      RunMetadata* run_metadata,
+      CallbackFrame* frame,
+      StatusCallback done);
+
 
  private:
   // For access to collective_graph_key_.
@@ -253,6 +271,26 @@ class DirectSession : public Session {
       RunMetadata* run_metadata,
       const thread::ThreadPoolOptions& threadpool_options);
 
+  void RunInternalAsync(
+      int64 step_id, const RunOptions& run_options,
+      CallFrameInterface* call_frame, ExecutorsAndKeys* executors_and_keys,
+      RunMetadata* run_metadata,
+      const thread::ThreadPoolOptions& threadpool_options,
+      const NamedTensorList& inputs,
+      const std::vector<string>& output_names,
+      const std::vector<string>& target_nodes,
+      std::vector<Tensor>* outputs,
+      CallbackFrame* frame,
+      StatusCallback done);
+
+  ::tensorflow::Status AfterRunAsync(const ::tensorflow::RunOptions& run_options,
+       const NamedTensorList& inputs,
+       const std::vector<string>& output_names,
+       const std::vector<string>& target_nodes,
+       std::vector<Tensor> *outputs,
+       CallbackFrame* frame,
+       RunMetadata* run_metadata,
+	   uint64 start_time_usecs);
   // Returns whether inter-op execution uses a global pool or the input
   // `run_options` requests being run on inter_op_thread_pool = 0 in case
   // multiple pools are configured.
@@ -403,6 +441,8 @@ class DirectSession : public Session {
   // Manages all the cost models for the graphs executed in this session.
   CostModelManager cost_model_manager_;
 
+  Executor::Args::NodeOutputsCallback node_outputs_callback_ = nullptr;
+
   // For testing collective graph key generation.
   mutex collective_graph_key_lock_;
   int64 collective_graph_key_ GUARDED_BY(collective_graph_key_lock_) = -1;
@@ -423,6 +463,7 @@ class DirectSession : public Session {
 
   // EXPERIMENTAL: debugger (tfdbg) related
   friend class DebugGateway;
+  friend class CallbackFrame;
 };
 
 }  // end namespace tensorflow

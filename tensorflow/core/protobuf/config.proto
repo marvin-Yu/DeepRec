@@ -602,6 +602,14 @@ message RunOptions {
 
   Experimental experimental = 8;
 
+  // for RTP
+  // proto3 does not support set default value and no *has_* interface for POD
+  message RunId {
+    int64 value = 1;
+  }
+  RunId run_id = 9;
+
+  bool record_flop_count = 109;
   reserved 4;
 }
 
