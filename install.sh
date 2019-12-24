@@ -51,47 +51,16 @@ export TF_NEED_PORSCHE=0
 export TF_NEED_MONOLITH=1
 export TF_NEED_METRIC=0
 
-python ./configure.py
-declare -a targets=("//tensorflow/cc:cc_op_gen_main"
-                    "//tensorflow/core:op_gen_lib"
-#                     "//tensorflow/core:op_gen_overrides_proto_cc"
-                    "//tensorflow:libtensorflow_cc.so"
-                    "//tensorflow/core:test"
-                    "//tensorflow/core:testlib"
-                    "//tensorflow/core/kernels:ops_testutil"
-                    "//tensorflow:libnew_nn_ops.so")
-declare -a install_targets=("cc/libcc_op_gen_main.a"
-                            "core/libop_gen_lib.a"
-#                            "core/libop_gen_overrides_proto_cc.a"
-                            "libtensorflow_cc.so"
-                            "core/libtest.so"
-                            "core/libtestlib.so"
-                            "core/kernels/libops_testutil.so"
-                            "libnew_nn_ops.so")
+declare -a targets=("//tensorflow:libtensorflow_framework.so"
+                    "//tensorflow:libtensorflow_cc.so")
+declare -a install_targets=("libtensorflow_framework.so"
+                            "libtensorflow_cc.so")
 ## now loop through the above array
 for target in "${targets[@]}"
 do
     bazel build --define framework_shared_object=false --config=cuda -c opt --copt -g --copt -mavx2 --copt -mfma --copt -DRTP_PLATFORM --copt -D_GLIBCXX_USE_CXX11_ABI=0 --copt -DGOOGLE_CUDA=1 --copt -fno-canonical-system-headers $target
 done
 
-# python
-# bazel build --define framework_shared_object=false -c opt --copt -g //tensorflow/tools/pip_package:build_pip_package
-# ./bazel-bin/tensorflow/tools/pip_package/build_pip_package /tmp/tensorflow_pkg/
-# PYTHON_INSTALL_ROOT=/home/liukan.lk/tensorflow_install
-# pip install --upgrade /tmp/tensorflow_pkg/* --target=$PYTHON_INSTALL_ROOT
-# touch $PYTHON_INSTALL_ROOT/google/__init__.py
-
-# zipfile.LargeZipFile: Filesize would require ZIP64 extensions:
-# https://github.com/tensorflow/tensorflow/issues/5538
-
-# test
-# bazel test --config=cuda --test_tag_filters=-no_oss,-oss_serial,-no_gpu,-benchmark-test -k \
-#     --test_lang_filters=cc --jobs=96 --test_timeout 300 \
-#     --build_tests_only --test_output=errors --local_test_jobs=8 \
-#     --run_under=//tensorflow/tools/ci_build/gpu_build:parallel_gpu_execute -- \
-#     //tensorflow/... -//tensorflow/compiler/... -//tensorflow/contrib/...
-
-# install
 EXTERNAL_DIR="../_external"
 EXTERNAL_DIR=`readlink -f $EXTERNAL_DIR`
 HEADER_DIR=$EXTERNAL_DIR"/usr/local/include/"

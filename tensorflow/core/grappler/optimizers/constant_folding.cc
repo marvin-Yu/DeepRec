@@ -380,7 +380,7 @@ Status ConstantFolding::MaterializeShapes(const GraphProperties& properties) {
   for (int node_idx = 0; node_idx < node_count; ++node_idx) {
     NodeDef* node = graph_->mutable_node(node_idx);
     const string op = node->op();
-    if (op != "Shape" && op != "Size" && op != "Rank" && op != "ShapeN" &&
+    if (op != "Shape" && op != "Rank" && op != "ShapeN" &&
         op != "TensorArraySizeV3") {
       continue;
     }
