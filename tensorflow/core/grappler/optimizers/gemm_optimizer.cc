@@ -50,6 +50,7 @@ std::unordered_set<string> GetUnaryOps() {
 
 std::unordered_set<string> GetBinaryOps() {
   std::unordered_set<string> ops = {
+      "IndicatorMatMul",
       "MatMul",
       "BatchMatMul",
       "BatchMatMulV2",
@@ -1634,6 +1635,8 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
     std::map<string, std::vector<Node*>> binary_ops_m;
     bool another_input_from_unpack = true;
     bool another_input_from_consts = true;
+    std::vector<std::pair<Node*, int>> common_extra_input;
+    bool has_common_extra_input = true;
     bool can_fuse = true;
     string binary_type;
     for (Node* out : node->out_nodes()) {
@@ -1650,25 +1653,47 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
         break;
       }
       binary_ops.push_back(out);
-      for (Node* n : out->in_nodes()) {
-        if (n != node) {
-          string type = n->type_string();
-          if (type != "Unpack") {
-            another_input_from_unpack = false;
+
+      if (out->num_inputs() < 2) {
+        can_fuse = false;
+        break;
+      }
+      for (int i = 0; i < out->num_inputs(); ++i) {
+        const Edge* edge = nullptr;
+        out->input_edge(i, &edge);
+        Node* n = edge->src();
+        if (i < 2) {
+          if (n != node) {
+            string type = n->type_string();
+            if (type != "Unpack") {
+              another_input_from_unpack = false;
+            }
+            if (type != "Const") {
+              another_input_from_consts = false;
+            }
           }
-          if (type != "Const") {
-            another_input_from_consts = false;
+        } else {
+          size_t vec_idx = i - 2;
+          if (vec_idx >= common_extra_input.size()) {
+            common_extra_input.emplace_back(std::make_pair(n, edge->src_output()));
+          } else {
+            if (n != common_extra_input[vec_idx].first ||
+                edge->src_output() != common_extra_input[vec_idx].second) {
+              has_common_extra_input = false;
+            }
           }
-          break;
         }
       }
     }
     if (!can_fuse || binary_ops.size() < 2) continue;
     if (!another_input_from_unpack &&
         !another_input_from_consts) continue;
+    if (!common_extra_input.empty() && !has_common_extra_input) continue;
 
     for (Node* b : binary_ops) {
-      for (Node* n : b->in_nodes()) {
+      for (int i = 0; i < std::min(b->num_inputs(), 2); ++i) {
+        const Node* n = nullptr;
+        b->input_node(i, &n);
         if (n != node) {
           string key;
           if (another_input_from_unpack) {
@@ -1702,36 +1727,39 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
     std::map<string, std::vector<Node*>>::iterator iter;
     iter = binary_ops_m.begin();
     while (iter != binary_ops_m.end()) {
-      std::vector<Node*>* binary_ops_group = &(iter->second);
+      std::vector<Node *> *binary_ops_group = &(iter->second);
       if (binary_ops_group->size() < 2) continue;
       std::sort(binary_ops_group->begin(), binary_ops_group->end(),
-                [node](Node* a, Node* b){
-        const Edge* e = nullptr;
-        a->input_edge(0, &e);
-        int a_src_output = e->src_output();
-        b->input_edge(0, &e);
-        int b_src_output = e->src_output();
-        return a_src_output < b_src_output;
-      });
-      std::vector<const Edge*> inputs[2];
+                [node](Node *a, Node *b) {
+                  const Edge *e = nullptr;
+                  a->input_edge(0, &e);
+                  int a_src_output = e->src_output();
+                  b->input_edge(0, &e);
+                  int b_src_output = e->src_output();
+                  return a_src_output < b_src_output;
+                });
+      std::vector<const Edge *> inputs[2];
       VLOG(1) << "the following ops are fused: ";
-      for (Node* b : *binary_ops_group) {
+      for (Node *b : *binary_ops_group) {
         VLOG(1) << b->name();
-        for (const Edge* e : b->in_edges()) {
+
+        for (int i = 0; i < 2; ++i) {
+          const Edge *e = nullptr;
+          b->input_edge(i, &e);
           inputs[e->dst_input()].push_back(e);
         }
       }
       // Add two Pack nodes to group on two sides, respectively
-      Node* packs[2];
+      Node *packs[2];
       string pack_names[2];
       string prefix = "GemmOptimizer/FuseBinaryOpsAfterUnpack/" +
                       std::to_string(count++);
       pack_names[0] = prefix + "/Pack_0";
       pack_names[1] = prefix + "/Pack_1";
-      Status status; 
+      Status status;
       for (int i = 0; i < 2; i++) {
         std::vector<NodeDefBuilder::NodeOut> pack_inputs;
-        for (const Edge* e : inputs[i]) {
+        for (const Edge *e : inputs[i]) {
           string s = e->src()->name();
           pack_inputs.emplace_back(s, e->src_output(), dtype);
         }
@@ -1740,7 +1768,7 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
         NodeDef pack_node;
         status =
             pack_builder
-                .Attr("N", (int)inputs[i].size())
+                .Attr("N", (int) inputs[i].size())
                 .Attr("T", dtype)
                 .Attr("axis", 0)
                 .Finalize(&pack_node);
@@ -1765,6 +1793,13 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
       std::vector<NodeDefBuilder::NodeOut> binary_op_inputs;
       binary_op_inputs.emplace_back(pack_names[0], 0, dtype);
       binary_op_inputs.emplace_back(pack_names[1], 0, dtype);
+      if (has_common_extra_input) {
+        for (size_t i = 0; i < common_extra_input.size(); ++i) {
+          const Node *extra_node = common_extra_input[i].first;
+          int extra_src_idx = common_extra_input[i].second;
+          binary_op_inputs.emplace_back(extra_node->name(), extra_src_idx, extra_node->output_type(extra_src_idx));
+        }
+      }
       string binary_op_name = prefix;
       string type = (*binary_ops_group)[0]->type_string();
       string new_type;
@@ -1780,16 +1815,20 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
       NodeDefBuilder binary_op_builder(binary_op_name, new_type);
       binary_op_builder.Input(binary_op_inputs[0]);
       binary_op_builder.Input(binary_op_inputs[1]);
+      if (has_common_extra_input) {
+        binary_op_builder.Input(binary_op_inputs[2]);
+      }
       NodeDef binary_op_node;
       bool transpose_a = false;
       bool transpose_b = false;
       if (type == "MatMul") {
         transpose_a = (*binary_ops_group)[0]->def().attr().at("transpose_a").b();
         transpose_b = (*binary_ops_group)[0]->def().attr().at("transpose_b").b();
-      } else if (type == "BatchMatMul" || type == "BatchMatMulV2") {
+      } else if (type == "BatchMatMul" || type == "BatchMatMulV2" || type == "IndicatorMatMul") {
         transpose_a = (*binary_ops_group)[0]->def().attr().at("adj_x").b();
         transpose_b = (*binary_ops_group)[0]->def().attr().at("adj_y").b();
       }
+
       if (type == "MatMul" ||
           type == "BatchMatMul" ||
           type == "BatchMatMulV2") {
@@ -1797,6 +1836,15 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
             binary_op_builder
                 .Attr("adj_x", transpose_a)
                 .Attr("adj_y", transpose_b)
+                .Attr("T", dtype)
+                .Finalize(&binary_op_node);
+
+      } else if (type == "indicatorMatMul") {
+        status =
+            binary_op_builder
+                .Attr("adj_x", transpose_a)
+                .Attr("adj_y", transpose_b)
+                .Attr("parallel_num", (int) (*binary_ops_group).size())
                 .Attr("T", dtype)
                 .Finalize(&binary_op_node);
       } else {
@@ -1972,6 +2020,10 @@ bool FuseBinaryOpsSharingACommonInputAfterUnpack(Graph* graph) {
           can_reorder = false;
           break;
         }
+        if (out->in_edges().size() != 2) {
+          can_reorder = false;
+          break;
+        }
         for (const Edge* e : out->in_edges()) {
           if (e->src() == unpack) {
             unpack_dst_input = e->dst_input();
@@ -1987,6 +2039,7 @@ bool FuseBinaryOpsSharingACommonInputAfterUnpack(Graph* graph) {
         can_reorder = false;
         break;
       }
+
       // check condition (3)
       for (const Edge* e : out->in_edges()) {
         if (e->src() == unpack) continue;
@@ -2236,6 +2289,111 @@ std::unordered_set<string> GetNonComputeIntensiveNodes() {
       "Concat",
       "ConcatV2"};
   return ops;
+}
+
+bool FuseGatherBeforeMatMul(Graph* graph) {
+  VLOG(1) << "FuseGatherBeforeMatMul";
+  
+  static int count = 0;
+  bool changed = false;
+  std::vector<Node*> nodes(graph->num_nodes());
+  int i = 0;
+  for (Node* node : graph->nodes()) {
+    nodes[i++] = node;
+  }
+  for (Node* node : nodes) {
+    if (node->type_string() != "BatchMatMulV2") continue;
+    Node *matmul = node;
+    // Check Gather
+    Node *gather = nullptr;
+    matmul->input_node(0, &gather);
+    if (!graph->IsValidNode(gather).ok()) continue;
+    string type = gather->type_string();
+    if (type != "GatherV2") continue;
+    // Check axis
+    Node* axis = nullptr;
+    gather->input_node(2, &axis);
+    if (!axis) continue;
+    type = axis->type_string();
+    if (type != "Const") continue;
+    if (axis->def().attr().at("value").i() != 0) continue;
+
+    // Prepare op name
+    string prefix = "GemmOptimizer/FuseGatherBeforeMatMul/" + matmul->name();
+    string op_name = prefix + "/IndicatorMatMul_" + std::to_string(count++);
+
+    // Build NodeDef
+    std::vector<NodeDefBuilder::NodeOut> ind_matmul_inputs;
+    Node *input_nodes[3] = {nullptr, nullptr, nullptr};
+    int input_idx[3] = {0, 0, 0};
+
+    const Edge* gather_input_0;
+    gather->input_edge(0, &gather_input_0);
+    input_nodes[0] = gather_input_0->src();
+    input_idx[0] = gather_input_0->src_output();
+
+    const Edge* matmul_input_1;
+    matmul->input_edge(1, &matmul_input_1);
+    input_nodes[1] = matmul_input_1->src();
+    input_idx[1] = matmul_input_1->src_output();
+
+    const Edge* gather_input_1;
+    gather->input_edge(1, &gather_input_1);
+    input_nodes[2] = gather_input_1->src();
+    input_idx[2] = gather_input_1->src_output();
+
+    if (!input_nodes[0] || !input_nodes[1] || !input_nodes[2]) continue;
+    DataType dtype = input_nodes[0]->output_type(0);
+    DataType ind_dtype = input_nodes[2]->output_type(0);
+    ind_matmul_inputs.emplace_back(input_nodes[0]->name(), input_idx[0], dtype);
+    ind_matmul_inputs.emplace_back(input_nodes[1]->name(), input_idx[1], dtype);
+    ind_matmul_inputs.emplace_back(input_nodes[2]->name(), input_idx[2], ind_dtype);
+    NodeDefBuilder ind_matmul_builder(op_name, "IndicatorMatMul");
+    ind_matmul_builder.Input(ind_matmul_inputs[0]);
+    ind_matmul_builder.Input(ind_matmul_inputs[1]);
+    ind_matmul_builder.Input(ind_matmul_inputs[2]);
+
+    NodeDef ind_matmul_def;
+    bool transpose_a = false, transpose_b = false;
+    if (matmul->def().attr().find("adj_x") != matmul->def().attr().end()) {
+      transpose_a = matmul->def().attr().at("adj_x").b();
+    }
+    if (matmul->def().attr().find("adj_y") != matmul->def().attr().end()) {
+      transpose_b = matmul->def().attr().at("adj_y").b();
+    }
+    Status status = ind_matmul_builder
+        .Attr("adj_x", transpose_a)
+        .Attr("adj_y", transpose_b)
+        .Attr("T", dtype)
+        .Device(matmul->def().device())
+        .Finalize(&ind_matmul_def);
+    if (!status.ok()) {
+      LOG(ERROR) << "IndicatorMatMul node construction failed with " << status;
+      return changed;
+    }
+
+    // Insert IndicatorMatMul node
+    Node *ind_matmul_node = graph->AddNode(ind_matmul_def, &status);
+    if (!status.ok()) {
+      LOG(ERROR) << "Adding node failed " << status;
+      return changed;
+    }
+    // Update input edge
+    graph->AddEdge(input_nodes[0], input_idx[0], ind_matmul_node, 0);
+    graph->AddEdge(input_nodes[1], input_idx[1], ind_matmul_node, 1);
+    graph->AddEdge(input_nodes[2], input_idx[2], ind_matmul_node, 2);
+    // Update output edge
+    for (const Edge* edge : matmul->out_edges()) {
+      Node* out_node = edge->dst();
+      int dst_idx = edge->dst_input();
+      graph->AddEdge(ind_matmul_node, 0, out_node, dst_idx);
+    }
+    // Remove useless node
+    graph->RemoveNode(matmul);
+
+    changed = true;
+  }
+  return changed;
 }
 
 int InsertToCPUSet(Node* node,
@@ -2545,7 +2703,8 @@ void FuseGemmKernels(Graph* graph) {
     if (VLOG_IS_ON(1)) DumpGraphToFile("after_placement", *graph);
   }
   while(1) {
-    bool graph_changed =
+    bool graph_changed = false;
+        FuseGatherBeforeMatMul(graph) ||
         ReorderReshapeAndBiasAdd(graph) ||
         RemoveReshapesBeforeMatMul(graph) ||
         ConstantFoldingForContinuousMatMuls(graph) ||

@@ -143,8 +143,9 @@ REGISTER_OP("IndicatorMatMul")
     .Input("indicator: int32")
     .Output("output: T")
     .Attr("T: {bfloat16, half, float, double, int32, int64}")
-    .Attr("transpose_a: bool = false")
-    .Attr("transpose_b: bool = false")
+    .Attr("adj_x: bool = false")
+    .Attr("adj_y: bool = false")
+    .Attr("parallel_num: int = 1")
     .SetShapeFn([](InferenceContext* c) {
       ShapeHandle a;
       TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 3, &a));
@@ -153,8 +154,8 @@ REGISTER_OP("IndicatorMatMul")
       ShapeHandle ind;
       TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &ind));
       bool transpose_a, transpose_b;
-      TF_RETURN_IF_ERROR(c->GetAttr("transpose_a", &transpose_a));
-      TF_RETURN_IF_ERROR(c->GetAttr("transpose_b", &transpose_b));
+      TF_RETURN_IF_ERROR(c->GetAttr("adj_x", &transpose_a));
+      TF_RETURN_IF_ERROR(c->GetAttr("adj_y", &transpose_b));
       DimensionHandle output_rows = transpose_a ? c->Dim(a, 2) : c->Dim(a, 1);
       DimensionHandle output_cols = transpose_b ? c->Dim(b, 1) : c->Dim(b, 2);
 
