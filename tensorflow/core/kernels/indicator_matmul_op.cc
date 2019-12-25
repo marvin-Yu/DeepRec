@@ -33,8 +33,8 @@ class IndicatorMatmulOp : public OpKernel {
  public:
   explicit IndicatorMatmulOp(OpKernelConstruction* context)
       : OpKernel(context) {
-    OP_REQUIRES_OK(context, context->GetAttr("transpose_a", &trans_a_));
-    OP_REQUIRES_OK(context, context->GetAttr("transpose_b", &trans_b_));
+    OP_REQUIRES_OK(context, context->GetAttr("adj_x", &trans_a_));
+    OP_REQUIRES_OK(context, context->GetAttr("adj_y", &trans_b_));
   }
 
   ~IndicatorMatmulOp() = default;
@@ -103,8 +103,8 @@ class ParallelIndicatorMatmulOp : public OpKernel {
  public:
   explicit ParallelIndicatorMatmulOp(OpKernelConstruction* context)
       : OpKernel(context) {
-    OP_REQUIRES_OK(context, context->GetAttr("transpose_a", &trans_a_));
-    OP_REQUIRES_OK(context, context->GetAttr("transpose_b", &trans_b_));
+    OP_REQUIRES_OK(context, context->GetAttr("adj_x", &trans_a_));
+    OP_REQUIRES_OK(context, context->GetAttr("adj_y", &trans_b_));
     OP_REQUIRES_OK(context, context->GetAttr("parallel_num", &parallel_num));
   }
 
