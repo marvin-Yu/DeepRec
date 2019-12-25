@@ -168,6 +168,46 @@ REGISTER_OP("IndicatorMatMul")
       return Status::OK();
     });
 
+REGISTER_OP("ParallelIndicatorMatMul")
+    .Input("x: T")
+    .Input("y: T")
+    .Input("indicator: int32")
+    .Output("output: T")
+    .Attr("T: {bfloat16, half, float, double, int32, int64}")
+    .Attr("transpose_a: bool = false")
+    .Attr("transpose_b: bool = false")
+    .Attr("parallel_num: int >= 1")
+    .SetShapeFn([](InferenceContext* c) {
+      ShapeHandle a;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 4, &a));
+      ShapeHandle b;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 4, &b));
+      ShapeHandle ind;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &ind));
+      bool transpose_a, transpose_b;
+      TF_RETURN_IF_ERROR(c->GetAttr("transpose_a", &transpose_a));
+      TF_RETURN_IF_ERROR(c->GetAttr("transpose_b", &transpose_b));
+      int parallel_num;
+      TF_RETURN_IF_ERROR(c->GetAttr("parallel_num", &parallel_num));
+      DimensionHandle output_rows = transpose_a ? c->Dim(a, 3) : c->Dim(a, 2);
+      DimensionHandle output_cols = transpose_b ? c->Dim(b, 2) : c->Dim(b, 3);
+
+      // Validate that the inner shapes are compatible.
+      DimensionHandle inner_a = transpose_a ? c->Dim(a, 2) : c->Dim(a, 3);
+      DimensionHandle inner_b = transpose_b ? c->Dim(b, 3) : c->Dim(b, 2);
+      DimensionHandle merged;
+      TF_RETURN_IF_ERROR(c->Merge(inner_a, inner_b, &merged));
+      // Validate that the parallel_num are compatible.
+      DimensionHandle parallel_a = c->Dim(a, 0);
+      DimensionHandle parallel_b = c->Dim(b, 0);
+      DimensionHandle parallel_merged;
+      TF_RETURN_IF_ERROR(c->Merge(parallel_a, parallel_b, &parallel_merged));
+      DimensionHandle batch_shape = c->Dim(b, 1);
+      c->set_output(0, c->MakeShape({parallel_merged, batch_shape, output_rows,
+                                     output_cols}));
+      return Status::OK();
+    });
+
 #ifdef INTEL_MKL
 REGISTER_OP("_MklBatchMatMul")
     .Input("x: T")

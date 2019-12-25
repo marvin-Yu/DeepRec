@@ -94,45 +94,64 @@ template <typename Scalar>
 void LaunchIndicatorMatmul<GPUDevice, Scalar>::operator()(
     OpKernelContext* context, bool trans_a, bool trans_b, int64 m, int64 n,
     int64 k, const Tensor& in_a, const Tensor& in_b, const Tensor& indicator,
-    Tensor* out, int64 batch_a, int64 batch_b) {
-  LOG(INFO) << "LaunchIndicatorMatmul GPU entry";
-  LOG(INFO) << indicator.DeviceSafeDebugString();
+    Tensor* out, int64 batch_a, int64 batch_b, int64 paralle_num) {
   auto a_ptr = AsDeviceMemory(in_a.template flat<Scalar>().data());
   auto b_ptr = AsDeviceMemory(in_b.template flat<Scalar>().data());
   auto out_ptr = AsDeviceMemory(out->template flat<Scalar>().data());
-  if (batch_a == 1) {
-    RunGemmStridedBatched<Scalar>(context, trans_a, trans_b, m, n, k,
-                                  Scalar(1.0), a_ptr, 0, b_ptr, k * n,
-                                  Scalar(0.0), &out_ptr, m * n, batch_b);
-  } else {
-    typedef se::DeviceMemory<Scalar> DeviceMemoryType;
-    std::vector<DeviceMemoryType> a_device_memory;
-    std::vector<DeviceMemoryType> b_device_memory;
-    std::vector<DeviceMemoryType> c_device_memory;
-    std::vector<DeviceMemoryType*> a_ptrs;
-    std::vector<DeviceMemoryType*> b_ptrs;
-    std::vector<DeviceMemoryType*> c_ptrs;
-    a_ptrs.reserve(batch_b);
-    b_ptrs.reserve(batch_b);
-    c_ptrs.reserve(batch_b);
-    auto* a_base_ptr = in_a.template flat<Scalar>().data();
-    auto* b_base_ptr = in_b.template flat<Scalar>().data();
-    auto* c_base_ptr = out->template flat<Scalar>().data();
-    auto ind_data = indicator.flat<int>();
-//    auto* ind_base_ptr = indicator.template flat<int>().data();
-    for (int64 i = 0; i < batch_b; i++) {
-      LOG(INFO) << "ind: " << ind_data(i);
-      a_device_memory.push_back(
-          AsDeviceMemory(a_base_ptr + ind_data(i) * m * k));
-      b_device_memory.push_back(AsDeviceMemory(b_base_ptr + i * k * n));
-      c_device_memory.push_back(AsDeviceMemory(c_base_ptr + i * m * n));
-      a_ptrs.push_back(&a_device_memory.back());
-      b_ptrs.push_back(&b_device_memory.back());
-      c_ptrs.push_back(&c_device_memory.back());
+  typedef se::DeviceMemory<Scalar> DeviceMemoryType;
+  std::vector<DeviceMemoryType> a_device_memory;
+  std::vector<DeviceMemoryType> b_device_memory;
+  std::vector<DeviceMemoryType> c_device_memory;
+  std::vector<DeviceMemoryType*> a_ptrs;
+  std::vector<DeviceMemoryType*> b_ptrs;
+  std::vector<DeviceMemoryType*> c_ptrs;
+  auto* a_base_ptr = in_a.template flat<Scalar>().data();
+  auto* b_base_ptr = in_b.template flat<Scalar>().data();
+  auto* c_base_ptr = out->template flat<Scalar>().data();
+  auto ind_data = indicator.flat<int>();
+  if (paralle_num == 1) {
+    if (batch_a == 1) {
+      RunGemmStridedBatched<Scalar>(context, trans_a, trans_b, m, n, k,
+                                    Scalar(1.0), a_ptr, 0, b_ptr, k * n,
+                                    Scalar(0.0), &out_ptr, m * n, batch_b);
+    } else {
+      for (int64 i = 0; i < batch_a; i++) {
+        a_device_memory.push_back(AsDeviceMemory(a_base_ptr + i * m * k));
+      }
+      for (int64 i = 0; i < batch_b; i++) {
+        b_device_memory.push_back(AsDeviceMemory(b_base_ptr + i * k * n));
+        c_device_memory.push_back(AsDeviceMemory(c_base_ptr + i * m * n));
+      }
+      for (int64 i = 0; i < batch_b; i++) {
+        a_ptrs.push_back(&a_device_memory[ind_data(i)]);
+        b_ptrs.push_back(&b_device_memory[i]);
+        c_ptrs.push_back(&c_device_memory[i]);
+      }
+      RunGemmBatched(context, trans_a, trans_b, m, n, k, Scalar(1.0), a_ptrs,
+                     b_ptrs, Scalar(0.0), c_ptrs, batch_b);
     }
-    LOG(INFO) << m << " "<< n << " " << k << " ";
+  } else {
+    for (int64 i = 0; i < paralle_num; i++) {
+      for (int64 j = 0; j < batch_a; j++) {
+        a_device_memory.push_back(
+            AsDeviceMemory(a_base_ptr + (i * batch_a + j) * m * k));
+      }
+      for (int64 j = 0; j < batch_b; j++) {
+        b_device_memory.push_back(
+            AsDeviceMemory(b_base_ptr + (i * batch_b + j) * k * n));
+        c_device_memory.push_back(
+            AsDeviceMemory(c_base_ptr + (i * batch_b + j) * m * n));
+      }
+    }
+    for (int64 i = 0; i < paralle_num; i++) {
+      for (int64 j = 0; j < batch_b; j++) {
+        a_ptrs.push_back(&a_device_memory[i * batch_a + ind_data(j)]);
+        b_ptrs.push_back(&b_device_memory[i * batch_b + j]);
+        c_ptrs.push_back(&c_device_memory[i * batch_b + j]);
+      }
+    }
     RunGemmBatched(context, trans_a, trans_b, m, n, k, Scalar(1.0), a_ptrs,
-                   b_ptrs, Scalar(0.0), c_ptrs, batch_b);
+                   b_ptrs, Scalar(0.0), c_ptrs, batch_b * paralle_num);
   }
 }
 
