@@ -181,19 +181,19 @@ class ParallelIndicatorMatmulOp : public OpKernel {
   int64 parallel_num;
 };
 
-#define REGISTER_INDICATOR_MATMUL_CPU(TYPE)                                 \
-  REGISTER_KERNEL_BUILDER(                                                  \
-      Name("IndicatorMatMul").Device(DEVICE_CPU).TypeConstraint<TYPE>("T"), \
-      IndicatorMatmulOp<CPUDevice, TYPE>);
-#define REGISTER_PARALLEL_INDICATOR_MATMUL_CPU(TYPE)      \
-  REGISTER_KERNEL_BUILDER(Name("ParallelIndicatorMatMul") \
-                              .Device(DEVICE_CPU)         \
-                              .TypeConstraint<TYPE>("T"), \
-                          ParallelIndicatorMatmulOp<CPUDevice, TYPE>);
-REGISTER_INDICATOR_MATMUL_CPU(float);
-REGISTER_INDICATOR_MATMUL_CPU(double);
-REGISTER_PARALLEL_INDICATOR_MATMUL_CPU(float);
-REGISTER_PARALLEL_INDICATOR_MATMUL_CPU(double);
+//#define REGISTER_INDICATOR_MATMUL_CPU(TYPE)                                 \
+//  REGISTER_KERNEL_BUILDER(                                                  \
+//      Name("IndicatorMatMul").Device(DEVICE_CPU).TypeConstraint<TYPE>("T"), \
+//      IndicatorMatmulOp<CPUDevice, TYPE>);
+//#define REGISTER_PARALLEL_INDICATOR_MATMUL_CPU(TYPE)      \
+//  REGISTER_KERNEL_BUILDER(Name("ParallelIndicatorMatMul") \
+//                              .Device(DEVICE_CPU)         \
+//                              .TypeConstraint<TYPE>("T"), \
+//                          ParallelIndicatorMatmulOp<CPUDevice, TYPE>);
+//REGISTER_INDICATOR_MATMUL_CPU(float);
+//REGISTER_INDICATOR_MATMUL_CPU(double);
+//REGISTER_PARALLEL_INDICATOR_MATMUL_CPU(float);
+//REGISTER_PARALLEL_INDICATOR_MATMUL_CPU(double);
 
 #if GOOGLE_CUDA
 #define REGISTER_INDICATOR_MATMUL_GPU(TYPE)                      \
