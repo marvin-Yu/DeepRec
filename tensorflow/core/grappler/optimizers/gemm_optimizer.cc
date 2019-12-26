@@ -2704,7 +2704,7 @@ void FuseGemmKernels(Graph* graph) {
     if (VLOG_IS_ON(1)) DumpGraphToFile("after_placement", *graph);
   }
   while(1) {
-    bool graph_changed = false;
+    bool graph_changed =
         FuseGatherBeforeMatMul(graph) ||
         ReorderReshapeAndBiasAdd(graph) ||
         RemoveReshapesBeforeMatMul(graph) ||
