@@ -1808,15 +1808,16 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
           type == "BatchMatMulV2") {
         binary_op_name += "/BatchMatMulV2";
         new_type = "BatchMatMulV2";
+      } else if (type == "IndicatorMatMul") {
+        binary_op_name += "/ParallelIndicatorMatMul";
+        new_type = "ParallelIndicatorMatMul";
       } else {
         binary_op_name += "/" + type;
         new_type = type;
       }
       NodeDefBuilder binary_op_builder(binary_op_name, new_type);
-      binary_op_builder.Input(binary_op_inputs[0]);
-      binary_op_builder.Input(binary_op_inputs[1]);
-      if (has_common_extra_input) {
-        binary_op_builder.Input(binary_op_inputs[2]);
+      for (size_t i = 0; i < binary_op_inputs.size(); ++i) {
+        binary_op_builder.Input(binary_op_inputs[i]);
       }
       NodeDef binary_op_node;
       bool transpose_a = false;
@@ -1839,7 +1840,7 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
                 .Attr("T", dtype)
                 .Finalize(&binary_op_node);
 
-      } else if (type == "indicatorMatMul") {
+      } else if (type == "IndicatorMatMul") {
         status =
             binary_op_builder
                 .Attr("adj_x", transpose_a)
