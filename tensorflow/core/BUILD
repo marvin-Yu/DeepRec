@@ -1416,8 +1416,6 @@ cc_library(
         ":user_ops_op_lib",
         ":word2vec_ops",
         "//tensorflow/c/kernels:bitcast_op_lib",
-        "//tensorflow/core/take_ops:take_ops_op_lib",
-        "//tensorflow/core/gru_op:gru_op_lib",
     ] + if_mkl([
         ":mkl_array_ops_op_lib",
         ":mkl_nn_ops_op_lib",

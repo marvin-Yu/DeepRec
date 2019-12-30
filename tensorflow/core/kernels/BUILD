@@ -3687,6 +3687,8 @@ cc_library(
         ":scan_ops",
         ":segment_reduction_ops",
         ":sequence_ops",
+        "//tensorflow/core/gru_op:gru_op",
+        "//tensorflow/core/take_ops:take_ops",
     ],
 )
 

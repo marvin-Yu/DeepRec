@@ -208,6 +208,73 @@ REGISTER_OP("ParallelIndicatorMatMul")
       return Status::OK();
     });
 
+REGISTER_OP("BlazeGRU")
+    .Input("x: T")         //[batch_size, rounds, elts]
+    .Input("h2h: T")       //[elts, 3elts]
+    .Input("i2h: T")       //[elts, 3elts]
+    .Input("h2h_bias: T")  //[3elts]
+    .Input("i2h_bias: T")  //[3elts]
+    .Output("y: T")        //[batch_size, rounds, elts]
+    .Attr("T: {float}")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      // check param shapes
+      c->set_output(0, c->input(0));
+      return Status::OK();
+    });
+
+/* values N * (scences, unit_size)
+ * coords N * (scences, 2)
+ * output_shape (2, ) [user's sessions, max scenes in one session]
+ * output (users' sessions, max scenes in one session, unit_size)
+ */
+
+REGISTER_OP("Take")
+    .Input("values: N * T")
+    .Input("coords: N * Tindices")
+    .Input("output_shape: Tindices")
+    .Output("output: T")
+    .Attr("N: int")
+    .Attr("T: realnumbertype")
+    .Attr("Tindices: {int32,int64}")
+    .SetShapeFn(shape_inference::UnknownShape);
+
+/* values N * (scences, unit_size)
+ * coords N * (scences, 2)
+ * output_shape (2, ) [user's sessions, max scenes in one session]
+ * output (users' sessions, max scenes in one session, unit_size)
+ */
+
+REGISTER_OP("TakeGrad")
+    .Input("grad: T")
+    .Input("coords: N * Tindices")
+    .Output("grad_values: N * T")
+    .Attr("N: int")
+    .Attr("T: realnumbertype")
+    .Attr("Tindices: {int32,int64}")
+    .SetShapeFn(shape_inference::UnknownShape);
+
+REGISTER_OP("TakeAxis")
+    .Input("input: T")
+    .Input("begin: Index")
+    .Output("output: T")
+    .Attr("size: int")
+    .Attr("axis: int")
+    .Attr("reverse: bool")
+    .Attr("T: realnumbertype")
+    .Attr("Index: {int32,int64}")
+    .SetShapeFn([](InferenceContext* c) {
+      int32 axis;
+      int32 size;
+      TF_RETURN_IF_ERROR(c->GetAttr("size", &size));
+      TF_RETURN_IF_ERROR(c->GetAttr("axis", &axis));
+      ShapeHandle in = c->input(0);
+      ShapeHandle out;
+      DimensionHandle size_dim;
+      TF_RETURN_IF_ERROR(c->ReplaceDim(in, axis, c->MakeDim(size), &out));
+      c->set_output(0, out);
+      return Status::OK();
+    });
+
 #ifdef INTEL_MKL
 REGISTER_OP("_MklBatchMatMul")
     .Input("x: T")

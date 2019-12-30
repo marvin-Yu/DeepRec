@@ -4,21 +4,7 @@ load(
     "tf_copts",
 )
 
-cc_library(
-    name = "take_ops_op_lib",
-    srcs = [
-        "take_op.cc",
-        "take_axis_op.cc",
-    ],
-    copts = tf_copts(),
-    linkstatic = 1,
-    visibility = ["//visibility:public"],
-    deps = [
-        "//tensorflow/core:framework",
-        ":take_ops",
-    ],
-    alwayslink = 1,
-)
+load("@local_config_cuda//cuda:build_defs.bzl", "if_cuda")
 
 tf_kernel_library(
     name = "take_ops",
@@ -46,8 +32,10 @@ tf_kernel_library(
         "take_axis_lib_gpu.cu.cc",
         "take_axis_lib_gpu_impl.cu.cc",
     ],
+    visibility = ["//visibility:public"],
     deps = [
-        "//tensorflow/core/kernels:gpu_device_array",
         "//tensorflow/core/kernels:eigen_helpers",
-    ],
+    ] + if_cuda([
+        "//tensorflow/core/kernels:gpu_device_array",
+    ]),
 )
