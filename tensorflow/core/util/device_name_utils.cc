@@ -33,7 +33,8 @@ static bool IsJobName(StringPiece in) {
   if (in.empty()) return false;
   if (!IsAlpha(in[0])) return false;
   for (size_t i = 1; i < in.size(); ++i) {
-    if (!(IsAlphaNum(in[i]) || in[i] == '_')) return false;
+    if (!(IsAlphaNum(in[i]) || in[i] == '_' || in[i] == '.')) return false;
+   // if (!(IsAlphaNum(in[i]) || in[i] == '_')) return false;
   }
   return true;
 }
@@ -46,7 +47,7 @@ static bool ConsumeJobName(StringPiece* in, string* job) {
   for (; i < in->size(); ++i) {
     const char c = (*in)[i];
     if (c == '/') break;
-    if (!(IsAlphaNum(c) || c == '_') || c == '.') {
+    if (!(IsAlphaNum(c) || c == '_' || c == '.')) {
       return false;
     }
   }

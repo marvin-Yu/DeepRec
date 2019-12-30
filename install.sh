@@ -1,64 +1,16 @@
 #export TEST_TMPDIR=
-export TF_PLATFORM=default
-export TF_NEED_RTP=1
-export TF_DEVICE=gpu
-export PATH=/usr/local/bin:/usr/lib/jvm/jre-1.8.0/bin:$PATH
-export JAVA_HOME=/usr/lib/jvm/jre-1.8.0/
-
-export GCC_HOST_COMPILER_PATH=/usr/bin/gcc
-export PYTHON_BIN_PATH=$(which python)
-export USE_DEFAULT_PYTHON_LIB_PATH=1
-export CC_OPT_FLAGS="-march=native"
-
-export CUDA_TOOLKIT_PATH=/usr/local/cuda/
-export TF_CUDA_VERSION=10.1
-export TF_CUDALIB_VERSION=10
-
-export CUDNN_INSTALL_PATH=/usr/local/cuda/
-export TF_CUDNN_VERSION=7
-
-export NCCL_INSTALL_PATH=/usr/local/cuda/
-export TF_NCCL_VERSION=2.3.7
-
-export TF_CUDA_CLANG=0
-export TF_CUDA_COMPUTE_CAPABILITIES="6.0,6.1,7.0,7.5"
-
-export TF_NEED_CUDA=1
-export TF_NEED_IGNITE=0
-export TF_NEED_PANGU=0
-export TF_NEED_PANGU_TEMP=0
-export TF_NEED_PAI=0
-export TF_NEED_BRPC=0
-export TF_NEED_STAR=0
-export TF_NEED_JEMALLOC=0
-export TF_NEED_GCP=0
-export TF_NEED_HDFS=0
-export TF_NEED_S3=0
-export TF_NEED_GDR=0
-export TF_NEED_VERBS=0
-export TF_NEED_OPENCL=0
-export TF_NEED_PAI_TRT=0
-export TF_NEED_MPI=0
-export TF_ENABLE_XLA=1
-export TF_NEED_ZOOKEEPER=0
-export TF_NEED_FPGA=1
-export TF_NEED_PAI_ALIFPGA=0
-export TF_NEED_OPENCL_SYCL=0
-export TF_NEED_ROCM=0
-export TF_SET_ANDROID_WORKSPACE=0
-export TF_NEED_MKL=0
-export TF_NEED_PORSCHE=0
-export TF_NEED_MONOLITH=1
-export TF_NEED_METRIC=0
-
+python ./configure.py
 declare -a targets=("//tensorflow:libtensorflow_framework.so"
                     "//tensorflow:libtensorflow_cc.so")
 declare -a install_targets=("libtensorflow_framework.so"
+                            "libtensorflow_framework.so.1"
+                            "libtensorflow_cc.so.1"
                             "libtensorflow_cc.so")
 ## now loop through the above array
 for target in "${targets[@]}"
 do
-    bazel build --define framework_shared_object=false --config=cuda -c opt --copt -g --copt -mavx2 --copt -mfma --copt -DRTP_PLATFORM --copt -D_GLIBCXX_USE_CXX11_ABI=0 --copt -DGOOGLE_CUDA=1 --copt -fno-canonical-system-headers $target
+    bazel build --copt=-mavx2 --config=cuda --copt -D_GLIBCXX_USE_CXX11_ABI=0 $target
+#    bazel build --define framework_shared_object=false --config=cuda -c opt --copt -g --copt -mavx2 --copt -mfma --copt -DRTP_PLATFORM --copt -D_GLIBCXX_USE_CXX11_ABI=0 --copt -DGOOGLE_CUDA=1 --copt -fno-canonical-system-headers $target
 done
 
 EXTERNAL_DIR="../_external"
