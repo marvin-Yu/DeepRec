@@ -380,7 +380,7 @@ Status ConstantFolding::MaterializeShapes(const GraphProperties& properties) {
   for (int node_idx = 0; node_idx < node_count; ++node_idx) {
     NodeDef* node = graph_->mutable_node(node_idx);
     const string op = node->op();
-    if (op != "Shape" && op != "Rank" && op != "ShapeN" &&
+    if (op != "Shape" && op != "Size" && op != "Rank" && op != "ShapeN" &&
         op != "TensorArraySizeV3") {
       continue;
     }
@@ -396,6 +396,10 @@ Status ConstantFolding::MaterializeShapes(const GraphProperties& properties) {
     if (op == "Shape" || op == "Size" || op == "Rank") {
       CHECK_EQ(1, output.size());
       CHECK_EQ(1, input.size());
+
+      if (input[0].dtype() == DT_VARIANT) {
+        continue;
+      }
 
       const DataType type = output[0].dtype();
       CHECK(type == DT_INT32 || type == DT_INT64);
