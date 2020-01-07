@@ -98,6 +98,7 @@ class OpsTestBase : public ::testing::Test {
 
   // Allow kernel unit tests to run on GPU
   void SetDevice(const DeviceType& device_type, std::unique_ptr<Device> device);
+  void SetDevice(const DeviceType& device_type);
 
   void set_node_def(const NodeDef& node_def) { node_def_.CopyFrom(node_def); }
 
