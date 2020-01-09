@@ -1633,10 +1633,8 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
     // group ops based on its inputs
     std::vector<Node*> binary_ops;
     std::map<string, std::vector<Node*>> binary_ops_m;
-    bool another_input_from_unpack = true;
-    bool another_input_from_consts = true;
     std::vector<std::pair<Node*, int>> common_extra_input;
-    bool has_common_extra_input = true;
+    const Node* another_node = nullptr;
     bool can_fuse = true;
     string binary_type;
     for (Node* out : node->out_nodes()) {
@@ -1652,24 +1650,33 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
         can_fuse = false;
         break;
       }
-      binary_ops.push_back(out);
 
       if (out->num_inputs() < 2) {
         can_fuse = false;
         break;
       }
+
+      bool has_same_another_input = true;
+      bool another_input_from_unpack_or_const = true;
+      bool has_common_extra_input = true;
       for (int i = 0; i < out->num_inputs(); ++i) {
         const Edge* edge = nullptr;
         out->input_edge(i, &edge);
         Node* n = edge->src();
         if (i < 2) {
           if (n != node) {
-            string type = n->type_string();
-            if (type != "Unpack") {
-              another_input_from_unpack = false;
-            }
-            if (type != "Const") {
-              another_input_from_consts = false;
+            if (another_node == nullptr) {
+              string type = n->type_string();
+              if (type == "Unpack" || type == "Const") {
+                another_node = n;
+              } else {
+                another_input_from_unpack_or_const = false;
+                break;
+              }
+            } else {
+              if (n != another_node) {
+                has_same_another_input = false;
+              }
             }
           }
         } else {
@@ -1684,11 +1691,12 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
           }
         }
       }
+
+      if (has_same_another_input && another_input_from_unpack_or_const && has_common_extra_input)
+        binary_ops.push_back(out);
     }
+
     if (!can_fuse || binary_ops.size() < 2) continue;
-    if (!another_input_from_unpack &&
-        !another_input_from_consts) continue;
-    if (!common_extra_input.empty() && !has_common_extra_input) continue;
 
     for (Node* b : binary_ops) {
       for (int i = 0; i < std::min(b->num_inputs(), 2); ++i) {
@@ -1696,7 +1704,7 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
         b->input_node(i, &n);
         if (n != node) {
           string key;
-          if (another_input_from_unpack) {
+          if (another_node->type_string() == "Unpack") {
             key = n->name();
           } else {
             TensorShapeProto s = n->def().attr().at("value").
@@ -1728,7 +1736,7 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
     iter = binary_ops_m.begin();
     while (iter != binary_ops_m.end()) {
       std::vector<Node *> *binary_ops_group = &(iter->second);
-      if (binary_ops_group->size() < 2) continue;
+      if (binary_ops_group->size() < 2) iter++;
       std::sort(binary_ops_group->begin(), binary_ops_group->end(),
                 [node](Node *a, Node *b) {
                   const Edge *e = nullptr;
@@ -1741,14 +1749,15 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
       std::vector<const Edge *> inputs[2];
       VLOG(1) << "the following ops are fused: ";
       for (Node *b : *binary_ops_group) {
-        VLOG(1) << b->name();
-
         for (int i = 0; i < 2; ++i) {
+          VLOG(1) << b->name();
+
           const Edge *e = nullptr;
           b->input_edge(i, &e);
           inputs[e->dst_input()].push_back(e);
         }
       }
+
       // Add two Pack nodes to group on two sides, respectively
       Node *packs[2];
       string pack_names[2];
@@ -1789,11 +1798,12 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
                          packs[i], j);
         }
       }
+
       // Add a new BatchMatMulV2
       std::vector<NodeDefBuilder::NodeOut> binary_op_inputs;
       binary_op_inputs.emplace_back(pack_names[0], 0, dtype);
       binary_op_inputs.emplace_back(pack_names[1], 0, dtype);
-      if (has_common_extra_input) {
+      if (!common_extra_input.empty()) {
         for (size_t i = 0; i < common_extra_input.size(); ++i) {
           const Node *extra_node = common_extra_input[i].first;
           int extra_src_idx = common_extra_input[i].second;
