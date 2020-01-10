@@ -33,6 +33,41 @@ inline se::DeviceMemory<T> AsDeviceMemory(const T* gpu_memory) {
   se::DeviceMemory<T> typed(wrapped);
   return typed;
 }
+
+class BlasScratchAllocator : public se::ScratchAllocator {
+ public:
+  using Stream = se::Stream;
+  using DeviceMemoryBytes = se::DeviceMemory<uint8>;
+
+  BlasScratchAllocator(OpKernelContext* context) : context_(context) {}
+
+  int64 GetMemoryLimitInBytes() override { return -1; }
+
+  se::port::StatusOr<DeviceMemoryBytes> AllocateBytes(
+      int64 byte_size) override {
+    Tensor temporary_memory;
+
+    Status allocation_status(context_->allocate_temp(
+        DT_UINT8, TensorShape({byte_size}), &temporary_memory));
+    if (!allocation_status.ok()) {
+      return se::port::StatusOr<DeviceMemoryBytes>(
+          DeviceMemoryBytes::MakeFromByteSize(nullptr, 0));
+    }
+    // Hold the reference of the allocated tensors until the end of the
+    // allocator.
+    allocated_tensors_.push_back(temporary_memory);
+    return se::port::StatusOr<DeviceMemoryBytes>(
+        DeviceMemoryBytes::MakeFromByteSize(
+            temporary_memory.flat<uint8>().data(),
+            temporary_memory.flat<uint8>().size()));
+  }
+
+  ArgSaver* GetArgSaver() override { return context_->get_arg_saver(); }
+
+ private:
+  OpKernelContext* context_;
+  std::vector<Tensor> allocated_tensors_;
+};
 }  // namespace
 
 template <typename Scalar>
@@ -77,11 +112,12 @@ void RunGemmBatched(OpKernelContext* context, bool trans_a, bool trans_b,
   auto trans_b_tf = trans_b ? se::blas::Transpose::kTranspose
                             : se::blas::Transpose::kNoTranspose;
   auto* stream = context->op_device_context()->stream();
+  BlasScratchAllocator scratch_allocator(context);
   bool blas_launch_status =
       stream
-          ->ThenBlasGemmBatched(trans_b_tf, trans_a_tf, n, m, k, alpha, b_ptrs,
-                                ldb, a_ptrs, lda, beta, c_ptrs, ldc,
-                                batch_count)
+          ->ThenBlasGemmBatchedWithScratch(
+              trans_b_tf, trans_a_tf, n, m, k, alpha, b_ptrs, ldb, a_ptrs, lda,
+              beta, c_ptrs, ldc, batch_count, &scratch_allocator)
           .ok();
 
   if (!blas_launch_status) {
