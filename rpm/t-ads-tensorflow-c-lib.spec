@@ -49,8 +49,8 @@ env PYTHON_BIN_PATH=/opt/conda/bin/python \
 export LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/local/cuda/extras/CUPTI/lib64/:"
 sh build_tflib.sh
 sudo /usr/bin/strip bazel-bin/tensorflow/libtensorflow.so.1.15.0
-ln -s libtensorflow.so.1.15.0 bazel-bin/tensorflow/libtensorflow.so
-ln -s libtensorflow.so.1.15.0 bazel-bin/tensorflow/libtensorflow.so.1
+ln -s -f libtensorflow.so.1.15.0 bazel-bin/tensorflow/libtensorflow.so
+ln -s -f libtensorflow.so.1.15.0 bazel-bin/tensorflow/libtensorflow.so.1
 
 %install
 export DONT_STRIP=1
