@@ -2028,6 +2028,7 @@ Status DirectSession::CreateGraphs(
   // Partition the graph across devices.
   PartitionOptions popts;
   popts.node_to_loc = [](const Node* node) {
+    auto& st = node->assigned_device_name();
     return node->assigned_device_name();
   };
   popts.new_name = [this](const string& prefix) {

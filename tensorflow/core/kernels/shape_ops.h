@@ -135,7 +135,6 @@ class SizeOp : public OpKernel {
           errors::InvalidArgument("Number of elements was larger than "
                                   "representable by 32-bit output type"));
     }
-    std::cerr << "SizeOp called " << size << std::endl;
     out->scalar<OutType>()() = static_cast<OutType>(size);
   }
 

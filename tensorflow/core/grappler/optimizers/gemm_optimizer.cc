@@ -2219,7 +2219,7 @@ std::unordered_set<string> GetNonComputeIntensiveNodes() {
       //"GatherV2",
       //"GatherNd",
       //"Identity",
-      //"Pack",
+      "Pack",
       //"Slice",
       //"Squeeze",
       //"StridedSlice",

@@ -2895,7 +2895,6 @@ Status CreateNonCachedKernel(Device* device, FunctionLibraryRuntime* flib,
                              OpKernel** kernel) {
   const auto device_type = DeviceType(device->attributes().device_type());
   auto allocator = device->GetAllocator(AllocatorAttributes());
-  std::cout << ndef.DebugString() << std::endl;
   return CreateOpKernel(device_type, device, allocator, flib, ndef,
                         graph_def_version, kernel);
 }
