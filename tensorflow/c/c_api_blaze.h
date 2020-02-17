@@ -146,10 +146,15 @@ TF_CAPI_EXPORT extern void TF_EnableVirtualGPUDevices(
     int num_virtual_gpus_per_device,
     int memory_limit_mb_per_virtual_gpus,
     int num_phisical_gpus);
-TF_CAPI_EXPORT extern void TF_EnablePerSessionThreadPool(
+TF_CAPI_EXPORT extern void TF_SetThreadPoolOptions(
     TF_SessionOptions* opt,
-    int num_threads_per_session);
-TF_CAPI_EXPORT extern void TF_EnableGPUMemoryAllowGrowth(
+    int num_inter_op_threads,
+    int num_intra_op_threads);
+TF_CAPI_EXPORT extern void TF_SetGPUMemoryOptions(
+    TF_SessionOptions* opt,
+    unsigned char allow_growth,
+    unsigned char force_gpu_compatible);
+TF_CAPI_EXPORT extern void TF_EnableAutoMixedPrecision(
     TF_SessionOptions* opt,
     unsigned char enable);
 TF_CAPI_EXPORT extern void TF_EnableCudaGraph(

@@ -2458,6 +2458,18 @@ int InsertToCPUSet(Node* node,
   return new_insertion;
 }
 
+static void ReplaceGPUWithCPUInDeviceString(std::string* device) {
+  std::string::size_type n;
+  n = device->find("GPU");
+  if (n != std::string::npos) {
+    *device = device->replace(n, 3, "CPU");
+  }
+  n = device->find("gpu");
+  if (n != std::string::npos) {
+    *device = device->replace(n, 3, "CPU");
+  }
+}
+
 void AutoPlaceConcats(Graph* graph) {
   // To improve CPU-GPU memcpy and GPU compute efficiency,
   // we place some memory intensive nodes to run on CPU.
@@ -2477,8 +2489,10 @@ void AutoPlaceConcats(Graph* graph) {
   }
 
   for (Node* node : cpu_nodes) {
-    node->set_requested_device("/job:localhost/replica:0/task:0/device:CPU:0");
-    VLOG(1) << "Place on CPU: " << node->DebugString();
+    std::string device = node->requested_device();
+    ReplaceGPUWithCPUInDeviceString(&device);
+    node->set_requested_device(device);
+    VLOG(1) << "Place node " << node->name() << " on " << device;
   }
 }
 

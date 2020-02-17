@@ -173,6 +173,18 @@ TF_Buffer* TF_ReadMetaGraphDefFromFile(
   }
 }
 
+static void ReplaceGPUWithCPUInDeviceString(std::string* device) {
+  std::string::size_type n;
+  n = device->find("GPU");
+  if (n != std::string::npos) {
+    *device = device->replace(n, 3, "CPU");
+  }
+  n = device->find("gpu");
+  if (n != std::string::npos) {
+    *device = device->replace(n, 3, "CPU");
+  }
+}
+
 void TF_GraphSetDevice(TF_Graph* graph,
                        const char* device) {
   mutex_lock l(graph->mu);
@@ -189,8 +201,20 @@ void TF_GraphSetDevice(TF_Graph* graph,
         requested_device.find("cpu") == std::string::npos) {
       node->set_requested_device(device);
     } else {
+      std::string temp = device;
+      ReplaceGPUWithCPUInDeviceString(&temp);
+      node->set_requested_device(temp);
       node->AddAttr("_XlaCompile", false);
+      VLOG(1) << "Place node " << node->name() << " on " << temp;
     }
+    // if (node->name().find("cnxh_gru") != std::string::npos ||
+    //     node->name().find("global_gru") != std::string::npos ||
+    //     node->name().find("realtime_gru") != std::string::npos) {
+    //   std::string temp = device;
+    //   ReplaceGPUToCPU(&temp);
+    //   node->set_requested_device(temp);
+    //   node->AddAttr("_XlaCompile", false);
+    // }
   }
 }
 
@@ -393,6 +417,18 @@ void TF_EnableGemmOptimization(TF_SessionOptions* options,
   }
 }
 
+void TF_EnableAutoMixedPrecision(TF_SessionOptions* options,
+                                 unsigned char enable) {
+  tensorflow::ConfigProto& config = options->options.config;
+  auto* rewrite_config =
+      config.mutable_graph_options()->mutable_rewrite_options();
+  if (enable) {
+    rewrite_config->set_auto_mixed_precision(tensorflow::RewriterConfig::ON);
+  } else {
+    rewrite_config->set_auto_mixed_precision(tensorflow::RewriterConfig::OFF);
+  }
+}
+
 TF_CAPI_EXPORT extern void TF_EnableVirtualGPUDevices(
     TF_SessionOptions* options,
     int num_virtual_gpus_per_device,
@@ -407,23 +443,34 @@ TF_CAPI_EXPORT extern void TF_EnableVirtualGPUDevices(
           memory_limit_mb_per_virtual_gpu);
     }
   }
+  auto* device_count = options->options.config.mutable_device_count();
+  device_count->insert({"CPU", num_virtual_gpus_per_device * num_phisical_gpus});
 }
 
-TF_CAPI_EXPORT extern void TF_EnablePerSessionThreadPool(
+TF_CAPI_EXPORT extern void TF_SetThreadPoolOptions(
     TF_SessionOptions* options,
-    int num_threads_per_session) {
-  static int count = 0;
-  std::string name = "pool:" + std::to_string(count++);
-  auto* pool_config = options->options.config.
-                      add_session_inter_op_thread_pool();
-  pool_config->set_num_threads(num_threads_per_session);
-  pool_config->set_global_name(name);
+    int num_inter_op_threads,
+    int num_intra_op_threads) {
+  if (num_inter_op_threads > 0) {
+    static int count = 0;
+    std::string name = "session_inter_op_threadpool:" + std::to_string(count++);
+    auto* pool_config = options->options.config.
+                        add_session_inter_op_thread_pool();
+    pool_config->set_num_threads(num_inter_op_threads);
+    pool_config->set_global_name(name);
+  }
+  if (num_intra_op_threads > 0) {
+    options->options.config.set_intra_op_parallelism_threads(
+        num_intra_op_threads);
+  }
 }
 
-void TF_EnableGPUMemoryAllowGrowth(TF_SessionOptions* options,
-                                   unsigned char enable) {
+void TF_SetGPUMemoryOptions(TF_SessionOptions* options,
+                            unsigned char allow_growth,
+                            unsigned char force_gpu_compatible) {
   auto* gpu_options = options->options.config.mutable_gpu_options();
-  gpu_options->set_allow_growth(enable);
+  gpu_options->set_allow_growth(allow_growth);
+  gpu_options->set_force_gpu_compatible(force_gpu_compatible);
 }
 
 void TF_EnableCudaGraph(TF_Buffer* run_options, unsigned char enable,
