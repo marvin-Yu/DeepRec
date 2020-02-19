@@ -171,6 +171,7 @@ class Node {
   }
   bool IsHostSend() const { return class_ == NC_HOST_SEND; }
   bool IsHostRecv() const { return class_ == NC_HOST_RECV; }
+  bool IsHostFuseRecv() const { return class_ == NC_HOST_FUSE_RECV; }
   bool IsScopedAllocator() const { return class_ == NC_SCOPED_ALLOCATOR; }
   bool IsCollective() const { return class_ == NC_COLLECTIVE; }
 
@@ -759,11 +760,12 @@ inline bool IsLoopCond(const Node* node) { return node->IsLoopCond(); }
 inline bool IsControlTrigger(const Node* n) { return n->IsControlTrigger(); }
 inline bool IsSend(const Node* node) { return node->IsSend(); }
 inline bool IsRecv(const Node* node) { return node->IsRecv(); }
+inline bool IsFuseRecv(const Node* node) { return node->IsFuseRecv(); }
 inline bool IsHostSend(const Node* node) { return node->IsHostSend(); }
 inline bool IsHostRecv(const Node* node) { return node->IsHostRecv(); }
 
 // True for Nodes that mediate the transfer of values between processes.
-inline bool IsTransferNode(const Node* n) { return IsSend(n) || IsRecv(n); }
+inline bool IsTransferNode(const Node* n) { return IsSend(n) || IsRecv(n) || IsFuseRecv(n); }
 
 inline bool IsConstant(const Node* node) { return node->IsConstant(); }
 inline bool IsVariable(const Node* node) { return node->IsVariable(); }

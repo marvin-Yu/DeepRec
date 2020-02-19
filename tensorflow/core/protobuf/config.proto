@@ -543,6 +543,7 @@ message ConfigProto {
   };
 
   Experimental experimental = 16;
+  bool run_graph_mode = 100;
 
   // Next: 17
 }

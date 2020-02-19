@@ -162,6 +162,12 @@ cc_library(
 )
 
 cc_library(
+    name = "worker_resource",
+    hdrs = ["worker_resource.h"],
+    deps = [],
+)
+
+cc_library(
     name = "tensor_coding",
     srcs = ["tensor_coding.cc"],
     hdrs = [

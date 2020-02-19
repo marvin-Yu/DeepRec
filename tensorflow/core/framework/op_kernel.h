@@ -142,8 +142,7 @@ class OpKernel {
   // runtime may use this flag to optimize graph execution for example
   // to "inline" inexpensive kernels.
   virtual bool IsExpensive() {
-    return expensive_ && (cost_estimate_.load(std::memory_order_relaxed) >
-                          kOpIsExpensiveThresholdCycles);
+    return expensive_;
   }
 
   // Updates the dynamic cost estimate, which is used to determine whether this
@@ -621,6 +620,7 @@ class OpKernelContext {
 
     // The step being executed.
     int64 step_id = 0;
+    int64 round_step_id = 0;
 
     // True if the op is created by eager runtime.
     bool is_eager = false;
@@ -758,6 +758,7 @@ class OpKernelContext {
 
   Env* env() const { return params_->device->env(); }
 
+  int64 round_step_id() const { return params_->round_step_id; }
   int64 step_id() const { return params_->step_id; }
 
   bool is_eager() const { return params_->is_eager; }
