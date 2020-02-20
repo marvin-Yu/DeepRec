@@ -31,6 +31,7 @@ limitations under the License.
 #include "tensorflow/core/grappler/optimizers/custom_graph_optimizer_registry.h"
 #include "tensorflow/core/grappler/optimizers/debug_stripper.h"
 #include "tensorflow/core/grappler/optimizers/dependency_optimizer.h"
+#include "tensorflow/core/grappler/optimizers/unfuse_batch_norm_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/function_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/gemm_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/generic_layout_optimizer.h"
@@ -182,6 +183,10 @@ Status MetaOptimizer::InitializeOptimizers(
   if (cfg_.function_optimization() != RewriterConfig::OFF) {
     optimizers->push_back(
         MakeUnique<FunctionOptimizer>(cfg_.function_optimization()));
+  }
+  if (cfg_.fuse_tile_concat_matmul() != RewriterConfig::OFF) {
+    optimizers->push_back(
+        std::unique_ptr<GraphOptimizer>(new UnfuseBatchNormOptimizer(cpu_device_)));
   }
   if (cfg_.debug_stripper() == RewriterConfig::ON) {
     optimizers->push_back(MakeUnique<DebugStripper>());

@@ -49,6 +49,25 @@ tf_cuda_cc_test(
 )
 
 cc_library(
+    name = "unfuse_batch_norm_optimizer",
+    srcs = ["unfuse_batch_norm_optimizer.cc"],
+    hdrs = ["unfuse_batch_norm_optimizer.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":graph_optimizer",
+        ":arithmetic_optimizer",
+        ":constant_folding",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:lib_internal",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core/grappler:grappler_item",
+        "//tensorflow/core/grappler:op_types",
+        "//tensorflow/core/grappler:utils",
+    ],
+)
+
+cc_library(
     name = "auto_parallel",
     srcs = ["auto_parallel.cc"],
     hdrs = [
@@ -604,6 +623,7 @@ cc_library(
         ":pin_to_host_optimizer",
         ":remapper",
         ":scoped_allocator_optimizer",
+        ":unfuse_batch_norm_optimizer",
         ":shape_optimizer",
         "//tensorflow/core:core_cpu_base",
         "//tensorflow/core:framework",
