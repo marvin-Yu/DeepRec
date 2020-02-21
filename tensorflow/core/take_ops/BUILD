@@ -4,8 +4,6 @@ load(
     "tf_copts",
 )
 
-load("@local_config_cuda//cuda:build_defs.bzl", "if_cuda")
-
 tf_kernel_library(
     name = "take_ops",
     srcs = [
@@ -35,8 +33,6 @@ tf_kernel_library(
     visibility = ["//visibility:public"],
     deps = [
         "//tensorflow/core/kernels:eigen_helpers",
-        "//tensorflow/core:lib",
-    ] + if_cuda([
         "//tensorflow/core/kernels:gpu_device_array",
-    ]),
+    ],
 )
