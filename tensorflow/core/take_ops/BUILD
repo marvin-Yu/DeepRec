@@ -35,6 +35,7 @@ tf_kernel_library(
     visibility = ["//visibility:public"],
     deps = [
         "//tensorflow/core/kernels:eigen_helpers",
+        "//tensorflow/core:lib",
     ] + if_cuda([
         "//tensorflow/core/kernels:gpu_device_array",
     ]),
