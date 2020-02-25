@@ -187,7 +187,7 @@ bool ReorderReshapeAndBiasAdd(Graph* graph) {
 // such that B*C, and (C*D)+E can be folded to consts.
 bool ConstantFoldingForContinuousMatMulsOnePass(Graph* graph);
 bool ConstantFoldingForContinuousMatMuls(Graph* graph) {
-  VLOG(1) << "ConstantFoldingForContinuousMatMuls";
+  VLOG(2) << "ConstantFoldingForContinuousMatMuls";
   bool changed = false;
   while (1) {
     if (ConstantFoldingForContinuousMatMulsOnePass(graph)) {
@@ -250,7 +250,7 @@ bool ConstantFoldingForContinuousMatMulsOnePass(Graph* graph) {
       matmuls[i]->input_node(1, &weights[i]);
     }
 
-    VLOG(1) << "ConstantFoldingForContinuousMatMuls: found pattern";
+    VLOG(2) << "ConstantFoldingForContinuousMatMuls: found pattern";
     Node* temps[5];
     for (int i = 0; i < 5; i++) {
       temps[i] = nullptr;
@@ -527,7 +527,7 @@ bool ConstantFoldingForContinuousMatMulsOnePass(Graph* graph) {
 //       ...
 bool FuseMatMuls(Graph* graph) {
   static int count = 0;
-  VLOG(1) << "FuseMatMuls";
+  VLOG(2) << "FuseMatMuls";
   bool changed = false;
 
   std::vector<Node*> nodes(graph->num_nodes());
@@ -562,17 +562,17 @@ bool FuseMatMuls(Graph* graph) {
     }
     if (!same_input) continue;
 
-    VLOG(1) << "FuseMatMuls: found pattern";
+    VLOG(2) << "FuseMatMuls: found pattern";
     std::sort(matmuls.begin(), matmuls.end(),
               [node](Node* a, Node* b){
       return a->name().compare(b->name()) < 0;
     });
     std::vector<Node*> weights;
-    VLOG(1) << "the following ops are fused: ";
+    VLOG(2) << "the following ops are fused: ";
     string weight_shape;
     bool can_fuse = true;
     for (Node* m : matmuls) {
-      VLOG(1) << m->name();
+      VLOG(2) << m->name();
       Node* w = nullptr;
       m->input_node(1, &w);
 
@@ -723,7 +723,7 @@ bool FuseMatMuls(Graph* graph) {
 // TODO(ylxu): to support fusing more types of ops after unpack
 bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
   static int count = 0;
-  VLOG(1) << "FuseBiasAdds";
+  VLOG(2) << "FuseBiasAdds";
   bool changed = false;
 
   std::vector<Node*> nodes(graph->num_nodes());
@@ -756,7 +756,7 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
     }
     if (!can_fuse || biasadds.size() < 2) continue;
 
-    VLOG(1) << "FuseBiasAdds: found pattern";
+    VLOG(2) << "FuseBiasAdds: found pattern";
     std::sort(biasadds.begin(), biasadds.end(),
               [node](Node* a, Node* b){
       const Edge* e = nullptr;
@@ -959,7 +959,7 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
 
 // [-, shape_param]->Reshape->Shape->Op to [shape_param]->Op
 bool RemoveShapeAfterReshape(Graph* graph) {
-  VLOG(1) << "RemoveShapeAfterReshape";
+  VLOG(2) << "RemoveShapeAfterReshape";
   bool changed = false;
   std::vector<Node*> nodes(graph->num_nodes());
   int i = 0;
@@ -974,7 +974,7 @@ bool RemoveShapeAfterReshape(Graph* graph) {
     Node* reshape = nullptr;
     shape->input_node(0, &reshape);
     if (reshape->type_string() != "Reshape") continue;
-    VLOG(1) << "RemoveShapeAfterReshape: found pattern";
+    VLOG(2) << "RemoveShapeAfterReshape: found pattern";
     Node* reshape_in_1 = nullptr;
     reshape->input_node(1, &reshape_in_1);
 
@@ -1001,7 +1001,7 @@ bool RemoveShapeAfterReshape(Graph* graph) {
 // Change ->Unpack->Reshape*n-> to ->Reshape->Unpack->
 bool FuseReshapesAfterUnpack(Graph* graph) {
   static int count = 0;
-  VLOG(1) << "FuseReshapesAfterUnpack";
+  VLOG(2) << "FuseReshapesAfterUnpack";
   bool changed = false;
 
   std::vector<Node*> nodes(graph->num_nodes());
@@ -1031,7 +1031,7 @@ bool FuseReshapesAfterUnpack(Graph* graph) {
     for (unsigned int i = 1; i < reshapes.size(); i++) {
       if (reshape_in_1[i] != reshape_in_1[0]) continue;
     }
-    VLOG(1) << "FuseReshapesAfterUnpack: found pattern";
+    VLOG(2) << "FuseReshapesAfterUnpack: found pattern";
     
     // Add a new Shape to get the shape of Unpack's input
     const Edge* to_unpack;
@@ -1250,7 +1250,7 @@ bool FuseReshapesAfterUnpack(Graph* graph) {
 // such that memory-intensive Unpack can be avoided.
 bool RemoveUnpackBeforeShape(Graph* graph) {
   static int count = 0;
-  VLOG(1) << "RemoveUnpackBeforeShape";
+  VLOG(2) << "RemoveUnpackBeforeShape";
   bool changed = false;
 
   std::vector<Node*> nodes(graph->num_nodes());
@@ -1265,7 +1265,7 @@ bool RemoveUnpackBeforeShape(Graph* graph) {
     Node* unpack = nullptr;
     node->input_node(0, &unpack);
     if (unpack->type_string() != "Unpack") continue;
-    VLOG(1) << "RemoveUnpackBeforeShape: found pattern";
+    VLOG(2) << "RemoveUnpackBeforeShape: found pattern";
 
     // Add a new Shape to get the shape of Unpack's input
     const Edge* to_unpack = nullptr;
@@ -1394,7 +1394,7 @@ bool RemoveUnpackBeforeShape(Graph* graph) {
 // Change ->Unpack->Transpose*n-> to ->Transpose->Unpack->
 bool FuseTransposesAfterUnpack(Graph* graph) {
   static int count = 0;
-  VLOG(1) << "FuseTransposesAfterUnpack";
+  VLOG(2) << "FuseTransposesAfterUnpack";
   bool changed = false;
 
   std::vector<Node*> nodes(graph->num_nodes());
@@ -1424,7 +1424,7 @@ bool FuseTransposesAfterUnpack(Graph* graph) {
     for (unsigned int i = 1; i < transposes.size(); i++) {
       if (transpose_in_1[i] != transpose_in_1[0]) continue;
     }
-    VLOG(1) << "FuseTransposesAfterUnpack: found pattern";
+    VLOG(2) << "FuseTransposesAfterUnpack: found pattern";
 
     string prefix = "GemmOptimizer/FuseTransposesAfterUnpack/" +
                     std::to_string(count++);
@@ -1618,7 +1618,7 @@ bool FuseBinaryOpsSharingACommonInputAfterUnpack(Graph* graph);
 // ->Unpack->BinaryOp*n to ->BinaryOp->Unpack
 bool FuseBinaryOpsAfterUnpack(Graph* graph) {
   static int count = 0;
-  VLOG(1) << "FuseBinaryOpsAfterUnpack";
+  VLOG(2) << "FuseBinaryOpsAfterUnpack";
   bool changed = FuseBinaryOpsSharingACommonInputAfterUnpack(graph);
   std::vector<Node*> nodes(graph->num_nodes());
   int i = 0;
@@ -1724,7 +1724,7 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
         }
       }
     }
-    VLOG(1) << "FuseBinaryOpsAfterUnpack: found pattern";
+    VLOG(2) << "FuseBinaryOpsAfterUnpack: found pattern";
 
     // Fuse binary_ops in each group.
     // For each group, do:
@@ -1747,10 +1747,10 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
                   return a_src_output < b_src_output;
                 });
       std::vector<const Edge *> inputs[2];
-      VLOG(1) << "the following ops are fused: ";
+      VLOG(2) << "the following ops are fused: ";
       for (Node *b : *binary_ops_group) {
         for (int i = 0; i < 2; ++i) {
-          VLOG(1) << b->name();
+          VLOG(2) << b->name();
 
           const Edge *e = nullptr;
           b->input_edge(i, &e);
@@ -1932,7 +1932,7 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
 
 // ->Unpack->UnaryOp*n to ->UnaryOp->Unpack
 bool FuseUnaryOpsAfterUnpack(Graph* graph) {
-  VLOG(1) << "FuseUnaryOpsAfterUnpack";
+  VLOG(2) << "FuseUnaryOpsAfterUnpack";
   bool changed = false;
 
   std::vector<Node*> nodes(graph->num_nodes());
@@ -1964,7 +1964,7 @@ bool FuseUnaryOpsAfterUnpack(Graph* graph) {
       unary_ops.push_back(out);
     }
     if (!can_reorder || unary_ops.size() < 2) continue;
-    VLOG(1) << "FuseUnaryOpsAfterUnpack: found pattern";
+    VLOG(2) << "FuseUnaryOpsAfterUnpack: found pattern";
     bool is_first = true;
     for (Node* u : unary_ops) {
       std::vector<Node*> dst_nodes;
@@ -1998,7 +1998,7 @@ bool FuseUnaryOpsAfterUnpack(Graph* graph) {
 
 // ->Unpack->BinaryOp*n to ->BinaryOp->Unpack
 bool FuseBinaryOpsSharingACommonInputAfterUnpack(Graph* graph) {
-  VLOG(1) << "FuseBinaryOpsSharingACommonInputAfterUnpack";
+  VLOG(2) << "FuseBinaryOpsSharingACommonInputAfterUnpack";
   bool changed = false;
 
   std::vector<Node*> nodes(graph->num_nodes());
@@ -2066,7 +2066,7 @@ bool FuseBinaryOpsSharingACommonInputAfterUnpack(Graph* graph) {
     }
 
     if (!can_reorder || binary_ops.size() < 2) continue;
-    VLOG(1) << "FuseBinaryOpsSharingACommonInputAfterUnpack: found pattern";
+    VLOG(2) << "FuseBinaryOpsSharingACommonInputAfterUnpack: found pattern";
     bool is_first = true;
     for (Node* b : binary_ops) {
       std::vector<Node*> dst_nodes;
@@ -2100,7 +2100,7 @@ bool FuseBinaryOpsSharingACommonInputAfterUnpack(Graph* graph) {
 }
 
 void RemoveDeadUnpacksAndPacks(Graph* graph) {
-  VLOG(1) << "RemoveDeadUnpacksAndPacks";
+  VLOG(2) << "RemoveDeadUnpacksAndPacks";
   std::vector<Node*> nodes(graph->num_nodes());
   int i = 0;
   for (Node* node : graph->nodes()) {
@@ -2118,7 +2118,7 @@ void RemoveDeadUnpacksAndPacks(Graph* graph) {
 }
 
 bool RemoveUnpacksAndPacks(Graph* graph) {
-  VLOG(1) << "RemoveUnpacksAndPacks";
+  VLOG(2) << "RemoveUnpacksAndPacks";
   bool changed = false;
   static int count = 0;
 
@@ -2183,7 +2183,7 @@ bool RemoveUnpacksAndPacks(Graph* graph) {
     }
 
     if (!can_remove || unpack_split_map.size() == 0) continue;
-    VLOG(1) << "RemoveUnpacksAndPacks: found pattern";
+    VLOG(2) << "RemoveUnpacksAndPacks: found pattern";
 
     // for Unpack->Pack*n, insert a Split Op, and
     // repalace Packs' outputs with Split's outputs.
@@ -2275,35 +2275,8 @@ bool RemoveUnpacksAndPacks(Graph* graph) {
   return changed;
 }
 
-// TODO(ylxu): use a better heuristic?
-std::unordered_set<string> GetNonComputeIntensiveNodes() {
-  std::unordered_set<string> ops = {
-      //"ExpandDims",
-      //"Gather",
-      //"GatherV2",
-      //"GatherNd",
-      //"Identity",
-      //"Pack",
-      //"Slice",
-      //"Squeeze",
-      //"StridedSlice",
-      //"Split",
-      //"SplitV",
-      //"Tile",
-      //"Transpose",
-      //"Unpack",
-      //"Where",
-      "TakeAxis",
-      "Sum",
-      "NotEqual",
-      "Reshape",
-      "Concat",
-      "ConcatV2"};
-  return ops;
-}
-
 bool FuseGatherBeforeMatMul(Graph* graph) {
-  VLOG(1) << "FuseGatherBeforeMatMul";
+  VLOG(2) << "FuseGatherBeforeMatMul";
   
   static int count = 0;
   bool changed = false;
@@ -2407,99 +2380,7 @@ bool FuseGatherBeforeMatMul(Graph* graph) {
   return changed;
 }
 
-int InsertToCPUSet(Node* node,
-                   const std::unordered_set<string>& candidates,
-                   std::unordered_set<Node*>* cpu_nodes) {
-  // Place node that satisfies some conditions on CPU.
-
-  // Put Placeholders on CPU
-  if (node->type_string() == "Placeholder" ||
-      node->type_string() == "PlaceholderV2") {
-    VLOG(1) << "InsertToCPUSet: " << node->DebugString();
-    return cpu_nodes->insert(node).second;
-  }
-  // Put INT32/INT64 node, which is the input of CPU nodes, on CPU.  
-  DataType output_type = node->output_type(0);
-  if (output_type == DT_INT32 || output_type == DT_INT64) {
-    for (const Edge* e : node->out_edges()) {
-      Node* n = e->dst();
-      if (cpu_nodes->find(n) != cpu_nodes->end()) {
-        VLOG(1) << "InsertToCPUSet: " << n->DebugString();
-        return cpu_nodes->insert(node).second;
-      }
-    }
-    return 0;
-  }
-
-  // Put Concats/Reshapes after placeholders on CPU
-  if (candidates.find(node->type_string()) == candidates.end()) {
-    return 0;
-  }
-  std::vector<Node*> int_or_const_inputs;
-  for (const Edge* e : node->in_edges()) {
-    Node* n = e->src();
-    DataType type = n->output_type(e->src_output());
-    if (type == DT_INT32 || type == DT_INT64 ||
-        n->type_string() == "Const") {
-      int_or_const_inputs.emplace_back(n);
-      continue;
-    }
-    if (cpu_nodes->find(n) == cpu_nodes->end()) {
-      return 0;
-    }
-  }
-  int new_insertion = 0;
-  for (Node* n : int_or_const_inputs) {
-    VLOG(1) << "InsertToCPUSet: " << n->DebugString();
-    if (cpu_nodes->insert(n).second) new_insertion++;
-  }
-  VLOG(1) << "InsertToCPUSet: " << node->DebugString();
-  if (cpu_nodes->insert(node).second) new_insertion++;
-  return new_insertion;
-}
-
-static void ReplaceGPUWithCPUInDeviceString(std::string* device) {
-  std::string::size_type n;
-  n = device->find("GPU");
-  if (n != std::string::npos) {
-    *device = device->replace(n, 3, "CPU");
-  }
-  n = device->find("gpu");
-  if (n != std::string::npos) {
-    *device = device->replace(n, 3, "CPU");
-  }
-}
-
-void AutoPlaceConcats(Graph* graph) {
-  // To improve CPU-GPU memcpy and GPU compute efficiency,
-  // we place some memory intensive nodes to run on CPU.
-  // Traverse from placeholders, mark cheap nodes
-  // after placeholders to run on CPU.
-  std::unordered_set<Node*> cpu_nodes;
-  std::unordered_set<string> candidates =
-      GetNonComputeIntensiveNodes();
-  while(1) {
-    int new_insertion = 0;
-    for (Node* node : graph->nodes()) {
-      VLOG(1) << "Check node: " << node->DebugString();
-      new_insertion += InsertToCPUSet(node, candidates, &cpu_nodes);
-      VLOG(1) << "Check node: new_insertion = " << new_insertion;
-    }
-    if (new_insertion == 0) break;
-  }
-
-  for (Node* node : cpu_nodes) {
-    std::string device = node->requested_device();
-    ReplaceGPUWithCPUInDeviceString(&device);
-    node->set_requested_device(device);
-    VLOG(1) << "Place node " << node->name() << " on " << device;
-  }
-}
-
-void OptimizeConcats(Graph* graph) {
-  // 0. Place concats after placeholders on CPU
-  AutoPlaceConcats(graph);
-
+void SplitConcatBasedOnInputDevices(Graph* graph) {
   // 1. Get all GPU concats
   std::vector<Node*> gpu_concats;
   for (Node* node : graph->nodes()) {
@@ -2508,7 +2389,7 @@ void OptimizeConcats(Graph* graph) {
       std::string device = node->requested_device();
       if (device.find("GPU") != std::string::npos ||
           device.find("gpu") != std::string::npos) {
-        VLOG(1) << "Found a OptimizeConcats candidate: "
+        VLOG(2) << "Found a SplitConcatBasedOnInputDevices candidate: "
                   << node->DebugString();
         gpu_concats.emplace_back(node);
       }
@@ -2518,7 +2399,7 @@ void OptimizeConcats(Graph* graph) {
   // 2. Split the concats whose inputs are from different devices
   //    into multiple concats
   for (Node* concat : gpu_concats) {
-    VLOG(1) << "Try to split concat: " << concat->DebugString();
+    VLOG(2) << "Try to split concat: " << concat->DebugString();
     // 2.1. Group inputs of each concat into clusters
     int num_inputs = concat->num_inputs();
     std::vector<const Edge*> inputs(num_inputs);
@@ -2559,7 +2440,7 @@ void OptimizeConcats(Graph* graph) {
     std::string device = devices[begin];
     cluster_inputs[0].emplace_back(inputs[begin]);
     cluster_devices.emplace_back(device);
-    VLOG(1) << "Clustering, cluster " << cluster_idx
+    VLOG(2) << "Clustering, cluster " << cluster_idx
               << ", on " << cluster_devices[cluster_idx]
               << " includes: "
               << inputs[begin]->DebugString();
@@ -2573,7 +2454,7 @@ void OptimizeConcats(Graph* graph) {
         cluster_devices.emplace_back(device);
         cluster_idx++;
       }
-      VLOG(1) << "Clustering, cluster " << cluster_idx
+      VLOG(2) << "Clustering, cluster " << cluster_idx
                 << ", on " << cluster_devices[cluster_idx]
                 << " includes: "
                 << inputs[i]->DebugString();
@@ -2582,11 +2463,11 @@ void OptimizeConcats(Graph* graph) {
     int num_clusters = cluster_inputs.size();
     CHECK(num_clusters <= num_inputs - 1);
     if (num_clusters == 1 || num_clusters == num_inputs - 1) {
-      VLOG(1) << "Do not split concat " << concat->DebugString();
+      VLOG(2) << "Do not split concat " << concat->DebugString();
       continue;
     }
 
-    VLOG(1) << "Split concat: " << concat->DebugString();
+    VLOG(2) << "Split concat: " << concat->DebugString();
     std::vector<Node*> new_inputs(num_clusters);
     std::vector<int> new_input_src_outputs(num_clusters);
     std::string concat_name = concat->name();
@@ -2602,14 +2483,14 @@ void OptimizeConcats(Graph* graph) {
 
     // 2.2. Add a new concat for each cluster
     for (int i = 0; i < num_clusters; i++) {
-      VLOG(1) << "Splitting, cluster " << i
+      VLOG(2) << "Splitting, cluster " << i
                 << ", on " << cluster_devices[i]
                 << " includes: ";
       std::vector<const Edge*> cluster = cluster_inputs[i];
       if (cluster.size() == 1) {
         new_inputs[i] = cluster[0]->src();
         new_input_src_outputs[i] = cluster[0]->src_output();
-        VLOG(1) << "node: " << new_inputs[i]->DebugString();
+        VLOG(2) << "node: " << new_inputs[i]->DebugString();
       } else {
         // add a new concat
         NodeDefBuilder concat_builder(
@@ -2617,7 +2498,7 @@ void OptimizeConcats(Graph* graph) {
         std::vector<NodeDefBuilder::NodeOut> concat_inputs;
         for (unsigned int j = 0; j < cluster.size(); j++) {
           Node* src = cluster[j]->src();
-          VLOG(1) << "node: " << src->DebugString();
+          VLOG(2) << "node: " << src->DebugString();
           int src_output = cluster[j]->src_output();
           concat_inputs.emplace_back(src->name(), src_output, type);
         }
@@ -2704,13 +2585,13 @@ void OptimizeConcats(Graph* graph) {
 void SetXlaCompileFlag(Graph* graph) {
   for (Node* node : graph->nodes()) {
     std::string requested_device = node->requested_device();
-    VLOG(1) << "node: " << node->DebugString();
-    VLOG(1) << "node requested_device: " << node->requested_device();
-    VLOG(1) << "node device: " << node->def().device();
-    VLOG(1) << "node assigned_device_name: " << node->assigned_device_name();
+    VLOG(2) << "node: " << node->DebugString();
+    VLOG(2) << "node requested_device: " << node->requested_device();
+    VLOG(2) << "node device: " << node->def().device();
+    VLOG(2) << "node assigned_device_name: " << node->assigned_device_name();
     if (requested_device.find("CPU") != std::string::npos ||
         requested_device.find("cpu") != std::string::npos) {
-      VLOG(1) << "node: " << node->DebugString();
+      VLOG(2) << "node: " << node->DebugString();
       node->AddAttr("_XlaCompile", false);
     }
   }
@@ -2720,13 +2601,8 @@ void FuseGemmKernels(Graph* graph) {
   bool gemm_fusion = true;
   ReadBoolFromEnvVar("TF_ENABLE_GEMM_FUSION", true, &gemm_fusion);
   if (!gemm_fusion) return;
-  bool optimize_concat = true;
-  ReadBoolFromEnvVar("TF_OPTIMIZE_CONCAT", true, &optimize_concat);
-  if (optimize_concat) {
-    if (VLOG_IS_ON(1)) DumpGraphToFile("before_placement", *graph);
-    OptimizeConcats(graph);
-    if (VLOG_IS_ON(1)) DumpGraphToFile("after_placement", *graph);
-  }
+
+  SplitConcatBasedOnInputDevices(graph);
   while(1) {
     bool graph_changed =
         FuseGatherBeforeMatMul(graph) ||
@@ -2750,7 +2626,7 @@ void FuseGemmKernels(Graph* graph) {
 
 Status GemmOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
                                GraphDef* optimized_graph) {
-  VLOG(1) << "GemmOptimizer";
+  VLOG(1) << "GemmOptimizer is on.";
   static int pass = 0;
   if (VLOG_IS_ON(1)) {
     DumpGraphDefToFile("before_gemm", item.graph);
