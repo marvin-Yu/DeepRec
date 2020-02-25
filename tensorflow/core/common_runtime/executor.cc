@@ -1847,32 +1847,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
         // Synchronous computes.
         OpKernelContext ctx(&params, item.num_outputs);
         nodestats::SetOpStart(stats);
-
-        if (TF_PREDICT_FALSE(MightTrace(item, event_collector_))) {
-          const string& op_name = op_kernel->name();
-          const string kernel_label = strings::StrCat(
-              op_name, ":", op_kernel->type_string(),
-              "#id=", step_container_ ? step_container_->step_id() : 0,
-              ",device=", device->name(), ",async=false#");
-          tracing::ScopedRegion region(tracing::EventCategory::kCompute,
-                                       op_name);
-          // 'TraceMe' will trace the OpKernel scheduling time.
-          profiler::TraceMe activity(
-              absl::string_view(kernel_label),
-              profiler::GetTFTraceMeLevel(op_kernel->IsExpensive()));
-          // 'ScopedAnnotation' will trace the OpKernel execution time.
-          tracing::ScopedAnnotation annotation(kernel_label);
-          device->Compute(op_kernel, &ctx);
-        } else {
-          // In the common case, avoid creating any tracing objects.
-         /* if (op_kernel->IsExpensive()) {
-            KernelTimer timer;
             device->Compute(op_kernel, &ctx);
-            op_kernel->UpdateCostEstimate(timer.ElapsedCycles());
-          } else { */
-            device->Compute(op_kernel, &ctx);
-//          }
-        }
 
         nodestats::SetOpEnd(stats);
         s = ProcessOutputs(item, &ctx, &outputs, stats);
@@ -2029,6 +2004,125 @@ Status ExecutorState::ProcessOutputs(const NodeItem& item, OpKernelContext* ctx,
       LOG(WARNING) << this << " Compute status: " << s;
       DumpState();
     }
+    return s;
+  }
+
+  // Get the device_context for this node id, if it exists.
+  DeviceContext* device_context = nullptr;
+  if (node->id() < device_context_map_.size()) {
+    device_context = device_context_map_[node->id()];
+  }
+
+  // Experimental: debugger (tfdb) access to intermediate node completion.
+  if (item.num_outputs == 0 && impl_->params_.node_outputs_cb != nullptr) {
+    // If the node has no output, invoke the callback with output slot set to
+    // -1, signifying that this is a no-output node.
+    s.Update(impl_->params_.node_outputs_cb(item.node->name(), -1, nullptr,
+                                            false, ctx));
+  }
+
+  for (int i = 0; i < item.num_outputs; ++i) {
+    const TensorValue val = ctx->release_output(i);
+    if (*ctx->is_output_dead() || val.tensor == nullptr) {
+      // Unless it's a Switch or a Recv, the node must produce a
+      // tensor value at i-th output.
+      if (!IsSwitch(node) && !IsRecv(node) && !IsFuseRecv(node)) {
+        s.Update(errors::Internal("Missing ", i, "-th output from ",
+                                  SummarizeNode(*node)));
+      }
+    } else {
+      Entry* out = &((*outputs)[i]);
+
+      // Set the device context of the output entry.
+      out->device_context = device_context;
+
+      // Set the allocator attributes of the output entry.
+      out->alloc_attr = ctx->output_alloc_attr(i);
+
+      // Sanity check of output tensor types.
+      DataType dtype;
+      if (val.is_ref()) {
+        tf_shared_lock ml(*val.mutex_if_ref);
+        dtype = MakeRefType(val->dtype());
+      } else {
+        dtype = val->dtype();
+      }
+      if (dtype == item.output_type(i)) {
+        if (stats && val.tensor->IsInitialized()) {
+          nodestats::SetOutput(stats, i, val.tensor);
+        }
+        if (val.is_ref()) {
+          out->has_value = true;
+          out->ref = val.tensor;
+          out->ref_mu = val.mutex_if_ref;
+          if (log_memory_) {
+            Tensor to_log;
+            {
+              // Dereference the tensor under the lock.
+              tf_shared_lock l(*out->ref_mu);
+              to_log = *out->ref;
+            }
+            LogMemory::RecordTensorOutput(ctx->op_kernel().name(),
+                                          ctx->step_id(), i, to_log);
+          }
+
+          // Experimental: debugger (tfdb) access to intermediate node
+          // outputs.
+          if (impl_->params_.node_outputs_cb != nullptr) {
+            s.Update(impl_->params_.node_outputs_cb(item.node->name(), i,
+                                                    out->ref, true, ctx));
+          }
+        } else {
+          // NOTE that std::move is used here, so val.tensor goes to
+          // uninitialized state (val.tensor->IsInitialized return false).
+          DCHECK(!out->val_field_is_set);
+          out->has_value = true;
+          out->val_field_is_set = true;
+          out->val.Init(std::move(*val.tensor));
+          if (log_memory_) {
+            LogMemory::RecordTensorOutput(ctx->op_kernel().name(),
+                                          ctx->step_id(), i, *out->val);
+          }
+
+          // Experimental: debugger access to intermediate node outputs.
+          if (impl_->params_.node_outputs_cb != nullptr) {
+            s.Update(impl_->params_.node_outputs_cb(
+                item.node->name(), i, out->val.get(), false, ctx));
+          }
+        }
+      } else {
+        s.Update(errors::Internal("Output ", i, " of type ",
+                                  DataTypeString(dtype),
+                                  " does not match declared output type ",
+                                  DataTypeString(item.output_type(i)),
+                                  " for node ", SummarizeNode(*node)));
+      }
+    }
+    if (!val.is_ref()) {
+      // If OpKernelContext returns outputs via pass-by-value, we
+      // don't need this trouble.
+      delete val.tensor;
+    }
+  }
+  return s;
+}
+/*
+Status ExecutorState::ProcessOutputs(const NodeItem& item, OpKernelContext* ctx,
+                                     EntryVector* outputs,
+                                     NodeExecStatsInterface* stats) {
+  const Node* node = item.node;
+  DCHECK_EQ(0, outputs->size());
+  outputs->resize(item.num_outputs);
+
+  Status s = ctx->status();
+  if (!s.ok()) {
+    s = AttachDef(s, item.kernel->def());
+    // TODO(misard) Replace with a finer-grain enabling flag once we
+    // add better optional debugging support.
+    if (vlog_ && VLOG_IS_ON(1)) {
+      LOG(WARNING) << this << " Compute status: " << s;
+      DumpState();
+    }
     if (s.code() == error::RESOURCE_EXHAUSTED) {
       if (stats_collector_) {
         string err = stats_collector_->ReportAllocsOnResourceExhausted(
@@ -2119,18 +2213,11 @@ Status ExecutorState::ProcessOutputs(const NodeItem& item, OpKernelContext* ctx,
     }
   }
   return s;
-}
+} */
 
 void ExecutorState::PropagateOutputs(const TaggedNode& tagged_node,
                                      const NodeItem* item, EntryVector* outputs,
                                      TaggedNodeSeq* ready) {
-  auto activity_handle = absl::make_unique<profiler::TraceMe>(
-      [&]() {
-        return strings::StrCat("ExecutorPropagateOutputs:",
-                               item->kernel->name(), "#id=", step_id_, "#");
-      },
-      profiler::GetTFTraceMeLevel(/*is_expensive=*/false));
-
   const Node* node = tagged_node.node;
   FrameState* input_frame = tagged_node.input_frame;
   const int64 input_iter = tagged_node.input_iter;
@@ -2262,15 +2349,6 @@ bool ExecutorState::NodeDone(const Status& s, const Node* node,
   }
   if (abort_run) {
     TRACEPRINTF("StartAbort: %s", s.ToString().c_str());
-    if (cancellation_manager_) {
-      // only log when the abort happens during the actual run time.
-      auto device_name = impl_->params_.device->name();
-      // Use VLOG instead of LOG(warning) because error status is expected when
-      // the executor is run under the grappler optimization phase or when
-      // iterating through a tf.data input pipeline.
-      VLOG(1) << "[" << device_name << "] Executor start aborting: " << s;
-    }
-
     if (rendezvous_) {
       rendezvous_->StartAbort(s);
     }
