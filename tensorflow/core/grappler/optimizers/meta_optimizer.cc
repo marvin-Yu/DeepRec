@@ -198,9 +198,9 @@ Status MetaOptimizer::InitializeOptimizers(
   if (cfg_.shape_optimization() != RewriterConfig::OFF) {
     optimizers->push_back(MakeUnique<ShapeOptimizer>());
   }
-  if (cfg_.remapping() != RewriterConfig::OFF) {
-    optimizers->push_back(MakeUnique<Remapper>(cfg_.remapping()));
-  }
+//  if (cfg_.remapping() != RewriterConfig::OFF) {
+ //   optimizers->push_back(MakeUnique<Remapper>(cfg_.remapping()));
+//  }
   if (cfg_.pin_to_host_optimization() == RewriterConfig::ON) {
     optimizers->push_back(MakeUnique<PinToHostOptimizer>());
   }
