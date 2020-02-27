@@ -9,7 +9,7 @@
 namespace tensorflow {
 typedef Eigen::ThreadPoolDevice CPUDevice;
 typedef Eigen::GpuDevice GPUDevice;
-#define GOOGLE_CUDA 1
+
 template <typename Device, typename Scalar>
 struct LaunchIndicatorMatmul {
   void operator()(OpKernelContext* context, bool trans_a, bool trans_b, int64 m,

@@ -200,13 +200,11 @@ class ParallelIndicatorMatmulOp : public OpKernel {
   extern template struct LaunchIndicatorMatmul<GPUDevice, TYPE>; \
   REGISTER_KERNEL_BUILDER(Name("IndicatorMatMul")                \
                               .Device(DEVICE_GPU)                \
-                              .HostMemory("indicator")           \
                               .TypeConstraint<TYPE>("T"),        \
                           IndicatorMatmulOp<GPUDevice, TYPE>);
 #define REGISTER_PARALLEL_INDICATOR_MATMUL_GPU(TYPE)      \
   REGISTER_KERNEL_BUILDER(Name("ParallelIndicatorMatMul") \
                               .Device(DEVICE_GPU)         \
-                              .HostMemory("indicator")    \
                               .TypeConstraint<TYPE>("T"), \
                           ParallelIndicatorMatmulOp<GPUDevice, TYPE>);
 REGISTER_INDICATOR_MATMUL_GPU(float);

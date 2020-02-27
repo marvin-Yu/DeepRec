@@ -70,6 +70,52 @@ class BlasScratchAllocator : public se::ScratchAllocator {
 };
 }  // namespace
 
+template <typename T>
+struct HalfAsFloat {
+  typedef T type;
+};
+
+template <typename T>
+struct GpuComplexT {
+  typedef T type;
+};
+
+// Converts a const DeviceMemory reference to its underlying typed pointer in
+// CUDA
+// device memory.
+template <typename T>
+const T* GpuMemory(const se::DeviceMemory<T>& mem) {
+  return static_cast<const T*>(mem.opaque());
+}
+
+template <typename Scalar>
+struct IMatmulParam {
+  Scalar* A;
+  Scalar* B;
+  Scalar* C;
+  Scalar** As;
+  Scalar** Bs;
+  Scalar** Cs;
+  int* indicators;
+  int m, n, k;
+  int batch_a, batch_b;
+};
+
+template <typename Scalar>
+__global__ void ComputePtrsKernel(IMatmulParam<Scalar> param) {
+  int m = param.m, n = param.n, k = param.k;
+  int batch_a = param.batch_a, batch_b = param.batch_b;
+  Scalar* A = param.A + blockIdx.x * batch_a * m * k;
+  Scalar* B = param.B + blockIdx.x * batch_b * k * n;
+  Scalar* C = param.C + blockIdx.x * batch_b * m * n;
+  for (int i = threadIdx.x; i < batch_b; i += blockDim.x) {
+    int64 offset = blockIdx.x * batch_b + i;
+    param.As[offset] = &A[param.indicators[i] * m * k];
+    param.Bs[offset] = &B[i * k * n];
+    param.Cs[offset] = &C[i * m * n];
+  }
+}
+
 template <typename Scalar>
 void RunGemmStridedBatched(OpKernelContext* context, bool trans_a, bool trans_b,
                            int64 m, int64 n, int64 k, Scalar alpha,
@@ -99,10 +145,8 @@ void RunGemmStridedBatched(OpKernelContext* context, bool trans_a, bool trans_b,
 
 template <typename Scalar>
 void RunGemmBatched(OpKernelContext* context, bool trans_a, bool trans_b,
-                    int64 m, int64 n, int64 k, Scalar alpha,
-                    std::vector<se::DeviceMemory<Scalar>*>& a_ptrs,
-                    std::vector<se::DeviceMemory<Scalar>*>& b_ptrs, Scalar beta,
-                    std::vector<se::DeviceMemory<Scalar>*>& c_ptrs,
+                    int64 m, int64 n, int64 k, Scalar alpha, Scalar** a_ptrs,
+                    Scalar** b_ptrs, Scalar beta, Scalar** c_ptrs,
                     int64 batch_count) {
   int lda = trans_a ? m : k;
   int ldb = trans_b ? k : n;
@@ -112,12 +156,12 @@ void RunGemmBatched(OpKernelContext* context, bool trans_a, bool trans_b,
   auto trans_b_tf = trans_b ? se::blas::Transpose::kTranspose
                             : se::blas::Transpose::kNoTranspose;
   auto* stream = context->op_device_context()->stream();
-  BlasScratchAllocator scratch_allocator(context);
   bool blas_launch_status =
       stream
-          ->ThenBlasGemmBatchedWithScratch(
-              trans_b_tf, trans_a_tf, n, m, k, alpha, b_ptrs, ldb, a_ptrs, lda,
-              beta, c_ptrs, ldc, batch_count, &scratch_allocator)
+          ->ThenBlasGemmBatched(trans_b_tf, trans_a_tf, n, m, k, alpha,
+                                const_cast<const Scalar**>(b_ptrs), ldb,
+                                const_cast<const Scalar**>(a_ptrs), lda, beta,
+                                c_ptrs, ldc, batch_count)
           .ok();
 
   if (!blas_launch_status) {
@@ -127,68 +171,63 @@ void RunGemmBatched(OpKernelContext* context, bool trans_a, bool trans_b,
 }
 
 template <typename Scalar>
+Status LaunchComputePtr(IMatmulParam<Scalar>* param, int64 paralle_num,
+                        OpKernelContext* context,
+                        BlasScratchAllocator* scratch_allocator) {
+  typedef typename HalfAsFloat<typename GpuComplexT<Scalar>::type>::type CUDA_T;
+  const size_t size = paralle_num * param->batch_b * sizeof(CUDA_T*);
+  SE_ASSIGN_OR_RETURN(se::DeviceMemory<uint8> a_bytes,
+                      scratch_allocator->AllocateBytes(size));
+  SE_ASSIGN_OR_RETURN(se::DeviceMemory<uint8> b_bytes,
+                      scratch_allocator->AllocateBytes(size));
+  SE_ASSIGN_OR_RETURN(se::DeviceMemory<uint8> c_bytes,
+                      scratch_allocator->AllocateBytes(size));
+  se::DeviceMemory<CUDA_T*> a = se::DeviceMemory<CUDA_T*>(a_bytes);
+  se::DeviceMemory<CUDA_T*> b = se::DeviceMemory<CUDA_T*>(b_bytes);
+  se::DeviceMemory<CUDA_T*> c = se::DeviceMemory<CUDA_T*>(c_bytes);
+  param->As = const_cast<CUDA_T**>(GpuMemory(a));
+  param->Bs = const_cast<CUDA_T**>(GpuMemory(b));
+  param->Cs = const_cast<CUDA_T**>(GpuMemory(c));
+  const auto& d = context->eigen_device<GPUDevice>();
+  GpuLaunchConfig config = GetGpuLaunchConfig(param->batch_b, d);
+  return GpuLaunchKernel(ComputePtrsKernel<Scalar>, paralle_num,
+                         config.thread_per_block, 0, d.stream(), *param);
+}
+
+template <typename Scalar>
 void LaunchIndicatorMatmul<GPUDevice, Scalar>::operator()(
     OpKernelContext* context, bool trans_a, bool trans_b, int64 m, int64 n,
     int64 k, const Tensor& in_a, const Tensor& in_b, const Tensor& indicator,
     Tensor* out, int64 batch_a, int64 batch_b, int64 paralle_num) {
-  auto a_ptr = AsDeviceMemory(in_a.template flat<Scalar>().data());
-  auto b_ptr = AsDeviceMemory(in_b.template flat<Scalar>().data());
-  auto out_ptr = AsDeviceMemory(out->template flat<Scalar>().data());
-  typedef se::DeviceMemory<Scalar> DeviceMemoryType;
-  std::vector<DeviceMemoryType> a_device_memory;
-  std::vector<DeviceMemoryType> b_device_memory;
-  std::vector<DeviceMemoryType> c_device_memory;
-  std::vector<DeviceMemoryType*> a_ptrs;
-  std::vector<DeviceMemoryType*> b_ptrs;
-  std::vector<DeviceMemoryType*> c_ptrs;
-  auto* a_base_ptr = in_a.template flat<Scalar>().data();
-  auto* b_base_ptr = in_b.template flat<Scalar>().data();
-  auto* c_base_ptr = out->template flat<Scalar>().data();
-  auto ind_data = indicator.flat<int>();
-  if (paralle_num == 1) {
-    if (batch_a == 1) {
-      RunGemmStridedBatched<Scalar>(context, trans_a, trans_b, m, n, k,
-                                    Scalar(1.0), a_ptr, 0, b_ptr, k * n,
-                                    Scalar(0.0), &out_ptr, m * n, batch_b);
-    } else {
-      for (int64 i = 0; i < batch_a; i++) {
-        a_device_memory.push_back(AsDeviceMemory(a_base_ptr + i * m * k));
-      }
-      for (int64 i = 0; i < batch_b; i++) {
-        b_device_memory.push_back(AsDeviceMemory(b_base_ptr + i * k * n));
-        c_device_memory.push_back(AsDeviceMemory(c_base_ptr + i * m * n));
-      }
-      for (int64 i = 0; i < batch_b; i++) {
-        a_ptrs.push_back(&a_device_memory[ind_data(i)]);
-        b_ptrs.push_back(&b_device_memory[i]);
-        c_ptrs.push_back(&c_device_memory[i]);
-      }
-      RunGemmBatched(context, trans_a, trans_b, m, n, k, Scalar(1.0), a_ptrs,
-                     b_ptrs, Scalar(0.0), c_ptrs, batch_b);
-    }
-  } else {
-    for (int64 i = 0; i < paralle_num; i++) {
-      for (int64 j = 0; j < batch_a; j++) {
-        a_device_memory.push_back(
-            AsDeviceMemory(a_base_ptr + (i * batch_a + j) * m * k));
-      }
-      for (int64 j = 0; j < batch_b; j++) {
-        b_device_memory.push_back(
-            AsDeviceMemory(b_base_ptr + (i * batch_b + j) * k * n));
-        c_device_memory.push_back(
-            AsDeviceMemory(c_base_ptr + (i * batch_b + j) * m * n));
-      }
-    }
-    for (int64 i = 0; i < paralle_num; i++) {
-      for (int64 j = 0; j < batch_b; j++) {
-        a_ptrs.push_back(&a_device_memory[i * batch_a + ind_data(j)]);
-        b_ptrs.push_back(&b_device_memory[i * batch_b + j]);
-        c_ptrs.push_back(&c_device_memory[i * batch_b + j]);
-      }
-    }
-    RunGemmBatched(context, trans_a, trans_b, m, n, k, Scalar(1.0), a_ptrs,
-                   b_ptrs, Scalar(0.0), c_ptrs, batch_b * paralle_num);
+  if (paralle_num == 1 && batch_a == 1) {
+    auto a_ptr = AsDeviceMemory(in_a.template flat<Scalar>().data());
+    auto b_ptr = AsDeviceMemory(in_b.template flat<Scalar>().data());
+    auto out_ptr = AsDeviceMemory(out->template flat<Scalar>().data());
+    RunGemmStridedBatched<Scalar>(context, trans_a, trans_b, m, n, k,
+                                  Scalar(1.0), a_ptr, 0, b_ptr, k * n,
+                                  Scalar(0.0), &out_ptr, m * n, batch_b);
+    return;
   }
+  auto a_base_ptr = in_a.template flat<Scalar>().data();
+  auto b_base_ptr = in_b.template flat<Scalar>().data();
+  auto c_base_ptr = out->template flat<Scalar>().data();
+  IMatmulParam<Scalar> param;
+  param.A = const_cast<Scalar*>(a_base_ptr);
+  param.B = const_cast<Scalar*>(b_base_ptr);
+  param.C = c_base_ptr;
+  param.indicators = const_cast<int*>(indicator.template flat<int>().data());
+  param.m = m, param.n = n, param.k = k;
+  param.batch_a = batch_a, param.batch_b = batch_b;
+  BlasScratchAllocator scratch_allocator(context);
+  auto stat = LaunchComputePtr<Scalar>(&param, paralle_num, context,
+                                       &scratch_allocator);
+  if (stat != Status::OK()) {
+    LOG(ERROR) << "ComputePtrKernel failed, " << stat.error_message();
+    return;
+  }
+  RunGemmBatched<Scalar>(context, trans_a, trans_b, m, n, k, Scalar(1.0),
+                         param.As, param.Bs, Scalar(0.0), param.Cs,
+                         batch_b * paralle_num);
 }
 
 template struct LaunchIndicatorMatmul<GPUDevice, float>;
