@@ -991,7 +991,6 @@ Status GraphPartitionerBase::CompleteMainGraph(
       // So if code run to here, it may be some wrong there.
       // LOG(FATAL) << "No RunGraph node to trigger the ps graph to run. \
       //              There must be some wrong with your graph partition.";
-        std::cerr << "return le a \n";
       continue;
     } else {
         std::cerr << sub_graph.GetInputEdges().size() << std::endl;
@@ -999,22 +998,17 @@ Status GraphPartitionerBase::CompleteMainGraph(
     }
 
     NodeDef *run_graph_node_def = graph_def.add_node();
-    std::cerr << "caixukun1\n";
     MakeRunGraphNodeDef(sub_graph, worker_device,
                         run_graph_node_def, zero_copy_,
                         ps_graph_count[sub_graph.GetLoc()]);
-    std::cerr << "caixukun2\n";
-
     Status s = ProcessRunGraphInputs(sub_graph, worker_device,
                                      &graph_def, run_graph_node_def, &bridge_nodes_map);
-    std::cerr << "caixukun3\n";
     RETURN_IF_NOT_OK(s);
 
     s = ProcessRunGraphOutputs(sub_graph, worker_device,
                                &graph_def, run_graph_node_def, &bridge_nodes_map,
                                &added_nodes);
     RETURN_IF_NOT_OK(s);
-    std::cerr << "caixukun4\n";
   }
 
   for (const Node* node : worker_graph->GetNodes()) {
@@ -1027,7 +1021,6 @@ Status GraphPartitionerBase::CompleteMainGraph(
     }
   }
 
-    std::cerr << "caixukun5\n";
   return Status::OK();
 }
 
