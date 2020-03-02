@@ -42,11 +42,11 @@ env PYTHON_BIN_PATH=/opt/conda/bin/python \
     TF_NEED_CUDA=1 TF_NEED_TENSORRT=0 TF_CUDA_CLANG=0 \
     GCC_HOST_COMPILER_PATH=/usr/bin/gcc TF_NEED_MPI=0 \
     CC_OPT_FLAGS="-march=native -Wno-sign-compare" \
-    CUDA_TOOLKIT_PATH=/usr/local/cuda \
+    CUDA_TOOLKIT_PATH=/usr/local/cuda-10.1 \
     TF_CUDA_COMPUTE_CAPABILITIES="6.0,7.5" \
-    LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/local/cuda/extras/CUPTI/lib64/:" \
+    LD_LIBRARY_PATH="/usr/local/cuda-10.1/lib64:/usr/local/cuda-10.1/extras/CUPTI/lib64/:" \
     TF_SET_ANDROID_WORKSPACE=0 ./configure
-export LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/local/cuda/extras/CUPTI/lib64/:"
+export LD_LIBRARY_PATH="/usr/local/cuda-10.1/lib64:/usr/local/cuda-10.1/extras/CUPTI/lib64/:"
 sh build_tflib.sh
 sudo /usr/bin/strip bazel-bin/tensorflow/libtensorflow.so.1.15.0
 ln -s -f libtensorflow.so.1.15.0 bazel-bin/tensorflow/libtensorflow.so
