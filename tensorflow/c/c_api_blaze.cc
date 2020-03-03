@@ -73,6 +73,7 @@ limitations under the License.
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/public/session.h"
 #include "tensorflow/core/public/version.h"
+#include "tensorflow/core/util/env_var.h"
 
 // The implementation below is at the top level instead of the
 // brain namespace because we are defining 'extern "C"' functions.
@@ -173,23 +174,135 @@ TF_Buffer* TF_ReadMetaGraphDefFromFile(
   }
 }
 
-void TF_GraphSetDevice(TF_Graph* graph,
-                       const char* device) {
+static std::unordered_set<string> GetNonComputeIntensiveNodes() {
+  std::unordered_set<string> ops = {
+      //"ExpandDims",
+      //"Gather",
+      //"GatherV2",
+      //"GatherNd",
+      //"Identity",
+      //"Pack",
+      //"Slice",
+      //"Squeeze",
+      //"StridedSlice",
+      //"Split",
+      //"SplitV",
+      //"Tile",
+      //"Transpose",
+      //"Unpack",
+      //"Where",
+      "TakeAxis",
+      "Sum",
+      "NotEqual",
+      "Reshape",
+      "Concat",
+      "ConcatV2"};
+  return ops;
+}
+
+static int InsertToCPUSet(Node* node,
+                   const std::unordered_set<string>& candidates,
+                   std::unordered_set<Node*>* cpu_nodes) {
+  // Put Placeholders on CPU
+  if (node->type_string() == "Placeholder" ||
+      node->type_string() == "PlaceholderV2") {
+    VLOG(2) << "InsertToCPUSet: " << node->DebugString();
+    return cpu_nodes->insert(node).second;
+  }
+  // Put INT32/INT64 node, which is also the input of CPU nodes, on CPU.
+  DataType output_type = node->output_type(0);
+  if ((output_type == tensorflow::DT_INT32 ||
+       output_type == tensorflow::DT_INT64) &&
+      node->type_string() != "Shape") {
+    for (const tensorflow::Edge* e : node->out_edges()) {
+      Node* n = e->dst();
+      if (cpu_nodes->find(n) != cpu_nodes->end()) {
+        VLOG(2) << "InsertToCPUSet: " << n->DebugString();
+        return cpu_nodes->insert(node).second;
+      }
+    }
+    return 0;
+  }
+
+  // Put Concats/Reshapes/... after Placeholders on CPU
+  if (candidates.find(node->type_string()) == candidates.end()) {
+    return 0;
+  }
+  std::vector<Node*> int_or_const_inputs;
+  for (const tensorflow::Edge* e : node->in_edges()) {
+    Node* n = e->src();
+    DataType type = n->output_type(e->src_output());
+    if (((type == tensorflow::DT_INT32 || type == tensorflow::DT_INT64) &&
+         n->type_string() != "Shape") ||
+        n->type_string() == "Const") {
+      int_or_const_inputs.emplace_back(n);
+      continue;
+    }
+    if (cpu_nodes->find(n) == cpu_nodes->end()) {
+      return 0;
+    }
+  }
+  int new_insertion = 0;
+  for (Node* n : int_or_const_inputs) {
+    VLOG(2) << "InsertToCPUSet: " << n->DebugString();
+    if (cpu_nodes->insert(n).second) new_insertion++;
+  }
+  VLOG(2) << "InsertToCPUSet: " << node->DebugString();
+  if (cpu_nodes->insert(node).second) new_insertion++;
+  return new_insertion;
+}
+
+static void AutoPlaceNodesOnCPU(Graph* graph) {
+  // To improve CPU-GPU memcpy and GPU compute efficiency,
+  // we place some memory intensive nodes to run on CPU.
+  // Traverse from placeholders, mark cheap nodes
+  // after placeholders to run on CPU.
+  std::unordered_set<Node*> cpu_nodes;
+  std::unordered_set<string> candidates =
+      GetNonComputeIntensiveNodes();
+  while(1) {
+    int new_insertion = 0;
+    for (Node* node : graph->nodes()) {
+      VLOG(2) << "Check node: " << node->DebugString();
+      new_insertion += InsertToCPUSet(node, candidates, &cpu_nodes);
+      VLOG(2) << "Check node: new_insertion = " << new_insertion;
+    }
+    if (new_insertion == 0) break;
+  }
+
+  std::string cpu_device = "/device:CPU:0";
+  for (Node* node : cpu_nodes) {
+    node->set_requested_device(cpu_device);
+    VLOG(2) << "Place on CPU: " << node->DebugString();
+  }
+}
+
+void TF_GraphSetDevice(TF_Graph* graph, int cpu_id, int gpu_id) {
   mutex_lock l(graph->mu);
   Graph* g = &(graph->graph);
+
+  AutoPlaceNodesOnCPU(g);
+
+  LOG(INFO) << "TF_GraphSetDevice: cpu_id, gpu_id = "
+            << cpu_id << ", " << gpu_id;
+  std::string cpu_device = "/device:CPU:" + std::to_string(cpu_id);
+  std::string gpu_device = "/device:GPU:" + std::to_string(gpu_id);
+  std::string device;
+  if (gpu_id >= 0) {
+    device = gpu_device;
+  } else {
+    device = cpu_device;
+  }
   for (Node* node : g->nodes()) {
     std::string requested_device = node->requested_device();
-    // To improve performance, users may manually place
-    // some memory-intensive nodes on CPU
-    // (e.g., Concat after Placeholder(s)).
-    // In this case, we respect such placement.
-    // Also, for these manually specified nodes, we turn off
-    // XLA compilation since XLA may ignore such placement.
-    if (requested_device.find("CPU") == std::string::npos &&
-        requested_device.find("cpu") == std::string::npos) {
-      node->set_requested_device(device);
-    } else {
+    if (requested_device.find("CPU") != std::string::npos ||
+        requested_device.find("cpu") != std::string::npos) {
+      node->set_requested_device(cpu_device);
       node->AddAttr("_XlaCompile", false);
+      VLOG(1) << "Place node " << node->name() << " on " << cpu_device;
+    } else {
+      node->set_requested_device(device);
+      VLOG(1) << "Place node " << node->name() << " on " << device;
     }
   }
 }
@@ -393,11 +506,24 @@ void TF_EnableGemmOptimization(TF_SessionOptions* options,
   }
 }
 
-TF_CAPI_EXPORT extern void TF_EnableVirtualGPUDevices(
+void TF_EnableAutoMixedPrecision(TF_SessionOptions* options,
+                                 unsigned char enable) {
+  tensorflow::ConfigProto& config = options->options.config;
+  auto* rewrite_config =
+      config.mutable_graph_options()->mutable_rewrite_options();
+  if (enable) {
+    rewrite_config->set_auto_mixed_precision(tensorflow::RewriterConfig::ON);
+  } else {
+    rewrite_config->set_auto_mixed_precision(tensorflow::RewriterConfig::OFF);
+  }
+}
+
+void TF_EnableVirtualGPUDevices(
     TF_SessionOptions* options,
     int num_virtual_gpus_per_device,
     int memory_limit_mb_per_virtual_gpu,
     int num_phisical_gpus) {
+  if (num_virtual_gpus_per_device <= 0 || num_phisical_gpus <= 0) return;
   auto* gpu_options = options->options.config.mutable_gpu_options();
   for (int i = 0; i < num_phisical_gpus; i++) {
     auto virtual_devices =
@@ -409,21 +535,37 @@ TF_CAPI_EXPORT extern void TF_EnableVirtualGPUDevices(
   }
 }
 
-TF_CAPI_EXPORT extern void TF_EnablePerSessionThreadPool(
-    TF_SessionOptions* options,
-    int num_threads_per_session) {
-  static int count = 0;
-  std::string name = "pool:" + std::to_string(count++);
-  auto* pool_config = options->options.config.
-                      add_session_inter_op_thread_pool();
-  pool_config->set_num_threads(num_threads_per_session);
-  pool_config->set_global_name(name);
+void TF_SetCPUDeviceCount(
+    TF_SessionOptions* options, int num_cpus) {
+  if (num_cpus <= 0) return;
+  auto* device_count = options->options.config.mutable_device_count();
+  device_count->insert({"CPU", num_cpus});
 }
 
-void TF_EnableGPUMemoryAllowGrowth(TF_SessionOptions* options,
-                                   unsigned char enable) {
+void TF_SetThreadPoolOptions(
+    TF_SessionOptions* options,
+    int num_inter_op_threads,
+    int num_intra_op_threads) {
+  if (num_inter_op_threads > 0) {
+    static int count = 0;
+    std::string name = "session_inter_op_threadpool:" + std::to_string(count++);
+    auto* pool_config = options->options.config.
+                        add_session_inter_op_thread_pool();
+    pool_config->set_num_threads(num_inter_op_threads);
+    pool_config->set_global_name(name);
+  }
+  if (num_intra_op_threads > 0) {
+    options->options.config.set_intra_op_parallelism_threads(
+        num_intra_op_threads);
+  }
+}
+
+void TF_SetGPUMemoryOptions(TF_SessionOptions* options,
+                            unsigned char allow_growth,
+                            unsigned char force_gpu_compatible) {
   auto* gpu_options = options->options.config.mutable_gpu_options();
-  gpu_options->set_allow_growth(enable);
+  gpu_options->set_allow_growth(allow_growth);
+  gpu_options->set_force_gpu_compatible(force_gpu_compatible);
 }
 
 void TF_EnableCudaGraph(TF_Buffer* run_options, unsigned char enable,

@@ -66,8 +66,8 @@ REGISTER_OP("AddN")
           } else if (shapes_and_types && shapes_and_types_i) {
             if (shapes_and_types_i->size() != shapes_and_types->size()) {
               return errors::InvalidArgument(
-                  "shapes_and_types[", i, "].size() == ",
-                  shapes_and_types_i->size(),
+                  "shapes_and_types[", i,
+                  "].size() == ", shapes_and_types_i->size(),
                   " != shapes_and_types[0].size() == ",
                   shapes_and_types->size());
             }
@@ -137,18 +137,143 @@ REGISTER_OP("BatchMatMulV2")
     .Attr("adj_y: bool = false")
     .SetShapeFn(shape_inference::BatchMatMulV2Shape);
 
-REGISTER_OP("ParallelGemm")
+REGISTER_OP("IndicatorMatMul")
     .Input("x: T")
     .Input("y: T")
-    .Input("c: T")
+    .Input("indicator: int32")
     .Output("output: T")
-    .Attr("T: {float, double}")
-//    .Attr("transpose_a: bool = false")
-//    .Attr("transpose_b: bool = false")
-    .Attr("alpha: float = 1.0")
-    .Attr("beta: float = 1.0")
-    .Attr("parallel_num: int = 1")
+    .Attr("T: {bfloat16, half, float, double, int32, int64}")
+    .Attr("adj_x: bool = false")
+    .Attr("adj_y: bool = false")
+    .SetShapeFn([](InferenceContext* c) {
+      ShapeHandle a;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 3, &a));
+      ShapeHandle b;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 3, &b));
+      ShapeHandle ind;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &ind));
+      bool transpose_a, transpose_b;
+      TF_RETURN_IF_ERROR(c->GetAttr("adj_x", &transpose_a));
+      TF_RETURN_IF_ERROR(c->GetAttr("adj_y", &transpose_b));
+      DimensionHandle output_rows = transpose_a ? c->Dim(a, 2) : c->Dim(a, 1);
+      DimensionHandle output_cols = transpose_b ? c->Dim(b, 1) : c->Dim(b, 2);
+
+      // Validate that the inner shapes are compatible.
+      DimensionHandle inner_a = transpose_a ? c->Dim(a, 1) : c->Dim(a, 2);
+      DimensionHandle inner_b = transpose_b ? c->Dim(b, 2) : c->Dim(b, 1);
+      DimensionHandle merged;
+      TF_RETURN_IF_ERROR(c->Merge(inner_a, inner_b, &merged));
+      DimensionHandle batch_shape = c->Dim(b, 0);
+      c->set_output(0, c->MakeShape({batch_shape, output_rows, output_cols}));
+      return Status::OK();
+    });
+
+REGISTER_OP("ParallelIndicatorMatMul")
+    .Input("x: T")
+    .Input("y: T")
+    .Input("indicator: int32")
+    .Output("output: T")
+    .Attr("T: {bfloat16, half, float, double, int32, int64}")
+    .Attr("adj_x: bool = false")
+    .Attr("adj_y: bool = false")
+    .Attr("parallel_num: int >= 1")
+    .SetShapeFn([](InferenceContext* c) {
+      ShapeHandle a;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 4, &a));
+      ShapeHandle b;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 4, &b));
+      ShapeHandle ind;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &ind));
+      bool transpose_a, transpose_b;
+      TF_RETURN_IF_ERROR(c->GetAttr("adj_x", &transpose_a));
+      TF_RETURN_IF_ERROR(c->GetAttr("adj_y", &transpose_b));
+      int parallel_num;
+      TF_RETURN_IF_ERROR(c->GetAttr("parallel_num", &parallel_num));
+      DimensionHandle output_rows = transpose_a ? c->Dim(a, 3) : c->Dim(a, 2);
+      DimensionHandle output_cols = transpose_b ? c->Dim(b, 2) : c->Dim(b, 3);
+
+      // Validate that the inner shapes are compatible.
+      DimensionHandle inner_a = transpose_a ? c->Dim(a, 2) : c->Dim(a, 3);
+      DimensionHandle inner_b = transpose_b ? c->Dim(b, 3) : c->Dim(b, 2);
+      DimensionHandle merged;
+      TF_RETURN_IF_ERROR(c->Merge(inner_a, inner_b, &merged));
+      // Validate that the parallel_num are compatible.
+      DimensionHandle parallel_a = c->Dim(a, 0);
+      DimensionHandle parallel_b = c->Dim(b, 0);
+      DimensionHandle parallel_merged;
+      TF_RETURN_IF_ERROR(c->Merge(parallel_a, parallel_b, &parallel_merged));
+      DimensionHandle batch_shape = c->Dim(b, 1);
+      c->set_output(0, c->MakeShape({parallel_merged, batch_shape, output_rows,
+                                     output_cols}));
+      return Status::OK();
+    });
+
+REGISTER_OP("BlazeGRU")
+    .Input("x: T")         //[batch_size, rounds, elts]
+    .Input("h2h: T")       //[elts, 3elts]
+    .Input("i2h: T")       //[elts, 3elts]
+    .Input("h2h_bias: T")  //[3elts]
+    .Input("i2h_bias: T")  //[3elts]
+    .Output("y: T")        //[batch_size, rounds, elts]
+    .Attr("T: {float}")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      // check param shapes
+      c->set_output(0, c->input(0));
+      return Status::OK();
+    });
+
+/* values N * (scences, unit_size)
+ * coords N * (scences, 2)
+ * output_shape (2, ) [user's sessions, max scenes in one session]
+ * output (users' sessions, max scenes in one session, unit_size)
+ */
+
+REGISTER_OP("Take")
+    .Input("values: N * T")
+    .Input("coords: N * Tindices")
+    .Input("output_shape: Tindices")
+    .Output("output: T")
+    .Attr("N: int")
+    .Attr("T: realnumbertype")
+    .Attr("Tindices: {int32,int64}")
     .SetShapeFn(shape_inference::UnknownShape);
+
+/* values N * (scences, unit_size)
+ * coords N * (scences, 2)
+ * output_shape (2, ) [user's sessions, max scenes in one session]
+ * output (users' sessions, max scenes in one session, unit_size)
+ */
+
+REGISTER_OP("TakeGrad")
+    .Input("grad: T")
+    .Input("coords: N * Tindices")
+    .Output("grad_values: N * T")
+    .Attr("N: int")
+    .Attr("T: realnumbertype")
+    .Attr("Tindices: {int32,int64}")
+    .SetShapeFn(shape_inference::UnknownShape);
+
+REGISTER_OP("TakeAxis")
+    .Input("input: T")
+    .Input("begin: Index")
+    .Output("output: T")
+    .Attr("size: int")
+    .Attr("axis: int")
+    .Attr("reverse: bool")
+    .Attr("T: realnumbertype")
+    .Attr("Index: {int32,int64}")
+    .SetShapeFn([](InferenceContext* c) {
+      int32 axis;
+      int32 size;
+      TF_RETURN_IF_ERROR(c->GetAttr("size", &size));
+      TF_RETURN_IF_ERROR(c->GetAttr("axis", &axis));
+      ShapeHandle in = c->input(0);
+      ShapeHandle out;
+      DimensionHandle size_dim;
+      TF_RETURN_IF_ERROR(c->ReplaceDim(in, axis, c->MakeDim(size), &out));
+      c->set_output(0, out);
+      return Status::OK();
+    });
 
 #ifdef INTEL_MKL
 REGISTER_OP("_MklBatchMatMul")
@@ -1407,12 +1532,12 @@ Status RangeSize(const Tensor* start_t, const Tensor* limit_t,
   T limit = limit_t->scalar<T>()();
   T delta = delta_t->scalar<T>()();
   if (start > limit && delta > 0) {
-    return errors::InvalidArgument("Requires start <= limit when delta > 0: ",
-                                   start, "/", limit);
+    return errors::InvalidArgument(
+        "Requires start <= limit when delta > 0: ", start, "/", limit);
   }
   if (start < limit && delta < 0) {
-    return errors::InvalidArgument("Requires start >= limit when delta < 0: ",
-                                   start, "/", limit);
+    return errors::InvalidArgument(
+        "Requires start >= limit when delta < 0: ", start, "/", limit);
   }
   if (delta == 0) {
     return errors::InvalidArgument("Requires delta != 0");

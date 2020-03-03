@@ -1099,6 +1099,11 @@ class BlasSupport {
       const port::ArraySlice<DeviceMemory<float> *> &b, int ldb, float beta,
       const port::ArraySlice<DeviceMemory<float> *> &c, int ldc,
       int batch_count, ScratchAllocator *scratch_allocator) = 0;
+  virtual bool DoBlasGemmBatched(Stream* stream, blas::Transpose transa,
+                                 blas::Transpose transb, uint64 m, uint64 n,
+                                 uint64 k, float alpha, const float** a,
+                                 int lda, const float** b, int ldb, float beta,
+                                 float** c, int ldc, int batch_count) = 0;
   virtual bool DoBlasGemmBatched(
       Stream *stream, blas::Transpose transa, blas::Transpose transb, uint64 m,
       uint64 n, uint64 k, double alpha,
@@ -1106,6 +1111,12 @@ class BlasSupport {
       const port::ArraySlice<DeviceMemory<double> *> &b, int ldb, double beta,
       const port::ArraySlice<DeviceMemory<double> *> &c, int ldc,
       int batch_count, ScratchAllocator *scratch_allocator) = 0;
+  virtual bool DoBlasGemmBatched(Stream* stream, blas::Transpose transa,
+                                 blas::Transpose transb, uint64 m, uint64 n,
+                                 uint64 k, double alpha, const double** a,
+                                 int lda, const double** b, int ldb,
+                                 double beta, double** c, int ldc,
+                                 int batch_count) = 0;
   virtual bool DoBlasGemmBatched(
       Stream *stream, blas::Transpose transa, blas::Transpose transb, uint64 m,
       uint64 n, uint64 k, std::complex<float> alpha,
@@ -2004,6 +2015,16 @@ class BlasSupport {
       const port::ArraySlice<DeviceMemory<float> *> &b, int ldb, float beta,   \
       const port::ArraySlice<DeviceMemory<float> *> &c, int ldc,               \
       int batch_count, ScratchAllocator *scratch_allocator) override;          \
+  bool DoBlasGemmBatched(Stream* stream, blas::Transpose transa,               \
+                         blas::Transpose transb, uint64 m, uint64 n, uint64 k, \
+                         float alpha, const float** a, int lda,                \
+                         const float** b, int ldb, float beta, float** c,      \
+                         int ldc, int batch_count) override;                   \
+  bool DoBlasGemmBatched(Stream* stream, blas::Transpose transa,               \
+                         blas::Transpose transb, uint64 m, uint64 n, uint64 k, \
+                         double alpha, const double** a, int lda,              \
+                         const double** b, int ldb, double beta, double** c,   \
+                         int ldc, int batch_count) override;                   \
   bool DoBlasGemmBatched(                                                      \
       Stream *stream, blas::Transpose transa, blas::Transpose transb,          \
       uint64 m, uint64 n, uint64 k, double alpha,                              \

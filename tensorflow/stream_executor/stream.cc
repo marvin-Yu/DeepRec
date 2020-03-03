@@ -4557,6 +4557,22 @@ Stream &Stream::ThenBlasGemmBatched(
                                         /*scratch_allocator=*/nullptr);
 }
 
+Stream& Stream::ThenBlasGemmBatched(blas::Transpose transa,
+                                    blas::Transpose transb, uint64 m, uint64 n,
+                                    uint64 k, float alpha, const float** a,
+                                    int lda, const float** b, int ldb,
+                                    float beta, float** c, int ldc,
+                                    int batch_count) {
+  VLOG_CALL(PARAM(transa), PARAM(transb), PARAM(m), PARAM(n), PARAM(k),
+            PARAM(alpha), PARAM(a), PARAM(lda), PARAM(b), PARAM(ldb),
+            PARAM(beta), PARAM(c), PARAM(ldc), PARAM(batch_count));
+  ThenBlasImpl<blas::Transpose, blas::Transpose, uint64, uint64, uint64, float,
+               const float**, int, const float**, int, float, float**, int, int>
+      impl;
+  return impl(this, &blas::BlasSupport::DoBlasGemmBatched, transa, transb, m, n,
+              k, alpha, a, lda, b, ldb, beta, c, ldc, batch_count);
+}
+
 Stream &Stream::ThenBlasGemmBatchedWithScratch(
     blas::Transpose transa, blas::Transpose transb, uint64 m, uint64 n,
     uint64 k, float alpha, const port::ArraySlice<DeviceMemory<float> *> &a,
@@ -4576,6 +4592,22 @@ Stream &Stream::ThenBlasGemmBatchedWithScratch(
   return impl(this, &blas::BlasSupport::DoBlasGemmBatched, transa, transb, m, n,
               k, alpha, a, lda, b, ldb, beta, c, ldc, batch_count,
               scratch_allocator);
+}
+
+Stream& Stream::ThenBlasGemmBatched(blas::Transpose transa,
+                                    blas::Transpose transb, uint64 m, uint64 n,
+                                    uint64 k, double alpha, const double** a,
+                                    int lda, const double** b, int ldb,
+                                    double beta, double** c, int ldc,
+                                    int batch_count) {
+  VLOG_CALL(PARAM(transa), PARAM(transb), PARAM(m), PARAM(n), PARAM(k),
+            PARAM(alpha), PARAM(a), PARAM(lda), PARAM(b), PARAM(ldb),
+            PARAM(beta), PARAM(c), PARAM(ldc), PARAM(batch_count));
+  ThenBlasImpl<blas::Transpose, blas::Transpose, uint64, uint64, uint64, double,
+      const double**, int, const double**, int, double, double**, int, int>
+      impl;
+  return impl(this, &blas::BlasSupport::DoBlasGemmBatched, transa, transb, m, n,
+              k, alpha, a, lda, b, ldb, beta, c, ldc, batch_count);
 }
 
 Stream &Stream::ThenBlasGemmBatched(

@@ -50,6 +50,7 @@ std::unordered_set<string> GetUnaryOps() {
 
 std::unordered_set<string> GetBinaryOps() {
   std::unordered_set<string> ops = {
+      "IndicatorMatMul",
       "MatMul",
       "BatchMatMul",
       "BatchMatMulV2",
@@ -186,7 +187,7 @@ bool ReorderReshapeAndBiasAdd(Graph* graph) {
 // such that B*C, and (C*D)+E can be folded to consts.
 bool ConstantFoldingForContinuousMatMulsOnePass(Graph* graph);
 bool ConstantFoldingForContinuousMatMuls(Graph* graph) {
-  VLOG(1) << "ConstantFoldingForContinuousMatMuls";
+  VLOG(2) << "ConstantFoldingForContinuousMatMuls";
   bool changed = false;
   while (1) {
     if (ConstantFoldingForContinuousMatMulsOnePass(graph)) {
@@ -249,7 +250,7 @@ bool ConstantFoldingForContinuousMatMulsOnePass(Graph* graph) {
       matmuls[i]->input_node(1, &weights[i]);
     }
 
-    VLOG(1) << "ConstantFoldingForContinuousMatMuls: found pattern";
+    VLOG(2) << "ConstantFoldingForContinuousMatMuls: found pattern";
     Node* temps[5];
     for (int i = 0; i < 5; i++) {
       temps[i] = nullptr;
@@ -526,7 +527,7 @@ bool ConstantFoldingForContinuousMatMulsOnePass(Graph* graph) {
 //       ...
 bool FuseMatMuls(Graph* graph) {
   static int count = 0;
-  VLOG(1) << "FuseMatMuls";
+  VLOG(2) << "FuseMatMuls";
   bool changed = false;
 
   std::vector<Node*> nodes(graph->num_nodes());
@@ -561,17 +562,17 @@ bool FuseMatMuls(Graph* graph) {
     }
     if (!same_input) continue;
 
-    VLOG(1) << "FuseMatMuls: found pattern";
+    VLOG(2) << "FuseMatMuls: found pattern";
     std::sort(matmuls.begin(), matmuls.end(),
               [node](Node* a, Node* b){
       return a->name().compare(b->name()) < 0;
     });
     std::vector<Node*> weights;
-    VLOG(1) << "the following ops are fused: ";
+    VLOG(2) << "the following ops are fused: ";
     string weight_shape;
     bool can_fuse = true;
     for (Node* m : matmuls) {
-      VLOG(1) << m->name();
+      VLOG(2) << m->name();
       Node* w = nullptr;
       m->input_node(1, &w);
 
@@ -722,7 +723,7 @@ bool FuseMatMuls(Graph* graph) {
 // TODO(ylxu): to support fusing more types of ops after unpack
 bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
   static int count = 0;
-  VLOG(1) << "FuseBiasAdds";
+  VLOG(2) << "FuseBiasAdds";
   bool changed = false;
 
   std::vector<Node*> nodes(graph->num_nodes());
@@ -755,7 +756,7 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
     }
     if (!can_fuse || biasadds.size() < 2) continue;
 
-    VLOG(1) << "FuseBiasAdds: found pattern";
+    VLOG(2) << "FuseBiasAdds: found pattern";
     std::sort(biasadds.begin(), biasadds.end(),
               [node](Node* a, Node* b){
       const Edge* e = nullptr;
@@ -958,7 +959,7 @@ bool FuseBiasAddsAfterBatchMatMulUnpack(Graph* graph) {
 
 // [-, shape_param]->Reshape->Shape->Op to [shape_param]->Op
 bool RemoveShapeAfterReshape(Graph* graph) {
-  VLOG(1) << "RemoveShapeAfterReshape";
+  VLOG(2) << "RemoveShapeAfterReshape";
   bool changed = false;
   std::vector<Node*> nodes(graph->num_nodes());
   int i = 0;
@@ -973,7 +974,7 @@ bool RemoveShapeAfterReshape(Graph* graph) {
     Node* reshape = nullptr;
     shape->input_node(0, &reshape);
     if (reshape->type_string() != "Reshape") continue;
-    VLOG(1) << "RemoveShapeAfterReshape: found pattern";
+    VLOG(2) << "RemoveShapeAfterReshape: found pattern";
     Node* reshape_in_1 = nullptr;
     reshape->input_node(1, &reshape_in_1);
 
@@ -1000,7 +1001,7 @@ bool RemoveShapeAfterReshape(Graph* graph) {
 // Change ->Unpack->Reshape*n-> to ->Reshape->Unpack->
 bool FuseReshapesAfterUnpack(Graph* graph) {
   static int count = 0;
-  VLOG(1) << "FuseReshapesAfterUnpack";
+  VLOG(2) << "FuseReshapesAfterUnpack";
   bool changed = false;
 
   std::vector<Node*> nodes(graph->num_nodes());
@@ -1030,7 +1031,7 @@ bool FuseReshapesAfterUnpack(Graph* graph) {
     for (unsigned int i = 1; i < reshapes.size(); i++) {
       if (reshape_in_1[i] != reshape_in_1[0]) continue;
     }
-    VLOG(1) << "FuseReshapesAfterUnpack: found pattern";
+    VLOG(2) << "FuseReshapesAfterUnpack: found pattern";
     
     // Add a new Shape to get the shape of Unpack's input
     const Edge* to_unpack;
@@ -1249,7 +1250,7 @@ bool FuseReshapesAfterUnpack(Graph* graph) {
 // such that memory-intensive Unpack can be avoided.
 bool RemoveUnpackBeforeShape(Graph* graph) {
   static int count = 0;
-  VLOG(1) << "RemoveUnpackBeforeShape";
+  VLOG(2) << "RemoveUnpackBeforeShape";
   bool changed = false;
 
   std::vector<Node*> nodes(graph->num_nodes());
@@ -1264,7 +1265,7 @@ bool RemoveUnpackBeforeShape(Graph* graph) {
     Node* unpack = nullptr;
     node->input_node(0, &unpack);
     if (unpack->type_string() != "Unpack") continue;
-    VLOG(1) << "RemoveUnpackBeforeShape: found pattern";
+    VLOG(2) << "RemoveUnpackBeforeShape: found pattern";
 
     // Add a new Shape to get the shape of Unpack's input
     const Edge* to_unpack = nullptr;
@@ -1393,7 +1394,7 @@ bool RemoveUnpackBeforeShape(Graph* graph) {
 // Change ->Unpack->Transpose*n-> to ->Transpose->Unpack->
 bool FuseTransposesAfterUnpack(Graph* graph) {
   static int count = 0;
-  VLOG(1) << "FuseTransposesAfterUnpack";
+  VLOG(2) << "FuseTransposesAfterUnpack";
   bool changed = false;
 
   std::vector<Node*> nodes(graph->num_nodes());
@@ -1423,7 +1424,7 @@ bool FuseTransposesAfterUnpack(Graph* graph) {
     for (unsigned int i = 1; i < transposes.size(); i++) {
       if (transpose_in_1[i] != transpose_in_1[0]) continue;
     }
-    VLOG(1) << "FuseTransposesAfterUnpack: found pattern";
+    VLOG(2) << "FuseTransposesAfterUnpack: found pattern";
 
     string prefix = "GemmOptimizer/FuseTransposesAfterUnpack/" +
                     std::to_string(count++);
@@ -1617,7 +1618,7 @@ bool FuseBinaryOpsSharingACommonInputAfterUnpack(Graph* graph);
 // ->Unpack->BinaryOp*n to ->BinaryOp->Unpack
 bool FuseBinaryOpsAfterUnpack(Graph* graph) {
   static int count = 0;
-  VLOG(1) << "FuseBinaryOpsAfterUnpack";
+  VLOG(2) << "FuseBinaryOpsAfterUnpack";
   bool changed = FuseBinaryOpsSharingACommonInputAfterUnpack(graph);
   std::vector<Node*> nodes(graph->num_nodes());
   int i = 0;
@@ -1632,8 +1633,8 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
     // group ops based on its inputs
     std::vector<Node*> binary_ops;
     std::map<string, std::vector<Node*>> binary_ops_m;
-    bool another_input_from_unpack = true;
-    bool another_input_from_consts = true;
+    std::vector<std::pair<Node*, int>> common_extra_input;
+    const Node* another_node = nullptr;
     bool can_fuse = true;
     string binary_type;
     for (Node* out : node->out_nodes()) {
@@ -1649,29 +1650,61 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
         can_fuse = false;
         break;
       }
-      binary_ops.push_back(out);
-      for (Node* n : out->in_nodes()) {
-        if (n != node) {
-          string type = n->type_string();
-          if (type != "Unpack") {
-            another_input_from_unpack = false;
+
+      if (out->num_inputs() < 2) {
+        can_fuse = false;
+        break;
+      }
+
+      bool has_same_another_input = true;
+      bool another_input_from_unpack_or_const = true;
+      bool has_common_extra_input = true;
+      for (int i = 0; i < out->num_inputs(); ++i) {
+        const Edge* edge = nullptr;
+        out->input_edge(i, &edge);
+        Node* n = edge->src();
+        if (i < 2) {
+          if (n != node) {
+            if (another_node == nullptr) {
+              string type = n->type_string();
+              if (type == "Unpack" || type == "Const") {
+                another_node = n;
+              } else {
+                another_input_from_unpack_or_const = false;
+                break;
+              }
+            } else {
+              if (n != another_node) {
+                has_same_another_input = false;
+              }
+            }
           }
-          if (type != "Const") {
-            another_input_from_consts = false;
+        } else {
+          size_t vec_idx = i - 2;
+          if (vec_idx >= common_extra_input.size()) {
+            common_extra_input.emplace_back(std::make_pair(n, edge->src_output()));
+          } else {
+            if (n != common_extra_input[vec_idx].first ||
+                edge->src_output() != common_extra_input[vec_idx].second) {
+              has_common_extra_input = false;
+            }
           }
-          break;
         }
       }
+
+      if (has_same_another_input && another_input_from_unpack_or_const && has_common_extra_input)
+        binary_ops.push_back(out);
     }
+
     if (!can_fuse || binary_ops.size() < 2) continue;
-    if (!another_input_from_unpack &&
-        !another_input_from_consts) continue;
 
     for (Node* b : binary_ops) {
-      for (Node* n : b->in_nodes()) {
+      for (int i = 0; i < std::min(b->num_inputs(), 2); ++i) {
+        const Node* n = nullptr;
+        b->input_node(i, &n);
         if (n != node) {
           string key;
-          if (another_input_from_unpack) {
+          if (another_node->type_string() == "Unpack") {
             key = n->name();
           } else {
             TensorShapeProto s = n->def().attr().at("value").
@@ -1691,7 +1724,7 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
         }
       }
     }
-    VLOG(1) << "FuseBinaryOpsAfterUnpack: found pattern";
+    VLOG(2) << "FuseBinaryOpsAfterUnpack: found pattern";
 
     // Fuse binary_ops in each group.
     // For each group, do:
@@ -1702,36 +1735,40 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
     std::map<string, std::vector<Node*>>::iterator iter;
     iter = binary_ops_m.begin();
     while (iter != binary_ops_m.end()) {
-      std::vector<Node*>* binary_ops_group = &(iter->second);
-      if (binary_ops_group->size() < 2) continue;
+      std::vector<Node *> *binary_ops_group = &(iter->second);
+      if (binary_ops_group->size() < 2) iter++;
       std::sort(binary_ops_group->begin(), binary_ops_group->end(),
-                [node](Node* a, Node* b){
-        const Edge* e = nullptr;
-        a->input_edge(0, &e);
-        int a_src_output = e->src_output();
-        b->input_edge(0, &e);
-        int b_src_output = e->src_output();
-        return a_src_output < b_src_output;
-      });
-      std::vector<const Edge*> inputs[2];
-      VLOG(1) << "the following ops are fused: ";
-      for (Node* b : *binary_ops_group) {
-        VLOG(1) << b->name();
-        for (const Edge* e : b->in_edges()) {
+                [node](Node *a, Node *b) {
+                  const Edge *e = nullptr;
+                  a->input_edge(0, &e);
+                  int a_src_output = e->src_output();
+                  b->input_edge(0, &e);
+                  int b_src_output = e->src_output();
+                  return a_src_output < b_src_output;
+                });
+      std::vector<const Edge *> inputs[2];
+      VLOG(2) << "the following ops are fused: ";
+      for (Node *b : *binary_ops_group) {
+        for (int i = 0; i < 2; ++i) {
+          VLOG(2) << b->name();
+
+          const Edge *e = nullptr;
+          b->input_edge(i, &e);
           inputs[e->dst_input()].push_back(e);
         }
       }
+
       // Add two Pack nodes to group on two sides, respectively
-      Node* packs[2];
+      Node *packs[2];
       string pack_names[2];
       string prefix = "GemmOptimizer/FuseBinaryOpsAfterUnpack/" +
                       std::to_string(count++);
       pack_names[0] = prefix + "/Pack_0";
       pack_names[1] = prefix + "/Pack_1";
-      Status status; 
+      Status status;
       for (int i = 0; i < 2; i++) {
         std::vector<NodeDefBuilder::NodeOut> pack_inputs;
-        for (const Edge* e : inputs[i]) {
+        for (const Edge *e : inputs[i]) {
           string s = e->src()->name();
           pack_inputs.emplace_back(s, e->src_output(), dtype);
         }
@@ -1740,7 +1777,7 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
         NodeDef pack_node;
         status =
             pack_builder
-                .Attr("N", (int)inputs[i].size())
+                .Attr("N", (int) inputs[i].size())
                 .Attr("T", dtype)
                 .Attr("axis", 0)
                 .Finalize(&pack_node);
@@ -1761,10 +1798,18 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
                          packs[i], j);
         }
       }
+
       // Add a new BatchMatMulV2
       std::vector<NodeDefBuilder::NodeOut> binary_op_inputs;
       binary_op_inputs.emplace_back(pack_names[0], 0, dtype);
       binary_op_inputs.emplace_back(pack_names[1], 0, dtype);
+      if (!common_extra_input.empty()) {
+        for (size_t i = 0; i < common_extra_input.size(); ++i) {
+          const Node *extra_node = common_extra_input[i].first;
+          int extra_src_idx = common_extra_input[i].second;
+          binary_op_inputs.emplace_back(extra_node->name(), extra_src_idx, extra_node->output_type(extra_src_idx));
+        }
+      }
       string binary_op_name = prefix;
       string type = (*binary_ops_group)[0]->type_string();
       string new_type;
@@ -1773,23 +1818,28 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
           type == "BatchMatMulV2") {
         binary_op_name += "/BatchMatMulV2";
         new_type = "BatchMatMulV2";
+      } else if (type == "IndicatorMatMul") {
+        binary_op_name += "/ParallelIndicatorMatMul";
+        new_type = "ParallelIndicatorMatMul";
       } else {
         binary_op_name += "/" + type;
         new_type = type;
       }
       NodeDefBuilder binary_op_builder(binary_op_name, new_type);
-      binary_op_builder.Input(binary_op_inputs[0]);
-      binary_op_builder.Input(binary_op_inputs[1]);
+      for (size_t i = 0; i < binary_op_inputs.size(); ++i) {
+        binary_op_builder.Input(binary_op_inputs[i]);
+      }
       NodeDef binary_op_node;
       bool transpose_a = false;
       bool transpose_b = false;
       if (type == "MatMul") {
         transpose_a = (*binary_ops_group)[0]->def().attr().at("transpose_a").b();
         transpose_b = (*binary_ops_group)[0]->def().attr().at("transpose_b").b();
-      } else if (type == "BatchMatMul" || type == "BatchMatMulV2") {
+      } else if (type == "BatchMatMul" || type == "BatchMatMulV2" || type == "IndicatorMatMul") {
         transpose_a = (*binary_ops_group)[0]->def().attr().at("adj_x").b();
         transpose_b = (*binary_ops_group)[0]->def().attr().at("adj_y").b();
       }
+
       if (type == "MatMul" ||
           type == "BatchMatMul" ||
           type == "BatchMatMulV2") {
@@ -1797,6 +1847,15 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
             binary_op_builder
                 .Attr("adj_x", transpose_a)
                 .Attr("adj_y", transpose_b)
+                .Attr("T", dtype)
+                .Finalize(&binary_op_node);
+
+      } else if (type == "IndicatorMatMul") {
+        status =
+            binary_op_builder
+                .Attr("adj_x", transpose_a)
+                .Attr("adj_y", transpose_b)
+                .Attr("parallel_num", (int) (*binary_ops_group).size())
                 .Attr("T", dtype)
                 .Finalize(&binary_op_node);
       } else {
@@ -1873,7 +1932,7 @@ bool FuseBinaryOpsAfterUnpack(Graph* graph) {
 
 // ->Unpack->UnaryOp*n to ->UnaryOp->Unpack
 bool FuseUnaryOpsAfterUnpack(Graph* graph) {
-  VLOG(1) << "FuseUnaryOpsAfterUnpack";
+  VLOG(2) << "FuseUnaryOpsAfterUnpack";
   bool changed = false;
 
   std::vector<Node*> nodes(graph->num_nodes());
@@ -1905,7 +1964,7 @@ bool FuseUnaryOpsAfterUnpack(Graph* graph) {
       unary_ops.push_back(out);
     }
     if (!can_reorder || unary_ops.size() < 2) continue;
-    VLOG(1) << "FuseUnaryOpsAfterUnpack: found pattern";
+    VLOG(2) << "FuseUnaryOpsAfterUnpack: found pattern";
     bool is_first = true;
     for (Node* u : unary_ops) {
       std::vector<Node*> dst_nodes;
@@ -1939,7 +1998,7 @@ bool FuseUnaryOpsAfterUnpack(Graph* graph) {
 
 // ->Unpack->BinaryOp*n to ->BinaryOp->Unpack
 bool FuseBinaryOpsSharingACommonInputAfterUnpack(Graph* graph) {
-  VLOG(1) << "FuseBinaryOpsSharingACommonInputAfterUnpack";
+  VLOG(2) << "FuseBinaryOpsSharingACommonInputAfterUnpack";
   bool changed = false;
 
   std::vector<Node*> nodes(graph->num_nodes());
@@ -1972,6 +2031,10 @@ bool FuseBinaryOpsSharingACommonInputAfterUnpack(Graph* graph) {
           can_reorder = false;
           break;
         }
+        if (out->in_edges().size() != 2) {
+          can_reorder = false;
+          break;
+        }
         for (const Edge* e : out->in_edges()) {
           if (e->src() == unpack) {
             unpack_dst_input = e->dst_input();
@@ -1987,6 +2050,7 @@ bool FuseBinaryOpsSharingACommonInputAfterUnpack(Graph* graph) {
         can_reorder = false;
         break;
       }
+
       // check condition (3)
       for (const Edge* e : out->in_edges()) {
         if (e->src() == unpack) continue;
@@ -2002,7 +2066,7 @@ bool FuseBinaryOpsSharingACommonInputAfterUnpack(Graph* graph) {
     }
 
     if (!can_reorder || binary_ops.size() < 2) continue;
-    VLOG(1) << "FuseBinaryOpsSharingACommonInputAfterUnpack: found pattern";
+    VLOG(2) << "FuseBinaryOpsSharingACommonInputAfterUnpack: found pattern";
     bool is_first = true;
     for (Node* b : binary_ops) {
       std::vector<Node*> dst_nodes;
@@ -2036,7 +2100,7 @@ bool FuseBinaryOpsSharingACommonInputAfterUnpack(Graph* graph) {
 }
 
 void RemoveDeadUnpacksAndPacks(Graph* graph) {
-  VLOG(1) << "RemoveDeadUnpacksAndPacks";
+  VLOG(2) << "RemoveDeadUnpacksAndPacks";
   std::vector<Node*> nodes(graph->num_nodes());
   int i = 0;
   for (Node* node : graph->nodes()) {
@@ -2054,7 +2118,7 @@ void RemoveDeadUnpacksAndPacks(Graph* graph) {
 }
 
 bool RemoveUnpacksAndPacks(Graph* graph) {
-  VLOG(1) << "RemoveUnpacksAndPacks";
+  VLOG(2) << "RemoveUnpacksAndPacks";
   bool changed = false;
   static int count = 0;
 
@@ -2119,7 +2183,7 @@ bool RemoveUnpacksAndPacks(Graph* graph) {
     }
 
     if (!can_remove || unpack_split_map.size() == 0) continue;
-    VLOG(1) << "RemoveUnpacksAndPacks: found pattern";
+    VLOG(2) << "RemoveUnpacksAndPacks: found pattern";
 
     // for Unpack->Pack*n, insert a Split Op, and
     // repalace Packs' outputs with Split's outputs.
@@ -2211,112 +2275,112 @@ bool RemoveUnpacksAndPacks(Graph* graph) {
   return changed;
 }
 
-// TODO(ylxu): use a better heuristic?
-std::unordered_set<string> GetNonComputeIntensiveNodes() {
-  std::unordered_set<string> ops = {
-      //"ExpandDims",
-      //"Gather",
-      //"GatherV2",
-      //"GatherNd",
-      //"Identity",
-      //"Pack",
-      //"Slice",
-      //"Squeeze",
-      //"StridedSlice",
-      //"Split",
-      //"SplitV",
-      //"Tile",
-      //"Transpose",
-      //"Unpack",
-      //"Where",
-      "TakeAxis",
-      "Sum",
-      "NotEqual",
-      "Reshape",
-      "Concat",
-      "ConcatV2"};
-  return ops;
+bool FuseGatherBeforeMatMul(Graph* graph) {
+  VLOG(2) << "FuseGatherBeforeMatMul";
+  
+  static int count = 0;
+  bool changed = false;
+  std::vector<Node*> nodes(graph->num_nodes());
+  int i = 0;
+  for (Node* node : graph->nodes()) {
+    nodes[i++] = node;
+  }
+  for (Node* node : nodes) {
+    if (node->type_string() != "BatchMatMulV2") continue;
+    Node *matmul = node;
+    // Check Gather
+    Node *gather = nullptr;
+    matmul->input_node(0, &gather);
+    if (!graph->IsValidNode(gather).ok()) continue;
+    string type = gather->type_string();
+    if (type != "GatherV2") continue;
+    // Check axis
+    Node* axis = nullptr;
+    gather->input_node(2, &axis);
+    if (!axis) continue;
+    type = axis->type_string();
+    if (type != "Const") continue;
+    if (axis->def().attr().at("value").i() != 0) continue;
+
+    // Prepare op name
+    string prefix = "GemmOptimizer/FuseGatherBeforeMatMul/" + matmul->name();
+    string op_name = prefix + "/IndicatorMatMul_" + std::to_string(count++);
+
+    // Build NodeDef
+    std::vector<NodeDefBuilder::NodeOut> ind_matmul_inputs;
+    Node *input_nodes[3] = {nullptr, nullptr, nullptr};
+    int input_idx[3] = {0, 0, 0};
+
+    const Edge* gather_input_0;
+    gather->input_edge(0, &gather_input_0);
+    input_nodes[0] = gather_input_0->src();
+    input_idx[0] = gather_input_0->src_output();
+
+    const Edge* matmul_input_1;
+    matmul->input_edge(1, &matmul_input_1);
+    input_nodes[1] = matmul_input_1->src();
+    input_idx[1] = matmul_input_1->src_output();
+
+    const Edge* gather_input_1;
+    gather->input_edge(1, &gather_input_1);
+    input_nodes[2] = gather_input_1->src();
+    input_idx[2] = gather_input_1->src_output();
+
+    if (!input_nodes[0] || !input_nodes[1] || !input_nodes[2]) continue;
+    DataType dtype = input_nodes[0]->output_type(0);
+    DataType ind_dtype = input_nodes[2]->output_type(0);
+    ind_matmul_inputs.emplace_back(input_nodes[0]->name(), input_idx[0], dtype);
+    ind_matmul_inputs.emplace_back(input_nodes[1]->name(), input_idx[1], dtype);
+    ind_matmul_inputs.emplace_back(input_nodes[2]->name(), input_idx[2], ind_dtype);
+    NodeDefBuilder ind_matmul_builder(op_name, "IndicatorMatMul");
+    ind_matmul_builder.Input(ind_matmul_inputs[0]);
+    ind_matmul_builder.Input(ind_matmul_inputs[1]);
+    ind_matmul_builder.Input(ind_matmul_inputs[2]);
+
+    NodeDef ind_matmul_def;
+    bool transpose_a = false, transpose_b = false;
+    if (matmul->def().attr().find("adj_x") != matmul->def().attr().end()) {
+      transpose_a = matmul->def().attr().at("adj_x").b();
+    }
+    if (matmul->def().attr().find("adj_y") != matmul->def().attr().end()) {
+      transpose_b = matmul->def().attr().at("adj_y").b();
+    }
+    Status status = ind_matmul_builder
+        .Attr("adj_x", transpose_a)
+        .Attr("adj_y", transpose_b)
+        .Attr("T", dtype)
+        .Device(matmul->def().device())
+        .Finalize(&ind_matmul_def);
+    if (!status.ok()) {
+      LOG(ERROR) << "IndicatorMatMul node construction failed with " << status;
+      return changed;
+    }
+
+    // Insert IndicatorMatMul node
+    Node *ind_matmul_node = graph->AddNode(ind_matmul_def, &status);
+    if (!status.ok()) {
+      LOG(ERROR) << "Adding node failed " << status;
+      return changed;
+    }
+    // Update input edge
+    graph->AddEdge(input_nodes[0], input_idx[0], ind_matmul_node, 0);
+    graph->AddEdge(input_nodes[1], input_idx[1], ind_matmul_node, 1);
+    graph->AddEdge(input_nodes[2], input_idx[2], ind_matmul_node, 2);
+    // Update output edge
+    for (const Edge* edge : matmul->out_edges()) {
+      Node* out_node = edge->dst();
+      int dst_idx = edge->dst_input();
+      graph->AddEdge(ind_matmul_node, 0, out_node, dst_idx);
+    }
+    // Remove useless node
+    graph->RemoveNode(matmul);
+
+    changed = true;
+  }
+  return changed;
 }
 
-int InsertToCPUSet(Node* node,
-                   const std::unordered_set<string>& candidates,
-                   std::unordered_set<Node*>* cpu_nodes) {
-  // Place node that satisfies some conditions on CPU.
-
-  // Put Placeholders on CPU
-  if (node->type_string() == "Placeholder" ||
-      node->type_string() == "PlaceholderV2") {
-    VLOG(1) << "InsertToCPUSet: " << node->DebugString();
-    return cpu_nodes->insert(node).second;
-  }
-  // Put INT32/INT64 node, which is the input of CPU nodes, on CPU.  
-  DataType output_type = node->output_type(0);
-  if (output_type == DT_INT32 || output_type == DT_INT64) {
-    for (const Edge* e : node->out_edges()) {
-      Node* n = e->dst();
-      if (cpu_nodes->find(n) != cpu_nodes->end()) {
-        VLOG(1) << "InsertToCPUSet: " << n->DebugString();
-        return cpu_nodes->insert(node).second;
-      }
-    }
-    return 0;
-  }
-
-  // Put Concats/Reshapes after placeholders on CPU
-  if (candidates.find(node->type_string()) == candidates.end()) {
-    return 0;
-  }
-  std::vector<Node*> int_or_const_inputs;
-  for (const Edge* e : node->in_edges()) {
-    Node* n = e->src();
-    DataType type = n->output_type(e->src_output());
-    if (type == DT_INT32 || type == DT_INT64 ||
-        n->type_string() == "Const") {
-      int_or_const_inputs.emplace_back(n);
-      continue;
-    }
-    if (cpu_nodes->find(n) == cpu_nodes->end()) {
-      return 0;
-    }
-  }
-  int new_insertion = 0;
-  for (Node* n : int_or_const_inputs) {
-    VLOG(1) << "InsertToCPUSet: " << n->DebugString();
-    if (cpu_nodes->insert(n).second) new_insertion++;
-  }
-  VLOG(1) << "InsertToCPUSet: " << node->DebugString();
-  if (cpu_nodes->insert(node).second) new_insertion++;
-  return new_insertion;
-}
-
-void AutoPlaceConcats(Graph* graph) {
-  // To improve CPU-GPU memcpy and GPU compute efficiency,
-  // we place some memory intensive nodes to run on CPU.
-  // Traverse from placeholders, mark cheap nodes
-  // after placeholders to run on CPU.
-  std::unordered_set<Node*> cpu_nodes;
-  std::unordered_set<string> candidates =
-      GetNonComputeIntensiveNodes();
-  while(1) {
-    int new_insertion = 0;
-    for (Node* node : graph->nodes()) {
-      VLOG(1) << "Check node: " << node->DebugString();
-      new_insertion += InsertToCPUSet(node, candidates, &cpu_nodes);
-      VLOG(1) << "Check node: new_insertion = " << new_insertion;
-    }
-    if (new_insertion == 0) break;
-  }
-
-  for (Node* node : cpu_nodes) {
-    node->set_requested_device("/job:localhost/replica:0/task:0/device:CPU:0");
-    VLOG(1) << "Place on CPU: " << node->DebugString();
-  }
-}
-
-void OptimizeConcats(Graph* graph) {
-  // 0. Place concats after placeholders on CPU
-  AutoPlaceConcats(graph);
-
+void SplitConcatBasedOnInputDevices(Graph* graph) {
   // 1. Get all GPU concats
   std::vector<Node*> gpu_concats;
   for (Node* node : graph->nodes()) {
@@ -2325,7 +2389,7 @@ void OptimizeConcats(Graph* graph) {
       std::string device = node->requested_device();
       if (device.find("GPU") != std::string::npos ||
           device.find("gpu") != std::string::npos) {
-        VLOG(1) << "Found a OptimizeConcats candidate: "
+        VLOG(2) << "Found a SplitConcatBasedOnInputDevices candidate: "
                   << node->DebugString();
         gpu_concats.emplace_back(node);
       }
@@ -2335,7 +2399,7 @@ void OptimizeConcats(Graph* graph) {
   // 2. Split the concats whose inputs are from different devices
   //    into multiple concats
   for (Node* concat : gpu_concats) {
-    VLOG(1) << "Try to split concat: " << concat->DebugString();
+    VLOG(2) << "Try to split concat: " << concat->DebugString();
     // 2.1. Group inputs of each concat into clusters
     int num_inputs = concat->num_inputs();
     std::vector<const Edge*> inputs(num_inputs);
@@ -2376,7 +2440,7 @@ void OptimizeConcats(Graph* graph) {
     std::string device = devices[begin];
     cluster_inputs[0].emplace_back(inputs[begin]);
     cluster_devices.emplace_back(device);
-    VLOG(1) << "Clustering, cluster " << cluster_idx
+    VLOG(2) << "Clustering, cluster " << cluster_idx
               << ", on " << cluster_devices[cluster_idx]
               << " includes: "
               << inputs[begin]->DebugString();
@@ -2390,7 +2454,7 @@ void OptimizeConcats(Graph* graph) {
         cluster_devices.emplace_back(device);
         cluster_idx++;
       }
-      VLOG(1) << "Clustering, cluster " << cluster_idx
+      VLOG(2) << "Clustering, cluster " << cluster_idx
                 << ", on " << cluster_devices[cluster_idx]
                 << " includes: "
                 << inputs[i]->DebugString();
@@ -2399,11 +2463,11 @@ void OptimizeConcats(Graph* graph) {
     int num_clusters = cluster_inputs.size();
     CHECK(num_clusters <= num_inputs - 1);
     if (num_clusters == 1 || num_clusters == num_inputs - 1) {
-      VLOG(1) << "Do not split concat " << concat->DebugString();
+      VLOG(2) << "Do not split concat " << concat->DebugString();
       continue;
     }
 
-    VLOG(1) << "Split concat: " << concat->DebugString();
+    VLOG(2) << "Split concat: " << concat->DebugString();
     std::vector<Node*> new_inputs(num_clusters);
     std::vector<int> new_input_src_outputs(num_clusters);
     std::string concat_name = concat->name();
@@ -2419,14 +2483,14 @@ void OptimizeConcats(Graph* graph) {
 
     // 2.2. Add a new concat for each cluster
     for (int i = 0; i < num_clusters; i++) {
-      VLOG(1) << "Splitting, cluster " << i
+      VLOG(2) << "Splitting, cluster " << i
                 << ", on " << cluster_devices[i]
                 << " includes: ";
       std::vector<const Edge*> cluster = cluster_inputs[i];
       if (cluster.size() == 1) {
         new_inputs[i] = cluster[0]->src();
         new_input_src_outputs[i] = cluster[0]->src_output();
-        VLOG(1) << "node: " << new_inputs[i]->DebugString();
+        VLOG(2) << "node: " << new_inputs[i]->DebugString();
       } else {
         // add a new concat
         NodeDefBuilder concat_builder(
@@ -2434,7 +2498,7 @@ void OptimizeConcats(Graph* graph) {
         std::vector<NodeDefBuilder::NodeOut> concat_inputs;
         for (unsigned int j = 0; j < cluster.size(); j++) {
           Node* src = cluster[j]->src();
-          VLOG(1) << "node: " << src->DebugString();
+          VLOG(2) << "node: " << src->DebugString();
           int src_output = cluster[j]->src_output();
           concat_inputs.emplace_back(src->name(), src_output, type);
         }
@@ -2521,13 +2585,13 @@ void OptimizeConcats(Graph* graph) {
 void SetXlaCompileFlag(Graph* graph) {
   for (Node* node : graph->nodes()) {
     std::string requested_device = node->requested_device();
-    VLOG(1) << "node: " << node->DebugString();
-    VLOG(1) << "node requested_device: " << node->requested_device();
-    VLOG(1) << "node device: " << node->def().device();
-    VLOG(1) << "node assigned_device_name: " << node->assigned_device_name();
+    VLOG(2) << "node: " << node->DebugString();
+    VLOG(2) << "node requested_device: " << node->requested_device();
+    VLOG(2) << "node device: " << node->def().device();
+    VLOG(2) << "node assigned_device_name: " << node->assigned_device_name();
     if (requested_device.find("CPU") != std::string::npos ||
         requested_device.find("cpu") != std::string::npos) {
-      VLOG(1) << "node: " << node->DebugString();
+      VLOG(2) << "node: " << node->DebugString();
       node->AddAttr("_XlaCompile", false);
     }
   }
@@ -2537,15 +2601,11 @@ void FuseGemmKernels(Graph* graph) {
   bool gemm_fusion = true;
   ReadBoolFromEnvVar("TF_ENABLE_GEMM_FUSION", true, &gemm_fusion);
   if (!gemm_fusion) return;
-  bool optimize_concat = true;
-  ReadBoolFromEnvVar("TF_OPTIMIZE_CONCAT", true, &optimize_concat);
-  if (optimize_concat) {
-    if (VLOG_IS_ON(1)) DumpGraphToFile("before_placement", *graph);
-    OptimizeConcats(graph);
-    if (VLOG_IS_ON(1)) DumpGraphToFile("after_placement", *graph);
-  }
+
+  SplitConcatBasedOnInputDevices(graph);
   while(1) {
     bool graph_changed =
+        FuseGatherBeforeMatMul(graph) ||
         ReorderReshapeAndBiasAdd(graph) ||
         RemoveReshapesBeforeMatMul(graph) ||
         ConstantFoldingForContinuousMatMuls(graph) ||
@@ -2566,7 +2626,7 @@ void FuseGemmKernels(Graph* graph) {
 
 Status GemmOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
                                GraphDef* optimized_graph) {
-  VLOG(1) << "GemmOptimizer";
+  VLOG(1) << "GemmOptimizer is on.";
   static int pass = 0;
   if (VLOG_IS_ON(1)) {
     DumpGraphDefToFile("before_gemm", item.graph);

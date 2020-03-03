@@ -19,9 +19,8 @@ inline void SetOutput(const size_t n, const T* z, const T* h,
 }
 
 template <typename T>
-void Gemm(const CPUDevice& d, 
-            size_t m, size_t n, size_t k, 
-            const T* a, const T* b, T* c) {
+void Gemm(const CPUDevice& d, size_t m, size_t n, size_t k, const T* a,
+          const T* b, T* c) {
   typename tensorflow::TTypes<const T>::Matrix a_matrix(a, m, k);
   typename tensorflow::TTypes<const T>::Matrix b_matrix(b, k, n);
   typename tensorflow::TTypes<T>::Matrix c_matrix(c, m, n);
@@ -33,39 +32,50 @@ void Gemm(const CPUDevice& d,
 }
 
 template <typename T>
-void GRUKernel(const CPUDevice& d,
-               int batch_size, int rounds, int elts,
-               T* y, const T* x,
-               const T* h2h, const T* i2h, const T* h2h_bias, const T* i2h_bias,
-               T* act_p, T* preact_p) {
-  if (rounds <= 0) { return; }
-  Gemm<T>(d, batch_size * rounds, elts * 3, elts,
-          x, i2h, preact_p);
+void GRUKernel(const CPUDevice& d, int batch_size, int rounds, int elts, T* y,
+               const T* x, const T* h2h, const T* i2h, const T* h2h_bias,
+               const T* i2h_bias, T* act_p, T* preact_p) {
+  if (rounds <= 0) {
+    return;
+  }
+  Gemm<T>(d, batch_size * rounds, elts * 3, elts, x, i2h, preact_p);
   memset(y, 0, batch_size * rounds * elts * sizeof(T));
   for (int b = 0; b < batch_size; b++) {
     T* y_batch = &y[b * rounds * elts];
     T* preact = &preact_p[b * rounds * elts * 3];
+    bool preact_nonzero = false;
     for (int i = 0; i < rounds; i++) {
-      if (i > 0) {
-        const T* prev_y = y_batch - elts;
-        Gemm<T>(d, 1, elts * 3, elts,
-                prev_y, h2h, act_p);
-        VML_Add(elts * 3, act_p, h2h_bias, act_p);
-        VML_Add(elts * 3, preact, i2h_bias, preact);
-        VML_Add(elts * 2, preact, act_p, preact);
-        VML_Sigmoid(elts * 2, preact, preact);
-        VML_AddMul(elts, &preact[elts * 2], preact, &act_p[elts * 2],
-                   &preact[elts * 2]);
-        VML_Tanh(elts, &preact[elts * 2], &preact[elts * 2]);
-        SetOutput(elts, &preact[elts], &preact[elts * 2], prev_y, y_batch);
+      if (!preact_nonzero) {
+        for (int k = 0; k < elts; k++) {
+          if (preact[k] != 0) {
+            preact_nonzero = true;
+            break;
+          }
+        }
+      }
+      if (preact_nonzero) {
+        if (i > 0) {
+          const T* prev_y = y_batch - elts;
+          Gemm<T>(d, 1, elts * 3, elts, prev_y, h2h, act_p);
+          VML_Add(elts * 3, act_p, h2h_bias, act_p);
+          VML_Add(elts * 3, preact, i2h_bias, preact);
+          VML_Add(elts * 2, preact, act_p, preact);
+          VML_Sigmoid(elts * 2, preact, preact);
+          VML_AddMul(elts, &preact[elts * 2], preact, &act_p[elts * 2],
+                     &preact[elts * 2]);
+          VML_Tanh(elts, &preact[elts * 2], &preact[elts * 2]);
+          SetOutput(elts, &preact[elts], &preact[elts * 2], prev_y, y_batch);
+        } else {
+          VML_Add(elts * 3, preact, i2h_bias, preact);
+          VML_Add(elts * 2, preact, h2h_bias, preact);
+          VML_Sigmoid(elts * 2, preact, preact);
+          VML_AddMul(elts, &preact[elts * 2], preact, &h2h_bias[elts * 2],
+                     &preact[elts * 2]);
+          VML_Tanh(elts, &preact[elts * 2], &preact[elts * 2]);
+          SetOutput(elts, &preact[elts], &preact[elts * 2], y_batch, y_batch);
+        }
       } else {
-        VML_Add(elts * 3, preact, i2h_bias, preact);
-        VML_Add(elts * 2, preact, h2h_bias, preact);
-        VML_Sigmoid(elts * 2, preact, preact);
-        VML_AddMul(elts, &preact[elts * 2], preact, &h2h_bias[elts * 2],
-                   &preact[elts * 2]);
-        VML_Tanh(elts, &preact[elts * 2], &preact[elts * 2]);
-        SetOutput(elts, &preact[elts], &preact[elts * 2], y_batch, y_batch);
+        memset(y_batch, 0, elts * sizeof(T));
       }
       preact += elts * 3;
       y_batch += elts;
@@ -73,42 +83,62 @@ void GRUKernel(const CPUDevice& d,
   }
 }
 
-
 template <typename T>
 struct GRUFunctor<CPUDevice, T> {
-  void operator()(const CPUDevice& d, OpKernelContext* context,
-                  int batch_size, int rounds, int elts,
-                  T* y, const T* x,
-                  const T* h2h, const T* i2h, const T* h2hBias, const T* i2hBias);
+  void operator()(const CPUDevice& d, OpKernelContext* context, int batch_size,
+                  int rounds, int elts, T* y, const T* x, const T* h2h,
+                  const T* i2h, const T* h2hBias, const T* i2hBias);
 };
 
 template <typename T>
-void GRUFunctor<CPUDevice, T>::operator()(const CPUDevice& d, OpKernelContext* context,
-                            int batch_size, int rounds, int elts,
-                            T* y, const T* x,
-                            const T* h2h, const T* i2h, const T* h2hBias, const T* i2hBias) {
+void GRUFunctor<CPUDevice, T>::operator()(const CPUDevice& d,
+                                          OpKernelContext* context,
+                                          int batch_size, int rounds, int elts,
+                                          T* y, const T* x, const T* h2h,
+                                          const T* i2h, const T* h2hBias,
+                                          const T* i2hBias) {
   VLOG(2) << "=== CPU GRUFunctor ===";
 
   Tensor act, preact;
   if (std::is_same<float, T>::value) {
-    OP_REQUIRES_OK(context, context->allocate_temp(DT_FLOAT, TensorShape({batch_size, rounds*3, elts}), &preact));
-    OP_REQUIRES_OK(context, context->allocate_temp(DT_FLOAT, TensorShape({batch_size, elts * (alignN(elts, gru_weights_per_thread)/gru_weights_per_thread) * 3 * 2}), &act));
+    OP_REQUIRES_OK(
+        context,
+        context->allocate_temp(
+            DT_FLOAT, TensorShape({batch_size, rounds * 3, elts}), &preact));
+    OP_REQUIRES_OK(
+        context,
+        context->allocate_temp(
+            DT_FLOAT,
+            TensorShape({batch_size, elts *
+                                         (alignN(elts, gru_weights_per_thread) /
+                                          gru_weights_per_thread) *
+                                         3 * 2}),
+            &act));
   } else if (std::is_same<double, T>::value) {
-    OP_REQUIRES_OK(context, context->allocate_temp(DT_DOUBLE, TensorShape({batch_size, rounds*3, elts}), &preact));
-    OP_REQUIRES_OK(context, context->allocate_temp(DT_DOUBLE, TensorShape({batch_size, elts * (alignN(elts, gru_weights_per_thread)/gru_weights_per_thread) * 3 * 2}), &act));
+    OP_REQUIRES_OK(
+        context,
+        context->allocate_temp(
+            DT_DOUBLE, TensorShape({batch_size, rounds * 3, elts}), &preact));
+    OP_REQUIRES_OK(
+        context,
+        context->allocate_temp(
+            DT_DOUBLE,
+            TensorShape({batch_size, elts *
+                                         (alignN(elts, gru_weights_per_thread) /
+                                          gru_weights_per_thread) *
+                                         3 * 2}),
+            &act));
   } else {
-    OP_REQUIRES(context, false, errors::InvalidArgument("Unsupported Datatype"));
+    OP_REQUIRES(context, false,
+                errors::InvalidArgument("Unsupported Datatype"));
   }
   T* act_p = act.flat<T>().data();
   T* preact_p = preact.flat<T>().data();
 
-  GRUKernel(d, batch_size, rounds, elts,
-            y, x,
-            h2h, i2h, h2hBias, i2hBias,
+  GRUKernel(d, batch_size, rounds, elts, y, x, h2h, i2h, h2hBias, i2hBias,
             act_p, preact_p);
 };
 
 template struct GRUFunctor<CPUDevice, float>;
 
-}//namespace
-
+}  // namespace tensorflow
