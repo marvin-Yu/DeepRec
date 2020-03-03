@@ -815,7 +815,6 @@ void DirectSession::RunInternalAsync(
                             executor_step_count, &debugger_state));
   }
 
-  run_state.rendez = new IntraProcessRendezvous(device_mgr_.get());
 #ifndef __ANDROID__
   // Set up for collectives if ExecutorsAndKeys declares a key.
   if (executors_and_keys->collective_graph_key !=
@@ -826,7 +825,11 @@ void DirectSession::RunInternalAsync(
       // matches what came out of GraphExecutionState::BuildGraph().
       if (run_options.experimental().collective_graph_key() !=
           executors_and_keys->collective_graph_key) {
-		  DONE_WITH_STATUS(errors::InvalidArgument("collective_graph_key in RunOptions"));
+         DONE_WITH_STATUS(errors::Internal(
+            "collective_graph_key in RunOptions ",
+            run_options.experimental().collective_graph_key(),
+            " should match collective_graph_key from optimized graph ",
+            executors_and_keys->collective_graph_key));
       }
     }
     if (!collective_executor_mgr_) {
@@ -844,6 +847,7 @@ void DirectSession::RunInternalAsync(
   }
 #endif
 
+  run_state.rendez = new IntraProcessRendezvous(device_mgr_.get());
   // Start parallel Executors.
   const size_t num_executors = executors_and_keys->items.size();
   ExecutorBarrier* barrier = new ExecutorBarrier(
