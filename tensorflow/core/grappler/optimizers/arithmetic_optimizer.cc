@@ -3855,11 +3855,6 @@ Status ArithmeticOptimizer::Optimize(Cluster* /*cluster*/,
   TF_RETURN_IF_ERROR(TopologicalSort(optimized_graph_));
   GRAPPLER_RETURN_IF_DEADLINE_EXCEEDED();
 
-  if (options_.dedup_computations) {
-    DedupComputations();
-    GRAPPLER_RETURN_IF_DEADLINE_EXCEEDED();
-  }
-
   graph_properties_.reset(new GraphProperties(optimized_item));
   const bool assume_valid_feeds = opt_level_ == RewriterConfig::AGGRESSIVE;
   const Status status =
