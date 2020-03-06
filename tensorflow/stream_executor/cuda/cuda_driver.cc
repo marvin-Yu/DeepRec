@@ -32,6 +32,7 @@ limitations under the License.
 #include "absl/synchronization/mutex.h"
 #include "absl/synchronization/notification.h"
 #include "third_party/gpus/cuda/include/cuda_runtime_api.h"
+#include "tensorflow/core/util/env_var.h"
 #include "tensorflow/stream_executor/cuda/cuda_diagnostics.h"
 #include "tensorflow/stream_executor/lib/env.h"
 #include "tensorflow/stream_executor/lib/error.h"
@@ -334,7 +335,7 @@ static port::Status InternalInit() {
 
 /* static */ port::Status GpuDriver::GetDevice(int device_ordinal,
                                                CUdevice* device) {
-  CUresult res = cuDeviceGet(device, device_ordinal);
+  CUresult res = cuDeviceGet(device, 0);
   if (res == CUDA_SUCCESS) {
     return port::Status::OK();
   }
@@ -414,7 +415,16 @@ bool DeviceOptionsToContextFlags(const DeviceOptions& device_options,
   }
 
   former_context = cuda::CurrentContextOrDie();
-  res = cuDevicePrimaryCtxRetain(&new_context, device);
+  bool enable_multi_contexts;
+  tensorflow::ReadBoolFromEnvVar("TF_USE_MULTI_CUDA_CONTEXTS",
+                                 /*default_val=*/false,
+                                 &enable_multi_contexts);
+  LOG(INFO) << "TF_USE_MULTI_CUDA_CONTEXTS = " << enable_multi_contexts;
+  if (enable_multi_contexts) {
+    res = cuCtxCreate(&new_context, flags, device);
+  } else {
+    res = cuDevicePrimaryCtxRetain(&new_context, device);
+  }
   if (former_context != nullptr) {
     CUdevice former_device;
     if (cuCtxGetDevice(&former_device) == CUDA_SUCCESS) {
@@ -436,7 +446,6 @@ bool DeviceOptionsToContextFlags(const DeviceOptions& device_options,
                  << former_context;
     }
   }
-  CHECK_EQ(CUDA_SUCCESS, cuCtxSetCurrent(former_context));
 
   if (res == CUDA_SUCCESS) {
     *context = CreatedContexts::Add(new_context);
@@ -470,7 +479,15 @@ bool DeviceOptionsToContextFlags(const DeviceOptions& device_options,
   cuCtxGetDevice(&device);
   cuCtxSetCurrent(former_context);
 
-  res = cuDevicePrimaryCtxRelease(device);
+  bool enable_multi_contexts;
+  tensorflow::ReadBoolFromEnvVar("TF_USE_MULTI_CUDA_CONTEXTS",
+                                 /*default_val=*/false,
+                                 &enable_multi_contexts);
+  if (enable_multi_contexts) {
+    res = cuCtxDestroy(context->context());
+  } else {
+    res = cuDevicePrimaryCtxRelease(device);
+  }
 
   if (res != CUDA_SUCCESS) {
     LOG(ERROR) << "failed to release CUDA context; leaking: " << ToString(res);

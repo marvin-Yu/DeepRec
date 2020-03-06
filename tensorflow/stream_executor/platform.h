@@ -123,6 +123,10 @@ class Platform {
   // device, a call to ExecutorForDevice may return an error status.
   virtual int VisibleDeviceCount() const = 0;
 
+  // For CUDA, return the number of tf virtual GPUs.
+  virtual int VirtualDeviceCount() const;
+  virtual port::Status SetVirtualDeviceCount(int count);
+
   // Returns true iff the platform has been initialized.
   virtual bool Initialized() const;
 

@@ -88,6 +88,15 @@ StreamExecutorConfig::StreamExecutorConfig(int ordinal_in)
 
 Platform::~Platform() {}
 
+int Platform::VirtualDeviceCount() const {
+  return VisibleDeviceCount();
+}
+
+port::Status Platform::SetVirtualDeviceCount(int count) {
+  return port::Status(port::error::UNIMPLEMENTED,
+                      "this platform does not support virtual devices");
+}
+
 bool Platform::Initialized() const { return true; }
 
 port::Status Platform::Initialize(

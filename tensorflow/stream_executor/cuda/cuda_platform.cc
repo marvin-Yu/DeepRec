@@ -66,7 +66,7 @@ const DeviceOptions GetDeviceOptionsFromEnv() {
 }  // namespace
 
 CudaPlatform::CudaPlatform()
-    : name_("CUDA"), min_numa_node_(0), limit_numa_node_(0) {}
+    : name_("CUDA"), min_numa_node_(0), limit_numa_node_(0), virtual_device_count_(-1) {}
 
 CudaPlatform::~CudaPlatform() {}
 
@@ -136,6 +136,19 @@ int CudaPlatform::VisibleDeviceCount() const {
   }
 
   return GpuDriver::GetDeviceCount();
+}
+
+int CudaPlatform::VirtualDeviceCount() const {
+  if (virtual_device_count_ == -1) {
+    return VisibleDeviceCount();
+  } else {
+    return virtual_device_count_;
+  }
+}
+
+port::Status CudaPlatform::SetVirtualDeviceCount(int count) {
+  virtual_device_count_ = count;
+  return port::Status::OK();
 }
 
 const string& CudaPlatform::Name() const { return name_; }
