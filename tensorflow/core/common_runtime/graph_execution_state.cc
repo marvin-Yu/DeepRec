@@ -898,8 +898,9 @@ Status GraphExecutionState::OptimizeGraph(
 
     // Now we can run the MetaOptimizer on the constructed GrapplerItem.
     GraphDef new_graph;
-    TF_RETURN_IF_ERROR(grappler::RunMetaOptimizer(
-        item, session_options_->config, cpu_device, &cluster, &new_graph));
+    TF_RETURN_IF_ERROR(
+        grappler::RunMetaOptimizer(std::move(item), session_options_->config,
+                                   cpu_device, &cluster, &new_graph));
 
     // Merge optimized graph function library with an original library.
     // Optimized graph might have new functions specialized for it's
