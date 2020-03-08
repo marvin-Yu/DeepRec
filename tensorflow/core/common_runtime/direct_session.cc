@@ -525,7 +525,6 @@ Status DirectSession::RunInternal(
                             executor_step_count, &debugger_state));
   }
 
-  run_state.rendez = new IntraProcessRendezvous(device_mgr_.get());
 #ifndef __ANDROID__
   // Set up for collectives if ExecutorsAndKeys declares a key.
   if (executors_and_keys->collective_graph_key !=
@@ -558,6 +557,7 @@ Status DirectSession::RunInternal(
   }
 #endif
 
+  run_state.rendez = new IntraProcessRendezvous(device_mgr_.get());
   // Start parallel Executors.
   const size_t num_executors = executors_and_keys->items.size();
   ExecutorBarrier* barrier = new ExecutorBarrier(
