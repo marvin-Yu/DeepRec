@@ -31,10 +31,12 @@ port::StatusOr<StreamExecutor*> ExecutorCache::GetOrCreate(
     return fast_result;
   }
 
+  std::string key = std::to_string(config.ordinal) + "," +
+                    std::to_string(config.virtual_ordinal);
   Entry* entry = nullptr;
   {
     absl::MutexLock lock{&mutex_};
-    entry = &cache_[config.ordinal];
+    entry = &cache_[key];
     // Release the map lock; the address of 'entry' is stable because
     // std::map guarantees reference stability.
   }
@@ -65,10 +67,12 @@ port::StatusOr<StreamExecutor*> ExecutorCache::GetOrCreate(
 
 port::StatusOr<StreamExecutor*> ExecutorCache::Get(
     const StreamExecutorConfig& config) {
+  std::string key = std::to_string(config.ordinal) + "," +
+                    std::to_string(config.virtual_ordinal);
   Entry* entry = nullptr;
   {
     absl::ReaderMutexLock lock{&mutex_};
-    auto it = cache_.find(config.ordinal);
+    auto it = cache_.find(key);
     if (it != cache_.end()) {
       entry = &it->second;
     } else {
@@ -88,7 +92,7 @@ port::StatusOr<StreamExecutor*> ExecutorCache::Get(
   for (const auto& iter : entry->configurations) {
     if (iter.first.plugin_config == config.plugin_config &&
         iter.first.device_options == config.device_options) {
-      VLOG(2) << "hit in cache for device ordinal " << config.ordinal;
+      VLOG(2) << "hit in cache for device ordinal " << key;
       return iter.second.get();
     }
   }

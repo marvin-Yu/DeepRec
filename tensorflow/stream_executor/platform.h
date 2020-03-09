@@ -81,6 +81,7 @@ struct StreamExecutorConfig {
 
   // The ordinal of the device to be managed by the returned StreamExecutor.
   int ordinal;
+  int virtual_ordinal;
 
   // The PluginConfig for the returned StreamExecutor.
   PluginConfig plugin_config;
@@ -156,12 +157,18 @@ class Platform {
   // Ownership of the executor is NOT transferred to the caller --
   // the Platform owns the executors in a singleton-like fashion.
   virtual port::StatusOr<StreamExecutor*> ExecutorForDevice(int ordinal) = 0;
+  virtual port::StatusOr<StreamExecutor*> ExecutorForDevice(
+      int ordinal, int virtual_ordinal) { return ExecutorForDevice(ordinal); }
 
   // Returns a device or error, as above, with the specified plugins.
   //
   // Ownership of the executor is NOT transferred to the caller.
   virtual port::StatusOr<StreamExecutor*> ExecutorForDeviceWithPluginConfig(
       int ordinal, const PluginConfig& plugin_config) = 0;
+  virtual port::StatusOr<StreamExecutor*> ExecutorForDeviceWithPluginConfig(
+      int ordinal, int virtual_ordinal, const PluginConfig& plugin_config) {
+     return ExecutorForDeviceWithPluginConfig(ordinal, plugin_config);
+  };
 
   // Returns a device constructed with the options specified in "config".
   // Ownership of the executor is NOT transferred to the caller.

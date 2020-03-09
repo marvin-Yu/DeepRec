@@ -335,7 +335,7 @@ static port::Status InternalInit() {
 
 /* static */ port::Status GpuDriver::GetDevice(int device_ordinal,
                                                CUdevice* device) {
-  CUresult res = cuDeviceGet(device, 0);
+  CUresult res = cuDeviceGet(device, device_ordinal);
   if (res == CUDA_SUCCESS) {
     return port::Status::OK();
   }

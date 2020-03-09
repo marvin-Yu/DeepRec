@@ -159,8 +159,14 @@ CudaPlatform::DescriptionForDevice(int ordinal) const {
 }
 
 port::StatusOr<StreamExecutor*> CudaPlatform::ExecutorForDevice(int ordinal) {
+  return ExecutorForDevice(ordinal, -1);
+}
+
+port::StatusOr<StreamExecutor*> CudaPlatform::ExecutorForDevice(
+    int ordinal, int virtual_ordinal) {
   StreamExecutorConfig config;
   config.ordinal = ordinal;
+  config.virtual_ordinal = virtual_ordinal;
   config.plugin_config = PluginConfig();
   config.device_options = GetDeviceOptionsFromEnv();
   return GetExecutor(config);
@@ -168,8 +174,14 @@ port::StatusOr<StreamExecutor*> CudaPlatform::ExecutorForDevice(int ordinal) {
 
 port::StatusOr<StreamExecutor*> CudaPlatform::ExecutorForDeviceWithPluginConfig(
     int device_ordinal, const PluginConfig& plugin_config) {
+  return ExecutorForDeviceWithPluginConfig(device_ordinal, -1, plugin_config);
+}
+
+port::StatusOr<StreamExecutor*> CudaPlatform::ExecutorForDeviceWithPluginConfig(
+    int device_ordinal, int virtual_ordinal, const PluginConfig& plugin_config) {
   StreamExecutorConfig config;
   config.ordinal = device_ordinal;
+  config.virtual_ordinal = virtual_ordinal;
   config.plugin_config = plugin_config;
   config.device_options = GetDeviceOptionsFromEnv();
   return GetExecutor(config);
