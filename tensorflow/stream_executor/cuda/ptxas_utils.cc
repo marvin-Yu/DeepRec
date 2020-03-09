@@ -151,10 +151,7 @@ port::StatusOr<std::vector<uint8>> CompilePtx(int device_ordinal,
                                               const char* ptx_contents,
                                               PtxCompilationOptions options) {
   gpu::GpuDeviceHandle handle;
-  // TODO(ylxu): device_ordinal here is tf_gpu_id rather than platform_gpu_id;
-  // this results in invalid device id in cuda driver.
-  // TF_RETURN_IF_ERROR(CUDADriver::GetDevice(device_ordinal, &handle));
-  TF_RETURN_IF_ERROR(CUDADriver::GetDevice(0, &handle));
+  TF_RETURN_IF_ERROR(CUDADriver::GetDevice(device_ordinal, &handle));
   int cc_major;
   int cc_minor;
   TF_RETURN_IF_ERROR(
