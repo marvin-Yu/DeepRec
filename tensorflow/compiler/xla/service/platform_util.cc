@@ -247,11 +247,21 @@ PlatformUtil::GetStreamExecutors(
       //           << " since it is not in the visible device list";
       //   continue;
       // }
-      thread_pool.Schedule([platform, i, &stream_executors]() {
+      thread_pool.Schedule([platform, i, device_count, &stream_executors]() {
         VLOG(1) << "Started device init " << i;
-        se::StreamExecutorConfig config;
-        config.ordinal = i;
-        auto executor_status = platform->GetExecutor(config);
+        int ordinal = i;
+        int virtual_ordinal = 0;
+        if (platform->id() == se::cuda::kCudaPlatformId) {
+          CHECK(platform->VisibleDeviceCount() > 0);
+          int virtual_gpus_per_device = device_count /
+                                        platform->VisibleDeviceCount();
+          CHECK(virtual_gpus_per_device >= 1);
+          ordinal = i / virtual_gpus_per_device;
+          virtual_ordinal = (virtual_gpus_per_device > 1) ?
+                            (i % virtual_gpus_per_device) : 0;
+        }
+        auto executor_status = platform->ExecutorForDevice(
+            ordinal, virtual_ordinal);
         if (executor_status.ok()) {
           se::StreamExecutor* executor = executor_status.ValueOrDie();
           if (IsDeviceSupported(executor)) {

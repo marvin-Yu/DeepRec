@@ -422,8 +422,10 @@ bool DeviceOptionsToContextFlags(const DeviceOptions& device_options,
   LOG(INFO) << "TF_USE_MULTI_CUDA_CONTEXTS = " << enable_multi_contexts;
   if (enable_multi_contexts) {
     res = cuCtxCreate(&new_context, flags, device);
+    LOG(INFO) << "cuCtxCreate context " << new_context;
   } else {
     res = cuDevicePrimaryCtxRetain(&new_context, device);
+    LOG(INFO) << "cuDevicePrimaryCtxRetain context " << new_context;
   }
   if (former_context != nullptr) {
     CUdevice former_device;

@@ -81,10 +81,10 @@ void CheckPlatformKindIsValid(PlatformKind kind) {
 }
 
 StreamExecutorConfig::StreamExecutorConfig()
-    : ordinal(-1), virtual_ordinal(-1), device_options(DeviceOptions::Default()) {}
+    : ordinal(-1), virtual_ordinal(0), device_options(DeviceOptions::Default()) {}
 
 StreamExecutorConfig::StreamExecutorConfig(int ordinal_in)
-    : ordinal(ordinal_in), virtual_ordinal(-1), device_options(DeviceOptions::Default()) {}
+    : ordinal(ordinal_in), virtual_ordinal(0), device_options(DeviceOptions::Default()) {}
 
 Platform::~Platform() {}
 

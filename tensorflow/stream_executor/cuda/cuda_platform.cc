@@ -159,7 +159,7 @@ CudaPlatform::DescriptionForDevice(int ordinal) const {
 }
 
 port::StatusOr<StreamExecutor*> CudaPlatform::ExecutorForDevice(int ordinal) {
-  return ExecutorForDevice(ordinal, -1);
+  return ExecutorForDevice(ordinal, 0);
 }
 
 port::StatusOr<StreamExecutor*> CudaPlatform::ExecutorForDevice(
@@ -174,7 +174,7 @@ port::StatusOr<StreamExecutor*> CudaPlatform::ExecutorForDevice(
 
 port::StatusOr<StreamExecutor*> CudaPlatform::ExecutorForDeviceWithPluginConfig(
     int device_ordinal, const PluginConfig& plugin_config) {
-  return ExecutorForDeviceWithPluginConfig(device_ordinal, -1, plugin_config);
+  return ExecutorForDeviceWithPluginConfig(device_ordinal, 0, plugin_config);
 }
 
 port::StatusOr<StreamExecutor*> CudaPlatform::ExecutorForDeviceWithPluginConfig(
