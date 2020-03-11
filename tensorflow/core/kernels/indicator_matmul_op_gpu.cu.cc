@@ -75,9 +75,9 @@ struct HalfAsFloat {
   typedef T type;
 };
 
-template <typename T>
-struct GpuComplexT {
-  typedef T type;
+template <>
+struct HalfAsFloat<Eigen::half> {
+  typedef float type;
 };
 
 // Converts a const DeviceMemory reference to its underlying typed pointer in
@@ -123,6 +123,7 @@ void RunGemmStridedBatched(OpKernelContext* context, bool trans_a, bool trans_b,
                            const se::DeviceMemory<Scalar>& b, int64 stride_b,
                            Scalar beta, se::DeviceMemory<Scalar>* c,
                            int64 stride_c, int64 batch_count) {
+  typedef typename HalfAsFloat<Scalar>::type CUDA_T;
   int lda = trans_a ? m : k;
   int ldb = trans_b ? k : n;
   int ldc = n;
@@ -133,9 +134,10 @@ void RunGemmStridedBatched(OpKernelContext* context, bool trans_a, bool trans_b,
   auto* stream = context->op_device_context()->stream();
   bool blas_launch_status =
       stream
-          ->ThenBlasGemmStridedBatched(trans_b_tf, trans_a_tf, n, m, k, alpha,
-                                       b, ldb, stride_b, a, lda, stride_a, beta,
-                                       c, ldc, stride_c, batch_count)
+          ->ThenBlasGemmStridedBatched(
+              trans_b_tf, trans_a_tf, n, m, k, static_cast<CUDA_T>(alpha), b,
+              ldb, stride_b, a, lda, stride_a, static_cast<CUDA_T>(beta), c,
+              ldc, stride_c, batch_count)
           .ok();
   if (!blas_launch_status) {
     context->SetStatus(errors::Internal(
@@ -148,6 +150,7 @@ void RunGemmBatched(OpKernelContext* context, bool trans_a, bool trans_b,
                     int64 m, int64 n, int64 k, Scalar alpha, Scalar** a_ptrs,
                     Scalar** b_ptrs, Scalar beta, Scalar** c_ptrs,
                     int64 batch_count) {
+  typedef typename HalfAsFloat<Scalar>::type CUDA_T;
   int lda = trans_a ? m : k;
   int ldb = trans_b ? k : n;
   int ldc = n;
@@ -158,10 +161,11 @@ void RunGemmBatched(OpKernelContext* context, bool trans_a, bool trans_b,
   auto* stream = context->op_device_context()->stream();
   bool blas_launch_status =
       stream
-          ->ThenBlasGemmBatched(trans_b_tf, trans_a_tf, n, m, k, alpha,
-                                const_cast<const Scalar**>(b_ptrs), ldb,
-                                const_cast<const Scalar**>(a_ptrs), lda, beta,
-                                c_ptrs, ldc, batch_count)
+          ->ThenBlasGemmBatched(
+              trans_b_tf, trans_a_tf, n, m, k, static_cast<CUDA_T>(alpha),
+              const_cast<const Scalar**>(b_ptrs), ldb,
+              const_cast<const Scalar**>(a_ptrs), lda,
+              static_cast<CUDA_T>(beta), c_ptrs, ldc, batch_count)
           .ok();
 
   if (!blas_launch_status) {
@@ -174,20 +178,19 @@ template <typename Scalar>
 Status LaunchComputePtr(IMatmulParam<Scalar>* param, int64 paralle_num,
                         OpKernelContext* context,
                         BlasScratchAllocator* scratch_allocator) {
-  typedef typename HalfAsFloat<typename GpuComplexT<Scalar>::type>::type CUDA_T;
-  const size_t size = paralle_num * param->batch_b * sizeof(CUDA_T*);
+  const size_t size = paralle_num * param->batch_b * sizeof(Scalar*);
   SE_ASSIGN_OR_RETURN(se::DeviceMemory<uint8> a_bytes,
                       scratch_allocator->AllocateBytes(size));
   SE_ASSIGN_OR_RETURN(se::DeviceMemory<uint8> b_bytes,
                       scratch_allocator->AllocateBytes(size));
   SE_ASSIGN_OR_RETURN(se::DeviceMemory<uint8> c_bytes,
                       scratch_allocator->AllocateBytes(size));
-  se::DeviceMemory<CUDA_T*> a = se::DeviceMemory<CUDA_T*>(a_bytes);
-  se::DeviceMemory<CUDA_T*> b = se::DeviceMemory<CUDA_T*>(b_bytes);
-  se::DeviceMemory<CUDA_T*> c = se::DeviceMemory<CUDA_T*>(c_bytes);
-  param->As = const_cast<CUDA_T**>(GpuMemory(a));
-  param->Bs = const_cast<CUDA_T**>(GpuMemory(b));
-  param->Cs = const_cast<CUDA_T**>(GpuMemory(c));
+  se::DeviceMemory<Scalar*> a = se::DeviceMemory<Scalar*>(a_bytes);
+  se::DeviceMemory<Scalar*> b = se::DeviceMemory<Scalar*>(b_bytes);
+  se::DeviceMemory<Scalar*> c = se::DeviceMemory<Scalar*>(c_bytes);
+  param->As = const_cast<Scalar**>(GpuMemory(a));
+  param->Bs = const_cast<Scalar**>(GpuMemory(b));
+  param->Cs = const_cast<Scalar**>(GpuMemory(c));
   const auto& d = context->eigen_device<GPUDevice>();
   GpuLaunchConfig config = GetGpuLaunchConfig(param->batch_b, d);
   return GpuLaunchKernel(ComputePtrsKernel<Scalar>, paralle_num,
@@ -232,5 +235,6 @@ void LaunchIndicatorMatmul<GPUDevice, Scalar>::operator()(
 
 template struct LaunchIndicatorMatmul<GPUDevice, float>;
 template struct LaunchIndicatorMatmul<GPUDevice, double>;
+template struct LaunchIndicatorMatmul<GPUDevice, Eigen::half>;
 #endif  // GOOGLE_CUDA
 }  // namespace tensorflow

@@ -4546,6 +4546,23 @@ Stream &Stream::ThenBlasGemmBatchedWithScratch(
               scratch_allocator);
 }
 
+Stream& Stream::ThenBlasGemmBatched(blas::Transpose transa,
+                                    blas::Transpose transb, uint64 m, uint64 n,
+                                    uint64 k, float alpha,
+                                    const Eigen::half** a, int lda,
+                                    const Eigen::half** b, int ldb, float beta,
+                                    Eigen::half** c, int ldc, int batch_count) {
+  VLOG_CALL(PARAM(transa), PARAM(transb), PARAM(m), PARAM(n), PARAM(k),
+            PARAM(alpha), PARAM(a), PARAM(lda), PARAM(b), PARAM(ldb),
+            PARAM(beta), PARAM(c), PARAM(ldc), PARAM(batch_count));
+  ThenBlasImpl<blas::Transpose, blas::Transpose, uint64, uint64, uint64, float,
+               const Eigen::half**, int, const Eigen::half**, int, float,
+               Eigen::half**, int, int>
+      impl;
+  return impl(this, &blas::BlasSupport::DoBlasGemmBatched, transa, transb, m, n,
+              k, alpha, a, lda, b, ldb, beta, c, ldc, batch_count);
+}
+
 Stream &Stream::ThenBlasGemmBatched(
     blas::Transpose transa, blas::Transpose transb, uint64 m, uint64 n,
     uint64 k, float alpha, const port::ArraySlice<DeviceMemory<float> *> &a,

@@ -1425,6 +1425,11 @@ class Stream {
       const port::ArraySlice<DeviceMemory<Eigen::half> *> &b, int ldb,
       float beta, const port::ArraySlice<DeviceMemory<Eigen::half> *> &c,
       int ldc, int batch_count);
+  Stream& ThenBlasGemmBatched(blas::Transpose transa, blas::Transpose transb,
+                              uint64 m, uint64 n, uint64 k, float alpha,
+                              const Eigen::half** a, int lda,
+                              const Eigen::half** b, int ldb, float beta,
+                              Eigen::half** c, int ldc, int batch_count);
   Stream &ThenBlasGemmBatched(blas::Transpose transa, blas::Transpose transb,
                               uint64 m, uint64 n, uint64 k, float alpha,
                               const port::ArraySlice<DeviceMemory<float> *> &a,

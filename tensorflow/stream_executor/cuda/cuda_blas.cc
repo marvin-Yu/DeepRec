@@ -2384,6 +2384,22 @@ bool CUDABlas::DoBlasGemmBatched(
 
 bool CUDABlas::DoBlasGemmBatched(Stream* stream, blas::Transpose transa,
                                  blas::Transpose transb, uint64 m, uint64 n,
+                                 uint64 k, float alpha,
+                                 const Eigen::half** a_array, int lda,
+                                 const Eigen::half** b_array, int ldb,
+                                 float beta, Eigen::half** c_array, int ldc,
+                                 int batch_count) {
+  port::Status status = DoBlasGemmBatchedInternal(
+      cublasSgemmBatched, stream, transa, transb, m, n, k, alpha, a_array, lda,
+      b_array, ldb, beta, c_array, ldc, batch_count);
+  if (!status.ok()) {
+    LOG(ERROR) << status;
+  }
+  return status.ok();
+}
+
+bool CUDABlas::DoBlasGemmBatched(Stream* stream, blas::Transpose transa,
+                                 blas::Transpose transb, uint64 m, uint64 n,
                                  uint64 k, float alpha, const float** a_array,
                                  int lda, const float** b_array, int ldb,
                                  float beta, float** c_array, int ldc,

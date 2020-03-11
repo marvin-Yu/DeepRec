@@ -1092,6 +1092,12 @@ class BlasSupport {
       const port::ArraySlice<DeviceMemory<Eigen::half> *> &b, int ldb,
       float beta, const port::ArraySlice<DeviceMemory<Eigen::half> *> &c,
       int ldc, int batch_count, ScratchAllocator *scratch_allocator) = 0;
+  virtual bool DoBlasGemmBatched(Stream* stream, blas::Transpose transa,
+                                 blas::Transpose transb, uint64 m, uint64 n,
+                                 uint64 k, float alpha, const Eigen::half** a,
+                                 int lda, const Eigen::half** b, int ldb,
+                                 float beta, Eigen::half** c, int ldc,
+                                 int batch_count) = 0;
   virtual bool DoBlasGemmBatched(
       Stream *stream, blas::Transpose transa, blas::Transpose transb, uint64 m,
       uint64 n, uint64 k, float alpha,
@@ -2015,6 +2021,11 @@ class BlasSupport {
       const port::ArraySlice<DeviceMemory<float> *> &b, int ldb, float beta,   \
       const port::ArraySlice<DeviceMemory<float> *> &c, int ldc,               \
       int batch_count, ScratchAllocator *scratch_allocator) override;          \
+  bool DoBlasGemmBatched(Stream* stream, blas::Transpose transa,               \
+                         blas::Transpose transb, uint64 m, uint64 n, uint64 k, \
+                         float alpha, const Eigen::half** a, int lda,          \
+                         const Eigen::half** b, int ldb, float beta,           \
+                         Eigen::half** c, int ldc, int batch_count) override;  \
   bool DoBlasGemmBatched(Stream* stream, blas::Transpose transa,               \
                          blas::Transpose transb, uint64 m, uint64 n, uint64 k, \
                          float alpha, const float** a, int lda,                \

@@ -209,8 +209,10 @@ class ParallelIndicatorMatmulOp : public OpKernel {
                           ParallelIndicatorMatmulOp<GPUDevice, TYPE>);
 REGISTER_INDICATOR_MATMUL_GPU(float);
 REGISTER_INDICATOR_MATMUL_GPU(double);
+REGISTER_INDICATOR_MATMUL_GPU(Eigen::half);
 REGISTER_PARALLEL_INDICATOR_MATMUL_GPU(float);
 REGISTER_PARALLEL_INDICATOR_MATMUL_GPU(double);
+REGISTER_PARALLEL_INDICATOR_MATMUL_GPU(Eigen::half);
 #endif
 
 }  // namespace tensorflow
