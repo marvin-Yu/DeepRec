@@ -442,26 +442,18 @@ class PrimaryContexts {
   }
 
   former_context = cuda::CurrentContextOrDie();
-  bool enable_multi_contexts;
-  tensorflow::ReadBoolFromEnvVar("TF_USE_MULTI_CUDA_CONTEXTS",
-                                 /*default_val=*/false,
-                                 &enable_multi_contexts);
-  LOG(INFO) << "TF_USE_MULTI_CUDA_CONTEXTS = " << enable_multi_contexts;
-  if (enable_multi_contexts) {
-    res = cuDevicePrimaryCtxRetain(&new_context, device);
-    if (res == CUDA_SUCCESS) {
-      if (PrimaryContexts::Add(new_context, device)) {
-        LOG(INFO) << "cuDevicePrimaryCtxRetain context " << new_context;
-      } else {
-        CHECK_EQ(CUDA_SUCCESS, cuDevicePrimaryCtxRelease(device));
-        res = cuCtxCreate(&new_context, flags, device);
-        LOG(INFO) << "Primary context has been used, cuCtxCreate context " << new_context;
-      }
+
+  res = cuDevicePrimaryCtxRetain(&new_context, device);
+  if (res == CUDA_SUCCESS) {
+    if (PrimaryContexts::Add(new_context, device)) {
+      LOG(INFO) << "cuDevicePrimaryCtxRetain context " << new_context;
+    } else {
+      CHECK_EQ(CUDA_SUCCESS, cuDevicePrimaryCtxRelease(device));
+      res = cuCtxCreate(&new_context, flags, device);
+      LOG(INFO) << "Primary context has been used, cuCtxCreate context " << new_context;
     }
-  } else {
-    res = cuDevicePrimaryCtxRetain(&new_context, device);
-    LOG(INFO) << "cuDevicePrimaryCtxRetain context " << new_context;
   }
+
   if (former_context != nullptr) {
     CUdevice former_device;
     if (cuCtxGetDevice(&former_device) == CUDA_SUCCESS) {
@@ -516,21 +508,12 @@ class PrimaryContexts {
   cuCtxGetDevice(&device);
   cuCtxSetCurrent(former_context);
 
-  bool enable_multi_contexts;
-  tensorflow::ReadBoolFromEnvVar("TF_USE_MULTI_CUDA_CONTEXTS",
-                                 /*default_val=*/false,
-                                 &enable_multi_contexts);
-  if (enable_multi_contexts) {
-    if (PrimaryContexts::Has(context->context())) {
-      res = cuDevicePrimaryCtxRelease(device);
-      LOG(INFO) << "cuDevicePrimaryCtxRelease: " << context->context();
-    } else {
-      res = cuCtxDestroy(context->context());
-      LOG(INFO) << "cuCtxDestroy: " << context->context();
-    }
-  } else {
+  if (PrimaryContexts::Has(context->context())) {
     res = cuDevicePrimaryCtxRelease(device);
     LOG(INFO) << "cuDevicePrimaryCtxRelease: " << context->context();
+  } else {
+    res = cuCtxDestroy(context->context());
+    LOG(INFO) << "cuCtxDestroy: " << context->context();
   }
 
   if (res != CUDA_SUCCESS) {

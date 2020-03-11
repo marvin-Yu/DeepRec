@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "tensorflow/stream_executor/executor_cache.h"
 
+#include "tensorflow/core/util/env_var.h"
 #include "absl/strings/str_format.h"
 #include "absl/synchronization/mutex.h"
 
@@ -31,8 +32,12 @@ port::StatusOr<StreamExecutor*> ExecutorCache::GetOrCreate(
     return fast_result;
   }
 
+  int64 num_contexts;
+  tensorflow::ReadInt64FromEnvVar("TF_NUM_CONTEXTS_PER_GPU", 2, &num_contexts);
+  LOG(INFO) << "TF_NUM_CONTEXTS_PER_GPU = " << num_contexts;
+
   std::string key = std::to_string(config.ordinal) + "," +
-                    std::to_string(config.virtual_ordinal);
+                    std::to_string(config.virtual_ordinal % num_contexts);
   Entry* entry = nullptr;
   {
     absl::MutexLock lock{&mutex_};
