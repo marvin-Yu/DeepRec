@@ -384,6 +384,33 @@ bool DeviceOptionsToContextFlags(const DeviceOptions& device_options,
   return true;
 }
 
+class PrimaryContexts {
+ public:
+  // Returns whether context is a member of the live set.
+  static bool Has(CUcontext context) {
+    absl::ReaderMutexLock lock(&mu_);
+    return Live()->find(context) != Live()->end();
+  }
+
+  // Adds context to the live set, or returns it if it's already present.
+  static bool Add(CUcontext context, CUdevice device) {
+    CHECK(context != nullptr);
+    absl::MutexLock lock(&mu_);
+    auto insert_result = Live()->insert(std::make_pair(context, device));
+    return insert_result.second;
+  }
+
+ private:
+  // Returns the live map singleton.
+  static std::map<CUcontext, CUdevice>* Live() {
+    static auto singleton = new std::map<CUcontext, CUdevice>;
+    return singleton;
+  }
+
+  static absl::Mutex mu_;
+};
+/* static */ absl::Mutex PrimaryContexts::mu_{absl::kConstInit};
+
 /* static */ port::Status GpuDriver::CreateContext(
     int device_ordinal, CUdevice device, const DeviceOptions& device_options,
     GpuContext** context) {
@@ -421,8 +448,16 @@ bool DeviceOptionsToContextFlags(const DeviceOptions& device_options,
                                  &enable_multi_contexts);
   LOG(INFO) << "TF_USE_MULTI_CUDA_CONTEXTS = " << enable_multi_contexts;
   if (enable_multi_contexts) {
-    res = cuCtxCreate(&new_context, flags, device);
-    LOG(INFO) << "cuCtxCreate context " << new_context;
+    res = cuDevicePrimaryCtxRetain(&new_context, device);
+    if (res == CUDA_SUCCESS) {
+      if (PrimaryContexts::Add(new_context, device)) {
+        LOG(INFO) << "cuDevicePrimaryCtxRetain context " << new_context;
+      } else {
+        CHECK_EQ(CUDA_SUCCESS, cuDevicePrimaryCtxRelease(device));
+        res = cuCtxCreate(&new_context, flags, device);
+        LOG(INFO) << "Primary context has been used, cuCtxCreate context " << new_context;
+      }
+    }
   } else {
     res = cuDevicePrimaryCtxRetain(&new_context, device);
     LOG(INFO) << "cuDevicePrimaryCtxRetain context " << new_context;
@@ -486,9 +521,16 @@ bool DeviceOptionsToContextFlags(const DeviceOptions& device_options,
                                  /*default_val=*/false,
                                  &enable_multi_contexts);
   if (enable_multi_contexts) {
-    res = cuCtxDestroy(context->context());
+    if (PrimaryContexts::Has(context->context())) {
+      res = cuDevicePrimaryCtxRelease(device);
+      LOG(INFO) << "cuDevicePrimaryCtxRelease: " << context->context();
+    } else {
+      res = cuCtxDestroy(context->context());
+      LOG(INFO) << "cuCtxDestroy: " << context->context();
+    }
   } else {
     res = cuDevicePrimaryCtxRelease(device);
+    LOG(INFO) << "cuDevicePrimaryCtxRelease: " << context->context();
   }
 
   if (res != CUDA_SUCCESS) {
