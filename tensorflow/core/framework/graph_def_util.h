@@ -24,6 +24,7 @@ namespace tensorflow {
 
 // Forward declare proto so that it's symbols can be removed from .so exports
 class GraphDef;
+class RunOptions;
 
 // Produce a human-readable version of a GraphDef that is more concise
 // than a text-format proto.
@@ -116,6 +117,7 @@ Status StrippedOpListForGraph(const GraphDef& graph_def,
                               const OpRegistryInterface& op_registry,
                               OpList* stripped_op_list);
 
+void AddDebugWatchOpts(const std::string &node, const int slot, RunOptions *runOptions);
 }  // namespace tensorflow
 
 #endif  // TENSORFLOW_CORE_FRAMEWORK_GRAPH_DEF_UTIL_H_
