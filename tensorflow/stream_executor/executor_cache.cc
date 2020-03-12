@@ -33,7 +33,7 @@ port::StatusOr<StreamExecutor*> ExecutorCache::GetOrCreate(
   }
 
   int64 num_contexts;
-  tensorflow::ReadInt64FromEnvVar("TF_NUM_CONTEXTS_PER_GPU", 2, &num_contexts);
+  tensorflow::ReadInt64FromEnvVar("TF_NUM_CONTEXTS_PER_GPU", 1, &num_contexts);
   LOG(INFO) << "TF_NUM_CONTEXTS_PER_GPU = " << num_contexts;
 
   std::string key = std::to_string(config.ordinal) + "," +
