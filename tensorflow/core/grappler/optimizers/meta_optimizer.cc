@@ -185,8 +185,8 @@ Status MetaOptimizer::InitializeOptimizers(
         MakeUnique<FunctionOptimizer>(cfg_.function_optimization()));
   }
   if (cfg_.fuse_tile_concat_matmul() != RewriterConfig::OFF) {
-//    optimizers->push_back(
-//        std::unique_ptr<GraphOptimizer>(new UnfuseBatchNormOptimizer(cpu_device_)));
+    optimizers->push_back(
+        std::unique_ptr<GraphOptimizer>(new UnfuseBatchNormOptimizer(cpu_device_)));
   }
   if (cfg_.debug_stripper() == RewriterConfig::ON) {
     optimizers->push_back(MakeUnique<DebugStripper>());
