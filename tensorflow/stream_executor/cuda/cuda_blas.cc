@@ -1619,6 +1619,68 @@ bool CUDABlas::DoBlasGemm(
 #endif
 }
 
+bool CUDABlas::DoBlasGemm(
+    Stream *stream, blas::Transpose transa,
+    blas::Transpose transb, uint64 m, uint64 n, uint64 k,
+    float alpha, const DeviceMemory<Eigen::half> &a, int lda,
+    const DeviceMemory<Eigen::half> &b, int ldb, float beta,
+    DeviceMemory<float> *c, int ldc) {
+#if CUDA_VERSION >= 7050
+  VLOG(1) << absl::StrFormat(
+      "doing cuBLAS SGEMM: at=%d bt=%d m=%u n=%u "
+      "k=%u alpha=%f a=%p lda=%d b=%p ldb=%d beta=%f "
+      "c=%p ldc=%d",
+      static_cast<int>(transa), static_cast<int>(transb), m, n, k, alpha,
+      a.opaque(), lda, b.opaque(), ldb, beta, c->opaque(), ldc);
+  if (transa == blas::Transpose::kNoTranspose) {
+    if (lda < static_cast<int64>(m)) {
+      LOG(WARNING) << "GEMM lda was smaller than m (no transpose case); "
+                      "precondition violation";
+    }
+  } else {
+    if (lda < static_cast<int64>(k)) {
+      LOG(WARNING) << "GEMM lda (" << lda << ") was smaller than k (" << k
+                   << ") (transpose case); precondition violation";
+    }
+  }
+  if (transb == blas::Transpose::kNoTranspose) {
+    if (ldb < static_cast<int64>(k)) {
+      LOG(WARNING) << "GEMM ldb (" << ldb << ") was smaller than k (" << k
+                   << ") (no transpose case); precondition violation";
+    }
+  } else {
+    if (ldb < static_cast<int64>(n)) {
+      LOG(WARNING) << "GEMM ldb was smaller than n (transpose case); "
+                      "precondition violation";
+    }
+  }
+
+  bool use_tensor_ops = false;
+#if CUDA_VERSION >= 9000
+  int cc_major, cc_minor;
+  stream->parent()->GetDeviceDescription().cuda_compute_capability(&cc_major,
+                                                                   &cc_minor);
+
+  // GPUs < sm_70 don't support tensor ops.
+  if (cc_major >= 7 && TensorOpMathEnabled()) {
+    use_tensor_ops = true;
+  }
+#endif
+
+  return DoBlasInternalImpl(
+      cublasSgemmEx, stream, true /* = pointer_mode_host */,
+      true /* = err_on_failure= */, use_tensor_ops, CUDABlasTranspose(transa),
+      CUDABlasTranspose(transb), m, n, k, &alpha, GpuMemory(a),
+      SE_CUDA_DATA_HALF, lda, GpuMemory(b), SE_CUDA_DATA_HALF, ldb, &beta,
+      GpuMemoryMutable(c), CUDA_R_32F, ldc);
+
+#else
+  LOG(ERROR) << "fp16 sgemm is not implemented in this cuBLAS version "
+             << "(need at least CUDA 7.5)";
+  return false;
+#endif
+}
+
 bool CUDABlas::DoBlasGemm(Stream *stream, blas::Transpose transa,
                           blas::Transpose transb, uint64 m, uint64 n, uint64 k,
                           float alpha, const DeviceMemory<float> &a, int lda,
@@ -2092,6 +2154,33 @@ bool CUDABlas::DoBlasGemmWithAlgorithm(
 }
 
 bool CUDABlas::DoBlasGemmWithAlgorithm(
+    Stream* stream, blas::Transpose transa, blas::Transpose transb, uint64 m,
+    uint64 n, uint64 k, const HostOrDeviceScalar<Eigen::half>& alpha,
+    const DeviceMemory<Eigen::half>& a, int lda,
+    const DeviceMemory<Eigen::half>& b, int ldb,
+    const HostOrDeviceScalar<float>& beta, DeviceMemory<float>* c, int ldc,
+    blas::ComputationType computation_type, blas::AlgorithmType algorithm,
+    blas::ProfileResult* output_profile_result) {
+  if (computation_type == blas::ComputationType::kF32) {
+    if (alpha.is_pointer() || beta.is_pointer()) {
+      // We cannot easily convert a pointer to f16 memory to a pointer to f32
+      // memory from here, so we don't support this for now.
+      // TODO(akuegel): Investigate whether we can do the conversion before
+      // calling DoBlasGemmWithAlgorithm.
+      return false;
+    }
+    HostOrDeviceScalar<float> float_alpha(static_cast<float>(alpha.value()));
+    return DoBlasGemmWithAlgorithmImpl(
+        stream, transa, transb, m, n, k, float_alpha, a, lda, b, ldb,
+        beta, c, ldc, computation_type, algorithm, output_profile_result);
+  } else {
+    LOG(ERROR)
+        << "DoBlasGemmWithAlgorithm error, compute type FP16 and c type FP32";
+    return false;
+  }
+}
+
+bool CUDABlas::DoBlasGemmWithAlgorithm(
     Stream *stream, blas::Transpose transa, blas::Transpose transb, uint64 m,
     uint64 n, uint64 k, const HostOrDeviceScalar<float> &alpha,
     const DeviceMemory<float> &a, int lda, const DeviceMemory<float> &b,
@@ -2535,6 +2624,47 @@ bool CUDABlas::DoBlasGemmStridedBatched(
     }
   }
   return true;
+}
+
+bool CUDABlas::DoBlasGemmStridedBatched(
+    Stream *stream, blas::Transpose transa, blas::Transpose transb, uint64 m,
+    uint64 n, uint64 k, float alpha, const DeviceMemory<Eigen::half> &a,
+    int lda, int64 stride_a, const DeviceMemory<Eigen::half> &b, int ldb,
+    int64 stride_b, float beta, DeviceMemory<float> *c, int ldc,
+    int64 stride_c, int batch_count) {
+  bool use_tensor_ops = false;
+#if CUDA_VERSION >= 9000
+  int cc_major, cc_minor;
+  if (stream->parent()->GetDeviceDescription().cuda_compute_capability(
+          &cc_major, &cc_minor)) {
+    // GPUs < sm_70 don't support tensor ops.
+    if (cc_major >= 7 && TensorOpMathEnabled()) {
+      use_tensor_ops = true;
+    }
+#if CUDA_VERSION >= 9010
+    if (cc_major >= 5) {
+      cublasGemmAlgo_t algo =
+          (use_tensor_ops ? CUBLAS_GEMM_DFALT_TENSOR_OP : CUBLAS_GEMM_DFALT);
+      bool ok = DoBlasInternalImpl(
+          cublasGemmStridedBatchedEx, stream, true /* = pointer_mode_host */,
+          true /* = err_on_failure */, use_tensor_ops,
+          CUDABlasTranspose(transa), CUDABlasTranspose(transb), m, n, k, &alpha,
+          GpuMemory(a), CUDA_R_16F, lda, stride_a, GpuMemory(b), CUDA_R_16F,
+          ldb, stride_b, &beta, GpuMemoryMutable(c), CUDA_R_32F, ldc, stride_c,
+          batch_count, CUDA_R_32F, algo);
+      if (ok) {
+        return true;
+      }
+      LOG(ERROR) << "failed BLAS call, see log for details";
+      return false;
+    }
+#endif
+  }
+#endif
+  // Either CUDA_VERSION < 9.1 or SM < 5.0. Fall back to a loop.
+  LOG(ERROR) << "CUDA_VERSION < 9.1 is not supported in "
+                "DoBlasGemmStridedBatched(half, half, float)";
+  return false;
 }
 
 bool CUDABlas::DoBlasGemmStridedBatched(

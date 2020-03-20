@@ -122,6 +122,23 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
     }
     return Status::OK();
   }
+
+  Status HandleConvert(HloInstruction *instr) override {
+    HloInstruction *existing_gemm;
+    if (Match(instr, m::Convert(m::Op(&existing_gemm)
+                                    .WithCustomCallTarget(kGemmCallTarget)))) {
+      auto src_type = instr->operand(0)->shape().element_type();
+      auto dst_type = instr->shape().element_type();
+      auto config =
+          existing_gemm->backend_config<GemmBackendConfig>().ValueOrDie();
+      if (src_type == F16 && dst_type == F32 && config.beta() == 0 &&
+          existing_gemm->user_count() == 1) {
+        existing_gemm->mutable_shape()->set_element_type(F32);
+        TF_RETURN_IF_ERROR(ReplaceInstruction(instr, existing_gemm));
+      }
+    }
+    return Status::OK();
+  }
 };
 
 static StatusOr<bool> RunOnComputation(HloComputation *computation) {

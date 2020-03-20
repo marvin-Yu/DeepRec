@@ -1300,6 +1300,12 @@ class Stream {
                                  int ldc);
   TF_EXPORT Stream &ThenBlasGemm(blas::Transpose transa, blas::Transpose transb,
                                  uint64 m, uint64 n, uint64 k, float alpha,
+                                 const DeviceMemory<Eigen::half> &a, int lda,
+                                 const DeviceMemory<Eigen::half> &b, int ldb,
+                                 float beta, DeviceMemory<float> *c,
+                                 int ldc);
+  TF_EXPORT Stream &ThenBlasGemm(blas::Transpose transa, blas::Transpose transb,
+                                 uint64 m, uint64 n, uint64 k, float alpha,
                                  const DeviceMemory<float> &a, int lda,
                                  const DeviceMemory<float> &b, int ldb,
                                  float beta, DeviceMemory<float> *c, int ldc);
@@ -1371,6 +1377,15 @@ class Stream {
       const DeviceMemory<Eigen::half> &a, int lda,
       const DeviceMemory<Eigen::half> &b, int ldb,
       const HostOrDeviceScalar<Eigen::half> &beta, DeviceMemory<Eigen::half> *c,
+      int ldc, blas::ComputationType computation_type,
+      blas::AlgorithmType algorithm,
+      blas::ProfileResult *output_profile_result);
+  Stream &ThenBlasGemmWithAlgorithm(
+      blas::Transpose transa, blas::Transpose transb, uint64 m, uint64 n,
+      uint64 k, const HostOrDeviceScalar<Eigen::half> &alpha,
+      const DeviceMemory<Eigen::half> &a, int lda,
+      const DeviceMemory<Eigen::half> &b, int ldb,
+      const HostOrDeviceScalar<float> &beta, DeviceMemory<float> *c,
       int ldc, blas::ComputationType computation_type,
       blas::AlgorithmType algorithm,
       blas::ProfileResult *output_profile_result);
@@ -1512,6 +1527,12 @@ class Stream {
       uint64 k, float alpha, const DeviceMemory<Eigen::half> &a, int lda,
       int64 stride_a, const DeviceMemory<Eigen::half> &b, int ldb,
       int64 stride_b, float beta, DeviceMemory<Eigen::half> *c, int ldc,
+      int64 stride_c, int batch_count);
+  Stream &ThenBlasGemmStridedBatched(
+      blas::Transpose transa, blas::Transpose transb, uint64 m, uint64 n,
+      uint64 k, float alpha, const DeviceMemory<Eigen::half> &a, int lda,
+      int64 stride_a, const DeviceMemory<Eigen::half> &b, int ldb,
+      int64 stride_b, float beta, DeviceMemory<float> *c, int ldc,
       int64 stride_c, int batch_count);
   Stream &ThenBlasGemmStridedBatched(
       blas::Transpose transa, blas::Transpose transb, uint64 m, uint64 n,
