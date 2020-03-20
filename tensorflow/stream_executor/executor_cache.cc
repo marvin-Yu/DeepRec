@@ -16,6 +16,7 @@ limitations under the License.
 #include "tensorflow/stream_executor/executor_cache.h"
 
 #include "tensorflow/core/util/env_var.h"
+#include "tensorflow/stream_executor/gpu/gpu_driver.h"
 #include "absl/strings/str_format.h"
 #include "absl/synchronization/mutex.h"
 
@@ -32,8 +33,17 @@ port::StatusOr<StreamExecutor*> ExecutorCache::GetOrCreate(
     return fast_result;
   }
 
-  int64 num_contexts;
-  tensorflow::ReadInt64FromEnvVar("TF_NUM_CONTEXTS_PER_GPU", 1, &num_contexts);
+  int64 num_contexts = 1;
+  gpu::GpuDeviceHandle device;
+  if (gpu::GpuDriver::GetDevice(config.ordinal, &device).ok()) {
+    int cc_major = 0, cc_minor = 0;
+    gpu::GpuDriver::GetComputeCapability(&cc_major, &cc_minor, device);
+    if (cc_major >= 7) {
+      int64 num_contexts_env;
+      tensorflow::ReadInt64FromEnvVar("TF_NUM_CONTEXTS_PER_GPU", 2, &num_contexts_env);
+      num_contexts = num_contexts_env;
+    }
+  }
   LOG(INFO) << "TF_NUM_CONTEXTS_PER_GPU = " << num_contexts;
 
   std::string key = std::to_string(config.ordinal) + "," +
