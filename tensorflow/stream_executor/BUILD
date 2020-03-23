@@ -4,7 +4,7 @@
 # Throughout this file, all targets are built with the standard crosstool and
 # do not link against restricted binary blobs.
 
-load("//tensorflow:tensorflow.bzl", "tf_cc_test")
+load("//tensorflow:tensorflow.bzl", "tf_cc_test", "tf_copts")
 load("//tensorflow/core/platform:default/build_config.bzl", "tf_proto_library")
 load("//tensorflow/core/platform:default/build_config_root.bzl", "if_static")
 load("//tensorflow/stream_executor:build_defs.bzl", "stream_executor_friends")
@@ -381,6 +381,7 @@ cc_library(
         "temporary_device_memory.h",
         "temporary_memory_manager.h",
     ],
+    copts = tf_copts(),
     hdrs = [
         "blas.h",
         "dnn.h",

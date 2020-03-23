@@ -16,7 +16,11 @@ limitations under the License.
 #include "tensorflow/stream_executor/executor_cache.h"
 
 #include "tensorflow/core/util/env_var.h"
+
+#ifdef GOOGLE_CUDA
 #include "tensorflow/stream_executor/gpu/gpu_driver.h"
+#endif
+
 #include "absl/strings/str_format.h"
 #include "absl/synchronization/mutex.h"
 
@@ -34,6 +38,7 @@ port::StatusOr<StreamExecutor*> ExecutorCache::GetOrCreate(
   }
 
   int64 num_contexts = 1;
+#ifdef GOOGLE_CUDA
   gpu::GpuDeviceHandle device;
   if (gpu::GpuDriver::GetDevice(config.ordinal, &device).ok()) {
     int cc_major = 0, cc_minor = 0;
@@ -44,8 +49,8 @@ port::StatusOr<StreamExecutor*> ExecutorCache::GetOrCreate(
       num_contexts = num_contexts_env;
     }
   }
+#endif  // GOOGLE_CUDA
   LOG(INFO) << "TF_NUM_CONTEXTS_PER_GPU = " << num_contexts;
-
   std::string key = std::to_string(config.ordinal) + "," +
                     std::to_string(config.virtual_ordinal % num_contexts);
   Entry* entry = nullptr;
