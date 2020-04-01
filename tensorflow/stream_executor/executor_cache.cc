@@ -54,7 +54,7 @@ port::StatusOr<StreamExecutor*> ExecutorCache::GetOrCreate(
     gpu::GpuDriver::GetComputeCapability(&cc_major, &cc_minor, device);
     if (cc_major >= 7) {
       int64 num_contexts_env;
-      tensorflow::ReadInt64FromEnvVar("TF_NUM_CONTEXTS_PER_GPU", 2, &num_contexts_env);
+      tensorflow::ReadInt64FromEnvVar("TF_NUM_CONTEXTS_PER_GPU", 1, &num_contexts_env);
       num_contexts = num_contexts_env;
     }
   }
