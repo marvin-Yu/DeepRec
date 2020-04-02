@@ -1029,8 +1029,12 @@ bool FuseReshapesAfterUnpack(Graph* graph) {
     }
     if (!can_reorder || reshapes.size() < 2) continue;
     for (unsigned int i = 1; i < reshapes.size(); i++) {
-      if (reshape_in_1[i] != reshape_in_1[0]) continue;
+      if (reshape_in_1[i] != reshape_in_1[0]){ 
+        can_reorder = false;
+        break;
+	    }
     }
+    if (!can_reorder) continue;
     VLOG(2) << "FuseReshapesAfterUnpack: found pattern";
     
     // Add a new Shape to get the shape of Unpack's input
