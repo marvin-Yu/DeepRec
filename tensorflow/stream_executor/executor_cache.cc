@@ -15,6 +15,12 @@ limitations under the License.
 
 #include "tensorflow/stream_executor/executor_cache.h"
 
+#include "tensorflow/core/util/env_var.h"
+
+#ifdef GOOGLE_CUDA
+#include "tensorflow/stream_executor/gpu/gpu_driver.h"
+#endif
+
 #include "absl/strings/str_format.h"
 #include "absl/synchronization/mutex.h"
 
@@ -31,10 +37,35 @@ port::StatusOr<StreamExecutor*> ExecutorCache::GetOrCreate(
     return fast_result;
   }
 
+  int64 num_contexts = 1;
+#ifdef GOOGLE_CUDA
+  bool use_mps = false;
+  string filename = "/tmp/nvidia-mps/control";
+  int temp = access(filename.c_str(), F_OK);
+  if (temp == 0) {
+    use_mps = true;
+    LOG(INFO) << "CUDA MPS demon is running.";
+  } else {
+    LOG(INFO) << "CUDA MPS demon is NOT running.";
+  }
+  gpu::GpuDeviceHandle device;
+  if (use_mps && gpu::GpuDriver::GetDevice(config.ordinal, &device).ok()) {
+    int cc_major = 0, cc_minor = 0;
+    gpu::GpuDriver::GetComputeCapability(&cc_major, &cc_minor, device);
+    if (cc_major >= 7) {
+      int64 num_contexts_env;
+      tensorflow::ReadInt64FromEnvVar("TF_NUM_CONTEXTS_PER_GPU", 1, &num_contexts_env);
+      num_contexts = num_contexts_env;
+    }
+  }
+#endif  // GOOGLE_CUDA
+  LOG(INFO) << "TF_NUM_CONTEXTS_PER_GPU = " << num_contexts;
+  std::string key = std::to_string(config.ordinal) + "," +
+                    std::to_string(config.virtual_ordinal % num_contexts);
   Entry* entry = nullptr;
   {
     absl::MutexLock lock{&mutex_};
-    entry = &cache_[config.ordinal];
+    entry = &cache_[key];
     // Release the map lock; the address of 'entry' is stable because
     // std::map guarantees reference stability.
   }
@@ -65,10 +96,12 @@ port::StatusOr<StreamExecutor*> ExecutorCache::GetOrCreate(
 
 port::StatusOr<StreamExecutor*> ExecutorCache::Get(
     const StreamExecutorConfig& config) {
+  std::string key = std::to_string(config.ordinal) + "," +
+                    std::to_string(config.virtual_ordinal);
   Entry* entry = nullptr;
   {
     absl::ReaderMutexLock lock{&mutex_};
-    auto it = cache_.find(config.ordinal);
+    auto it = cache_.find(key);
     if (it != cache_.end()) {
       entry = &it->second;
     } else {
@@ -88,7 +121,7 @@ port::StatusOr<StreamExecutor*> ExecutorCache::Get(
   for (const auto& iter : entry->configurations) {
     if (iter.first.plugin_config == config.plugin_config &&
         iter.first.device_options == config.device_options) {
-      VLOG(2) << "hit in cache for device ordinal " << config.ordinal;
+      VLOG(2) << "hit in cache for device ordinal " << key;
       return iter.second.get();
     }
   }

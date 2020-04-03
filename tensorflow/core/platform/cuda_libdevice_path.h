@@ -35,6 +35,11 @@ inline std::vector<string> CandidateCudaRoots(
     candidates.insert(candidates.begin(), preferred_location);
   }
 
+  const char* hippo_binary_path = getenv("HIPPO_APP_INST_ROOT");
+  if (hippo_binary_path){
+    candidates.emplace_back(std::string(hippo_binary_path) +
+                            "/home/a/xdl-blaze");
+  }
   // "." is our last resort, even though it probably won't work.
   candidates.push_back(".");
 
