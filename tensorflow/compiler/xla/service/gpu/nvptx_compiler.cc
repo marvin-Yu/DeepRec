@@ -357,77 +357,44 @@ std::vector<uint8> NVPTXCompiler::CompilePtxOrGetCachedResult(
   XLA_SCOPED_LOGGING_TIMER("NVPTXCompiler::CompilePtxOrGetCachedResult");
   tensorflow::profiler::TraceMe activity(
       "PTX->CUBIN", tensorflow::profiler::TraceMeLevel::kInfo);
-  bool inserted;
-  decltype(compilation_cache_.begin()) iter;
-  // Pointers into compilation_cache_ where the ptx and (optional) cubin are
-  // stored.
-  const string* cache_ptx = nullptr;
-  CompilationCacheValue* cache_value = nullptr;
 
-  {
-    tensorflow::mutex_lock lock(mutex_);
-    std::tie(iter, inserted) = compilation_cache_.emplace(
-        std::piecewise_construct,
-        std::forward_as_tuple(ptx, cc_major, cc_minor),
-        std::forward_as_tuple());
-    cache_ptx = &iter->first.ptx;
-    cache_value = &iter->second;
-  }
+  std::vector<uint8> cubin_data;
+  if (ptx.empty()) return cubin_data;
+  StatusOr<std::vector<uint8>> maybe_cubin = se::cuda::CompilePtx(
+      stream_exec->device_ordinal(), ptx.c_str(),
+      PtxOptsFromConfig(hlo_module_config));
 
-  // Compile the ptx if it wasn't in the cache before we called this function.
-  // Other threads asking for the same compilation key will block on
-  // cache_value->mutex_ until compilation is done.
-  {
-    tensorflow::mutex_lock lock(cache_value->mutex_);
-    if (inserted) {
-      CHECK(!cache_value->compilation_done);
-      if (!ptx.empty()) {
-        StatusOr<std::vector<uint8>> maybe_cubin = se::cuda::CompilePtx(
-            stream_exec->device_ordinal(), cache_ptx->c_str(),
-            PtxOptsFromConfig(hlo_module_config));
-        if (maybe_cubin.ok()) {
-          cache_value->cubin_data = std::move(maybe_cubin).ValueOrDie();
-          VLOG(2) << "Compiled PTX size:" << ptx.size()
-                  << " CUBIN size: " << cache_value->cubin_data.size();
-        } else {
-          bool log_warning = true;
-          if (maybe_cubin.status().code() ==
-              tensorflow::error::Code::NOT_FOUND) {
-            // Missing ptxas is expected in some environments where CUDA SDK
-            // binaries are not available. We don't want to spam logs with
-            // identical warnings in this case.
+  if (maybe_cubin.ok()) {
+    cubin_data = std::move(maybe_cubin).ValueOrDie();
+    VLOG(2) << "Compiled PTX size:" << ptx.size()
+            << " CUBIN size: " << cubin_data.size();
+  } else {
+    bool log_warning = true;
+    if (maybe_cubin.status().code() ==
+        tensorflow::error::Code::NOT_FOUND) {
+      // Missing ptxas is expected in some environments where CUDA SDK
+      // binaries are not available. We don't want to spam logs with
+      // identical warnings in this case.
 
-            // TODO(jlebar): we should implement a LOG_FIRST_N and LOG_EVERY_N
-            // for more general usage.
-            static std::atomic<bool> warning_done(false);
-            log_warning = !warning_done.exchange(true);
-          }
-          if (log_warning) {
-            PrintCantFindCudaMessage(
-                "Can't find ptxas binary in ${CUDA_DIR}/bin.  Will back to the "
-                "GPU driver for PTX -> sass compilation.  This is OK so long "
-                "as you don't see a warning below about an out-of-date driver "
-                "version.",
-                hlo_module_config);
-          }
-
-          // We're going to use the driver to JIT our PTX->SASS, so warn if
-          // the JIT in the driver has known bugs.
-          WarnIfBadDriverJITVersion();
-        }
-      }
-      cache_value->compilation_done = true;
-      cache_value->compilation_done_cv_.notify_all();
-    } else {
-      while (!cache_value->compilation_done) {
-        cache_value->compilation_done_cv_.wait(lock);
-      }
+      // TODO(jlebar): we should implement a LOG_FIRST_N and LOG_EVERY_N
+      // for more general usage.
+      static std::atomic<bool> warning_done(false);
+      log_warning = !warning_done.exchange(true);
     }
-  }
+    if (log_warning) {
+      PrintCantFindCudaMessage(
+          "Can't find ptxas binary in ${CUDA_DIR}/bin.  Will back to the "
+          "GPU driver for PTX -> sass compilation.  This is OK so long "
+          "as you don't see a warning below about an out-of-date driver "
+          "version.",
+          hlo_module_config);
+    }
 
-  CHECK(cache_value != nullptr);
-  CHECK(cache_value->compilation_done);
-  return cache_value->cubin_data;
+    // We're going to use the driver to JIT our PTX->SASS, so warn if
+    // the JIT in the driver has known bugs.
+    WarnIfBadDriverJITVersion();
+  }
+  return cubin_data;
 }
 
 }  // namespace gpu
