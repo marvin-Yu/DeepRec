@@ -547,7 +547,6 @@ void TF_SetThreadPoolOptions(
     int num_inter_op_threads,
     int num_intra_op_threads) {
   if (num_inter_op_threads > 0) {
-    static int count = 0;
     auto* pool_config = options->options.config.
                         add_session_inter_op_thread_pool();
     pool_config->set_num_threads(num_inter_op_threads);
