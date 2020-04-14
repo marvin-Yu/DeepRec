@@ -81,6 +81,24 @@ void GRUKernel(const CPUDevice& d, int batch_size, int rounds, int elts, T* y,
       y_batch += elts;
     }
   }
+
+  if (VLOG_IS_ON(1)) {
+    int64 flops = 0;
+    flops += batch_size * rounds * elts * 3 * elts * 2;
+    for (int b = 0; b < batch_size; b++) {
+      for (int i = 0; i < rounds; i++) {
+        flops += elts * 3 * elts * 2;
+        flops += elts * 3;
+        flops += elts * 3;
+        flops += elts * 2;
+        flops += elts * 2 * 4;
+        flops += elts * 2;
+        flops += elts * 5;
+      }
+    }
+    LOG(INFO) << "FLOPs = " << flops
+              << ", BlazeGRU";
+  }
 }
 
 template <typename T>

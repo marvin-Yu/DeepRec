@@ -478,13 +478,23 @@ class MatMulOp : public OpKernel {
         {a.dim_size(a_dim_remaining), b.dim_size(b_dim_remaining)});
     Tensor* out = nullptr;
     OP_REQUIRES_OK(ctx, ctx->allocate_output(0, out_shape, &out));
-
     if (out->NumElements() == 0) {
       // If a has shape [0, x] or b has shape [x, 0], the output shape
       // is a 0-element matrix, so there is nothing to do.
       return;
     }
 
+    if (VLOG_IS_ON(1)) {
+      int64 flops = 1;
+      for (int i = 0; i < out_shape.dims(); i++) {
+        flops *= out_shape.dim_size(i);
+      }
+      LOG(INFO) << "FLOPs = " << flops * a.dim_size(dim_pair[0].first) * 2
+                << ", " << type_string()
+                << ", " << name()
+                << ", " << a.shape().DebugString()
+                << ", " << b.shape().DebugString();
+    }
     if (a.NumElements() == 0 && b.NumElements() == 0) {
       // If a has shape [x, 0] and b has shape [0, y], the
       // output shape is [x, y] where x and y are non-zero, so we fill
