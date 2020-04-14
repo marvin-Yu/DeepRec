@@ -69,7 +69,7 @@ struct MatrixDescriptor {
   int64 num_cols;
 };
 
-template <typename Element, typename AlphaType>
+template <typename InT, typename OutT, typename AlphaType>
 static bool DoGemmWithAlgorithm(
     int64 batch_size, MatrixDescriptor lhs_matrix, MatrixDescriptor rhs_matrix,
     MatrixDescriptor output_matrix, AlphaType alpha, double beta,
@@ -77,7 +77,7 @@ static bool DoGemmWithAlgorithm(
     se::blas::ProfileResult *output_profile_result) {
   DCHECK(!output_matrix.transpose);
 
-  PrimitiveType type = primitive_util::NativeToPrimitiveType<Element>();
+  PrimitiveType type = primitive_util::NativeToPrimitiveType<InT>();
 
   // Converts from an XLA PrimitiveType to a blas::ComputationType, which is
   // used to specify the precision with which matmul computations should be
@@ -101,9 +101,9 @@ static bool DoGemmWithAlgorithm(
     }
   }(type);
 
-  se::DeviceMemory<Element> lhs_data(lhs_matrix.data);
-  se::DeviceMemory<Element> rhs_data(rhs_matrix.data);
-  se::DeviceMemory<Element> output_data(output_matrix.data);
+  se::DeviceMemory<InT> lhs_data(lhs_matrix.data);
+  se::DeviceMemory<InT> rhs_data(rhs_matrix.data);
+  se::DeviceMemory<OutT> output_data(output_matrix.data);
 
   auto lhs_transpose = lhs_matrix.transpose ? se::blas::Transpose::kTranspose
                                             : se::blas::Transpose::kNoTranspose;
@@ -119,10 +119,10 @@ static bool DoGemmWithAlgorithm(
             lhs_transpose, rhs_transpose, output_matrix.num_rows,
             output_matrix.num_cols,
             /*size of reduce dim=*/k,
-            /*alpha=*/static_cast<Element>(alpha), lhs_data,
+            /*alpha=*/static_cast<InT>(alpha), lhs_data,
             /*leading dim of LHS=*/lhs_matrix.num_rows, rhs_data,
             /*leading dim of RHS=*/rhs_matrix.num_rows,
-            /*beta=*/static_cast<Element>(beta), &output_data,
+            /*beta=*/static_cast<OutT>(beta), &output_data,
             /*leading dim of output=*/output_matrix.num_rows, computation_type,
             *algorithm, output_profile_result)
         .ok();
@@ -268,29 +268,36 @@ Status RunGemm(const HloInstruction *gemm,
     switch (output_shape.element_type()) {
       case F16:
         CHECK_EQ(alpha.imag(), 0);
-        return DoGemmWithAlgorithm<Eigen::half, double>(
+        return DoGemmWithAlgorithm<Eigen::half, Eigen::half, double>(
             batch_size, lhs_matrix, rhs_matrix, output_matrix, alpha.real(),
             beta, stream, best_algorithm,
             /*output_profile_result=*/profile_result);
       case F32:
         CHECK_EQ(alpha.imag(), 0);
-        return DoGemmWithAlgorithm<float, double>(
-            batch_size, lhs_matrix, rhs_matrix, output_matrix, alpha.real(),
-            beta, stream, best_algorithm,
-            /*output_profile_result=*/profile_result);
+        if (lhs_shape.element_type() == F16) {
+          return DoGemmWithAlgorithm<Eigen::half, float, double>(
+              batch_size, lhs_matrix, rhs_matrix, output_matrix, alpha.real(),
+              beta, stream, best_algorithm,
+              /*output_profile_result=*/profile_result);
+        } else {
+          return DoGemmWithAlgorithm<float, float, double>(
+              batch_size, lhs_matrix, rhs_matrix, output_matrix, alpha.real(),
+              beta, stream, best_algorithm,
+              /*output_profile_result=*/profile_result);
+        }
       case F64:
         CHECK_EQ(alpha.imag(), 0);
-        return DoGemmWithAlgorithm<double, double>(
+        return DoGemmWithAlgorithm<double, double, double>(
             batch_size, lhs_matrix, rhs_matrix, output_matrix, alpha.real(),
             beta, stream, best_algorithm,
             /*output_profile_result=*/profile_result);
       case C64:
-        return DoGemmWithAlgorithm<complex64, complex64>(
+        return DoGemmWithAlgorithm<complex64, complex64, complex64>(
             batch_size, lhs_matrix, rhs_matrix, output_matrix,
             static_cast<complex64>(alpha), beta, stream, best_algorithm,
             /*output_profile_result=*/profile_result);
       case C128:
-        return DoGemmWithAlgorithm<complex128, complex128>(
+        return DoGemmWithAlgorithm<complex128, complex128, complex128>(
             batch_size, lhs_matrix, rhs_matrix, output_matrix, alpha, beta,
             stream, best_algorithm,
             /*output_profile_result=*/profile_result);

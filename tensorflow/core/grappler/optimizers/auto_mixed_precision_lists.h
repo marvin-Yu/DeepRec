@@ -79,6 +79,8 @@ class AutoMixedPrecisionLists {
       // Fp16 BatchMatMul is slow before CUDA 9.1.
       list.insert("BatchMatMul");
       list.insert("BatchMatMulV2");
+      list.insert("IndicatorMatMul");
+      list.insert("ParallelIndicatorMatMul");
     }
     UpdateList(&list, to_add, to_remove);
     return list;
