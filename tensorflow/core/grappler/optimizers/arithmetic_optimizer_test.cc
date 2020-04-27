@@ -843,7 +843,7 @@ TEST_F(ArithmeticOptimizerTest, FoldTransposeIntoMatMul) {
     auto identity = ops::Identity(s.WithOpName("identity"), matmul);
 
     GrapplerItem item;
-    item.fetch = {"matmul"};
+    item.fetch = {"identity"};
     TF_CHECK_OK(s.ToGraphDef(&item.graph));
 
     auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
@@ -902,9 +902,10 @@ TEST_F(ArithmeticOptimizerTest, FoldConjugateTransposeIntoBatchMatMul) {
   Output trans_a = ops::ConjugateTranspose(s.WithOpName("trans_a"), a, perm);
   Output trans_b = ops::ConjugateTranspose(s.WithOpName("trans_b"), b, perm);
   Output matmul = ops::BatchMatMul(s.WithOpName("matmul"), trans_a, trans_b);
+  Output identity = ops::Identity(s.WithOpName("identity"), matmul);
 
   GrapplerItem item;
-  item.fetch = {"matmul"};
+  item.fetch = {"identity"};
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
 
   auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
@@ -915,7 +916,7 @@ TEST_F(ArithmeticOptimizerTest, FoldConjugateTransposeIntoBatchMatMul) {
   OptimizeTwice(&optimizer, &item, &output);
 
   NodeMap node_map(&output);
-  EXPECT_EQ(output.node_size(), 11);
+  EXPECT_EQ(output.node_size(), 12);
 
   const string p = "ArithmeticOptimizer/FoldTransposeIntoMatMul";
   const string optimized_name = absl::StrCat(p, "_", "matmul");
