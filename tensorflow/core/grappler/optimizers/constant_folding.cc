@@ -2342,6 +2342,13 @@ bool ConstantFolding::SimplifyPack(GraphDef* optimized_graph, NodeDef* node) {
         !OptimizedNodeExists(*node, "_const_axis"))) {
     return false;
   }
+
+  // It's unsafe to add a control dependency on the feed node, because it might
+  // have been never executed otherwiwise.
+  if (feed_nodes_.find(NodeName(node->input(0))) != feed_nodes_.end()) {
+    return false;
+  }
+
   // Create constant axis node.
   Tensor axis_t(DT_INT32, TensorShape({}));
   NodeDef* axis_node = optimized_graph->add_node();
