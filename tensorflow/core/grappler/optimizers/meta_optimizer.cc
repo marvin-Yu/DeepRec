@@ -140,6 +140,7 @@ std::unique_ptr<GraphOptimizer> MetaOptimizer::MakeNewOptimizer(
   MK_OPT("shape", new ShapeOptimizer());
   MK_OPT("remap", new Remapper(cfg_.remapping()));
   MK_OPT("layout", new GenericLayoutOptimizer());
+  MK_OPT("gemm", new GemmOptimizer());
   MK_OPT("auto_mixed_precision",
          new AutoMixedPrecision(cfg_.auto_mixed_precision()));
   MK_OPT("memory", new MemoryOptimizer(RewriterConfig::MANUAL));
@@ -153,7 +154,6 @@ std::unique_ptr<GraphOptimizer> MetaOptimizer::MakeNewOptimizer(
                                       cfg_.scoped_allocator_opts()));
   MK_OPT("pin_to_host",
          new PinToHostOptimizer(cfg_.pin_to_host_optimization()));
-  MK_OPT("gemm", new GemmOptimizer());
 
   return std::unique_ptr<GraphOptimizer>();
 }
@@ -211,6 +211,9 @@ Status MetaOptimizer::InitializeOptimizers(
     optimizers->push_back(
         MakeUnique<DependencyOptimizer>(cfg_.dependency_optimization()));
   }
+  if (cfg_.gemm_optimization() != RewriterConfig::OFF) {
+    optimizers->push_back(MakeUnique<GemmOptimizer>());
+  }
   if (AutoMixedPrecisionEnabled(cfg_.auto_mixed_precision())) {
     optimizers->push_back(
         MakeUnique<AutoMixedPrecision>(cfg_.auto_mixed_precision()));
@@ -236,9 +239,6 @@ Status MetaOptimizer::InitializeOptimizers(
   if (cfg_.scoped_allocator_optimization()) {
     optimizers->push_back(MakeUnique<ScopedAllocatorOptimizer>(
         cfg_.scoped_allocator_optimization(), cfg_.scoped_allocator_opts()));
-  }
-  if (cfg_.gemm_optimization() != RewriterConfig::OFF) {
-    optimizers->push_back(MakeUnique<GemmOptimizer>());
   }
   return InitializeCustomGraphOptimizers(std::set<string>(), optimizers);
 }

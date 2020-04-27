@@ -151,6 +151,12 @@ class ReductionOp : public OpKernel {
     VLOG(1) << "data shape: " << data.shape().DebugString();
     VLOG(1) << "axes      : " << axes.SummarizeValue(10);
 
+    if (VLOG_IS_ON(1)) {
+      LOG(INFO) << "FLOPs = " << data.NumElements()
+                << ", " << type_string()
+                << ", " << name()
+                << ", " << data.shape().DebugString();
+    }
     ReductionHelper helper;
     OP_REQUIRES_OK(ctx, helper.Simplify(data, axes, keep_dims_));
     CHECK_GE(helper.ndims(), 0);

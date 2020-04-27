@@ -1162,7 +1162,7 @@ bool ShouldIgnorePerformance() {
     bool ret = false;
     TF_CHECK_OK(ReadBoolFromEnvVar(
         "TF_AUTO_MIXED_PRECISION_GRAPH_REWRITE_IGNORE_PERFORMANCE",
-        /*default_val=*/false, &ret));
+        /*default_val=*/true, &ret));
     return ret;
   }();
   return is_enabled;

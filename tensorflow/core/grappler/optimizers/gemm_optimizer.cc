@@ -61,6 +61,20 @@ std::unordered_set<string> GetBinaryOps() {
   return ops;
 }
 
+Status UpdateAllEdge(Graph* graph, Node* new_src_node, Node* old_dst_node) {
+  std::vector<Node*> dst_nodes;
+  std::vector<int> dst_inputs;
+  for (const Edge* e : old_dst_node->out_edges()) {
+    dst_nodes.push_back(e->dst());
+    dst_inputs.push_back(e->dst_input());
+  }
+  for (unsigned int i = 0; i < dst_nodes.size(); i++) {
+    TF_RETURN_IF_ERROR(
+        graph->UpdateEdge(new_src_node, 0, dst_nodes[i], dst_inputs[i]));
+  }
+  return Status::OK();
+}
+
 // Change MatMul_0->[Reshape]*n->MatMul_1 to MatMul_0->MatMul_1
 bool RemoveReshapesBeforeMatMul(Graph* graph) {
   bool changed = false; 
@@ -1029,8 +1043,12 @@ bool FuseReshapesAfterUnpack(Graph* graph) {
     }
     if (!can_reorder || reshapes.size() < 2) continue;
     for (unsigned int i = 1; i < reshapes.size(); i++) {
-      if (reshape_in_1[i] != reshape_in_1[0]) continue;
+      if (reshape_in_1[i] != reshape_in_1[0]){ 
+        can_reorder = false;
+        break;
+	    }
     }
+    if (!can_reorder) continue;
     VLOG(2) << "FuseReshapesAfterUnpack: found pattern";
     
     // Add a new Shape to get the shape of Unpack's input
@@ -2367,14 +2385,16 @@ bool FuseGatherBeforeMatMul(Graph* graph) {
     graph->AddEdge(input_nodes[1], input_idx[1], ind_matmul_node, 1);
     graph->AddEdge(input_nodes[2], input_idx[2], ind_matmul_node, 2);
     // Update output edge
-    for (const Edge* edge : matmul->out_edges()) {
-      Node* out_node = edge->dst();
-      int dst_idx = edge->dst_input();
-      graph->AddEdge(ind_matmul_node, 0, out_node, dst_idx);
-    }
+    UpdateAllEdge(graph, ind_matmul_node, matmul);
     // Remove useless node
-    graph->RemoveNode(matmul);
-
+    auto RemoveNodeSafely = [&](Node* node) {
+      if (node->out_edges().empty()) {
+        graph->RemoveNode(node);
+      }
+    };
+    RemoveNodeSafely(matmul);
+    RemoveNodeSafely(gather);
+    RemoveNodeSafely(axis);
     changed = true;
   }
   return changed;

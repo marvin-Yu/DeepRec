@@ -4,7 +4,7 @@
 ##############################################################
 Name: %(echo t-ads-tensorflow-c-lib${SUFFIX})
 Packager:xianjie.qxj
-Version:1.15.14
+Version:1.15.16
 # if you want get version number from outside, use like this
 Release:%(echo $RELEASE)%{?dist}
 
@@ -43,7 +43,7 @@ env PYTHON_BIN_PATH=/opt/conda/bin/python \
     GCC_HOST_COMPILER_PATH=/usr/bin/gcc TF_NEED_MPI=0 \
     CC_OPT_FLAGS="-march=native -Wno-sign-compare" \
     CUDA_TOOLKIT_PATH=/usr/local/cuda-10.1 \
-    TF_CUDA_COMPUTE_CAPABILITIES="6.0,7.5" \
+    TF_CUDA_COMPUTE_CAPABILITIES="6.0,7.0,7.5" \
     LD_LIBRARY_PATH="/usr/local/cuda-10.1/lib64:/usr/local/cuda-10.1/extras/CUPTI/lib64/:" \
     TF_SET_ANDROID_WORKSPACE=0 ./configure
 export LD_LIBRARY_PATH="/usr/local/cuda-10.1/lib64:/usr/local/cuda-10.1/extras/CUPTI/lib64/:"

@@ -635,8 +635,21 @@ class BaseBatchMatMulOp : public OpKernel {
     out_shape.AddDim(d3);
     Tensor* out = nullptr;
     OP_REQUIRES_OK(ctx, ctx->allocate_output(0, out_shape, &out));
+
     if (out->NumElements() == 0) {
       return;
+    }
+
+    if (VLOG_IS_ON(1)) {
+      int64 flops = 1;
+      for (int i = 0; i < out_shape.dims(); i++) {
+        flops *= out_shape.dim_size(i);
+      }
+      LOG(INFO) << "FLOPs = " << flops * d1 * 2
+                << ", " << type_string()
+                << ", " << name()
+                << ", " << in0.shape().DebugString()
+                << ", " << in1.shape().DebugString();
     }
     if (in0.NumElements() == 0 || in1.NumElements() == 0) {
       functor::SetZeroFunctor<Device, Scalar> f;

@@ -1300,6 +1300,12 @@ class Stream {
                                  int ldc);
   TF_EXPORT Stream &ThenBlasGemm(blas::Transpose transa, blas::Transpose transb,
                                  uint64 m, uint64 n, uint64 k, float alpha,
+                                 const DeviceMemory<Eigen::half> &a, int lda,
+                                 const DeviceMemory<Eigen::half> &b, int ldb,
+                                 float beta, DeviceMemory<float> *c,
+                                 int ldc);
+  TF_EXPORT Stream &ThenBlasGemm(blas::Transpose transa, blas::Transpose transb,
+                                 uint64 m, uint64 n, uint64 k, float alpha,
                                  const DeviceMemory<float> &a, int lda,
                                  const DeviceMemory<float> &b, int ldb,
                                  float beta, DeviceMemory<float> *c, int ldc);
@@ -1376,6 +1382,15 @@ class Stream {
       blas::ProfileResult *output_profile_result);
   Stream &ThenBlasGemmWithAlgorithm(
       blas::Transpose transa, blas::Transpose transb, uint64 m, uint64 n,
+      uint64 k, const HostOrDeviceScalar<Eigen::half> &alpha,
+      const DeviceMemory<Eigen::half> &a, int lda,
+      const DeviceMemory<Eigen::half> &b, int ldb,
+      const HostOrDeviceScalar<float> &beta, DeviceMemory<float> *c,
+      int ldc, blas::ComputationType computation_type,
+      blas::AlgorithmType algorithm,
+      blas::ProfileResult *output_profile_result);
+  Stream &ThenBlasGemmWithAlgorithm(
+      blas::Transpose transa, blas::Transpose transb, uint64 m, uint64 n,
       uint64 k, const HostOrDeviceScalar<int> &alpha,
       const DeviceMemory<int8> &a, int lda, const DeviceMemory<int8> &b,
       int ldb, const HostOrDeviceScalar<int> &beta, DeviceMemory<int> *c,
@@ -1425,6 +1440,11 @@ class Stream {
       const port::ArraySlice<DeviceMemory<Eigen::half> *> &b, int ldb,
       float beta, const port::ArraySlice<DeviceMemory<Eigen::half> *> &c,
       int ldc, int batch_count);
+  Stream& ThenBlasGemmBatched(blas::Transpose transa, blas::Transpose transb,
+                              uint64 m, uint64 n, uint64 k, float alpha,
+                              const Eigen::half** a, int lda,
+                              const Eigen::half** b, int ldb, float beta,
+                              Eigen::half** c, int ldc, int batch_count);
   Stream &ThenBlasGemmBatched(blas::Transpose transa, blas::Transpose transb,
                               uint64 m, uint64 n, uint64 k, float alpha,
                               const port::ArraySlice<DeviceMemory<float> *> &a,
@@ -1507,6 +1527,12 @@ class Stream {
       uint64 k, float alpha, const DeviceMemory<Eigen::half> &a, int lda,
       int64 stride_a, const DeviceMemory<Eigen::half> &b, int ldb,
       int64 stride_b, float beta, DeviceMemory<Eigen::half> *c, int ldc,
+      int64 stride_c, int batch_count);
+  Stream &ThenBlasGemmStridedBatched(
+      blas::Transpose transa, blas::Transpose transb, uint64 m, uint64 n,
+      uint64 k, float alpha, const DeviceMemory<Eigen::half> &a, int lda,
+      int64 stride_a, const DeviceMemory<Eigen::half> &b, int ldb,
+      int64 stride_b, float beta, DeviceMemory<float> *c, int ldc,
       int64 stride_c, int batch_count);
   Stream &ThenBlasGemmStridedBatched(
       blas::Transpose transa, blas::Transpose transb, uint64 m, uint64 n,

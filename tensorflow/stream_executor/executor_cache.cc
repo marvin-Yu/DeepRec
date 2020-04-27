@@ -21,10 +21,40 @@ limitations under the License.
 #include "tensorflow/stream_executor/gpu/gpu_driver.h"
 #endif
 
+#include "absl/base/call_once.h"
 #include "absl/strings/str_format.h"
 #include "absl/synchronization/mutex.h"
 
 namespace stream_executor {
+
+namespace {
+static absl::once_flag flag_init;
+static void SetNumCudaContexts(int ordinal, int64* num_cuda_contexts) {
+  *num_cuda_contexts = 1;
+#ifdef GOOGLE_CUDA
+  bool use_mps = false;
+  string filename = "/tmp/nvidia-mps/control";
+  int temp = access(filename.c_str(), F_OK);
+  if (temp == 0) {
+    use_mps = true;
+    LOG(INFO) << "CUDA MPS demon is running.";
+  } else {
+    LOG(INFO) << "CUDA MPS demon is NOT running.";
+  }
+  gpu::GpuDeviceHandle device;
+  if (use_mps && gpu::GpuDriver::GetDevice(ordinal, &device).ok()) {
+    int cc_major = 0, cc_minor = 0;
+    gpu::GpuDriver::GetComputeCapability(&cc_major, &cc_minor, device);
+    if (cc_major >= 7) {
+      int64 num_contexts_env;
+      tensorflow::ReadInt64FromEnvVar("TF_NUM_CONTEXTS_PER_GPU", 2, &num_contexts_env);
+      *num_cuda_contexts = num_contexts_env;
+      LOG(INFO) << "TF_NUM_CONTEXTS_PER_GPU = " << *num_cuda_contexts;
+    }
+  }
+#endif  // GOOGLE_CUDA
+}
+}  // end namespace
 
 port::StatusOr<StreamExecutor*> ExecutorCache::GetOrCreate(
     const StreamExecutorConfig& config,
@@ -37,31 +67,11 @@ port::StatusOr<StreamExecutor*> ExecutorCache::GetOrCreate(
     return fast_result;
   }
 
-  int64 num_contexts = 1;
-#ifdef GOOGLE_CUDA
-  bool use_mps = false;
-  string filename = "/tmp/nvidia-mps/control";
-  int temp = access(filename.c_str(), F_OK);
-  if (temp == 0) {
-    use_mps = true;
-    LOG(INFO) << "CUDA MPS demon is running.";
-  } else {
-    LOG(INFO) << "CUDA MPS demon is NOT running.";
-  }
-  gpu::GpuDeviceHandle device;
-  if (use_mps && gpu::GpuDriver::GetDevice(config.ordinal, &device).ok()) {
-    int cc_major = 0, cc_minor = 0;
-    gpu::GpuDriver::GetComputeCapability(&cc_major, &cc_minor, device);
-    if (cc_major >= 7) {
-      int64 num_contexts_env;
-      tensorflow::ReadInt64FromEnvVar("TF_NUM_CONTEXTS_PER_GPU", 1, &num_contexts_env);
-      num_contexts = num_contexts_env;
-    }
-  }
-#endif  // GOOGLE_CUDA
-  LOG(INFO) << "TF_NUM_CONTEXTS_PER_GPU = " << num_contexts;
+  static int64 num_cuda_contexts = 1;
+  absl::call_once(flag_init, &SetNumCudaContexts, config.ordinal, &num_cuda_contexts);
+  LOG(INFO) << "TF_NUM_CONTEXTS_PER_GPU = " << num_cuda_contexts;
   std::string key = std::to_string(config.ordinal) + "," +
-                    std::to_string(config.virtual_ordinal % num_contexts);
+                    std::to_string(config.virtual_ordinal % num_cuda_contexts);
   Entry* entry = nullptr;
   {
     absl::MutexLock lock{&mutex_};
