@@ -6,27 +6,37 @@
 
 namespace tensorflow {
 
-__global__ void GRUPadZeros(float* x, float* y, int* padded_iterations,
-                            const int round, const int elts) {
+__global__ void GRUPadZeros(const float* x, float* y, int* padded_iterations,
+                            const int round, const int elts,
+                            const int hidden_num) {
   const int batch_idx = blockIdx.x;
   x += batch_idx * round * elts;
-  y += batch_idx * round * elts;
+  y += batch_idx * round * hidden_num;
   padded_iterations += batch_idx;
+  __shared__ int all_zero[1];
   int i;
   for (i = 0; i < round; i++) {
-    auto p = x + i * elts;
-    bool all_zero = true;
-    for (int k = 0; k < elts; k++) {
+    if (threadIdx.x == 0) { all_zero[0] = 1; }
+    __syncthreads();
+    const float* p = x + i * elts;
+    int k = threadIdx.x;
+    while (k < elts) {
       if (p[k] != 0) {
-        all_zero = false;
+        all_zero[0] = 0;
         break;
       }
+      k += blockDim.x;
     }
-    if (!all_zero) { break; }
-    p = y + i * elts;
-    for (int k = 0; k < elts; k++) { p[k] = 0; }
+    __syncthreads();
+    if (!all_zero[0]) { break; }
+    float* q = y + i * hidden_num;
+    k = threadIdx.x;
+    while (k < hidden_num) {
+      q[k] = 0;
+      k += blockDim.x;
+    }
   }
-  *padded_iterations = i;
+  if (threadIdx.x == 0) { *padded_iterations = i; }
 }
 
 __global__ void GRUPrepare(unsigned int* finished, const int round) {
@@ -52,35 +62,34 @@ enum GRUType {
 };
 
 __device__
-int calc_offset(int elts, int slot_per_block, int slot_per_batch,
+int calc_offset(int hidden_num, int slot_per_block, int slot_per_batch,
                 int threads_per_slot) {
-  int rem = elts % slot_per_block;
+  int rem = hidden_num % slot_per_block;
   int k = blockIdx.x % slot_per_batch;
   int slots = (rem != 0 && k + 1 == slot_per_batch
                ? rem : slot_per_block);
-  return (threadIdx.x >= slots * threads_per_slot
-          ? -1
-          : (k * slot_per_block
-             + threadIdx.x / threads_per_slot));
+  return (threadIdx.x >= slots*threads_per_slot? 
+          -1: (k*slot_per_block + threadIdx.x/threads_per_slot));
 }
 
 __forceinline__ __device__ float sigmoidf(float x) {
-  return 0.5 + 0.5 * tanhf(0.5 * x);
+  return 1.0 / (1.0 + expf(-x));
 }
 
 template <const int weights_per_thread>
 __device__ void load_weights(float* weights, const float* all_weights,
                              const GRUType type, const int offset,
-                             const int offset_idx, const int elts) {
-  auto k = (type % 3 * elts
+                             const int offset_idx, const int elts,
+                             const int hidden_num) {
+  auto k = (type % 3 * hidden_num
             + offset
-            + offset_idx * weights_per_thread * 3 * elts);
-  const auto max = elts * elts * 3;
+            + offset_idx * weights_per_thread * 3 * hidden_num);
+  const auto max = elts * hidden_num * 3;
   #pragma unroll
   for (int i = 0; i < weights_per_thread; i++) {
     if (k < max) {
       weights[i] = all_weights[k];
-      k += elts * 3;
+      k += hidden_num * 3;
     }
   }
 }
@@ -88,10 +97,11 @@ __device__ void load_weights(float* weights, const float* all_weights,
 template <const int weights_per_thread>
 __device__ void multiply(const float* weights, const float* inp,
                          float* out, const GRUType type, const int iter,
-                         const int offset_idx, const int elts) {
+                         const int offset_idx, const int elts,
+                         const float* init_h) {
   float res = 0;
   auto k = weights_per_thread * offset_idx;
-  const float* p = type >= 3 || iter > 0 ? inp : nullptr;
+  const float* p = type >= 3 || iter > 0 ? inp : init_h;
   #pragma unroll
   for (int i = 0; i < weights_per_thread; i++) {
     if (k < elts) {
@@ -141,7 +151,9 @@ __global__ void GRUKernel(const float* x, const float* h2h,
                           const float* h2h_bias, const float* i2h,
                           const float* i2h_bias, float* y,
                           unsigned int* finished, const int batch_size,
-                          const int round, const int elts) {
+                          const int round, const int elts,
+                          const int hidden_num, const int* padded_iterations,
+                          const float* init_h) {
   const int total_per_slot_0 = alignN(elts, gru_weights_per_thread);
   const int threads_per_slot_0 = total_per_slot_0 / weights_per_thread;
   const int total_per_slot = total_per_slot_0 * 6;
@@ -149,8 +161,8 @@ __global__ void GRUKernel(const float* x, const float* h2h,
   const int slot_per_block = (alignN(threads_per_slot, gru_threads_per_block)
                               / threads_per_slot);
   const int slot_per_batch =
-    alignN(elts, slot_per_block) / slot_per_block;
-  const int offset = calc_offset(elts, slot_per_block, slot_per_batch,
+    alignN(hidden_num, slot_per_block) / slot_per_block;
+  const int offset = calc_offset(hidden_num, slot_per_block, slot_per_batch,
                                  threads_per_slot);
   if (offset < 0) { return; }
   const int offset_idx = threadIdx.x % threads_per_slot_0;
@@ -158,39 +170,65 @@ __global__ void GRUKernel(const float* x, const float* h2h,
     threadIdx.x % threads_per_slot / threads_per_slot_0);
   const int batch_idx = blockIdx.x / slot_per_batch;
   x += batch_idx * round * elts;
-  y += batch_idx * round * elts;
+  y += batch_idx * round * hidden_num;
+  if (init_h) { init_h += batch_idx * hidden_num; }
   float weights[weights_per_thread];
   auto all_weights = type < 3 ? h2h : i2h;
   load_weights<weights_per_thread>(
-    weights, all_weights, type, offset, offset_idx, elts);
+    weights, all_weights, type, offset, offset_idx, elts, hidden_num);
   const float hbr = h2h_bias[offset];
-  const float hbz = h2h_bias[offset + elts];
-  const float hbh = h2h_bias[offset + elts * 2];
+  const float hbz = h2h_bias[offset + hidden_num];
+  const float hbh = h2h_bias[offset + hidden_num * 2];
   const float ibr = i2h_bias[offset];
-  const float ibz = i2h_bias[offset + elts];
-  const float ibh = i2h_bias[offset + elts * 2];
+  const float ibz = i2h_bias[offset + hidden_num];
+  const float ibh = i2h_bias[offset + hidden_num * 2];
+  const int padded_iteration = padded_iterations[batch_idx];
   extern __shared__ float vals[];
   __shared__ bool ready[1];
   for (int iter = 0; iter < round; ) {
     check_readiness(ready, iter, &finished[iter - 1], gridDim.x);
     if (!ready[0]) { continue; }
-    auto inp = (type < 3
-                ? y + (iter - 1) * elts
-                : x + iter * elts);
-    multiply<weights_per_thread>(
-      weights, inp, vals, type, iter, offset_idx, elts);
-    __syncthreads();
-    sum(vals, vals, offset_idx, threads_per_slot_0);
-    __syncthreads();
-    float prev_h;
-    if (offset_idx == 0 && type == 0) {
-      prev_h = (iter == 0
-                ? 0 : y[(iter - 1) * elts + offset]);
+    if (iter >= padded_iteration) {
+      auto inp = (type < 3
+                  ? y + (iter - 1) * hidden_num
+                  : x + iter * elts);
+      multiply<weights_per_thread>(
+        weights, inp, vals, type, iter, offset_idx, elts, init_h);
+      __syncthreads();
+      sum(vals, vals, offset_idx, threads_per_slot_0);
+      __syncthreads();
+      float prev_h;
+      if (offset_idx == 0 && type == 0) {
+        prev_h = (iter == 0
+                  ? (init_h == nullptr ? 0 : init_h[offset])
+                  : y[(iter - 1) * hidden_num + offset]);
+      }
+      calc_final(vals, &y[iter * hidden_num], type, offset, offset_idx,
+                 threads_per_slot_0, prev_h, hbr, hbz, hbh, ibr, ibz, ibh);
     }
-    calc_final(vals, &y[iter * elts], type, offset, offset_idx,
-                threads_per_slot_0, prev_h, hbr, hbz, hbh, ibr, ibz, ibh);
     finish(&finished[iter]);
     iter++;
+  }
+}
+
+inline int GetThreadsNum(int data_size, bool upper = false) {
+  if (upper) {
+    // Return threadnum >= data_size if data_size <= 512
+    if (data_size < 16) return 16;
+    else if (data_size < 32) return 32;
+    else if (data_size < 64) return 64;
+    else if (data_size < 128) return 128;
+    else if (data_size < 256) return 256;
+    else return 512;
+  } else {
+    // Rerurn theadnum <= data_size
+    if (data_size >= 512) return 512;
+    else if (data_size >= 256) return 256;
+    else if (data_size >= 128) return 128;
+    else if (data_size >= 64) return 64;
+    else if (data_size >= 32) return 32;
+    else if (data_size >= 16) return 16;
+    else return data_size;
   }
 }
 
@@ -203,9 +241,14 @@ void GRUFunctor<Eigen::GpuDevice, T>::operator()(const Eigen::GpuDevice& d, OpKe
   
   Tensor finished;
   OP_REQUIRES_OK(context, context->allocate_temp(DT_UINT32, TensorShape({batch_size}), &finished));
-
   unsigned int* finished_p = finished.flat<unsigned int>().data(); 
+  Tensor padded_iterations;
+  OP_REQUIRES_OK(context, context->allocate_temp(DT_INT32, TensorShape({batch_size}), &padded_iterations));
+  int* padded_iterations_p = padded_iterations.flat<int>().data();
+  float* init_h = nullptr;
 
+
+  const int hidden_num = elts;
   const int total_per_slot_0 = alignN(elts, gru_weights_per_thread);
   // 3 for input and 3 for hidden, so 6 in total
   const int total_per_slot = total_per_slot_0 * 6;
@@ -217,21 +260,30 @@ void GRUFunctor<Eigen::GpuDevice, T>::operator()(const Eigen::GpuDevice& d, OpKe
   const size_t cache_size =
     sizeof(T) * slot_per_block * threads_per_slot;
 
-  //GRUPrepare<<<1, 1, 0, d.stream()>>>(finished_p, rounds);
 
+  
+
+  //GRUPadZeros<<<batch_size, GetThreadsNum(elts*sizeof(T)/sizeof(float), true), 0, context_.cuda_stream()>>>(
+  //    x, y, padded_iterations_p, rounds, elts, hidden_num);
   TF_CHECK_OK(GpuLaunchKernel(
-      GRUPrepare, 1, 1, 0, d.stream(),
+      GRUPadZeros, 
+      batch_size, GetThreadsNum(elts*sizeof(T)/sizeof(float), true), 0, d.stream(),
+      x, y, padded_iterations_p, rounds, elts, hidden_num));
+
+  //GRUPrepare<<<1, 1, 0, d.stream()>>>(finished_p, rounds);
+  TF_CHECK_OK(GpuLaunchKernel(
+      GRUPrepare, 
+      1, 1, 0, d.stream(),
       finished_p, rounds));
 
   //GRUKernel<gru_weights_per_thread><<<block_count, gru_threads_per_block, cache_size, d.stream()>>>(
   //    x, h2h, h2hBias, i2h, i2hBias,
   //    y, finished_p, batch_size, rounds, elts);
-
   TF_CHECK_OK(GpuLaunchKernel(
       GRUKernel<gru_weights_per_thread>,
       block_count, gru_threads_per_block, cache_size, d.stream(),
       x, h2h, h2hBias, i2h, i2hBias,
-      y, finished_p, batch_size, rounds, elts));
+      y, finished_p, batch_size, rounds, elts, hidden_num, padded_iterations_p, init_h));
 }
 
 template struct GRUFunctor<Eigen::GpuDevice, float>;
