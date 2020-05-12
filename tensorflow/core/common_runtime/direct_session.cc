@@ -499,11 +499,18 @@ DirectSession::DirectSession(const SessionOptions& options,
   }
   // The default value of sync_on_finish will be flipped soon and this
   // environment variable will be removed as well.
-  const Status status =
+  Status status =
       ReadBoolFromEnvVar("TF_SYNC_ON_FINISH", true, &sync_on_finish_);
   if (!status.ok()) {
     LOG(ERROR) << status.error_message();
   }
+
+  status =
+    ReadBoolFromEnvVar("TF_ENABLE_GEMM_DYNAMIC_BATCHSIZE", false, &gemm_dynamic_batchsize_);
+  if (!status.ok()) {
+    LOG(ERROR) << status.error_message();
+  }
+
   session_handle_ =
       strings::StrCat("direct", strings::FpToString(random::New64()));
   int devices_added = 0;
@@ -881,8 +888,10 @@ Status DirectSession::RunInternal(
   args.user_intra_op_threadpool = threadpool_options.intra_op_threadpool;
 
   //[DYNAMIC-SHAPE]
-  args.before_padding = run_options.padding_info().before_padding();
-  args.after_padding = run_options.padding_info().after_padding();
+  if (gemm_dynamic_batchsize_) {
+    args.before_padding = run_options.padding_info().before_padding();
+    args.after_padding = run_options.padding_info().after_padding();
+  }
 
 #ifdef GOOGLE_CUDA
   if (cuda_graph_device_context && cuda_graph_context) {

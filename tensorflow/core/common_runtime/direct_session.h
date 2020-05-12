@@ -394,6 +394,9 @@ class DirectSession : public Session {
 
   Status init_error_;  // Set to an error if construction failed.
 
+  //[DYNAMIC-SHAPE]
+  bool gemm_dynamic_batchsize_ = false;
+
   // If true, blocks until device has finished all queued operations in a step.
   bool sync_on_finish_ = true;
 
