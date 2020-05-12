@@ -164,6 +164,22 @@ TF_CAPI_EXPORT extern void TF_EnableCudaGraph(
     TF_Buffer* run_options, unsigned char enable,
     unsigned char init, int count, TF_Status* status);
 
+typedef int64_t TF_CallableHandle;
+
+TF_CAPI_EXPORT extern void TF_SessionMakeCallable(
+    TF_Session* tf_sess, TF_CallableHandle* callable_handle,
+    char** feed_names, int feed_count,
+    char** fetch_names, int fetch_count,
+    char* device_name, TF_Status* status);
+TF_CAPI_EXPORT extern void TF_SessionRunCallable(
+    TF_Session* tf_sess, TF_CallableHandle callable_handle,
+    TF_Tensor* const* input_values, int ninputs,
+    TF_Tensor** output_values, int noutputs,
+    TF_Buffer* run_metadata, TF_Status* status);
+TF_CAPI_EXPORT extern void TF_SessionReleaseCallable(
+    TF_Session* tf_sess, TF_CallableHandle callable_handle,
+    TF_Status* status);
+
 #ifdef __cplusplus
 } /* end extern "C" */
 #endif

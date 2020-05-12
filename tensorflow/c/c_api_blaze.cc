@@ -71,9 +71,11 @@ limitations under the License.
 #include "tensorflow/core/platform/protobuf.h"
 #include "tensorflow/core/platform/thread_annotations.h"
 #include "tensorflow/core/platform/types.h"
+#include "tensorflow/core/protobuf/config.pb.h"
 #include "tensorflow/core/public/session.h"
 #include "tensorflow/core/public/version.h"
 #include "tensorflow/core/util/env_var.h"
+
 
 // The implementation below is at the top level instead of the
 // brain namespace because we are defining 'extern "C"' functions.
@@ -588,6 +590,50 @@ void TF_EnableCudaGraph(TF_Buffer* run_options, unsigned char enable,
   }
   TF_CHECK_OK(MessageToBuffer(run_options_proto, run_options));
   status->status = Status::OK();
+}
+
+void TF_SessionMakeCallable(TF_Session* tf_sess, TF_CallableHandle* callable_handle,
+                            char** feed_names, int feed_count,
+                            char** fetch_names, int fetch_count,
+                            char* device_name, TF_Status* status) {
+  CallableOptions opts;
+  for (int i = 0; i < feed_count; ++i) {
+    char* feed_name = feed_names[i];
+    opts.add_feed(feed_name);
+    opts.mutable_feed_device()->insert({feed_name, device_name});
+  }
+  for (int i = 0; i < fetch_count; ++i) {
+    char* fetch_name = fetch_names[i];
+    opts.add_fetch(fetch_name);
+    opts.mutable_fetch_device()->insert({fetch_name, device_name});
+  }
+  status->status = tf_sess->session->MakeCallable(opts, callable_handle);
+}
+
+void TF_SessionRunCallable(TF_Session* tf_sess, TF_CallableHandle callable_handle,
+                           TF_Tensor* const* input_values, int ninputs,
+                           TF_Tensor** output_values, int noutputs,
+                           TF_Buffer* run_metadata, TF_Status* status) {
+  std::vector<Tensor> input_tensors(ninputs);
+  for (int i = 0; i < ninputs; ++i) {
+    status->status = tensorflow::TF_TensorToTensor(input_values[i], &input_tensors[i]);
+    if (TF_GetCode(status) != TF_OK) return;
+  }
+
+  std::vector<Tensor> output_tensors;
+  RunMetadata run_metadata_proto;
+  status->status = tf_sess->session->RunCallable(callable_handle, input_tensors,
+                                                 &output_tensors, &run_metadata_proto);
+  // Serialize back to upstream client, who now owns the new buffer
+  if (run_metadata != nullptr) {
+    status->status = MessageToBuffer(run_metadata_proto, run_metadata);
+    if (TF_GetCode(status) != TF_OK) return;
+  }
+}
+
+void TF_SessionReleaseCallable(TF_Session* tf_sess, TF_CallableHandle callable_handle,
+                               TF_Status* status) {
+  status->status = session->ReleaseCallable(callable_handle);
 }
 
 }  // end extern "C"
