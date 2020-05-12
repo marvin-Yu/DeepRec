@@ -879,6 +879,11 @@ Status DirectSession::RunInternal(
   args.step_container = &run_state.step_container;
   args.sync_on_finish = sync_on_finish_;
   args.user_intra_op_threadpool = threadpool_options.intra_op_threadpool;
+
+  //[DYNAMIC-SHAPE]
+  args.before_padding = run_options.padding_info().before_padding();
+  args.after_padding = run_options.padding_info().after_padding();
+
 #ifdef GOOGLE_CUDA
   if (cuda_graph_device_context && cuda_graph_context) {
     args.persistent_allocator =

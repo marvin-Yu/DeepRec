@@ -74,7 +74,9 @@ Status RunGemm(
     se::DeviceMemoryBase output_buffer, se::Stream* stream,
     bool implements_whole_instruction, HloExecutionProfiler* profiler = nullptr,
     se::blas::ProfileResult* profile_result = nullptr,
-    absl::optional<se::blas::AlgorithmType> algorithm = absl::nullopt);
+    absl::optional<se::blas::AlgorithmType> algorithm = absl::nullopt,
+    //[DYNAMIC-SHAPE]
+    uint64 before_padding, uint64 after_padding);
 
 }  // namespace gpu
 }  // namespace xla

@@ -92,6 +92,10 @@ class Thunk {
   // Parameters passed to ExecuteOnStream.  Encapsulated in a struct so that
   // when we add something we don't have to change every subclass of Thunk.
   struct ExecuteParams {
+    //[DYNAMIC-SHAPE]
+    uint64 before_padding = 0;
+    uint64 after_padding = 0;
+
     const BufferAllocations* buffer_allocations;  // never null
     se::Stream* stream;
     RunId run_id;

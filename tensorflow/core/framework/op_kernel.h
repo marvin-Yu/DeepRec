@@ -619,6 +619,10 @@ class OpKernelContext {
   struct Params {
     ~Params() { delete eigen_gpu_device; }
 
+    //[DYNAMIC-SHAPE]
+    before_padding = 0;
+    after_padding = 0;
+
     // The step being executed.
     int64 step_id = 0;
 
@@ -755,6 +759,10 @@ class OpKernelContext {
   ~OpKernelContext();
 
   Env* env() const { return params_->device->env(); }
+
+  //[DYNAMIC-SHAPE]
+  uint64 before_padding() const {return params_->before_padding; }
+  uint64 after_padding() const {return params_->after_padding; }
 
   int64 step_id() const { return params_->step_id; }
 
