@@ -590,8 +590,8 @@ void TF_EnableCudaGraph(TF_Buffer* run_options, unsigned char enable,
   status->status = Status::OK();
 }
 
-void TF_SetPaddingInfo(TF_Buffer* run_options, uint64 before_padding,
-                       uint64 after_padding, TF_Status* status) {
+void TF_SetPaddingInfo(TF_Buffer* run_options, unsigned long long before_padding,
+                       unsigned long long after_padding, TF_Status* status) {
   tensorflow::RunOptions run_options_proto;
   if (run_options != nullptr &&
       !run_options_proto.ParseFromArray(run_options->data,
