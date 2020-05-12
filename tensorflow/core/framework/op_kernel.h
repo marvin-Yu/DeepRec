@@ -620,8 +620,8 @@ class OpKernelContext {
     ~Params() { delete eigen_gpu_device; }
 
     //[DYNAMIC-SHAPE]
-    before_padding = 0;
-    after_padding = 0;
+    uint64 before_padding = 0;
+    uint64 after_padding = 0;
 
     // The step being executed.
     int64 step_id = 0;

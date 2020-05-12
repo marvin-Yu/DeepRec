@@ -58,6 +58,8 @@ Status GemmThunk::ExecuteOnStream(const ExecuteParams &params) {
   return RunGemm(hlo_instruction(), backend_config_, lhs_data, rhs_data,
                  output_data, params.stream, implements_whole_instruction_,
                  params.profiler,
+                 /*profile_result =*/ nullptr,
+                 /*algorithm =*/ absl::nullopt,
                  //[DYNAMIC-SHAPE]
                  params.before_padding, params.after_padding);
 }
@@ -124,13 +126,13 @@ static bool DoGemmWithAlgorithm(
     }
   }
 
-
   if (algorithm) {
     // Autotuning is disabled for batch_size != 1.
     CHECK_EQ(1, batch_size);
     return stream
         ->ThenBlasGemmWithAlgorithm(
             lhs_transpose, rhs_transpose, output_matrix.num_rows,
+            //output_matrix.num_cols,
             num_cols_needed,
             /*size of reduce dim=*/k,
             /*alpha=*/static_cast<InT>(alpha), lhs_data,
@@ -274,7 +276,12 @@ Status RunGemm(const HloInstruction *gemm,
         GemmBackendConfig::ALGORITHM_NOT_SET) {
       return absl::nullopt;
     }
-    return backend_config.selected_algorithm();
+    //return backend_config.selected_algorithm();
+
+    //[DYNAMIC-SHAPE]
+    // use absl::nullopt instead of backend_config.selected_algorithm() at runtime.
+    // this won't affect GemmAlgorithmPicker, since algoritm will be specified while picking.
+    return absl::nullopt;
   }();
 
   complex128 alpha = {backend_config.alpha_real(), backend_config.alpha_imag()};

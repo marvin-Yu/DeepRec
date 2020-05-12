@@ -76,7 +76,7 @@ Status RunGemm(
     se::blas::ProfileResult* profile_result = nullptr,
     absl::optional<se::blas::AlgorithmType> algorithm = absl::nullopt,
     //[DYNAMIC-SHAPE]
-    uint64 before_padding, uint64 after_padding);
+    uint64 before_padding = 0, uint64 after_padding = 0);
 
 }  // namespace gpu
 }  // namespace xla

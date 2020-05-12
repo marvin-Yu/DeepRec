@@ -57,8 +57,8 @@ class ServiceExecutableRunOptions {
   }
 
   //[DYNAMIC-SHAPE]
-  uint64 before_padding() { return run_options_.before_padding; }
-  uint64 after_padding() { return run_options_.after_padding; }
+  uint64 before_padding() const { return run_options_.before_padding; }
+  uint64 after_padding() const { return run_options_.after_padding; }
 
  private:
   ExecutableRunOptions run_options_;
