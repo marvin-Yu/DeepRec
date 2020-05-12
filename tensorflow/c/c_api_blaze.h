@@ -163,6 +163,9 @@ TF_CAPI_EXPORT extern void TF_EnableAutoMixedPrecision(
 TF_CAPI_EXPORT extern void TF_EnableCudaGraph(
     TF_Buffer* run_options, unsigned char enable,
     unsigned char init, int count, TF_Status* status);
+TF_CAPI_EXPORT extern void TF_SetPaddingInfo(
+    TF_Buffer* run_options, unsigned long long before_padding,
+    unsigned long long after_padding, TF_Status* status);
 
 #ifdef __cplusplus
 } /* end extern "C" */

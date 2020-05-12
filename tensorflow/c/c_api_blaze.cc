@@ -590,4 +590,27 @@ void TF_EnableCudaGraph(TF_Buffer* run_options, unsigned char enable,
   status->status = Status::OK();
 }
 
+void TF_SetPaddingInfo(TF_Buffer* run_options, uint64 before_padding,
+                       uint64 after_padding, TF_Status* status) {
+  tensorflow::RunOptions run_options_proto;
+  if (run_options != nullptr &&
+      !run_options_proto.ParseFromArray(run_options->data,
+                                        run_options->length)) {
+    status->status = InvalidArgument("Unparseable RunOptions proto");
+    return;
+  }
+  if (run_options->data_deallocator != nullptr) {
+    (*run_options->data_deallocator)(const_cast<void*>(run_options->data),
+                                     run_options->length);
+  }
+  run_options->data = nullptr;
+  run_options->length = 0;
+
+  run_options_proto.mutable_padding_info()->set_before_padding(before_padding);
+  run_options_proto.mutable_padding_info()->set_after_padding(after_padding);
+
+  TF_CHECK_OK(MessageToBuffer(run_options_proto, run_options));
+  status->status = Status::OK();
+}
+
 }  // end extern "C"
