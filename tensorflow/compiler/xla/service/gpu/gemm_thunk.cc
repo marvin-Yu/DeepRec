@@ -121,8 +121,9 @@ static bool DoGemmWithAlgorithm(
   uint64 num_cols_needed = output_matrix.num_cols;
   if (before_padding != 0 && after_padding != 0) {
     if (num_cols_needed == after_padding){
-      VLOG(2) << "[DYNAMIC-SHAPE] caculating size "<<before_padding<<" instead of "<<after_padding;
-      num_cols_needed = before_padding;
+      num_cols_needed = (before_padding+7)/8*8; // make it multiple of 8
+      VLOG(2) << "[DYNAMIC-SHAPE] actual size before padding is "<<before_padding
+              <<", using size "<<num_cols_needed<<" instead of "<<after_padding;
     }
   }
 
