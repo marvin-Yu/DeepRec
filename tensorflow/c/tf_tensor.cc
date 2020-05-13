@@ -105,6 +105,23 @@ TF_Tensor* TF_AllocateTensor(TF_DataType dtype, const int64_t* dims,
                       tensorflow::cpu_allocator());
 }
 
+TF_Tensor* TF_NewZeroCopyTensor(TF_DataType dtype, const int64_t* dims, int num_dims,
+                                void* data, size_t len,
+                                void (*deallocator)(void* data, size_t len, void* arg),
+                                void* deallocator_arg) {
+  std::vector<tensorflow::int64> dimvec(num_dims);
+  TF_ManagedBuffer* buf = new TF_ManagedBuffer(data, len, deallocator, deallocator_arg);
+  TF_Tensor* ret = new TF_Tensor{Tensor(static_cast<tensorflow::DataType>(dtype),
+                           tensorflow::TensorShape(dimvec), buf)};
+  buf->Unref();
+  size_t elem_size = TF_DataTypeSize(dtype);
+  if (elem_size > 0 && len < (elem_size * ret->tensor.NumElements())) {
+    delete ret;
+    return nullptr;
+  }
+  return ret;
+}
+
 TF_Tensor* TF_NewTensor(TF_DataType dtype, const int64_t* dims, int num_dims,
                         void* data, size_t len,
                         void (*deallocator)(void* data, size_t len, void* arg),

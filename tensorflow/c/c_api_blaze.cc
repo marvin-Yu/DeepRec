@@ -598,6 +598,11 @@ void TF_SessionMakeCallable(TF_Session* tf_sess, TF_CallableHandle* callable_han
                             const char* const* feed_names, int feed_count,
                             const char* const* fetch_names, int fetch_count,
                             const char* device_name, TF_Status* status) {
+  std::vector<tensorflow::DeviceAttributes> devices;
+  tf_sess->session->ListDevices(&devices);
+  for (const auto& device : devices) {
+    LOG(INFO) << device.name();
+  }
   // directly, instead of requiring us to serialize to a GraphDef and
   // call Session::Extend().
   if (tf_sess->extend_before_run &&
@@ -616,6 +621,7 @@ void TF_SessionMakeCallable(TF_Session* tf_sess, TF_CallableHandle* callable_han
     opts.add_fetch(fetch_name);
     opts.mutable_fetch_devices()->insert({fetch_name, device_name});
   }
+  opts.set_fetch_skip_sync(true);
   Session::CallableHandle handle;
   status->status = tf_sess->session->MakeCallable(opts, &handle);
   if (TF_GetCode(status) != TF_OK) return;
