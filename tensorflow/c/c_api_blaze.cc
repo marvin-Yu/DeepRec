@@ -13,6 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include "tensorflow/c/c_api_blaze.h"
 #include "tensorflow/c/c_api.h"
 
 #include <algorithm>
@@ -80,6 +81,7 @@ limitations under the License.
 // The implementation below is at the top level instead of the
 // brain namespace because we are defining 'extern "C"' functions.
 using tensorflow::AllocationDescription;
+using tensorflow::CallableOptions;
 using tensorflow::DataType;
 using tensorflow::ExtendSessionGraphHelper;
 using tensorflow::Env;
@@ -593,21 +595,31 @@ void TF_EnableCudaGraph(TF_Buffer* run_options, unsigned char enable,
 }
 
 void TF_SessionMakeCallable(TF_Session* tf_sess, TF_CallableHandle* callable_handle,
-                            char** feed_names, int feed_count,
-                            char** fetch_names, int fetch_count,
-                            char* device_name, TF_Status* status) {
+                            const char* const* feed_names, int feed_count,
+                            const char* const* fetch_names, int fetch_count,
+                            const char* device_name, TF_Status* status) {
+  // directly, instead of requiring us to serialize to a GraphDef and
+  // call Session::Extend().
+  if (tf_sess->extend_before_run &&
+      !ExtendSessionGraphHelper(tf_sess, status)) {
+    return;
+  }
+
   CallableOptions opts;
   for (int i = 0; i < feed_count; ++i) {
-    char* feed_name = feed_names[i];
+    const char* feed_name = feed_names[i];
     opts.add_feed(feed_name);
-    opts.mutable_feed_device()->insert({feed_name, device_name});
+    opts.mutable_feed_devices()->insert({feed_name, device_name});
   }
   for (int i = 0; i < fetch_count; ++i) {
-    char* fetch_name = fetch_names[i];
+    const char* fetch_name = fetch_names[i];
     opts.add_fetch(fetch_name);
-    opts.mutable_fetch_device()->insert({fetch_name, device_name});
+    opts.mutable_fetch_devices()->insert({fetch_name, device_name});
   }
-  status->status = tf_sess->session->MakeCallable(opts, callable_handle);
+  Session::CallableHandle handle;
+  status->status = tf_sess->session->MakeCallable(opts, &handle);
+  if (TF_GetCode(status) != TF_OK) return;
+  *callable_handle = handle;
 }
 
 void TF_SessionRunCallable(TF_Session* tf_sess, TF_CallableHandle callable_handle,
@@ -633,7 +645,7 @@ void TF_SessionRunCallable(TF_Session* tf_sess, TF_CallableHandle callable_handl
 
 void TF_SessionReleaseCallable(TF_Session* tf_sess, TF_CallableHandle callable_handle,
                                TF_Status* status) {
-  status->status = session->ReleaseCallable(callable_handle);
+  status->status = tf_sess->session->ReleaseCallable(callable_handle);
 }
 
 }  // end extern "C"
