@@ -414,7 +414,10 @@ static void TF_Run_Helper(
     const std::vector<string>& output_tensor_names, TF_Tensor** c_outputs,
     // Target nodes
     const std::vector<string>& target_oper_names, TF_Buffer* run_metadata,
-    TF_Status* status) {
+    TF_Status* status,
+    //[DYNAMIC-SHAPE]
+    uint64_t before_padding, uint64_t after_padding
+    ) {
   const int noutputs = output_tensor_names.size();
   std::vector<Tensor> outputs(noutputs);
   Status result;
@@ -426,6 +429,8 @@ static void TF_Run_Helper(
       status->status = InvalidArgument("Unparseable RunOptions proto");
       return;
     }
+    run_options_proto.mutable_padding_info()->set_before_padding(before_padding);
+    run_options_proto.mutable_padding_info()->set_after_padding(after_padding);
     if (run_metadata != nullptr && run_metadata->data != nullptr) {
       status->status =
           InvalidArgument("Passing non-empty run_metadata is invalid.");
@@ -488,7 +493,7 @@ void TF_Run(TF_DeprecatedSession* s, const TF_Buffer* run_options,
     target_oper_names[i] = c_target_oper_names[i];
   }
   TF_Run_Helper(s->session, nullptr, run_options, input_pairs, output_names,
-                c_outputs, target_oper_names, run_metadata, status);
+                c_outputs, target_oper_names, run_metadata, status, 0, 0);
 }
 
 void TF_PRunSetup(TF_DeprecatedSession* s,
@@ -547,7 +552,7 @@ void TF_PRun(TF_DeprecatedSession* s, const char* handle,
     target_oper_names[i] = c_target_oper_names[i];
   }
   TF_Run_Helper(s->session, handle, nullptr, input_pairs, output_names,
-                c_outputs, target_oper_names, nullptr, status);
+                c_outputs, target_oper_names, nullptr, status, 0, 0);
 }
 
 TF_Library* TF_LoadLibrary(const char* library_filename, TF_Status* status) {
@@ -2260,7 +2265,10 @@ void TF_SessionRun(TF_Session* session, const TF_Buffer* run_options,
                    int ninputs, const TF_Output* outputs,
                    TF_Tensor** output_values, int noutputs,
                    const TF_Operation* const* target_opers, int ntargets,
-                   TF_Buffer* run_metadata, TF_Status* status) {
+                   TF_Buffer* run_metadata, TF_Status* status,
+                   //[DYNAMIC-SHAPE]
+                   uint64_t before_padding, uint64_t after_padding
+) {
   // TODO(josh11b,mrry): Change Session to be able to use a Graph*
   // directly, instead of requiring us to serialize to a GraphDef and
   // call Session::Extend().
@@ -2293,7 +2301,7 @@ void TF_SessionRun(TF_Session* session, const TF_Buffer* run_options,
   // Actually run.
   TF_Run_Helper(session->session, nullptr, run_options, input_pairs,
                 output_names, output_values, target_names, run_metadata,
-                status);
+                status, before_padding, after_padding);
 }
 
 void TF_SessionPRunSetup(TF_Session* session, const TF_Output* inputs,
@@ -2373,7 +2381,7 @@ void TF_SessionPRun(TF_Session* session, const char* handle,
   }
 
   TF_Run_Helper(session->session, handle, nullptr, input_pairs, output_names,
-                output_values, target_names, nullptr, status);
+                output_values, target_names, nullptr, status, 0, 0);
 }
 
 unsigned char TF_TryEvaluateConstant(TF_Graph* graph, TF_Output output,

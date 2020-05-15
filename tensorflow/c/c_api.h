@@ -1264,7 +1264,10 @@ TF_CAPI_EXPORT extern void TF_SessionRun(
     // RunMetadata
     TF_Buffer* run_metadata,
     // Output status
-    TF_Status*);
+    TF_Status*,
+    //[DYNAMIC-SHAPE]
+    uint64_t before_padding = 0, uint64_t after_padding = 0
+    );
 
 // Set up the graph with the intended feeds (inputs) and fetches (outputs) for a
 // sequence of partial run calls.
