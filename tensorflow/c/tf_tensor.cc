@@ -25,6 +25,7 @@ limitations under the License.
 #include "tensorflow/core/framework/types.pb.h"
 #include "tensorflow/core/lib/core/coding.h"
 
+
 using tensorflow::Status;
 using tensorflow::Tensor;
 using tensorflow::TensorBuffer;
@@ -106,13 +107,14 @@ TF_Tensor* TF_AllocateTensor(TF_DataType dtype, const int64_t* dims,
 }
 
 TF_Tensor* TF_NewZeroCopyTensor(TF_DataType dtype, const int64_t* dims, int num_dims,
-                                void* data, size_t len,
-                                void (*deallocator)(void* data, size_t len, void* arg),
-                                void* deallocator_arg) {
+                                void* data, size_t len) {
   std::vector<tensorflow::int64> dimvec(num_dims);
-  TF_ManagedBuffer* buf = new TF_ManagedBuffer(data, len, deallocator, deallocator_arg);
+  for (int i = 0; i < num_dims; ++i) {
+    dimvec[i] = static_cast<tensorflow::int64>(dims[i]);
+  }
+  TF_ManagedBuffer* buf = new TF_ManagedBuffer(data, len, nullptr, nullptr);
   TF_Tensor* ret = new TF_Tensor{Tensor(static_cast<tensorflow::DataType>(dtype),
-                           tensorflow::TensorShape(dimvec), buf)};
+                                 tensorflow::TensorShape(dimvec), buf)};
   buf->Unref();
   size_t elem_size = TF_DataTypeSize(dtype);
   if (elem_size > 0 && len < (elem_size * ret->tensor.NumElements())) {

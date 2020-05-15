@@ -624,7 +624,10 @@ void TF_SessionMakeCallable(TF_Session* tf_sess, TF_CallableHandle* callable_han
   opts.set_fetch_skip_sync(true);
   Session::CallableHandle handle;
   status->status = tf_sess->session->MakeCallable(opts, &handle);
-  if (TF_GetCode(status) != TF_OK) return;
+  if (TF_GetCode(status) != TF_OK) {
+    LOG(ERROR) << "session make callable failed!";
+    return;
+  }
   *callable_handle = handle;
 }
 
