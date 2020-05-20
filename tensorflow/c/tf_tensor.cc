@@ -112,7 +112,7 @@ TF_Tensor* TF_NewZeroCopyTensor(TF_DataType dtype, const int64_t* dims, int num_
   for (int i = 0; i < num_dims; ++i) {
     dimvec[i] = static_cast<tensorflow::int64>(dims[i]);
   }
-  TF_ManagedBuffer* buf = new TF_ManagedBuffer(data, len, nullptr, nullptr);
+  TF_ManagedBuffer* buf = new TF_ManagedBuffer(data, len, [](void*data, size_t len, void* arg){}, nullptr);
   TF_Tensor* ret = new TF_Tensor{Tensor(static_cast<tensorflow::DataType>(dtype),
                                  tensorflow::TensorShape(dimvec), buf)};
   buf->Unref();
