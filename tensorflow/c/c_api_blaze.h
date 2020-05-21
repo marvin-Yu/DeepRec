@@ -187,7 +187,7 @@ TF_CAPI_EXPORT void TF_CudaMemCopyHostToDeviceAsync(
     int virtual_gpu_id,
     void* device_ptr,
     const void* host_ptr,
-    size_t length) {
+    size_t length);
 
 #ifdef __cplusplus
 } /* end extern "C" */
