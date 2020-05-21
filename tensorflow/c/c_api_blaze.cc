@@ -41,6 +41,8 @@ limitations under the License.
 #include "tensorflow/c/tf_tensor.h"
 #include "tensorflow/core/common_runtime/device_mgr.h"
 #include "tensorflow/core/common_runtime/eval_const_tensor.h"
+#include "tensorflow/core/common_runtime/gpu/gpu_id_manager.h"
+#include "tensorflow/core/common_runtime/gpu/gpu_id_utils.h"
 #include "tensorflow/core/common_runtime/shape_refiner.h"
 #include "tensorflow/core/framework/allocation_description.pb.h"
 #include "tensorflow/core/framework/kernel_def.pb.h"
@@ -70,6 +72,7 @@ limitations under the License.
 #include "tensorflow/core/platform/mem.h"
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/protobuf.h"
+#include "tensorflow/core/platform/stream_executor.h"
 #include "tensorflow/core/platform/thread_annotations.h"
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/protobuf/config.pb.h"
@@ -85,6 +88,8 @@ using tensorflow::CallableOptions;
 using tensorflow::DataType;
 using tensorflow::ExtendSessionGraphHelper;
 using tensorflow::Env;
+using tensorflow::GpuIdManager;
+using tensorflow::GpuIdUtil;
 using tensorflow::Graph;
 using tensorflow::GraphDef;
 using tensorflow::mutex_lock;
@@ -98,11 +103,13 @@ using tensorflow::OpDef;
 using tensorflow::OpRegistry;
 using tensorflow::OutputTensor;
 using tensorflow::PartialTensorShape;
+using tensorflow::PlatformGpuId;
 using tensorflow::RunMetadata;
 using tensorflow::RunOptions;
 using tensorflow::Session;
 using tensorflow::Status;
 using tensorflow::string;
+using tensorflow::TfGpuId;
 using tensorflow::Tensor;
 using tensorflow::TensorBuffer;
 using tensorflow::TensorId;
@@ -655,6 +662,27 @@ void TF_SessionRunCallable(TF_Session* tf_sess, TF_CallableHandle callable_handl
 void TF_SessionReleaseCallable(TF_Session* tf_sess, TF_CallableHandle callable_handle,
                                TF_Status* status) {
   status->status = tf_sess->session->ReleaseCallable(callable_handle);
+}
+
+void TF_CudaMemAlloc(int virtual_gpu_id, void** gpu_ptr, size_t length) {
+  TfGpuId tf_gpu_id(virtual_gpu_id);
+  PlatformGpuId platform_gpu_id;
+  Status s = GpuIdManager::TfToPlatformGpuId(tf_gpu_id, &platform_gpu_id);
+  stream_executor::StreamExecutor* se =
+      GpuIdUtil::ExecutorForPlatformGpuId(platform_gpu_id).ValueOrDie();
+  *gpu_ptr = se->UnifiedMemoryAllocate(length);
+}
+
+void TF_CudaMemCopyHostToDeviceAsync(int virtual_gpu_id, void* device_ptr, const void* host_ptr, size_t length) {
+  TfGpuId tf_gpu_id(virtual_gpu_id);
+  PlatformGpuId platform_gpu_id;
+  Status s = GpuIdManager::TfToPlatformGpuId(tf_gpu_id, &platform_gpu_id);
+  stream_executor::StreamExecutor* executor =
+      GpuIdUtil::ExecutorForPlatformGpuId(platform_gpu_id).ValueOrDie();
+  stream_executor::Stream stream(executor);
+  stream.Init();
+  stream_executor::DeviceMemoryBase device_memory(device_ptr, length);
+  stream.ThenMemcpy(&device_memory, host_ptr, length);
 }
 
 }  // end extern "C"

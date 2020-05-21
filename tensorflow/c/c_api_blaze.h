@@ -179,6 +179,15 @@ TF_CAPI_EXPORT extern void TF_SessionRunCallable(
 TF_CAPI_EXPORT extern void TF_SessionReleaseCallable(
     TF_Session* tf_sess, TF_CallableHandle callable_handle,
     TF_Status* status);
+TF_CAPI_EXPORT void TF_CudaMemAlloc(
+    int virtual_gpu_id,
+    void** gpu_ptr,
+    size_t length);
+TF_CAPI_EXPORT void TF_CudaMemCopyHostToDeviceAsync(
+    int virtual_gpu_id,
+    void* device_ptr,
+    const void* host_ptr,
+    size_t length) {
 
 #ifdef __cplusplus
 } /* end extern "C" */
