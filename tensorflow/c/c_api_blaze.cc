@@ -673,7 +673,12 @@ void TF_CudaMemAlloc(int virtual_gpu_id, void** gpu_ptr, size_t length) {
   *gpu_ptr = se->UnifiedMemoryAllocate(length);
 }
 
+// TODO USE CUDA
+#include "tensorflow/core/common_runtime/gpu/gpu_device.h"
+#include "tensorflow/core/public/session_options.h"
+
 void TF_CudaMemCopyHostToDeviceAsync(int virtual_gpu_id, void* device_ptr, const void* host_ptr, size_t length) {
+  /*
   TfGpuId tf_gpu_id(virtual_gpu_id);
   PlatformGpuId platform_gpu_id;
   Status s = GpuIdManager::TfToPlatformGpuId(tf_gpu_id, &platform_gpu_id);
@@ -682,7 +687,19 @@ void TF_CudaMemCopyHostToDeviceAsync(int virtual_gpu_id, void* device_ptr, const
   stream_executor::Stream stream(executor);
   stream.Init();
   stream_executor::DeviceMemoryBase device_memory(device_ptr, length);
-  stream.ThenMemcpy(&device_memory, host_ptr, length);
+  stream.ThenMemcpy(&device_memory, host_ptr, length);*/
+
+
+  static tensorflow::GPUOptions gpu_options;
+  TfGpuId tf_gpu_id(virtual_gpu_id);
+  PlatformGpuId platform_gpu_id;
+  Status s = GpuIdManager::TfToPlatformGpuId(tf_gpu_id, &platform_gpu_id);
+  stream_executor::StreamExecutor* executor =
+      GpuIdUtil::ExecutorForPlatformGpuId(platform_gpu_id).ValueOrDie();
+  tensorflow::BaseGPUDevice::StreamGroup* stream_group = tensorflow::BaseGPUDevice::StreamGroupFactory::Global().GetOrCreate(
+      tf_gpu_id, 0, executor, gpu_options);
+  stream_executor::DeviceMemoryBase device_memory(device_ptr, length);
+  stream_group->compute->ThenMemcpy(&device_memory, host_ptr, length);
 }
 
 }  // end extern "C"
