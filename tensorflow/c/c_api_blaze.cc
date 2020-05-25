@@ -657,6 +657,13 @@ void TF_SessionRunCallable(TF_Session* tf_sess, TF_CallableHandle callable_handl
     status->status = MessageToBuffer(run_metadata_proto, run_metadata);
     if (TF_GetCode(status) != TF_OK) return;
   }
+  if (output_tensors.size() != noutputs) {
+    // TODO
+  }
+  for (int i = 0; i < noutputs; ++i) {
+    output_values[i] = tensorflow::TF_TensorFromTensor(output_tensors[i], status);
+    if (TF_GetCode(status) != TF_OK) return;
+  }
 }
 
 void TF_SessionReleaseCallable(TF_Session* tf_sess, TF_CallableHandle callable_handle,
