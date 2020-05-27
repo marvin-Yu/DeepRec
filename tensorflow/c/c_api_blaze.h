@@ -197,8 +197,7 @@ TF_CAPI_EXPORT bool TF_CudaMemCopyDeviceToHostAsync(
     const void* device_ptr,
     size_t length);
 TF_CAPI_EXPORT bool TF_CudaBlockStreamUntilDone(
-    int virtual_gpu_id,
-    TF_Status* status);
+    int virtual_gpu_id);
 
 #ifdef __cplusplus
 } /* end extern "C" */

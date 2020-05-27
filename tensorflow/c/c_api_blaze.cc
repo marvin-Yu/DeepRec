@@ -692,7 +692,7 @@ bool TF_CudaMemAlloc(int virtual_gpu_id, void** gpu_ptr, size_t length) {
   if (stream == nullptr) {
     return false;
   }
-  stream->parent()->UnifiedMemoryAllocate(length);
+  *gpu_ptr = stream->parent()->UnifiedMemoryAllocate(length);
   return true;
 }
 
@@ -725,13 +725,13 @@ bool TF_CudaMemCopyDeviceToHostAsync(int virtual_gpu_id, void* host_ptr, const v
   return true;
 }
 
-bool TF_CudaBlockStreamUntilDone(int virtual_gpu_id, TF_Status* status) {
+bool TF_CudaBlockStreamUntilDone(int virtual_gpu_id) {
   stream_executor::Stream* stream = GetStreamOfVirtualDevice(virtual_gpu_id);
   if (stream == nullptr) {
     return false;
   }
-  stream->BlockHostUntilDone();
-  return true;
+  Status status = stream->BlockHostUntilDone();
+  return status.ok();
 }
 
 }  // end extern "C"
