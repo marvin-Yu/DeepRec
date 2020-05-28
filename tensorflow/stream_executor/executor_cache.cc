@@ -47,7 +47,7 @@ static void SetNumCudaContexts(int ordinal, int64* num_cuda_contexts) {
     gpu::GpuDriver::GetComputeCapability(&cc_major, &cc_minor, device);
     if (cc_major >= 7) {
       int64 num_contexts_env;
-      tensorflow::ReadInt64FromEnvVar("TF_NUM_CONTEXTS_PER_GPU", 2, &num_contexts_env);
+      tensorflow::ReadInt64FromEnvVar("TF_NUM_CONTEXTS_PER_GPU", 4, &num_contexts_env);
       *num_cuda_contexts = num_contexts_env;
       LOG(INFO) << "TF_NUM_CONTEXTS_PER_GPU = " << *num_cuda_contexts;
     }
