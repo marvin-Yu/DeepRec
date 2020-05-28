@@ -20,15 +20,15 @@
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
 
 namespace tensorflow {
-template <typename Scalar>
-struct LaunchIndicatorMatmul<CPUDevice, Scalar> {
+template <typename Scalar, typename TIndex>
+struct LaunchIndicatorMatmul<CPUDevice, Scalar, TIndex> {
   void operator()(OpKernelContext* context, bool trans_a, bool trans_b, int64 m,
                   int64 n, int64 k, const Tensor& in_a, const Tensor& in_b,
                   const Tensor& indicator, Tensor* out, int64 batch_a,
                   int64 batch_b, int64 paralle_num) {}
 };
 
-template <typename Device, typename Scalar>
+template <typename Device, typename Scalar, typename TIndex>
 class IndicatorMatmulOp : public OpKernel {
  public:
   explicit IndicatorMatmulOp(OpKernelConstruction* context)
@@ -88,9 +88,9 @@ class IndicatorMatmulOp : public OpKernel {
       f(ctx->eigen_device<Device>(), out->flat<Scalar>());
       return;
     }
-    LaunchIndicatorMatmul<Device, Scalar>()(ctx, trans_a_, trans_b_, d0, d3, d1,
-                                            a, b, ind, out, batch_a, batch_b,
-                                            1);
+    LaunchIndicatorMatmul<Device, Scalar, TIndex>()(ctx, trans_a_, trans_b_, d0,
+                                                    d3, d1, a, b, ind, out,
+                                                    batch_a, batch_b, 1);
   }
 
  private:
@@ -98,7 +98,7 @@ class IndicatorMatmulOp : public OpKernel {
   bool trans_b_;
 };
 
-template <typename Device, typename Scalar>
+template <typename Device, typename Scalar, typename TIndex>
 class ParallelIndicatorMatmulOp : public OpKernel {
  public:
   explicit ParallelIndicatorMatmulOp(OpKernelConstruction* context)
@@ -170,9 +170,9 @@ class ParallelIndicatorMatmulOp : public OpKernel {
       f(ctx->eigen_device<Device>(), out->flat<Scalar>());
       return;
     }
-    LaunchIndicatorMatmul<Device, Scalar>()(ctx, trans_a_, trans_b_, d0, d3, d1,
-                                            a, b, ind, out, batch_a, batch_b,
-                                            parallel_num);
+    LaunchIndicatorMatmul<Device, Scalar, TIndex>()(
+        ctx, trans_a_, trans_b_, d0, d3, d1, a, b, ind, out, batch_a, batch_b,
+        parallel_num);
   }
 
  private:
@@ -190,29 +190,32 @@ class ParallelIndicatorMatmulOp : public OpKernel {
 //                              .Device(DEVICE_CPU)         \
 //                              .TypeConstraint<TYPE>("T"), \
 //                          ParallelIndicatorMatmulOp<CPUDevice, TYPE>);
-//REGISTER_INDICATOR_MATMUL_CPU(float);
-//REGISTER_INDICATOR_MATMUL_CPU(double);
-//REGISTER_PARALLEL_INDICATOR_MATMUL_CPU(float);
-//REGISTER_PARALLEL_INDICATOR_MATMUL_CPU(double);
+// REGISTER_INDICATOR_MATMUL_CPU(float);
+// REGISTER_INDICATOR_MATMUL_CPU(double);
+// REGISTER_PARALLEL_INDICATOR_MATMUL_CPU(float);
+// REGISTER_PARALLEL_INDICATOR_MATMUL_CPU(double);
 
 #if GOOGLE_CUDA
-#define REGISTER_INDICATOR_MATMUL_GPU(TYPE)                      \
-  extern template struct LaunchIndicatorMatmul<GPUDevice, TYPE>; \
-  REGISTER_KERNEL_BUILDER(Name("IndicatorMatMul")                \
-                              .Device(DEVICE_GPU)                \
-                              .TypeConstraint<TYPE>("T"),        \
-                          IndicatorMatmulOp<GPUDevice, TYPE>);
-#define REGISTER_PARALLEL_INDICATOR_MATMUL_GPU(TYPE)      \
-  REGISTER_KERNEL_BUILDER(Name("ParallelIndicatorMatMul") \
-                              .Device(DEVICE_GPU)         \
-                              .TypeConstraint<TYPE>("T"), \
-                          ParallelIndicatorMatmulOp<GPUDevice, TYPE>);
-REGISTER_INDICATOR_MATMUL_GPU(float);
-REGISTER_INDICATOR_MATMUL_GPU(double);
-REGISTER_INDICATOR_MATMUL_GPU(Eigen::half);
-REGISTER_PARALLEL_INDICATOR_MATMUL_GPU(float);
-REGISTER_PARALLEL_INDICATOR_MATMUL_GPU(double);
-REGISTER_PARALLEL_INDICATOR_MATMUL_GPU(Eigen::half);
+#define REGISTER_INDICATOR_MATMUL_GPU(TYPE, TIndex)                      \
+  extern template struct LaunchIndicatorMatmul<GPUDevice, TYPE, TIndex>; \
+  REGISTER_KERNEL_BUILDER(Name("IndicatorMatMul")                        \
+                              .Device(DEVICE_GPU)                        \
+                              .TypeConstraint<TYPE>("T")                 \
+                              .TypeConstraint<TIndex>("Tindices"),       \
+                          IndicatorMatmulOp<GPUDevice, TYPE, TIndex>); \
+  REGISTER_KERNEL_BUILDER(Name("ParallelIndicatorMatMul")                \
+                              .Device(DEVICE_GPU)                        \
+                              .TypeConstraint<TYPE>("T")                 \
+                              .TypeConstraint<TIndex>("Tindices"),       \
+                          ParallelIndicatorMatmulOp<GPUDevice, TYPE, TIndex>);
+
+#define REGISTER_INDICATOR_MATMUL_GPU_ALL_INDICES(type) \
+  REGISTER_INDICATOR_MATMUL_GPU(type, int32);           \
+  REGISTER_INDICATOR_MATMUL_GPU(type, int64);
+
+REGISTER_INDICATOR_MATMUL_GPU_ALL_INDICES(float);
+REGISTER_INDICATOR_MATMUL_GPU_ALL_INDICES(double);
+REGISTER_INDICATOR_MATMUL_GPU_ALL_INDICES(Eigen::half);
 #endif
 
 }  // namespace tensorflow

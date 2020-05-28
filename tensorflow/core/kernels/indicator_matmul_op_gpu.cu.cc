@@ -88,7 +88,7 @@ const T* GpuMemory(const se::DeviceMemory<T>& mem) {
   return static_cast<const T*>(mem.opaque());
 }
 
-template <typename Scalar>
+template <typename Scalar, typename TIndex>
 struct IMatmulParam {
   Scalar* A;
   Scalar* B;
@@ -96,13 +96,13 @@ struct IMatmulParam {
   Scalar** As;
   Scalar** Bs;
   Scalar** Cs;
-  int* indicators;
+  TIndex* indicators;
   int m, n, k;
   int batch_a, batch_b;
 };
 
-template <typename Scalar>
-__global__ void ComputePtrsKernel(IMatmulParam<Scalar> param) {
+template <typename Scalar, typename TIndex>
+__global__ void ComputePtrsKernel(IMatmulParam<Scalar, TIndex> param) {
   int m = param.m, n = param.n, k = param.k;
   int batch_a = param.batch_a, batch_b = param.batch_b;
   Scalar* A = param.A + blockIdx.x * batch_a * m * k;
@@ -174,8 +174,8 @@ void RunGemmBatched(OpKernelContext* context, bool trans_a, bool trans_b,
   }
 }
 
-template <typename Scalar>
-Status LaunchComputePtr(IMatmulParam<Scalar>* param, int64 paralle_num,
+template <typename Scalar, typename TIndex>
+Status LaunchComputePtr(IMatmulParam<Scalar, TIndex>* param, int64 paralle_num,
                         OpKernelContext* context,
                         BlasScratchAllocator* scratch_allocator) {
   const size_t size = paralle_num * param->batch_b * sizeof(Scalar*);
@@ -193,12 +193,12 @@ Status LaunchComputePtr(IMatmulParam<Scalar>* param, int64 paralle_num,
   param->Cs = const_cast<Scalar**>(GpuMemory(c));
   const auto& d = context->eigen_device<GPUDevice>();
   GpuLaunchConfig config = GetGpuLaunchConfig(param->batch_b, d);
-  return GpuLaunchKernel(ComputePtrsKernel<Scalar>, paralle_num,
+  return GpuLaunchKernel(ComputePtrsKernel<Scalar,TIndex>, paralle_num,
                          config.thread_per_block, 0, d.stream(), *param);
 }
 
-template <typename Scalar>
-void LaunchIndicatorMatmul<GPUDevice, Scalar>::operator()(
+template <typename Scalar, typename TIndex>
+void LaunchIndicatorMatmul<GPUDevice, Scalar, TIndex>::operator()(
     OpKernelContext* context, bool trans_a, bool trans_b, int64 m, int64 n,
     int64 k, const Tensor& in_a, const Tensor& in_b, const Tensor& indicator,
     Tensor* out, int64 batch_a, int64 batch_b, int64 paralle_num) {
@@ -214,15 +214,15 @@ void LaunchIndicatorMatmul<GPUDevice, Scalar>::operator()(
   auto a_base_ptr = in_a.template flat<Scalar>().data();
   auto b_base_ptr = in_b.template flat<Scalar>().data();
   auto c_base_ptr = out->template flat<Scalar>().data();
-  IMatmulParam<Scalar> param;
+  IMatmulParam<Scalar, TIndex> param;
   param.A = const_cast<Scalar*>(a_base_ptr);
   param.B = const_cast<Scalar*>(b_base_ptr);
   param.C = c_base_ptr;
-  param.indicators = const_cast<int*>(indicator.template flat<int>().data());
+  param.indicators = const_cast<TIndex*>(indicator.template flat<TIndex>().data());
   param.m = m, param.n = n, param.k = k;
   param.batch_a = batch_a, param.batch_b = batch_b;
   BlasScratchAllocator scratch_allocator(context);
-  auto stat = LaunchComputePtr<Scalar>(&param, paralle_num, context,
+  auto stat = LaunchComputePtr<Scalar,TIndex>(&param, paralle_num, context,
                                        &scratch_allocator);
   if (stat != Status::OK()) {
     LOG(ERROR) << "ComputePtrKernel failed, " << stat.error_message();
@@ -233,8 +233,11 @@ void LaunchIndicatorMatmul<GPUDevice, Scalar>::operator()(
                          batch_b * paralle_num);
 }
 
-template struct LaunchIndicatorMatmul<GPUDevice, float>;
-template struct LaunchIndicatorMatmul<GPUDevice, double>;
-template struct LaunchIndicatorMatmul<GPUDevice, Eigen::half>;
+template struct LaunchIndicatorMatmul<GPUDevice, float, int32>;
+template struct LaunchIndicatorMatmul<GPUDevice, double, int32>;
+template struct LaunchIndicatorMatmul<GPUDevice, Eigen::half, int32>;
+template struct LaunchIndicatorMatmul<GPUDevice, float, int64>;
+template struct LaunchIndicatorMatmul<GPUDevice, double, int64>;
+template struct LaunchIndicatorMatmul<GPUDevice, Eigen::half, int64>;
 #endif  // GOOGLE_CUDA
 }  // namespace tensorflow
