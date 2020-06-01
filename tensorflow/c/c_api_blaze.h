@@ -186,18 +186,23 @@ TF_CAPI_EXPORT bool TF_CudaMemAlloc(
 TF_CAPI_EXPORT bool TF_CudaMemDealloc(
     int virtual_gpu_id,
     void* gpu_ptr);
+TF_CAPI_EXPORT bool TF_HostMemAlloc(
+    int virtual_gpu_id,
+    void** host_ptr,
+    size_t length);
+TF_CAPI_EXPORT bool TF_HostMemDealloc(
+    int virtual_gpu_id,
+    void* host_ptr);
 TF_CAPI_EXPORT bool TF_CudaMemCopyHostToDeviceAsync(
     int virtual_gpu_id,
     void* device_ptr,
     const void* host_ptr,
     size_t length);
-TF_CAPI_EXPORT bool TF_CudaMemCopyDeviceToHostAsync(
+TF_CAPI_EXPORT bool TF_CudaMemCopyDeviceToHost(
     int virtual_gpu_id,
     void* host_ptr,
     const void* device_ptr,
     size_t length);
-TF_CAPI_EXPORT bool TF_CudaBlockStreamUntilDone(
-    int virtual_gpu_id);
 
 #ifdef __cplusplus
 } /* end extern "C" */

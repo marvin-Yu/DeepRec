@@ -80,6 +80,8 @@ limitations under the License.
 #include "tensorflow/core/public/session.h"
 #include "tensorflow/core/public/version.h"
 #include "tensorflow/core/util/env_var.h"
+#include "third_party/gpus/cuda/include/cuda.h"
+#include "third_party/gpus/cuda/include/cuda_runtime_api.h"
 
 // The implementation below is at the top level instead of the
 // brain namespace because we are defining 'extern "C"' functions.
@@ -117,6 +119,7 @@ using tensorflow::TensorShape;
 using tensorflow::TensorShapeProto;
 using tensorflow::VersionDef;
 using tensorflow::errors::FailedPrecondition;
+using tensorflow::errors::Internal;
 using tensorflow::errors::InvalidArgument;
 using tensorflow::gtl::ArraySlice;
 using tensorflow::strings::StrCat;
@@ -654,12 +657,19 @@ void TF_SessionRunCallable(TF_Session* tf_sess, TF_CallableHandle callable_handl
   RunMetadata run_metadata_proto;
   status->status = tf_sess->session->RunCallable(callable_handle, input_tensors,
                                                  &output_tensors, &run_metadata_proto);
+  if (TF_GetCode(status) != TF_OK) {
+    LOG(ERROR) << "RunCallabe failed!" << status->status.error_message();
+    return;
+  }
   // Serialize back to upstream client, who now owns the new buffer
   if (run_metadata != nullptr) {
     status->status = MessageToBuffer(run_metadata_proto, run_metadata);
     if (TF_GetCode(status) != TF_OK) return;
   }
-  if (output_tensors.size() != noutputs) return;
+  if (output_tensors.size() != noutputs) {
+    status->status = Internal("Unexpected output size");
+    return;
+  }
   for (int i = 0; i < noutputs; ++i) {
     output_values[i] = tensorflow::TF_TensorFromTensor(output_tensors[i], status);
     if (TF_GetCode(status) != TF_OK) return;
@@ -705,6 +715,24 @@ bool TF_CudaMemDealloc(int virtual_gpu_id, void* gpu_ptr) {
   return true;
 }
 
+bool TF_HostMemAlloc(int virtual_gpu_id, void** host_ptr, size_t length) {
+  stream_executor::Stream* stream = GetStreamOfVirtualDevice(virtual_gpu_id);
+  if (stream == nullptr) {
+    return false;
+  }
+  *host_ptr = stream->parent()->HostMemoryAllocate(length);
+  return true;
+}
+
+bool TF_HostMemDealloc(int virtual_gpu_id, void* host_ptr) {
+  stream_executor::Stream* stream = GetStreamOfVirtualDevice(virtual_gpu_id);
+  if (stream == nullptr) {
+    return false;
+  }
+  stream->parent()->HostMemoryDeallocate(host_ptr);
+  return true;
+}
+
 bool TF_CudaMemCopyHostToDeviceAsync(int virtual_gpu_id, void* device_ptr, const void* host_ptr, size_t length) {
   stream_executor::Stream* stream = GetStreamOfVirtualDevice(virtual_gpu_id);
   if (stream == nullptr) {
@@ -715,23 +743,25 @@ bool TF_CudaMemCopyHostToDeviceAsync(int virtual_gpu_id, void* device_ptr, const
   return true;
 }
 
-bool TF_CudaMemCopyDeviceToHostAsync(int virtual_gpu_id, void* host_ptr, const void* device_ptr, size_t length) {
+bool TF_CudaMemCopyDeviceToHost(int virtual_gpu_id, void* host_ptr, const void* device_ptr, size_t length) {
   stream_executor::Stream* stream = GetStreamOfVirtualDevice(virtual_gpu_id);
   if (stream == nullptr) {
     return false;
   }
   stream_executor::DeviceMemoryBase device_memory(const_cast<void*>(device_ptr), length);
-  stream->ThenMemcpy(host_ptr, device_memory, length);
-  return true;
-}
+  // sync 
+  stream->parent()->SynchronousMemcpyD2H(device_memory, length, host_ptr);
 
-bool TF_CudaBlockStreamUntilDone(int virtual_gpu_id) {
-  stream_executor::Stream* stream = GetStreamOfVirtualDevice(virtual_gpu_id);
-  if (stream == nullptr) {
+  // async
+  /*stream->ThenMemcpy(host_ptr, device_memory, length);
+  auto event = std::make_shared<stream_executor::Event>(stream->parent());
+  if (!event->Init()) {
+    LOG(ERROR) << "event init failed!";
     return false;
   }
-  Status status = stream->BlockHostUntilDone();
-  return status.ok();
+  stream->ThenRecordEvent(event.get());
+  stream->ThenWaitFor(event.get());*/
+  return true;
 }
 
 }  // end extern "C"
