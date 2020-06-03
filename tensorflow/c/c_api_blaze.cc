@@ -750,17 +750,17 @@ bool TF_CudaMemCopyDeviceToHost(int virtual_gpu_id, void* host_ptr, const void* 
   }
   stream_executor::DeviceMemoryBase device_memory(const_cast<void*>(device_ptr), length);
   // sync 
-  stream->parent()->SynchronousMemcpyD2H(device_memory, length, host_ptr);
+  //stream->parent()->SynchronousMemcpyD2H(device_memory, length, host_ptr);
 
   // async
-  /*stream->ThenMemcpy(host_ptr, device_memory, length);
+  stream->ThenMemcpy(host_ptr, device_memory, length);
   auto event = std::make_shared<stream_executor::Event>(stream->parent());
   if (!event->Init()) {
     LOG(ERROR) << "event init failed!";
     return false;
   }
   stream->ThenRecordEvent(event.get());
-  stream->ThenWaitFor(event.get());*/
+  stream->ThenWaitFor(event.get());
   return true;
 }
 
