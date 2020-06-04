@@ -1,4 +1,5 @@
 #include "gru_func.h"
+
 #include "vml.h"
 
 #define EIGEN_USE_THREADS
@@ -38,9 +39,10 @@ void GRUKernel(const CPUDevice& d, int batch_size, int rounds, int elts, T* y,
   if (rounds <= 0) {
     return;
   }
-  Gemm<T>(d, batch_size * rounds, elts * 3, elts, x, i2h, preact_p);
   memset(y, 0, batch_size * rounds * elts * sizeof(T));
   for (int b = 0; b < batch_size; b++) {
+    Gemm<T>(d, rounds, elts * 3, elts, x + b * rounds * elts,
+            i2h + b * elts * elts * 3, preact_p + b * rounds * elts * 3);
     T* y_batch = &y[b * rounds * elts];
     T* preact = &preact_p[b * rounds * elts * 3];
     bool preact_nonzero = false;
@@ -56,9 +58,10 @@ void GRUKernel(const CPUDevice& d, int batch_size, int rounds, int elts, T* y,
       if (preact_nonzero) {
         if (i > 0) {
           const T* prev_y = y_batch - elts;
-          Gemm<T>(d, 1, elts * 3, elts, prev_y, h2h, act_p);
-          VML_Add(elts * 3, act_p, h2h_bias, act_p);
-          VML_Add(elts * 3, preact, i2h_bias, preact);
+          Gemm<T>(d, 1, elts * 3, elts, prev_y, h2h + b * elts * elts * 3,
+                  act_p);
+          VML_Add(elts * 3, act_p, h2h_bias + b * elts * 3, act_p);
+          VML_Add(elts * 3, preact, i2h_bias + b * elts * 3, preact);
           VML_Add(elts * 2, preact, act_p, preact);
           VML_Sigmoid(elts * 2, preact, preact);
           VML_AddMul(elts, &preact[elts * 2], preact, &act_p[elts * 2],
@@ -66,11 +69,11 @@ void GRUKernel(const CPUDevice& d, int batch_size, int rounds, int elts, T* y,
           VML_Tanh(elts, &preact[elts * 2], &preact[elts * 2]);
           SetOutput(elts, &preact[elts], &preact[elts * 2], prev_y, y_batch);
         } else {
-          VML_Add(elts * 3, preact, i2h_bias, preact);
-          VML_Add(elts * 2, preact, h2h_bias, preact);
+          VML_Add(elts * 3, preact, i2h_bias + b * elts * 3, preact);
+          VML_Add(elts * 2, preact, h2h_bias + b * elts * 3, preact);
           VML_Sigmoid(elts * 2, preact, preact);
-          VML_AddMul(elts, &preact[elts * 2], preact, &h2h_bias[elts * 2],
-                     &preact[elts * 2]);
+          VML_AddMul(elts, &preact[elts * 2], preact,
+                     &h2h_bias[elts * 2 + b * elts * 3], &preact[elts * 2]);
           VML_Tanh(elts, &preact[elts * 2], &preact[elts * 2]);
           SetOutput(elts, &preact[elts], &preact[elts * 2], y_batch, y_batch);
         }
@@ -96,8 +99,7 @@ void GRUKernel(const CPUDevice& d, int batch_size, int rounds, int elts, T* y,
         flops += elts * 5;
       }
     }
-    LOG(INFO) << "FLOPs = " << flops
-              << ", BlazeGRU";
+    LOG(INFO) << "FLOPs = " << flops << ", BlazeGRU";
   }
 }
 
