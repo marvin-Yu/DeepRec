@@ -605,6 +605,16 @@ void TF_EnableCudaGraph(TF_Buffer* run_options, unsigned char enable,
   status->status = Status::OK();
 }
 
+void TF_EnableSingleThreadedExecutor(TF_SessionOptions* options,
+                                     unsigned char enable) {
+  tensorflow::ConfigProto& config = options->options.config;
+  if (enable) {
+    config->mutable_experimental()->set_executor_type("SINGLE_THREADED_EXECUTOR");
+  } else {
+    config->mutable_experimental()->set_executor_type("DEFAULT");
+  }
+}
+
 void TF_SessionMakeCallable(TF_Session* tf_sess, TF_CallableHandle* callable_handle,
                             const char* const* feed_names, int feed_count,
                             const char* const* fetch_names, int fetch_count,

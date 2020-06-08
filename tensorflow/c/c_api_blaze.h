@@ -163,6 +163,9 @@ TF_CAPI_EXPORT extern void TF_EnableAutoMixedPrecision(
 TF_CAPI_EXPORT extern void TF_EnableCudaGraph(
     TF_Buffer* run_options, unsigned char enable,
     unsigned char init, int count, TF_Status* status);
+TF_CAPI_EXPORT extern void TF_EnableSingleThreadedExecutor(
+    TF_SessionOptions* opt,
+    unsigned char enable);
 
 typedef int64_t TF_CallableHandle;
 
