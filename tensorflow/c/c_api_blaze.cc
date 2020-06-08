@@ -609,9 +609,9 @@ void TF_EnableSingleThreadedExecutor(TF_SessionOptions* options,
                                      unsigned char enable) {
   tensorflow::ConfigProto& config = options->options.config;
   if (enable) {
-    config->mutable_experimental()->set_executor_type("SINGLE_THREADED_EXECUTOR");
+    config.mutable_experimental()->set_executor_type("SINGLE_THREADED_EXECUTOR");
   } else {
-    config->mutable_experimental()->set_executor_type("DEFAULT");
+    config.mutable_experimental()->set_executor_type("DEFAULT");
   }
 }
 
