@@ -1811,11 +1811,7 @@ Status DirectSession::CreateExecutors(
     item->executor = nullptr;
     item->device = device;
     auto executor_type = options_.config.experimental().executor_type();
-//    TF_RETURN_IF_ERROR(NewExecutor(
-//        executor_type, params, std::move(partition_graph), &item->executor));
-    LOG(INFO) << "############# USE SINGLE_THREADED_EXECUTOR";
-    TF_RETURN_IF_ERROR(NewExecutor(
-        "SINGLE_THREADED_EXECUTOR", params, std::move(partition_graph), &item->executor));
+    LOG(INFO) << "Executor type: " << executor_type;
   }
 
   // Cache the mapping from input/output names to graph elements to
