@@ -170,7 +170,7 @@ TF_CAPI_EXPORT extern void TF_SessionMakeCallable(
     TF_Session* tf_sess, TF_CallableHandle* callable_handle,
     const char* const* feed_names, int feed_count,
     const char* const* fetch_names, int fetch_count,
-    const char* device_name, TF_Status* status);
+    bool adapt_device, const char* device_name, TF_Status* status);
 TF_CAPI_EXPORT extern void TF_SessionRunCallable(
     TF_Session* tf_sess, TF_CallableHandle callable_handle,
     TF_Tensor* const* input_values, int ninputs,

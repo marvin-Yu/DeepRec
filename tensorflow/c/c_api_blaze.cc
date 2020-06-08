@@ -608,7 +608,7 @@ void TF_EnableCudaGraph(TF_Buffer* run_options, unsigned char enable,
 void TF_SessionMakeCallable(TF_Session* tf_sess, TF_CallableHandle* callable_handle,
                             const char* const* feed_names, int feed_count,
                             const char* const* fetch_names, int fetch_count,
-                            const char* device_name, TF_Status* status) {
+                            bool adapt_device, const char* device_name, TF_Status* status) {
   std::vector<tensorflow::DeviceAttributes> devices;
   tf_sess->session->ListDevices(&devices);
   for (const auto& device : devices) {
@@ -625,12 +625,16 @@ void TF_SessionMakeCallable(TF_Session* tf_sess, TF_CallableHandle* callable_han
   for (int i = 0; i < feed_count; ++i) {
     const char* feed_name = feed_names[i];
     opts.add_feed(feed_name);
-    opts.mutable_feed_devices()->insert({feed_name, device_name});
+    if (adapt_device) {
+      opts.mutable_feed_devices()->insert({feed_name, device_name});
+    }
   }
   for (int i = 0; i < fetch_count; ++i) {
     const char* fetch_name = fetch_names[i];
     opts.add_fetch(fetch_name);
-    opts.mutable_fetch_devices()->insert({fetch_name, device_name});
+    if (adapt_device) {
+      opts.mutable_fetch_devices()->insert({fetch_name, device_name});
+    }
   }
   opts.set_fetch_skip_sync(true);
   LOG(INFO) << opts.DebugString();
