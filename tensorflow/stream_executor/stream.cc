@@ -337,6 +337,19 @@ Stream &Stream::ThenRecordEvent(Event *event) {
   return *this;
 }
 
+Stream &Stream::ThenSynchronizeEvent(Event *event) {
+  VLOG_CALL(PARAM(event));
+
+  port::Status status = parent_->SynchronizeEvent(event);
+  if (!status.ok()) {
+    LOG(ERROR) << "Error synchronize event: " << status.error_message()
+               << "; not marking stream as bad, as the Event object may be "
+               << "at fault. Monitor for further errors.";
+  }
+
+  return *this;
+}
+
 Stream &Stream::ThenBatchNormalizationForward(
     const DeviceMemory<float> &x, const DeviceMemory<float> &scale,
     const DeviceMemory<float> &offset,

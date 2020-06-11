@@ -695,7 +695,7 @@ void TF_SessionReleaseCallable(TF_Session* tf_sess, TF_CallableHandle callable_h
   status->status = tf_sess->session->ReleaseCallable(callable_handle);
 }
 
-stream_executor::Stream* GetStreamOfVirtualDevice(int virtual_gpu_id) {
+tensorflow::BaseGPUDevice::StreamGroup* GetStreamGroupOfVirtualDevice(int virtual_gpu_id) {
   TfGpuId tf_gpu_id(virtual_gpu_id);
   PlatformGpuId platform_gpu_id;
   Status s = GpuIdManager::TfToPlatformGpuId(tf_gpu_id, &platform_gpu_id);
@@ -706,13 +706,13 @@ stream_executor::Stream* GetStreamOfVirtualDevice(int virtual_gpu_id) {
   stream_executor::StreamExecutor* se =
       GpuIdUtil::ExecutorForPlatformGpuId(platform_gpu_id).ValueOrDie();
   static tensorflow::GPUOptions gpu_options;
-  tensorflow::BaseGPUDevice::StreamGroup* stream_group = tensorflow::StreamGroupFactory::Global().GetOrCreate(
+  return tensorflow::StreamGroupFactory::Global().GetOrCreate(
       tf_gpu_id, 0, se, gpu_options);
-  return stream_group->compute;
 }
 
 bool TF_CudaMemAlloc(int virtual_gpu_id, void** gpu_ptr, size_t length) {
-  stream_executor::Stream* stream = GetStreamOfVirtualDevice(virtual_gpu_id);
+  tensorflow::BaseGPUDevice::StreamGroup* stream_group = GetStreamGroupOfVirtualDevice(virtual_gpu_id);
+  stream_executor::Stream* stream = stream_group->host_to_device;
   if (stream == nullptr) {
     return false;
   }
@@ -721,7 +721,8 @@ bool TF_CudaMemAlloc(int virtual_gpu_id, void** gpu_ptr, size_t length) {
 }
 
 bool TF_CudaMemDealloc(int virtual_gpu_id, void* gpu_ptr) {
-  stream_executor::Stream* stream = GetStreamOfVirtualDevice(virtual_gpu_id);
+  tensorflow::BaseGPUDevice::StreamGroup* stream_group = GetStreamGroupOfVirtualDevice(virtual_gpu_id);
+  stream_executor::Stream* stream = stream_group->host_to_device;
   if (stream == nullptr) {
     return false;
   }
@@ -730,7 +731,8 @@ bool TF_CudaMemDealloc(int virtual_gpu_id, void* gpu_ptr) {
 }
 
 bool TF_HostMemAlloc(int virtual_gpu_id, void** host_ptr, size_t length) {
-  stream_executor::Stream* stream = GetStreamOfVirtualDevice(virtual_gpu_id);
+  tensorflow::BaseGPUDevice::StreamGroup* stream_group = GetStreamGroupOfVirtualDevice(virtual_gpu_id);
+  stream_executor::Stream* stream = stream_group->host_to_device;
   if (stream == nullptr) {
     return false;
   }
@@ -739,7 +741,8 @@ bool TF_HostMemAlloc(int virtual_gpu_id, void** host_ptr, size_t length) {
 }
 
 bool TF_HostMemDealloc(int virtual_gpu_id, void* host_ptr) {
-  stream_executor::Stream* stream = GetStreamOfVirtualDevice(virtual_gpu_id);
+  tensorflow::BaseGPUDevice::StreamGroup* stream_group = GetStreamGroupOfVirtualDevice(virtual_gpu_id);
+  stream_executor::Stream* stream = stream_group->host_to_device;
   if (stream == nullptr) {
     return false;
   }
@@ -748,34 +751,40 @@ bool TF_HostMemDealloc(int virtual_gpu_id, void* host_ptr) {
 }
 
 bool TF_CudaMemCopyHostToDeviceAsync(int virtual_gpu_id, void* device_ptr, const void* host_ptr, size_t length) {
-  stream_executor::Stream* stream = GetStreamOfVirtualDevice(virtual_gpu_id);
-  if (stream == nullptr) {
+  tensorflow::BaseGPUDevice::StreamGroup* stream_group = GetStreamGroupOfVirtualDevice(virtual_gpu_id);
+  stream_executor::Stream* h2d_stream = stream_group->host_to_device;
+  stream_executor::Stream* compute_stream = stream_group->compute;
+  if (h2d_stream == nullptr || compute_stream == nullptr) {
     return false;
   }
   stream_executor::DeviceMemoryBase device_memory(device_ptr, length);
-  stream->ThenMemcpy(&device_memory, host_ptr, length);
+  h2d_stream->ThenMemcpy(&device_memory, host_ptr, length);
+  compute_stream->ThenWaitFor(h2d_stream);
   return true;
 }
 
+
 bool TF_CudaMemCopyDeviceToHost(int virtual_gpu_id, void* host_ptr, const void* device_ptr, size_t length) {
-  stream_executor::Stream* stream = GetStreamOfVirtualDevice(virtual_gpu_id);
-  if (stream == nullptr) {
+  tensorflow::BaseGPUDevice::StreamGroup* stream_group = GetStreamGroupOfVirtualDevice(virtual_gpu_id);
+  stream_executor::Stream* d2h_stream = stream_group->device_to_host;
+  stream_executor::Stream* compute_stream = stream_group->compute;
+  if (d2h_stream == nullptr || compute_stream == nullptr) {
     return false;
   }
   stream_executor::DeviceMemoryBase device_memory(const_cast<void*>(device_ptr), length);
+  d2h_stream->ThenWaitFor(compute_stream);
   // sync 
-  stream->parent()->SynchronousMemcpyD2H(device_memory, length, host_ptr);
+//  stream->parent()->SynchronousMemcpyD2H(device_memory, length, host_ptr);
 
   // async
-  /*
-  stream->ThenMemcpy(host_ptr, device_memory, length);
-  auto event = std::make_shared<stream_executor::Event>(stream->parent());
+  d2h_stream->ThenMemcpy(host_ptr, device_memory, length);
+  auto event = std::make_shared<stream_executor::Event>(d2h_stream->parent());
   if (!event->Init()) {
     LOG(ERROR) << "event init failed!";
     return false;
   }
-  stream->ThenRecordEvent(event.get());
-  stream->ThenWaitFor(event.get());*/
+  d2h_stream->ThenRecordEvent(event.get());
+  d2h_stream->ThenSynchronizeEvent(event.get());
   return true;
 }
 

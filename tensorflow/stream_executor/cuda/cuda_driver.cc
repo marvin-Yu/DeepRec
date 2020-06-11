@@ -1060,6 +1060,18 @@ GpuDriver::ContextGetSharedMemConfig(GpuContext* context) {
   return true;
 }
 
+/* static */ bool GpuDriver::SynchronizeEvent(GpuContext* context,
+                                              CUevent event) {
+  ScopedActivateContext activated{context};
+  CUresult res = cuEventSynchronize(event);
+  if (res != CUDA_SUCCESS) {
+    LOG(ERROR) << "failed to synchronize the stop event: " << ToString(res);
+    return false;
+  }
+
+  return true;
+}
+
 /* static */ bool GpuDriver::WaitStreamOnEvent(GpuContext* context,
                                                CUstream stream, CUevent event) {
   ScopedActivateContext activation(context);

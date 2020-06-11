@@ -363,6 +363,9 @@ class GpuDriver {
   static port::Status RecordEvent(GpuContext* context, GpuEventHandle event,
                                   GpuStreamHandle stream);
 
+  static bool SynchronizeEvent(GpuContext* context,
+                               GpuEventHandle event);
+
   // Polls (without blocking) to determine the status of an event - pending or
   // complete (or an error status).
   // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EVENT.html#group__CUDA__EVENT_1g6f0704d755066b0ee705749ae911deef
