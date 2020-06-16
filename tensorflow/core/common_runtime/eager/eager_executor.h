@@ -101,6 +101,13 @@ class EagerExecutor {
   // Returns Status based on any errors that occurred during async execution.
   Status status() const;
 
+  // On destruction, runs `callback`. Used by the EagerContext for clearing
+  // thread-local executors.
+  void AddCleanup(intptr_t key, std::function<void()> callback);
+  // If `key` (e.g. a context) is destroyed before the executor, the associated
+  // callbacks are no longer safe to run.
+  void RemoveCleanups(intptr_t key);
+
  private:
   // Possible states for this executor.
   // Executor starts in kActive state. When Shutdown() is called, Executor
@@ -171,6 +178,9 @@ class EagerExecutor {
   // Thread object that calls the `Run` method in async mode.This thread runs
   // until state_ is set to kShuttingDown. It is `nullptr` in sync mode.
   const std::unique_ptr<Thread> thread_;
+
+  // Callbacks to run on destruction.
+  std::unordered_map<intptr_t, std::vector<std::function<void()>>> cleanups_;
 };
 
 }  // namespace tensorflow
