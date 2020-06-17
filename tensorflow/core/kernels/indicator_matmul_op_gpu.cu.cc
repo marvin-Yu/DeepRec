@@ -68,7 +68,7 @@ __global__ void ComputePtrsKernel(IMatmulParam<Scalar, TIndex> param) {
     int64 offset = blockIdx.x * batch_b + i;
     int64 ind = (int64)param.indicators[i];
     if (ind < 0 || ind >= batch_a) {
-      printf("Indicator ERROR for indicator_matmul, indicator: %d.\n", ind);
+      //printf("Indicator ERROR for indicator_matmul, indicator: %d.\n", ind);
       ind = 0;
     }
     param.As[offset] = &A[ind * m * k];
