@@ -91,7 +91,8 @@ class HloPrintOptions {
         canonicalize_instruction_names_(false),
         indent_amount_(0),
         is_in_nested_computation_(false),
-        print_ids_(true) {}
+        print_ids_(true),
+        print_cluster_id_(true) {}
 
   static HloPrintOptions ShortParsable() {
     return HloPrintOptions()
@@ -231,6 +232,11 @@ class HloPrintOptions {
     return *this;
   }
 
+  HloPrintOptions& set_print_cluster_id(bool value) {
+    print_cluster_id_ = value;
+    return *this;
+  }
+
   bool print_large_constants() const { return print_large_constants_; }
   PrintSubcomputationMode print_subcomputation_mode() const {
     return print_subcomputation_mode_;
@@ -247,6 +253,7 @@ class HloPrintOptions {
   bool print_control_dependencies() const {
     return print_control_dependencies_;
   }
+  bool print_cluster_id() const { return print_cluster_id_; }
   bool canonicalize_instruction_names() const {
     return canonicalize_instruction_names_;
   }
@@ -269,6 +276,7 @@ class HloPrintOptions {
   int indent_amount_;
   bool is_in_nested_computation_;
   bool print_ids_;
+  bool print_cluster_id_;
 };
 
 // For canonical string output, we need to have a canonical way to rename
