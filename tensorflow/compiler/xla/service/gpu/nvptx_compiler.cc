@@ -247,6 +247,8 @@ void WarnIfBadDriverJITVersion() {
   });
 }
 
+static tensorflow::mutex ptx_cache_mutex;
+
 // Try to load ptx from files defined in the FLAGS. If successful, return true.
 bool MaybeLoadPtxFromFile(const HloModule* module, std::string* ptx) {
   // If the xla_gpu_ptx_file options is set, be explicit when a file is used
@@ -272,7 +274,12 @@ bool MaybeLoadPtxFromFile(const HloModule* module, std::string* ptx) {
   string ptx_cache_dir;
   tensorflow::ReadStringFromEnvVar("TF_XLA_PTX_CACHE_DIR", "", &ptx_cache_dir);
   if (!ptx_cache_dir.empty()) {
-    string filename = ptx_cache_dir + "/" + std::to_string(module->Hash()) + ".ptx";
+    HloPrintOptions options;
+    options.set_print_cluster_id(false);
+    options.set_print_metadata(false);
+    uint64 key = tensorflow::Hash64(module->ToString(options));
+    string filename = ptx_cache_dir + "/" + std::to_string(key) + ".ptx";
+    tensorflow::mutex_lock lock(ptx_cache_mutex);
     if (access(filename.c_str(), F_OK) == 0) {
       matched_filename = filename;
       VLOG(0) << "RunBackend() - Will load PTX from file: " << filename;
@@ -345,9 +352,21 @@ NVPTXCompiler::CompileTargetBinary(const HloModule* module,
     string ptx_cache_dir;
 	tensorflow::ReadStringFromEnvVar("TF_XLA_PTX_CACHE_DIR", "", &ptx_cache_dir);
     if (!ptx_cache_dir.empty()) {
-      string filename = std::to_string(module->Hash()) + ".ptx";
-      VLOG(0) << "Dump " << filename << " to " << ptx_cache_dir;
-      DumpPtxToFileInDir(ptx_cache_dir, filename, ptx);
+      HloPrintOptions options;
+      options.set_print_cluster_id(false);
+      options.set_print_metadata(false);
+      uint64 key = tensorflow::Hash64(module->ToString(options));
+      string ptx_filename = std::to_string(key) + ".ptx";
+      string hlo_filename = std::to_string(key) + ".hlomodule";
+      string ptx_fullpath = ptx_cache_dir + "/" + ptx_filename;
+
+      tensorflow::mutex_lock lock(ptx_cache_mutex);
+      if (access(ptx_fullpath.c_str(), F_OK) != 0) {
+        VLOG(0) << "Dump " << ptx_filename << " to " << ptx_cache_dir;
+        VLOG(0) << "Dump " << hlo_filename << " to " << ptx_cache_dir;
+        DumpPtxToFileInDir(ptx_cache_dir, ptx_filename, ptx);
+        DumpPtxToFileInDir(ptx_cache_dir, hlo_filename, module->ToString(options));
+      }
     }
   }
 

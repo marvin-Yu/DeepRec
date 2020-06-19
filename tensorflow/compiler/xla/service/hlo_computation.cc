@@ -535,7 +535,7 @@ string HloComputation::ToString(
     }
     std::string hlo_computation_name = name();
     if (!options.print_cluster_id()) {
-      std::regex pattern("(cluster_)(\\d)(__)");
+      std::regex pattern("(cluster_)(\\d+)(__)");
       hlo_computation_name =
           std::regex_replace(hlo_computation_name, pattern, "cluster__");
     }

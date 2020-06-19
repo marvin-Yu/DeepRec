@@ -218,7 +218,7 @@ string HloModule::ToString(const HloPrintOptions& options) const {
   std::ostringstream s;
   std::string hlo_module_name = name();
   if (!options.print_cluster_id()) {
-    std::regex pattern("(cluster_)(\\d)(__)");
+    std::regex pattern("(cluster_)(\\d+)(__)");
     hlo_module_name = std::regex_replace(hlo_module_name, pattern, "cluster__");
     LOG(INFO) << "HloModel replaced: " << hlo_module_name;
   }
