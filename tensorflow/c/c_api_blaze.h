@@ -166,6 +166,9 @@ TF_CAPI_EXPORT extern void TF_EnableCudaGraph(
 TF_CAPI_EXPORT extern void TF_SetPaddingInfo(
     TF_Buffer* run_options, unsigned long long before_padding,
     unsigned long long after_padding, TF_Status* status);
+TF_CAPI_EXPORT extern void TF_SaveRunMetadata(const TF_Buffer* run_metadata,
+                                              const char* save_path,
+                                              const char* file_name);
 
 #ifdef __cplusplus
 } /* end extern "C" */

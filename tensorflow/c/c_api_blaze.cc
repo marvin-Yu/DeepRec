@@ -43,7 +43,6 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/shape_refiner.h"
 #include "tensorflow/core/framework/allocation_description.pb.h"
 #include "tensorflow/core/framework/kernel_def.pb.h"
-#include "tensorflow/core/protobuf/meta_graph.pb.h"
 #include "tensorflow/core/framework/log_memory.h"
 #include "tensorflow/core/framework/node_def_util.h"
 #include "tensorflow/core/framework/op_kernel.h"
@@ -63,6 +62,7 @@ limitations under the License.
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/core/stringpiece.h"
 #include "tensorflow/core/lib/gtl/array_slice.h"
+#include "tensorflow/core/lib/io/path.h"
 #include "tensorflow/core/lib/strings/str_util.h"
 #include "tensorflow/core/lib/strings/strcat.h"
 #include "tensorflow/core/platform/env.h"
@@ -71,6 +71,7 @@ limitations under the License.
 #include "tensorflow/core/platform/protobuf.h"
 #include "tensorflow/core/platform/thread_annotations.h"
 #include "tensorflow/core/platform/types.h"
+#include "tensorflow/core/protobuf/meta_graph.pb.h"
 #include "tensorflow/core/public/session.h"
 #include "tensorflow/core/public/version.h"
 #include "tensorflow/core/util/env_var.h"
@@ -611,6 +612,29 @@ void TF_SetPaddingInfo(TF_Buffer* run_options, unsigned long long before_padding
 
   TF_CHECK_OK(MessageToBuffer(run_options_proto, run_options));
   status->status = Status::OK();
+}
+
+void TF_SaveRunMetadata(const TF_Buffer* run_metadata, const char* dir,
+                        const char* file_name) {
+  tensorflow::Env* env = tensorflow::Env::Default();
+  if (!env->IsDirectory(dir).ok()) {
+    auto status = env->RecursivelyCreateDir(dir);
+    if (!status.ok() && !env->IsDirectory(dir).ok()) {
+      LOG(ERROR) << "Could not create directory " << dir
+                 << " for dumping run_metadata " << status;
+      return;
+    }
+  }
+  tensorflow::RunMetadata metadata;
+  metadata.ParseFromArray(run_metadata->data, run_metadata->length);
+  string file_path = tensorflow::io::JoinPath(dir, string(file_name));
+  auto status = tensorflow::WriteStringToFile(env, file_path,
+                                              metadata.SerializeAsString());
+  if (!status.ok()) {
+    LOG(ERROR) << "Could not write run_metadata to " << file_path << ": "
+               << status;
+  }
+  LOG(INFO) << "Dumped run_metadata " << file_path;
 }
 
 }  // end extern "C"
