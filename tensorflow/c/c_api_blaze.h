@@ -178,7 +178,10 @@ TF_CAPI_EXPORT extern void TF_SessionRunCallable(
     TF_Session* tf_sess, TF_CallableHandle callable_handle,
     TF_Tensor* const* input_values, int ninputs,
     TF_Tensor** output_values, int noutputs,
-    TF_Buffer* run_metadata, TF_Status* status);
+    TF_Buffer* run_metadata, TF_Status* status,
+    //[DYNAMIC-SHAPE]
+    uint64_t before_padding = 0, uint64_t after_padding = 0);
+
 TF_CAPI_EXPORT extern void TF_SessionReleaseCallable(
     TF_Session* tf_sess, TF_CallableHandle callable_handle,
     TF_Status* status);

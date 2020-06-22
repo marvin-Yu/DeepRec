@@ -2503,15 +2503,19 @@ class DirectSession::RunCallableCallFrame : public CallFrameInterface {
 
 ::tensorflow::Status DirectSession::RunCallable(
     CallableHandle handle, const std::vector<Tensor>& feed_tensors,
-    std::vector<Tensor>* fetch_tensors, RunMetadata* run_metadata) {
+    std::vector<Tensor>* fetch_tensors, RunMetadata* run_metadata,
+    uint64_t before_padding,
+    uint64_t after_padding) {
   return RunCallable(handle, feed_tensors, fetch_tensors, run_metadata,
-                     thread::ThreadPoolOptions());
+                     thread::ThreadPoolOptions(),
+                     before_padding, after_padding);
 }
 
 ::tensorflow::Status DirectSession::RunCallable(
     CallableHandle handle, const std::vector<Tensor>& feed_tensors,
     std::vector<Tensor>* fetch_tensors, RunMetadata* run_metadata,
-    const thread::ThreadPoolOptions& threadpool_options) {
+    const thread::ThreadPoolOptions& threadpool_options,
+    uint64_t before_padding, uint64_t after_padding) {
   TF_RETURN_IF_ERROR(CheckNotClosed());
   TF_RETURN_IF_ERROR(CheckGraphCreated("RunCallable()"));
   direct_session_runs->GetCell()->IncrementBy(1);
@@ -2568,6 +2572,10 @@ class DirectSession::RunCallableCallFrame : public CallFrameInterface {
   if (LogMemory::IsEnabled()) {
     LogMemory::RecordStep(step_id, run_state_args.handle);
   }
+
+  auto run_options = executors_and_keys->callable_options.mutable_run_options();
+  run_options->mutable_padding_info()->set_before_padding(before_padding);
+  run_options->mutable_padding_info()->set_after_padding(after_padding);
 
   TF_RETURN_IF_ERROR(RunInternal(
       step_id, executors_and_keys->callable_options.run_options(), &call_frame,

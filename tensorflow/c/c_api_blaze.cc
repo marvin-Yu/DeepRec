@@ -661,7 +661,9 @@ void TF_SessionMakeCallable(TF_Session* tf_sess, TF_CallableHandle* callable_han
 void TF_SessionRunCallable(TF_Session* tf_sess, TF_CallableHandle callable_handle,
                            TF_Tensor* const* input_values, int ninputs,
                            TF_Tensor** output_values, int noutputs,
-                           TF_Buffer* run_metadata, TF_Status* status) {
+                           TF_Buffer* run_metadata, TF_Status* status,
+                           //[DYNAMIC-SHAPE]
+                           uint64_t before_padding, uint64_t after_padding) {
   std::vector<Tensor> input_tensors(ninputs);
   for (int i = 0; i < ninputs; ++i) {
     status->status = tensorflow::TF_TensorToTensor(input_values[i], &input_tensors[i]);
@@ -671,7 +673,8 @@ void TF_SessionRunCallable(TF_Session* tf_sess, TF_CallableHandle callable_handl
   std::vector<Tensor> output_tensors;
   RunMetadata run_metadata_proto;
   status->status = tf_sess->session->RunCallable(callable_handle, input_tensors,
-                                                 &output_tensors, &run_metadata_proto);
+                                                 &output_tensors, &run_metadata_proto,
+                                                 before_padding, after_padding);
   if (TF_GetCode(status) != TF_OK) {
     LOG(ERROR) << "RunCallabe failed!" << status->status.error_message();
     return;
