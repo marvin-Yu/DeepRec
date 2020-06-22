@@ -43,6 +43,7 @@ limitations under the License.
 #include "tensorflow/core/grappler/optimizers/remapper.h"
 #include "tensorflow/core/grappler/optimizers/scoped_allocator_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/shape_optimizer.h"
+#include "tensorflow/core/grappler/optimizers/tile_optimizer.h"
 #include "tensorflow/core/grappler/utils/canonicalizer.h"
 #include "tensorflow/core/grappler/utils/colocation.h"
 #include "tensorflow/core/grappler/utils/functions.h"
@@ -198,9 +199,9 @@ Status MetaOptimizer::InitializeOptimizers(
   if (cfg_.shape_optimization() != RewriterConfig::OFF) {
     optimizers->push_back(MakeUnique<ShapeOptimizer>());
   }
-//  if (cfg_.remapping() != RewriterConfig::OFF) {
- //   optimizers->push_back(MakeUnique<Remapper>(cfg_.remapping()));
-//  }
+  if (cfg_.remapping() != RewriterConfig::OFF) {
+    optimizers->push_back(MakeUnique<Remapper>(cfg_.remapping()));
+  }
   if (cfg_.pin_to_host_optimization() == RewriterConfig::ON) {
     optimizers->push_back(MakeUnique<PinToHostOptimizer>());
   }
@@ -244,6 +245,9 @@ Status MetaOptimizer::InitializeOptimizers(
   }
   if (cfg_.gemm_optimization() != RewriterConfig::OFF) {
     optimizers->push_back(MakeUnique<GemmOptimizer>());
+  }
+  if (cfg_.tile_equal() != RewriterConfig::OFF) {
+    optimizers->push_back(MakeUnique<TileOptimizer>());
   }
   return InitializeCustomGraphOptimizers(std::set<string>(), optimizers);
 }
@@ -414,6 +418,13 @@ Status MetaOptimizer::OptimizeGraph(Cluster* cluster, const GrapplerItem& item,
 
     for (const auto& optimizer : optimizers) {
       GRAPPLER_RETURN_IF_DEADLINE_EXCEEDED();
+      if (VLOG_IS_ON(4)) {
+        DumpGraphDefToFile(
+            strings::StrCat("before_MetaOptimizer_iteration_", iteration, "_",
+                            optimizer->name(), "_",
+                            reinterpret_cast<uintptr_t>(optimized_graph)),
+            *optimized_graph);
+      }
       // Some optimizers can run only once.
       if (iteration > 0 && IsRunOnceOptimizer(optimizer->name())) continue;
       // Some must run only on the last iteration.

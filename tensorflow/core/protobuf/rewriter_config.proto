@@ -192,4 +192,7 @@ message RewriterConfig {
 
   // fuse tile concat and matmul (default is OFF)
   Toggle fuse_tile_concat_matmul = 401;
+
+  // tile equal optimizer
+  Toggle tile_equal = 402;
 }

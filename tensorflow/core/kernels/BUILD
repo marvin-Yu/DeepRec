@@ -6099,6 +6099,7 @@ filegroup(
         "gather_nd_op_cpu_impl_6.cc",
         "gather_nd_op_cpu_impl_7.cc",
         "gather_op.cc",
+        "tile_fuse_op.cc",
         "identity_n_op.cc",
         "identity_n_op.h",
         "identity_op.cc",
@@ -7956,6 +7957,18 @@ tf_kernel_library(
 )
 
 tf_kernel_library(
+    name = "tile_fuse_op",
+    srcs = ["tile_fuse_op.cc"],
+    deps = [
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core/util/proto:descriptors",
+        "//tensorflow/core/util/proto:proto_utils",
+        "//third_party/eigen3",
+    ],
+)
+
+tf_kernel_library(
     name = "rpc_op",
     srcs = [
         "rpc_op.cc",
@@ -7988,6 +8001,7 @@ cc_library(
     srcs = [
         "cwise_ops_common.cc",
         "meta_support.cc",
+        "tile_fuse_op.cc",
     ],
     hdrs = [
         "cwise_ops.h",

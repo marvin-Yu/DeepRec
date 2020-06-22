@@ -2001,6 +2001,17 @@ REGISTER_OP("Tile")
       return Status::OK();
     });
 
+REGISTER_OP("TileEqual")
+    .Input("input: T")
+    .Input("multiples: Tmultiples")
+    .Input("equal_to: T")
+    .Output("output : bool")
+    .Attr("T: {float, double, int32}")
+    .Attr("Tmultiples: {int32, int64} = DT_INT32")
+    .SetShapeFn([](InferenceContext* c) {
+      c->set_output(0, c->input(2));
+      return Status::OK();
+    });
 // --------------------------------------------------------------------------
 REGISTER_OP("TileGrad")
     .Input("input: T")
