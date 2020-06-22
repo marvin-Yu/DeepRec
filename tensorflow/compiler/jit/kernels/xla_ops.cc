@@ -379,6 +379,10 @@ void XlaLocalLaunchBase::Compute(OpKernelContext* ctx) {
   // Execute the computation.
   VLOG(2) << "Executing computation.";
   xla::ExecutableRunOptions run_options;
+  //[DYNAMIC-SHAPE]
+  run_options.before_padding = ctx->before_padding();
+  run_options.after_padding = ctx->after_padding();
+
   run_options.set_stream(stream);
   run_options.set_allocator(allocator);
   run_options.set_intra_op_thread_pool(&ctx->eigen_cpu_device());
@@ -575,6 +579,11 @@ void XlaRunOp::Compute(OpKernelContext* ctx) {
   se::Stream* stream =
       ctx->op_device_context() ? ctx->op_device_context()->stream() : nullptr;
   xla::ExecutableRunOptions run_options;
+
+  //[DYNAMIC-SHAPE]
+  run_options.before_padding = ctx->before_padding();
+  run_options.after_padding = ctx->after_padding();
+
   run_options.set_stream(stream);
   run_options.set_allocator(allocator);
   run_options.set_intra_op_thread_pool(&ctx->eigen_cpu_device());

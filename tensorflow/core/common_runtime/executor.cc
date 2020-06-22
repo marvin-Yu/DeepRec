@@ -1313,6 +1313,10 @@ class ExecutorState {
 
   struct AsyncState;
 
+  //[DYNAMIC-SHAPE]
+  uint64 before_padding_ = 0;
+  uint64 after_padding_ = 0;
+
   const bool vlog_;  // true if VLOG_IS_ON(1). Used to check vlog cheaply.
 
   // true if LogMemory::IsEnabled(). Used to check memory enabled cheaply.
@@ -1476,6 +1480,11 @@ class ExecutorState {
 
 ExecutorState::ExecutorState(const Executor::Args& args, ExecutorImpl* impl)
     : vlog_(VLOG_IS_ON(1)),
+
+      //[DYNAMIC-SHAPE]
+      before_padding_(args.before_padding),
+      after_padding_(args.after_padding),
+
       log_memory_(LogMemory::IsEnabled()),
       step_id_(args.step_id),
       rendezvous_(args.rendezvous),
@@ -1750,6 +1759,11 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
   AllocatorAttributeVec input_alloc_attrs;
 
   OpKernelContext::Params params;
+
+  //[DYNAMIC-SHAPE]
+  params.before_padding = before_padding_;
+  params.after_padding = after_padding_;
+
   params.step_id = step_id_;
   // Override device's threadpool if user provides an intra_op_threadpool
   Device* device = impl_->params_.device;

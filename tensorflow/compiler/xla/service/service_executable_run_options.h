@@ -56,6 +56,10 @@ class ServiceExecutableRunOptions {
                : Status(tensorflow::error::UNIMPLEMENTED, "No stream cache");
   }
 
+  //[DYNAMIC-SHAPE]
+  uint64 before_padding() const { return run_options_.before_padding; }
+  uint64 after_padding() const { return run_options_.after_padding; }
+
  private:
   ExecutableRunOptions run_options_;
   StreamBorrower borrow_stream_;

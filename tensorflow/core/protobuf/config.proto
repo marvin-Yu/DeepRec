@@ -621,6 +621,12 @@ message RunOptions {
 
   CUDAGraphOptions cuda_graph_options = 500;
 
+  message PaddingInfo {
+    uint64 before_padding = 1;
+    uint64 after_padding = 2;
+  }
+  PaddingInfo padding_info = 600;
+
   reserved 4;
 }
 

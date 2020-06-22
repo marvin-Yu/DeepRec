@@ -784,5 +784,28 @@ bool TF_CudaMemCopyDeviceToHost(int virtual_gpu_id, void* host_ptr, const void* 
   return true;
 }
 
+void TF_SetPaddingInfo(TF_Buffer* run_options, unsigned long long before_padding,
+                       unsigned long long after_padding, TF_Status* status) {
+  tensorflow::RunOptions run_options_proto;
+  if (run_options != nullptr &&
+      !run_options_proto.ParseFromArray(run_options->data,
+                                        run_options->length)) {
+    status->status = InvalidArgument("Unparseable RunOptions proto");
+    return;
+  }
+  if (run_options->data_deallocator != nullptr) {
+    (*run_options->data_deallocator)(const_cast<void*>(run_options->data),
+                                     run_options->length);
+  }
+  run_options->data = nullptr;
+  run_options->length = 0;
+
+  run_options_proto.mutable_padding_info()->set_before_padding(before_padding);
+  run_options_proto.mutable_padding_info()->set_after_padding(after_padding);
+
+  TF_CHECK_OK(MessageToBuffer(run_options_proto, run_options));
+  status->status = Status::OK();
+}
+
 }  // end extern "C"
 

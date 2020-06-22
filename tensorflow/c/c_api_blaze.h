@@ -206,6 +206,9 @@ TF_CAPI_EXPORT bool TF_CudaMemCopyDeviceToHost(
     void* host_ptr,
     const void* device_ptr,
     size_t length);
+TF_CAPI_EXPORT extern void TF_SetPaddingInfo(
+    TF_Buffer* run_options, unsigned long long before_padding,
+    unsigned long long after_padding, TF_Status* status);
 
 #ifdef __cplusplus
 } /* end extern "C" */
