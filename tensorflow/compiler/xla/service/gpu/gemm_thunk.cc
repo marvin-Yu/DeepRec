@@ -122,8 +122,12 @@ static bool DoGemmWithAlgorithm(
   if (before_padding != 0 && after_padding != 0) {
     if (num_cols_needed == after_padding){
       num_cols_needed = (before_padding+7)/8*8; // make it multiple of 8
-      VLOG(2) << "[DYNAMIC-SHAPE] actual size before padding is "<<before_padding
-              <<", using size "<<num_cols_needed<<" instead of "<<after_padding;
+      if (num_cols_needed > output_matrix.num_cols) { // in case of out-of-bound, i.e. before_padding==1, after_padding==2
+        num_cols_needed = output_matrix.num_cols;
+      } else {
+        VLOG(2) << "[DYNAMIC-SHAPE] actual size before padding is "<<before_padding
+                <<", using size "<<num_cols_needed<<" instead of "<<after_padding;
+      }
     }
   }
 
