@@ -194,9 +194,7 @@ void DumpHloModuleImpl(const HloModule& module,
   string filename = FilenameFor(module, suffix);
 
   if (opts.dump_as_text) {
-    HloPrintOptions printOptions;
-    printOptions.set_print_cluster_id(false);
-    DumpToFileInDirOrStdoutImpl(StrCat(filename, ".txt"), module.ToString(printOptions),
+    DumpToFileInDirOrStdoutImpl(StrCat(filename, ".txt"), module.ToString(),
                                 opts);
     if (buffer_assn) {
       DumpToFileInDirOrStdoutImpl(StrCat(filename, "-buffer-assignment.txt"),
