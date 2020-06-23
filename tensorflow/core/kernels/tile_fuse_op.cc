@@ -43,20 +43,19 @@ namespace tensorflow {
 						const Tensor& input2, Tensor* output, const TensorShape& shape) {
 					switch (input0.dims()) {
 						case 1 : {
-											 auto i_data0 = input0.tensor<T, 1>();
-											 auto i_data2 = input2.tensor<T, 1>();
-											 auto out = output->tensor<bool, 1>();
+											 auto i_data0 = input0.flat<T>().data();
+											 auto i_data2 = input2.flat<T>().data();
+											 auto out = output->flat<bool>().data();
 
 											 for (int i = 0; i < shape.dim_size(0); ++i) {
-												 out(i) = (i_data2(i % input2.dim_size(0)) ==
-														 (i_data0(i % input0.dim_size(0))));
+												 out[i] = (i_data0[i % input0.dim_size(0)] == i_data2[i % input2.dim_size(0)]);
 											 }
 											 return true;
 										 }
 						case 2 : {
-											 auto i_data0 = input0.tensor<T, 2>();
-											 auto i_data2 = input2.tensor<T, 2>();
-											 auto out = output->tensor<bool, 2>();
+											 auto i_data0 = input0.flat<T>().data();
+											 auto i_data2 = input2.flat<T>().data();
+											 auto out = output->flat<bool>().data();
 											 std::vector<int> idx0;
 											 std::vector<int> idx2;
 											 idx0.reserve(shape.dim_size(1));
@@ -66,19 +65,20 @@ namespace tensorflow {
 												 idx2.push_back(i % input2.dim_size(1));
 											 }
 
+											 int idx = 0;
 											 for (int i = 0; i < shape.dim_size(0); ++i) {
-												 auto d_0_0 = i % input0.dim_size(0);
-												 auto d_2_0 = i % input2.dim_size(0);
+												 auto d_0_0 = (i % input0.dim_size(0)) * input0.dim_size(1);
+												 auto d_2_0 = (i % input2.dim_size(0)) * input2.dim_size(1);
 												 for (int j = 0; j < shape.dim_size(1); ++j) {
-													 out(i, j) = (i_data0(d_0_0, idx0[j]) == i_data2(d_2_0, idx2[j]));
+													 out[idx++] = (i_data0[d_0_0 + idx0[j]] == i_data2[d_2_0 + idx2[j]]);
 												 }
 											 }
 											 return true;
 										 }
 						case 3 : {
-											 auto i_data0 = input0.tensor<T, 3>();
-											 auto i_data2 = input2.tensor<T, 3>();
-											 auto out = output->tensor<bool, 3>();
+											 auto i_data0 = input0.flat<T>().data();
+											 auto i_data2 = input2.flat<T>().data();
+											 auto out = output->flat<bool>().data();
 											 auto special = (
 													 input0.dim_size(0) == 1 && input2.dim_size(0) != 1 && 
 													 input2.dim_size(1) == 1 && input0.dim_size(2) == input2.dim_size(2));
@@ -87,13 +87,15 @@ namespace tensorflow {
 												 d_0_1.reserve(shape.dim_size(1));
 
 												 for (int i = 0; i < shape.dim_size(1); ++i) {
-													 d_0_1.push_back(i % input0.dim_size(1));
+													 d_0_1.push_back((i % input0.dim_size(1)) * input0.dim_size(2));
 												 }
+												 auto count = 0;
 
 												 for (int i = 0; i < shape.dim_size(0); ++i) {
+													 auto idx = (i % input2.dim_size(0)) * input2.dim_size(2);
 													 for (int j = 0; j < shape.dim_size(1); ++j) {
 														 for (int k = 0; k < shape.dim_size(2); ++k) {
-															 out(i, j, k) = (i_data0(0, d_0_1[j], k) == i_data2(i, 0, k));
+															 out[count++] = (i_data0[d_0_1[j] + k] == i_data2[idx + k]);
 														 }
 													 }
 												 }
@@ -107,20 +109,21 @@ namespace tensorflow {
 												 d_0_2.reserve(shape.dim_size(2));
 												 d_2_2.reserve(shape.dim_size(2));
 												 for (int i = 0; i < shape.dim_size(1); ++i) {
-													 d_0_1.push_back(i % shape.dim_size(1));
-													 d_2_1.push_back(i % shape.dim_size(1));
+													 d_0_1.push_back((i % shape.dim_size(1)) * shape.dim_size(2));
+													 d_2_1.push_back((i % shape.dim_size(1)) * shape.dim_size(2));
 												 }
 												 for (int i = 0; i < shape.dim_size(2); ++i) {
 													 d_0_2.push_back(i % shape.dim_size(2));
 													 d_2_2.push_back(i % shape.dim_size(2));
 												 }
+												 auto count = 0;
 												 for (int i = 0; i < shape.dim_size(0); ++i) {
-													 auto d_0_0 = i % input0.dim_size(0);
-													 auto d_2_0 = i % input2.dim_size(0);
+													 auto d_0_0 = (i % input0.dim_size(0)) * input0.dim_size(1) * input0.dim_size(2);
+													 auto d_2_0 = (i % input2.dim_size(0)) * input2.dim_size(1) * input2.dim_size(2);
 													 for (int j = 0; j < shape.dim_size(1); ++j) {
 														 for (int k = 0; k < shape.dim_size(2); ++k) {
-															 out(i, j, k) = (i_data0(d_0_0, d_0_1[j], d_0_2[k]) ==
-																	 i_data2(d_2_0, d_2_1[j], d_2_2[k]));
+															 out[count++] = (i_data0[d_0_0 + d_0_1[j] + d_0_2[k]]
+																	 == i_data2[d_2_0 + d_2_1[j] + d_2_2[k]]);
 														 }
 													 }
 												 }
