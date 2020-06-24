@@ -132,12 +132,16 @@ class DirectSession : public Session {
   ::tensorflow::Status RunCallable(CallableHandle handle,
                                    const std::vector<Tensor>& feed_tensors,
                                    std::vector<Tensor>* fetch_tensors,
-                                   RunMetadata* run_metadata) override;
+                                   RunMetadata* run_metadata,
+                                   uint64_t before_padding = 0,
+                                   uint64_t after_padding = 0) override;
 
   ::tensorflow::Status RunCallable(
       CallableHandle handle, const std::vector<Tensor>& feed_tensors,
       std::vector<Tensor>* fetch_tensors, RunMetadata* run_metadata,
-      const thread::ThreadPoolOptions& threadpool_options) override;
+      const thread::ThreadPoolOptions& threadpool_options,
+      uint64_t before_padding = 0,
+      uint64_t after_padding = 0) override;
 
   ::tensorflow::Status ReleaseCallable(CallableHandle handle) override;
 
@@ -393,6 +397,9 @@ class DirectSession : public Session {
   std::vector<std::pair<thread::ThreadPool*, bool>> thread_pools_;
 
   Status init_error_;  // Set to an error if construction failed.
+
+  //[DYNAMIC-SHAPE]
+  bool gemm_dynamic_batchsize_ = false;
 
   // If true, blocks until device has finished all queued operations in a step.
   bool sync_on_finish_ = true;

@@ -224,6 +224,8 @@ class Stream {
   // must extend past the point at which it is marked complete!
   Stream &ThenRecordEvent(Event *event);
 
+  Stream &ThenSynchronizeEvent(Event *event);
+
   ////////////////
   // DNN support
   //

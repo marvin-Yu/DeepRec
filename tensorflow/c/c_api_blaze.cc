@@ -13,6 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include "tensorflow/c/c_api_blaze.h"
 #include "tensorflow/c/c_api.h"
 
 #include <algorithm>
@@ -40,10 +41,12 @@ limitations under the License.
 #include "tensorflow/c/tf_tensor.h"
 #include "tensorflow/core/common_runtime/device_mgr.h"
 #include "tensorflow/core/common_runtime/eval_const_tensor.h"
+#include "tensorflow/core/common_runtime/gpu/gpu_device.h"
+#include "tensorflow/core/common_runtime/gpu/gpu_id_manager.h"
+#include "tensorflow/core/common_runtime/gpu/gpu_id_utils.h"
 #include "tensorflow/core/common_runtime/shape_refiner.h"
 #include "tensorflow/core/framework/allocation_description.pb.h"
 #include "tensorflow/core/framework/kernel_def.pb.h"
-#include "tensorflow/core/protobuf/meta_graph.pb.h"
 #include "tensorflow/core/framework/log_memory.h"
 #include "tensorflow/core/framework/node_def_util.h"
 #include "tensorflow/core/framework/op_kernel.h"
@@ -63,24 +66,33 @@ limitations under the License.
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/core/stringpiece.h"
 #include "tensorflow/core/lib/gtl/array_slice.h"
+#include "tensorflow/core/lib/io/path.h"
 #include "tensorflow/core/lib/strings/str_util.h"
 #include "tensorflow/core/lib/strings/strcat.h"
 #include "tensorflow/core/platform/env.h"
 #include "tensorflow/core/platform/mem.h"
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/protobuf.h"
+#include "tensorflow/core/platform/stream_executor.h"
 #include "tensorflow/core/platform/thread_annotations.h"
 #include "tensorflow/core/platform/types.h"
+#include "tensorflow/core/protobuf/config.pb.h"
+#include "tensorflow/core/protobuf/meta_graph.pb.h"
 #include "tensorflow/core/public/session.h"
 #include "tensorflow/core/public/version.h"
 #include "tensorflow/core/util/env_var.h"
+#include "third_party/gpus/cuda/include/cuda.h"
+#include "third_party/gpus/cuda/include/cuda_runtime_api.h"
 
 // The implementation below is at the top level instead of the
 // brain namespace because we are defining 'extern "C"' functions.
 using tensorflow::AllocationDescription;
+using tensorflow::CallableOptions;
 using tensorflow::DataType;
 using tensorflow::ExtendSessionGraphHelper;
 using tensorflow::Env;
+using tensorflow::GpuIdManager;
+using tensorflow::GpuIdUtil;
 using tensorflow::Graph;
 using tensorflow::GraphDef;
 using tensorflow::mutex_lock;
@@ -94,11 +106,13 @@ using tensorflow::OpDef;
 using tensorflow::OpRegistry;
 using tensorflow::OutputTensor;
 using tensorflow::PartialTensorShape;
+using tensorflow::PlatformGpuId;
 using tensorflow::RunMetadata;
 using tensorflow::RunOptions;
 using tensorflow::Session;
 using tensorflow::Status;
 using tensorflow::string;
+using tensorflow::TfGpuId;
 using tensorflow::Tensor;
 using tensorflow::TensorBuffer;
 using tensorflow::TensorId;
@@ -106,6 +120,7 @@ using tensorflow::TensorShape;
 using tensorflow::TensorShapeProto;
 using tensorflow::VersionDef;
 using tensorflow::errors::FailedPrecondition;
+using tensorflow::errors::Internal;
 using tensorflow::errors::InvalidArgument;
 using tensorflow::gtl::ArraySlice;
 using tensorflow::strings::StrCat;
@@ -281,7 +296,8 @@ void TF_GraphSetDevice(TF_Graph* graph, int cpu_id, int gpu_id) {
   mutex_lock l(graph->mu);
   Graph* g = &(graph->graph);
 
-  AutoPlaceNodesOnCPU(g);
+  // TODO
+//  AutoPlaceNodesOnCPU(g);
 
   LOG(INFO) << "TF_GraphSetDevice: cpu_id, gpu_id = "
             << cpu_id << ", " << gpu_id;
@@ -590,4 +606,233 @@ void TF_EnableCudaGraph(TF_Buffer* run_options, unsigned char enable,
   status->status = Status::OK();
 }
 
+void TF_EnableSingleThreadedExecutor(TF_SessionOptions* options,
+                                     unsigned char enable) {
+  tensorflow::ConfigProto& config = options->options.config;
+  if (enable) {
+    config.mutable_experimental()->set_executor_type("SINGLE_THREADED_EXECUTOR");
+  } else {
+    config.mutable_experimental()->set_executor_type("DEFAULT");
+  }
+}
+
+void TF_SessionMakeCallable(TF_Session* tf_sess, TF_CallableHandle* callable_handle,
+                            const char* const* feed_names, int feed_count,
+                            const char* const* fetch_names, int fetch_count,
+                            bool adapt_device, const char* device_name, TF_Status* status) {
+  std::vector<tensorflow::DeviceAttributes> devices;
+  tf_sess->session->ListDevices(&devices);
+  for (const auto& device : devices) {
+    LOG(INFO) << device.name();
+  }
+  // directly, instead of requiring us to serialize to a GraphDef and
+  // call Session::Extend().
+  if (tf_sess->extend_before_run &&
+      !ExtendSessionGraphHelper(tf_sess, status)) {
+    return;
+  }
+
+  CallableOptions opts;
+  for (int i = 0; i < feed_count; ++i) {
+    const char* feed_name = feed_names[i];
+    opts.add_feed(feed_name);
+    if (adapt_device) {
+      opts.mutable_feed_devices()->insert({feed_name, device_name});
+    }
+  }
+  for (int i = 0; i < fetch_count; ++i) {
+    const char* fetch_name = fetch_names[i];
+    opts.add_fetch(fetch_name);
+    if (adapt_device) {
+      opts.mutable_fetch_devices()->insert({fetch_name, device_name});
+    }
+  }
+  opts.set_fetch_skip_sync(true);
+  LOG(INFO) << opts.DebugString();
+  Session::CallableHandle handle;
+  status->status = tf_sess->session->MakeCallable(opts, &handle);
+  if (TF_GetCode(status) != TF_OK) {
+    LOG(ERROR) << "session make callable failed!";
+    return;
+  }
+  *callable_handle = handle;
+}
+
+void TF_SessionRunCallable(TF_Session* tf_sess, TF_CallableHandle callable_handle,
+                           TF_Tensor* const* input_values, int ninputs,
+                           TF_Tensor** output_values, int noutputs,
+                           TF_Buffer* run_metadata, TF_Status* status,
+                           //[DYNAMIC-SHAPE]
+                           uint64_t before_padding, uint64_t after_padding) {
+  std::vector<Tensor> input_tensors(ninputs);
+  for (int i = 0; i < ninputs; ++i) {
+    status->status = tensorflow::TF_TensorToTensor(input_values[i], &input_tensors[i]);
+    if (TF_GetCode(status) != TF_OK) return;
+  }
+
+  std::vector<Tensor> output_tensors;
+  RunMetadata run_metadata_proto;
+  status->status = tf_sess->session->RunCallable(callable_handle, input_tensors,
+                                                 &output_tensors, &run_metadata_proto,
+                                                 before_padding, after_padding);
+  if (TF_GetCode(status) != TF_OK) {
+    LOG(ERROR) << "RunCallabe failed!" << status->status.error_message();
+    return;
+  }
+  // Serialize back to upstream client, who now owns the new buffer
+  if (run_metadata != nullptr) {
+    status->status = MessageToBuffer(run_metadata_proto, run_metadata);
+    if (TF_GetCode(status) != TF_OK) return;
+  }
+  if (output_tensors.size() != noutputs) {
+    status->status = Internal("Unexpected output size");
+    return;
+  }
+  for (int i = 0; i < noutputs; ++i) {
+    output_values[i] = tensorflow::TF_TensorFromTensor(output_tensors[i], status);
+    if (TF_GetCode(status) != TF_OK) return;
+  }
+}
+
+void TF_SessionReleaseCallable(TF_Session* tf_sess, TF_CallableHandle callable_handle,
+                               TF_Status* status) {
+  status->status = tf_sess->session->ReleaseCallable(callable_handle);
+}
+
+tensorflow::BaseGPUDevice::StreamGroup* GetStreamGroupOfVirtualDevice(int virtual_gpu_id) {
+  TfGpuId tf_gpu_id(virtual_gpu_id);
+  PlatformGpuId platform_gpu_id;
+  Status s = GpuIdManager::TfToPlatformGpuId(tf_gpu_id, &platform_gpu_id);
+  if (!s.ok()) {
+    LOG(ERROR) << "invalid tf gpu id: " << virtual_gpu_id;
+    return nullptr;
+  }
+  stream_executor::StreamExecutor* se =
+      GpuIdUtil::ExecutorForPlatformGpuId(platform_gpu_id).ValueOrDie();
+  static tensorflow::GPUOptions gpu_options;
+  return tensorflow::StreamGroupFactory::Global().GetOrCreate(
+      tf_gpu_id, 0, se, gpu_options);
+}
+
+bool TF_CudaMemAlloc(int virtual_gpu_id, void** gpu_ptr, size_t length) {
+  tensorflow::BaseGPUDevice::StreamGroup* stream_group = GetStreamGroupOfVirtualDevice(virtual_gpu_id);
+  stream_executor::Stream* stream = stream_group->host_to_device;
+  if (stream == nullptr) {
+    return false;
+  }
+  *gpu_ptr = stream->parent()->UnifiedMemoryAllocate(length);
+  return true;
+}
+
+bool TF_CudaMemDealloc(int virtual_gpu_id, void* gpu_ptr) {
+  tensorflow::BaseGPUDevice::StreamGroup* stream_group = GetStreamGroupOfVirtualDevice(virtual_gpu_id);
+  stream_executor::Stream* stream = stream_group->compute;
+  if (stream == nullptr) {
+    return false;
+  }
+  stream->parent()->UnifiedMemoryDeallocate(gpu_ptr);
+  return true;
+}
+
+bool TF_HostMemAlloc(int virtual_gpu_id, void** host_ptr, size_t length) {
+  tensorflow::BaseGPUDevice::StreamGroup* stream_group = GetStreamGroupOfVirtualDevice(virtual_gpu_id);
+  stream_executor::Stream* stream = stream_group->compute;
+  if (stream == nullptr) {
+    return false;
+  }
+  *host_ptr = stream->parent()->HostMemoryAllocate(length);
+  return true;
+}
+
+bool TF_HostMemDealloc(int virtual_gpu_id, void* host_ptr) {
+  tensorflow::BaseGPUDevice::StreamGroup* stream_group = GetStreamGroupOfVirtualDevice(virtual_gpu_id);
+  stream_executor::Stream* stream = stream_group->compute;
+  if (stream == nullptr) {
+    return false;
+  }
+  stream->parent()->HostMemoryDeallocate(host_ptr);
+  return true;
+}
+
+bool TF_CudaMemCopyHostToDeviceAsync(int virtual_gpu_id, void* device_ptr, const void* host_ptr, size_t length) {
+  tensorflow::BaseGPUDevice::StreamGroup* stream_group = GetStreamGroupOfVirtualDevice(virtual_gpu_id);
+  stream_executor::Stream* stream = stream_group->compute;
+  if (stream == nullptr) {
+    return false;
+  }
+  stream_executor::DeviceMemoryBase device_memory(device_ptr, length);
+  stream->ThenMemcpy(&device_memory, host_ptr, length);
+  return true;
+}
+
+
+bool TF_CudaMemCopyDeviceToHost(int virtual_gpu_id, void* host_ptr, const void* device_ptr, size_t length) {
+  tensorflow::BaseGPUDevice::StreamGroup* stream_group = GetStreamGroupOfVirtualDevice(virtual_gpu_id);
+  stream_executor::Stream* stream = stream_group->compute;
+  if (stream == nullptr) {
+    return false;
+  }
+  stream_executor::DeviceMemoryBase device_memory(const_cast<void*>(device_ptr), length);
+  // sync 
+//  stream->parent()->SynchronousMemcpyD2H(device_memory, length, host_ptr);
+
+  // async
+  stream->ThenMemcpy(host_ptr, device_memory, length);
+  auto event = std::make_shared<stream_executor::Event>(stream->parent());
+  if (!event->Init()) {
+    LOG(ERROR) << "event init failed!";
+    return false;
+  }
+  stream->ThenRecordEvent(event.get());
+  stream->ThenSynchronizeEvent(event.get());
+  return true;
+}
+
+void TF_SetPaddingInfo(TF_Buffer* run_options, unsigned long long before_padding,
+                       unsigned long long after_padding, TF_Status* status) {
+  tensorflow::RunOptions run_options_proto;
+  if (run_options != nullptr &&
+      !run_options_proto.ParseFromArray(run_options->data,
+                                        run_options->length)) {
+    status->status = InvalidArgument("Unparseable RunOptions proto");
+    return;
+  }
+  if (run_options->data_deallocator != nullptr) {
+    (*run_options->data_deallocator)(const_cast<void*>(run_options->data),
+                                     run_options->length);
+  }
+  run_options->data = nullptr;
+  run_options->length = 0;
+
+  run_options_proto.mutable_padding_info()->set_before_padding(before_padding);
+  run_options_proto.mutable_padding_info()->set_after_padding(after_padding);
+
+  TF_CHECK_OK(MessageToBuffer(run_options_proto, run_options));
+  status->status = Status::OK();
+}
+
+void TF_SaveRunMetadata(const TF_Buffer* run_metadata, const char* dir,
+                        const char* file_name) {
+  tensorflow::Env* env = tensorflow::Env::Default();
+  if (!env->IsDirectory(dir).ok()) {
+    auto status = env->RecursivelyCreateDir(dir);
+    if (!status.ok() && !env->IsDirectory(dir).ok()) {
+      LOG(ERROR) << "Could not create directory " << dir
+                 << " for dumping run_metadata " << status;
+      return;
+    }
+  }
+  tensorflow::RunMetadata metadata;
+  metadata.ParseFromArray(run_metadata->data, run_metadata->length);
+  string file_path = tensorflow::io::JoinPath(dir, string(file_name));
+  auto status = tensorflow::WriteStringToFile(env, file_path,
+                                              metadata.SerializeAsString());
+  if (!status.ok()) {
+    LOG(ERROR) << "Could not write run_metadata to " << file_path << ": "
+               << status;
+  }
+  LOG(INFO) << "Dumped run_metadata " << file_path;
+}
+
 }  // end extern "C"
+

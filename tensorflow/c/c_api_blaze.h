@@ -163,6 +163,58 @@ TF_CAPI_EXPORT extern void TF_EnableAutoMixedPrecision(
 TF_CAPI_EXPORT extern void TF_EnableCudaGraph(
     TF_Buffer* run_options, unsigned char enable,
     unsigned char init, int count, TF_Status* status);
+TF_CAPI_EXPORT extern void TF_EnableSingleThreadedExecutor(
+    TF_SessionOptions* opt,
+    unsigned char enable);
+
+typedef int64_t TF_CallableHandle;
+
+TF_CAPI_EXPORT extern void TF_SessionMakeCallable(
+    TF_Session* tf_sess, TF_CallableHandle* callable_handle,
+    const char* const* feed_names, int feed_count,
+    const char* const* fetch_names, int fetch_count,
+    bool adapt_device, const char* device_name, TF_Status* status);
+TF_CAPI_EXPORT extern void TF_SessionRunCallable(
+    TF_Session* tf_sess, TF_CallableHandle callable_handle,
+    TF_Tensor* const* input_values, int ninputs,
+    TF_Tensor** output_values, int noutputs,
+    TF_Buffer* run_metadata, TF_Status* status,
+    //[DYNAMIC-SHAPE]
+    uint64_t before_padding = 0, uint64_t after_padding = 0);
+
+TF_CAPI_EXPORT extern void TF_SessionReleaseCallable(
+    TF_Session* tf_sess, TF_CallableHandle callable_handle,
+    TF_Status* status);
+TF_CAPI_EXPORT bool TF_CudaMemAlloc(
+    int virtual_gpu_id,
+    void** gpu_ptr,
+    size_t length);
+TF_CAPI_EXPORT bool TF_CudaMemDealloc(
+    int virtual_gpu_id,
+    void* gpu_ptr);
+TF_CAPI_EXPORT bool TF_HostMemAlloc(
+    int virtual_gpu_id,
+    void** host_ptr,
+    size_t length);
+TF_CAPI_EXPORT bool TF_HostMemDealloc(
+    int virtual_gpu_id,
+    void* host_ptr);
+TF_CAPI_EXPORT bool TF_CudaMemCopyHostToDeviceAsync(
+    int virtual_gpu_id,
+    void* device_ptr,
+    const void* host_ptr,
+    size_t length);
+TF_CAPI_EXPORT bool TF_CudaMemCopyDeviceToHost(
+    int virtual_gpu_id,
+    void* host_ptr,
+    const void* device_ptr,
+    size_t length);
+TF_CAPI_EXPORT extern void TF_SetPaddingInfo(
+    TF_Buffer* run_options, unsigned long long before_padding,
+    unsigned long long after_padding, TF_Status* status);
+TF_CAPI_EXPORT extern void TF_SaveRunMetadata(const TF_Buffer* run_metadata,
+                                              const char* save_path,
+                                              const char* file_name);
 
 #ifdef __cplusplus
 } /* end extern "C" */

@@ -57,7 +57,11 @@ Status GemmThunk::ExecuteOnStream(const ExecuteParams &params) {
   se::DeviceMemoryBase output_data = get_device_address(output_buffer_);
   return RunGemm(hlo_instruction(), backend_config_, lhs_data, rhs_data,
                  output_data, params.stream, implements_whole_instruction_,
-                 params.profiler);
+                 params.profiler,
+                 /*profile_result =*/ nullptr,
+                 /*algorithm =*/ absl::nullopt,
+                 //[DYNAMIC-SHAPE]
+                 params.before_padding, params.after_padding);
 }
 
 // This struct contains the metadata of a matrix, e.g., its base address and
@@ -74,7 +78,9 @@ static bool DoGemmWithAlgorithm(
     int64 batch_size, MatrixDescriptor lhs_matrix, MatrixDescriptor rhs_matrix,
     MatrixDescriptor output_matrix, AlphaType alpha, double beta,
     se::Stream *stream, absl::optional<se::blas::AlgorithmType> algorithm,
-    se::blas::ProfileResult *output_profile_result) {
+    se::blas::ProfileResult *output_profile_result,
+    //[DYNAMIC-SHAPE]
+    uint64 before_padding, uint64 after_padding) {
   DCHECK(!output_matrix.transpose);
 
   PrimitiveType type = primitive_util::NativeToPrimitiveType<InT>();
@@ -111,13 +117,28 @@ static bool DoGemmWithAlgorithm(
                                             : se::blas::Transpose::kNoTranspose;
   auto k = lhs_matrix.transpose ? lhs_matrix.num_rows : lhs_matrix.num_cols;
 
+  //[DYNAMIC-SHAPE]
+  uint64 num_cols_needed = output_matrix.num_cols;
+  if (before_padding != 0 && after_padding != 0) {
+    if (num_cols_needed == after_padding){
+      num_cols_needed = (before_padding+7)/8*8; // make it multiple of 8
+      if (num_cols_needed > output_matrix.num_cols) { // in case of out-of-bound, i.e. before_padding==1, after_padding==2
+        num_cols_needed = output_matrix.num_cols;
+      } else {
+        VLOG(2) << "[DYNAMIC-SHAPE] actual size before padding is "<<before_padding
+                <<", using size "<<num_cols_needed<<" instead of "<<after_padding;
+      }
+    }
+  }
+
   if (algorithm) {
     // Autotuning is disabled for batch_size != 1.
     CHECK_EQ(1, batch_size);
     return stream
         ->ThenBlasGemmWithAlgorithm(
             lhs_transpose, rhs_transpose, output_matrix.num_rows,
-            output_matrix.num_cols,
+            //output_matrix.num_cols,
+            num_cols_needed,
             /*size of reduce dim=*/k,
             /*alpha=*/static_cast<InT>(alpha), lhs_data,
             /*leading dim of LHS=*/lhs_matrix.num_rows, rhs_data,
@@ -135,7 +156,7 @@ static bool DoGemmWithAlgorithm(
     return stream
         ->ThenBlasGemmStridedBatched(
             lhs_transpose, rhs_transpose, output_matrix.num_rows,
-            output_matrix.num_cols, /*size of reduce dim=*/k,
+            num_cols_needed, /*size of reduce dim=*/k,
             /*alpha=*/alpha, lhs_data,
             /*leading dim of LHS=*/lhs_matrix.num_rows, lhs_stride, rhs_data,
             /*leading dim of RHS=*/rhs_matrix.num_rows, rhs_stride,
@@ -148,7 +169,7 @@ static bool DoGemmWithAlgorithm(
   return stream
       ->ThenBlasGemm(
           lhs_transpose, rhs_transpose, output_matrix.num_rows,
-          output_matrix.num_cols, /*size of reduce dim=*/k, /*alpha=*/alpha,
+          num_cols_needed, /*size of reduce dim=*/k, /*alpha=*/alpha,
           lhs_data, /*leading dim of LHS=*/lhs_matrix.num_rows, rhs_data,
           /*leading dim of RHS=*/rhs_matrix.num_rows, /*beta=*/beta,
           &output_data, /*leading dim of output=*/output_matrix.num_rows)
@@ -162,7 +183,9 @@ Status RunGemm(const HloInstruction *gemm,
                bool implements_whole_instruction,
                HloExecutionProfiler *profiler,
                se::blas::ProfileResult *profile_result,
-               absl::optional<se::blas::AlgorithmType> algorithm) {
+               absl::optional<se::blas::AlgorithmType> algorithm,
+               //[DYNAMIC-SHAPE]
+               uint64 before_padding, uint64 after_padding) {
   VLOG(2) << "Executing a GemmThunk";
   CHECK(IsCublasGemm(*gemm));
 
@@ -258,7 +281,12 @@ Status RunGemm(const HloInstruction *gemm,
         GemmBackendConfig::ALGORITHM_NOT_SET) {
       return absl::nullopt;
     }
-    return backend_config.selected_algorithm();
+    //return backend_config.selected_algorithm();
+
+    //[DYNAMIC-SHAPE]
+    // use absl::nullopt instead of backend_config.selected_algorithm() at runtime.
+    // this won't affect GemmAlgorithmPicker, since algoritm will be specified while picking.
+    return absl::nullopt;
   }();
 
   complex128 alpha = {backend_config.alpha_real(), backend_config.alpha_imag()};
@@ -271,36 +299,48 @@ Status RunGemm(const HloInstruction *gemm,
         return DoGemmWithAlgorithm<Eigen::half, Eigen::half, double>(
             batch_size, lhs_matrix, rhs_matrix, output_matrix, alpha.real(),
             beta, stream, best_algorithm,
-            /*output_profile_result=*/profile_result);
+            /*output_profile_result=*/profile_result,
+            //[DYNAMIC-SHAPE]
+            before_padding, after_padding);
       case F32:
         CHECK_EQ(alpha.imag(), 0);
         if (lhs_shape.element_type() == F16) {
           return DoGemmWithAlgorithm<Eigen::half, float, double>(
               batch_size, lhs_matrix, rhs_matrix, output_matrix, alpha.real(),
               beta, stream, best_algorithm,
-              /*output_profile_result=*/profile_result);
+              /*output_profile_result=*/profile_result,
+              //[DYNAMIC-SHAPE]
+              before_padding, after_padding);
         } else {
           return DoGemmWithAlgorithm<float, float, double>(
               batch_size, lhs_matrix, rhs_matrix, output_matrix, alpha.real(),
               beta, stream, best_algorithm,
-              /*output_profile_result=*/profile_result);
+              /*output_profile_result=*/profile_result,
+              //[DYNAMIC-SHAPE]
+              before_padding, after_padding);
         }
       case F64:
         CHECK_EQ(alpha.imag(), 0);
         return DoGemmWithAlgorithm<double, double, double>(
             batch_size, lhs_matrix, rhs_matrix, output_matrix, alpha.real(),
             beta, stream, best_algorithm,
-            /*output_profile_result=*/profile_result);
+            /*output_profile_result=*/profile_result,
+            //[DYNAMIC-SHAPE]
+            before_padding, after_padding);
       case C64:
         return DoGemmWithAlgorithm<complex64, complex64, complex64>(
             batch_size, lhs_matrix, rhs_matrix, output_matrix,
             static_cast<complex64>(alpha), beta, stream, best_algorithm,
-            /*output_profile_result=*/profile_result);
+            /*output_profile_result=*/profile_result,
+            //[DYNAMIC-SHAPE]
+            before_padding, after_padding);
       case C128:
         return DoGemmWithAlgorithm<complex128, complex128, complex128>(
             batch_size, lhs_matrix, rhs_matrix, output_matrix, alpha, beta,
             stream, best_algorithm,
-            /*output_profile_result=*/profile_result);
+            /*output_profile_result=*/profile_result,
+            //[DYNAMIC-SHAPE]
+            before_padding, after_padding);
       default:
         LOG(FATAL) << "Unsupported type.";
     }

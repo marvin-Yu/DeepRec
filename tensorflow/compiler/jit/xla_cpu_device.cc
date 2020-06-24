@@ -94,7 +94,7 @@ Status XlaCpuDeviceFactory::CreateDevices(
   return Status::OK();
 }
 
-REGISTER_LOCAL_DEVICE_FACTORY(DEVICE_XLA_CPU, XlaCpuDeviceFactory);
+// REGISTER_LOCAL_DEVICE_FACTORY(DEVICE_XLA_CPU, XlaCpuDeviceFactory);
 
 // Kernel registrations
 

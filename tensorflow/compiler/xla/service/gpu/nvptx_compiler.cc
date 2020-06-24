@@ -19,6 +19,7 @@ limitations under the License.
 
 #include <fstream>
 
+#include "absl/base/call_once.h"
 #include "tensorflow/compiler/xla/service/algebraic_simplifier.h"
 #include "tensorflow/compiler/xla/service/dump.h"
 #include "tensorflow/compiler/xla/service/gpu/cudnn_conv_algorithm_picker.h"
@@ -46,8 +47,10 @@ limitations under the License.
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/io/path.h"
 #include "tensorflow/core/platform/cuda_libdevice_path.h"
+#include "tensorflow/core/platform/env.h"
 #include "tensorflow/core/platform/tracing.h"
 #include "tensorflow/core/profiler/lib/traceme.h"
+#include "tensorflow/core/util/env_var.h"
 #include "tensorflow/stream_executor/cuda/cuda_diagnostics.h"
 #include "tensorflow/stream_executor/cuda/ptxas_utils.h"
 
@@ -177,7 +180,7 @@ Status NVPTXCompiler::OptimizeHloPostLayoutAssignment(
   pipeline.AddPass<CudnnConvAlgorithmPicker>(stream_exec, device_allocator);
 
   // Find the fastest algorithm for GEMMs.
-  pipeline.AddPass<GemmAlgorithmPicker>(stream_exec, device_allocator);
+  // pipeline.AddPass<GemmAlgorithmPicker>(stream_exec, device_allocator);
 
   // Clean up new_tuple described above.
   pipeline.AddPass<TupleSimplifier>();
@@ -246,6 +249,26 @@ void WarnIfBadDriverJITVersion() {
   });
 }
 
+static string ptx_cache_dir;
+static tensorflow::mutex ptx_cache_mutex;
+
+static void InitPtxCacheDir() {
+  static absl::once_flag init_once;
+  absl::call_once(init_once, [] {
+    tensorflow::ReadStringFromEnvVar("TF_XLA_PTX_CACHE_DIR", "",
+                                     &ptx_cache_dir);
+    if (ptx_cache_dir.empty()) {
+      LOG(INFO) << "Will not cache XLA PTXs. "
+                << "This line is logged at most "
+                << "once for the lifetime of the process.";
+    } else {
+      LOG(INFO) << "Cache XLA PTXs in " << ptx_cache_dir << ". "
+                << "This line is logged at most "
+                << "once for the lifetime of the process.";
+    }
+  });
+}
+
 // Try to load ptx from files defined in the FLAGS. If successful, return true.
 bool MaybeLoadPtxFromFile(const HloModule* module, std::string* ptx) {
   // If the xla_gpu_ptx_file options is set, be explicit when a file is used
@@ -266,6 +289,20 @@ bool MaybeLoadPtxFromFile(const HloModule* module, std::string* ptx) {
       matched_filename.empty()) {
     VLOG(0) << "RunBackend() - For module with prefix '" << prefix
             << "', we did not found a PTX file to load.";
+  }
+
+  if (!ptx_cache_dir.empty()) {
+    HloPrintOptions options;
+    options.set_print_cluster_id(false);
+    options.set_print_metadata(false);
+    uint64 key = tensorflow::Hash64(module->ToString(options));
+    string filename = ptx_cache_dir + "/" + std::to_string(key) + ".ptx";
+    auto env = tensorflow::Env::Default();
+    tensorflow::mutex_lock lock(ptx_cache_mutex);
+    if (env->FileExists(filename).ok()) {
+      matched_filename = filename;
+      VLOG(0) << "RunBackend() - Will load PTX from file: " << filename;
+    }
   }
 
   if (!matched_filename.empty()) {
@@ -324,6 +361,8 @@ NVPTXCompiler::CompileTargetBinary(const HloModule* module,
   }
   VLOG(2) << "Libdevice dir = " << libdevice_dir << "\n";
 
+  InitPtxCacheDir();
+
   string ptx;
   if (!MaybeLoadPtxFromFile(module, &ptx)) {
     XLA_SCOPED_LOGGING_TIMER(
@@ -331,6 +370,24 @@ NVPTXCompiler::CompileTargetBinary(const HloModule* module,
     TF_ASSIGN_OR_RETURN(
         ptx, nvptx::CompileToPtx(llvm_module, gpu_version, module->config(),
                                  libdevice_dir));
+    if (!ptx_cache_dir.empty()) {
+      HloPrintOptions options;
+      options.set_print_cluster_id(false);
+      options.set_print_metadata(false);
+      uint64 key = tensorflow::Hash64(module->ToString(options));
+      string ptx_filename = std::to_string(key) + ".ptx";
+      string hlo_filename = std::to_string(key) + ".hlomodule";
+      string ptx_fullpath = ptx_cache_dir + "/" + ptx_filename;
+
+      auto env = tensorflow::Env::Default();
+      tensorflow::mutex_lock lock(ptx_cache_mutex);
+      if (!env->FileExists(ptx_fullpath).ok()) {
+        VLOG(0) << "Dump " << ptx_filename << " to " << ptx_cache_dir;
+        VLOG(0) << "Dump " << hlo_filename << " to " << ptx_cache_dir;
+        DumpPtxToFileInDir(ptx_cache_dir, ptx_filename, ptx);
+        DumpPtxToFileInDir(ptx_cache_dir, hlo_filename, module->ToString(options));
+      }
+    }
   }
 
   llvm_ir::DumpIrIfEnabled(*module, *llvm_module, /*optimized=*/true);
@@ -351,13 +408,9 @@ NVPTXCompiler::CompileTargetBinary(const HloModule* module,
                                                     std::move(cubin));
 }
 
-std::vector<uint8> NVPTXCompiler::CompilePtxOrGetCachedResult(
+std::vector<uint8> NVPTXCompiler::CompilePtx(
     se::StreamExecutor* stream_exec, const string& ptx, int cc_major,
     int cc_minor, const HloModuleConfig& hlo_module_config) {
-  XLA_SCOPED_LOGGING_TIMER("NVPTXCompiler::CompilePtxOrGetCachedResult");
-  tensorflow::profiler::TraceMe activity(
-      "PTX->CUBIN", tensorflow::profiler::TraceMeLevel::kInfo);
-
   std::vector<uint8> cubin_data;
   if (ptx.empty()) return cubin_data;
   StatusOr<std::vector<uint8>> maybe_cubin = se::cuda::CompilePtx(
@@ -395,6 +448,91 @@ std::vector<uint8> NVPTXCompiler::CompilePtxOrGetCachedResult(
     WarnIfBadDriverJITVersion();
   }
   return cubin_data;
+}
+
+std::vector<uint8> NVPTXCompiler::CompilePtxOrGetCachedResult(
+    se::StreamExecutor* stream_exec, const string& ptx, int cc_major,
+    int cc_minor, const HloModuleConfig& hlo_module_config) {
+  XLA_SCOPED_LOGGING_TIMER("NVPTXCompiler::CompilePtxOrGetCachedResult");
+  tensorflow::profiler::TraceMe activity(
+      "PTX->CUBIN", tensorflow::profiler::TraceMeLevel::kInfo);
+
+  if (ptx_cache_dir.empty()) {
+    return CompilePtx(stream_exec, ptx, cc_major, cc_minor, hlo_module_config);
+  }
+
+  bool inserted;
+  decltype(compilation_cache_.begin()) iter;
+  // Pointers into compilation_cache_ where the ptx and (optional) cubin are
+  // stored.
+  const string* cache_ptx = nullptr;
+  CompilationCacheValue* cache_value = nullptr;
+
+  {
+    tensorflow::mutex_lock lock(mutex_);
+    std::tie(iter, inserted) = compilation_cache_.emplace(
+        std::piecewise_construct,
+        std::forward_as_tuple(ptx, cc_major, cc_minor),
+        std::forward_as_tuple());
+    cache_ptx = &iter->first.ptx;
+    cache_value = &iter->second;
+  }
+
+  // Compile the ptx if it wasn't in the cache before we called this function.
+  // Other threads asking for the same compilation key will block on
+  // cache_value->mutex_ until compilation is done.
+  {
+    tensorflow::mutex_lock lock(cache_value->mutex_);
+    if (inserted) {
+      CHECK(!cache_value->compilation_done);
+      if (!ptx.empty()) {
+        StatusOr<std::vector<uint8>> maybe_cubin = se::cuda::CompilePtx(
+            stream_exec->device_ordinal(), cache_ptx->c_str(),
+            PtxOptsFromConfig(hlo_module_config));
+        if (maybe_cubin.ok()) {
+          cache_value->cubin_data = std::move(maybe_cubin).ValueOrDie();
+          VLOG(2) << "Compiled PTX size:" << ptx.size()
+                  << " CUBIN size: " << cache_value->cubin_data.size();
+        } else {
+          bool log_warning = true;
+          if (maybe_cubin.status().code() ==
+              tensorflow::error::Code::NOT_FOUND) {
+            // Missing ptxas is expected in some environments where CUDA SDK
+            // binaries are not available. We don't want to spam logs with
+            // identical warnings in this case.
+
+            // TODO(jlebar): we should implement a LOG_FIRST_N and LOG_EVERY_N
+            // for more general usage.
+            static std::atomic<bool> warning_done(false);
+            log_warning = !warning_done.exchange(true);
+          }
+          if (log_warning) {
+            PrintCantFindCudaMessage(
+                "Can't find ptxas binary in ${CUDA_DIR}/bin.  Will back to the "
+                "GPU driver for PTX -> sass compilation.  This is OK so long "
+                "as you don't see a warning below about an out-of-date driver "
+                "version.",
+                hlo_module_config);
+          }
+
+          // We're going to use the driver to JIT our PTX->SASS, so warn if
+          // the JIT in the driver has known bugs.
+          WarnIfBadDriverJITVersion();
+        }
+      }
+      cache_value->compilation_done = true;
+      cache_value->compilation_done_cv_.notify_all();
+    } else {
+      while (!cache_value->compilation_done) {
+        cache_value->compilation_done_cv_.wait(lock);
+      }
+      VLOG(0) << "Compile ptx to cubin: found in cache";
+    }
+  }
+
+  CHECK(cache_value != nullptr);
+  CHECK(cache_value->compilation_done);
+  return cache_value->cubin_data;
 }
 
 }  // namespace gpu

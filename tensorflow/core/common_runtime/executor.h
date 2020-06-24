@@ -130,6 +130,10 @@ class Executor {
     int cuda_graph_capture_timeout_secs = 0;
 
     ArgSaver* arg_saver = nullptr;
+
+    //[DYNAMIC-SHAPE]
+    uint64 before_padding = 0;
+    uint64 after_padding = 0;
   };
   typedef std::function<void(const Status&)> DoneCallback;
   virtual void RunAsync(const Args& args, DoneCallback done) = 0;

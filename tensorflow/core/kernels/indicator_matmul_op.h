@@ -10,7 +10,7 @@ namespace tensorflow {
 typedef Eigen::ThreadPoolDevice CPUDevice;
 typedef Eigen::GpuDevice GPUDevice;
 
-template <typename Device, typename Scalar>
+template <typename Device, typename Scalar, typename TIndex>
 struct LaunchIndicatorMatmul {
   void operator()(OpKernelContext* context, bool trans_a, bool trans_b, int64 m,
                   int64 n, int64 k, const Tensor& in_a, const Tensor& in_b,
@@ -19,8 +19,8 @@ struct LaunchIndicatorMatmul {
 };
 
 #if GOOGLE_CUDA
-template <typename Scalar>
-struct LaunchIndicatorMatmul<GPUDevice, Scalar> {
+template <typename Scalar, typename TIndex>
+struct LaunchIndicatorMatmul<GPUDevice, Scalar, TIndex> {
   void operator()(OpKernelContext* context, bool trans_a, bool trans_b, int64 m,
                   int64 n, int64 k, const Tensor& in_a, const Tensor& in_b,
                   const Tensor& indicator, Tensor* out, int64 batch_a,

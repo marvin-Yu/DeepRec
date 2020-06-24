@@ -184,6 +184,9 @@ Status GpuExecutable::ExecuteThunks(
             << thunk->hlo_instruction()->ToString() << " on stream "
             << stream_no;
     Thunk::ExecuteParams thunk_params{
+        //[DYNAMIC-SHAPE]
+        run_options->before_padding(), run_options->after_padding(),
+
         &buffer_allocations, stream, run_options->run_options().run_id(),
         &profiler, run_options->run_options().device_assignment()};
     TF_RETURN_IF_ERROR(thunk->ExecuteOnStream(thunk_params));

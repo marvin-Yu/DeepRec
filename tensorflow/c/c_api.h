@@ -1266,6 +1266,25 @@ TF_CAPI_EXPORT extern void TF_SessionRun(
     // Output status
     TF_Status*);
 
+//[DYNAMIC-SHAPE]
+TF_CAPI_EXPORT extern void TF_SessionRun_DynamicShape(
+    TF_Session* session,
+    // RunOptions
+    const TF_Buffer* run_options,
+    // Input tensors
+    const TF_Output* inputs, TF_Tensor* const* input_values, int ninputs,
+    // Output tensors
+    const TF_Output* outputs, TF_Tensor** output_values, int noutputs,
+    // Target operations
+    const TF_Operation* const* target_opers, int ntargets,
+    // RunMetadata
+    TF_Buffer* run_metadata,
+    // Output status
+    TF_Status*,
+    //[DYNAMIC-SHAPE]
+    uint64_t before_padding, uint64_t after_padding
+    );
+
 // Set up the graph with the intended feeds (inputs) and fetches (outputs) for a
 // sequence of partial run calls.
 //

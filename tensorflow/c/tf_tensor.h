@@ -79,6 +79,13 @@ TF_CAPI_EXPORT extern TF_Tensor* TF_NewTensor(
     void (*deallocator)(void* data, size_t len, void* arg),
     void* deallocator_arg);
 
+// Return a new tensor that holds the bytes data[0,len-1]
+//
+// The memory is managed by external allocator.
+// The data address should satisfy align rule.
+TF_CAPI_EXPORT extern TF_Tensor* TF_NewZeroCopyTensor(
+    TF_DataType, const int64_t* dims, int num_dims, void* data, size_t len);
+
 // Allocate and return a new Tensor.
 //
 // This function is an alternative to TF_NewTensor and should be used when

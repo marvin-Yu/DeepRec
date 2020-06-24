@@ -143,7 +143,13 @@ TF_Buffer* TF_CreateConfig(unsigned char enable_xla_compilation,
 
 TF_Buffer* TF_CreateRunOptions(unsigned char enable_full_trace) {
   tensorflow::RunOptions options;
-  if (enable_full_trace) {
+  if (enable_full_trace == 0xFF) {
+    options.set_trace_level(tensorflow::RunOptions::SOFTWARE_TRACE);
+  }
+  else if (enable_full_trace == 0x0F) {
+    options.set_trace_level(tensorflow::RunOptions::HARDWARE_TRACE);
+  }
+  else if (enable_full_trace) {
     options.set_trace_level(tensorflow::RunOptions::FULL_TRACE);
   } else {
     options.set_trace_level(tensorflow::RunOptions::NO_TRACE);

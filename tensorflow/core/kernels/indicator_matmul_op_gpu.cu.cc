@@ -2,8 +2,6 @@
 // Created by qiaoxj on 2019-12-10.
 //
 
-#include "tensorflow/core/kernels/indicator_matmul_op.h"
-
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/register_types.h"
 #include "tensorflow/core/framework/tensor.h"
@@ -11,6 +9,7 @@
 #include "tensorflow/core/framework/type_traits.h"
 #include "tensorflow/core/framework/types.h"
 #include "tensorflow/core/kernels/fill_functor.h"
+#include "tensorflow/core/kernels/indicator_matmul_op.h"
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/lib/gtl/inlined_vector.h"
 #include "tensorflow/core/platform/logging.h"
@@ -33,41 +32,6 @@ inline se::DeviceMemory<T> AsDeviceMemory(const T* gpu_memory) {
   se::DeviceMemory<T> typed(wrapped);
   return typed;
 }
-
-class BlasScratchAllocator : public se::ScratchAllocator {
- public:
-  using Stream = se::Stream;
-  using DeviceMemoryBytes = se::DeviceMemory<uint8>;
-
-  BlasScratchAllocator(OpKernelContext* context) : context_(context) {}
-
-  int64 GetMemoryLimitInBytes() override { return -1; }
-
-  se::port::StatusOr<DeviceMemoryBytes> AllocateBytes(
-      int64 byte_size) override {
-    Tensor temporary_memory;
-
-    Status allocation_status(context_->allocate_temp(
-        DT_UINT8, TensorShape({byte_size}), &temporary_memory));
-    if (!allocation_status.ok()) {
-      return se::port::StatusOr<DeviceMemoryBytes>(
-          DeviceMemoryBytes::MakeFromByteSize(nullptr, 0));
-    }
-    // Hold the reference of the allocated tensors until the end of the
-    // allocator.
-    allocated_tensors_.push_back(temporary_memory);
-    return se::port::StatusOr<DeviceMemoryBytes>(
-        DeviceMemoryBytes::MakeFromByteSize(
-            temporary_memory.flat<uint8>().data(),
-            temporary_memory.flat<uint8>().size()));
-  }
-
-  ArgSaver* GetArgSaver() override { return context_->get_arg_saver(); }
-
- private:
-  OpKernelContext* context_;
-  std::vector<Tensor> allocated_tensors_;
-};
 }  // namespace
 
 template <typename T>
@@ -80,15 +44,7 @@ struct HalfAsFloat<Eigen::half> {
   typedef float type;
 };
 
-// Converts a const DeviceMemory reference to its underlying typed pointer in
-// CUDA
-// device memory.
-template <typename T>
-const T* GpuMemory(const se::DeviceMemory<T>& mem) {
-  return static_cast<const T*>(mem.opaque());
-}
-
-template <typename Scalar>
+template <typename Scalar, typename TIndex>
 struct IMatmulParam {
   Scalar* A;
   Scalar* B;
@@ -96,13 +52,13 @@ struct IMatmulParam {
   Scalar** As;
   Scalar** Bs;
   Scalar** Cs;
-  int* indicators;
+  TIndex* indicators;
   int m, n, k;
   int batch_a, batch_b;
 };
 
-template <typename Scalar>
-__global__ void ComputePtrsKernel(IMatmulParam<Scalar> param) {
+template <typename Scalar, typename TIndex>
+__global__ void ComputePtrsKernel(IMatmulParam<Scalar, TIndex> param) {
   int m = param.m, n = param.n, k = param.k;
   int batch_a = param.batch_a, batch_b = param.batch_b;
   Scalar* A = param.A + blockIdx.x * batch_a * m * k;
@@ -110,7 +66,12 @@ __global__ void ComputePtrsKernel(IMatmulParam<Scalar> param) {
   Scalar* C = param.C + blockIdx.x * batch_b * m * n;
   for (int i = threadIdx.x; i < batch_b; i += blockDim.x) {
     int64 offset = blockIdx.x * batch_b + i;
-    param.As[offset] = &A[param.indicators[i] * m * k];
+    int64 ind = (int64)param.indicators[i];
+    if (ind < 0 || ind >= batch_a) {
+      //printf("Indicator ERROR for indicator_matmul, indicator: %d.\n", ind);
+      ind = 0;
+    }
+    param.As[offset] = &A[ind * m * k];
     param.Bs[offset] = &B[i * k * n];
     param.Cs[offset] = &C[i * m * n];
   }
@@ -174,31 +135,8 @@ void RunGemmBatched(OpKernelContext* context, bool trans_a, bool trans_b,
   }
 }
 
-template <typename Scalar>
-Status LaunchComputePtr(IMatmulParam<Scalar>* param, int64 paralle_num,
-                        OpKernelContext* context,
-                        BlasScratchAllocator* scratch_allocator) {
-  const size_t size = paralle_num * param->batch_b * sizeof(Scalar*);
-  SE_ASSIGN_OR_RETURN(se::DeviceMemory<uint8> a_bytes,
-                      scratch_allocator->AllocateBytes(size));
-  SE_ASSIGN_OR_RETURN(se::DeviceMemory<uint8> b_bytes,
-                      scratch_allocator->AllocateBytes(size));
-  SE_ASSIGN_OR_RETURN(se::DeviceMemory<uint8> c_bytes,
-                      scratch_allocator->AllocateBytes(size));
-  se::DeviceMemory<Scalar*> a = se::DeviceMemory<Scalar*>(a_bytes);
-  se::DeviceMemory<Scalar*> b = se::DeviceMemory<Scalar*>(b_bytes);
-  se::DeviceMemory<Scalar*> c = se::DeviceMemory<Scalar*>(c_bytes);
-  param->As = const_cast<Scalar**>(GpuMemory(a));
-  param->Bs = const_cast<Scalar**>(GpuMemory(b));
-  param->Cs = const_cast<Scalar**>(GpuMemory(c));
-  const auto& d = context->eigen_device<GPUDevice>();
-  GpuLaunchConfig config = GetGpuLaunchConfig(param->batch_b, d);
-  return GpuLaunchKernel(ComputePtrsKernel<Scalar>, paralle_num,
-                         config.thread_per_block, 0, d.stream(), *param);
-}
-
-template <typename Scalar>
-void LaunchIndicatorMatmul<GPUDevice, Scalar>::operator()(
+template <typename Scalar, typename TIndex>
+void LaunchIndicatorMatmul<GPUDevice, Scalar, TIndex>::operator()(
     OpKernelContext* context, bool trans_a, bool trans_b, int64 m, int64 n,
     int64 k, const Tensor& in_a, const Tensor& in_b, const Tensor& indicator,
     Tensor* out, int64 batch_a, int64 batch_b, int64 paralle_num) {
@@ -214,27 +152,40 @@ void LaunchIndicatorMatmul<GPUDevice, Scalar>::operator()(
   auto a_base_ptr = in_a.template flat<Scalar>().data();
   auto b_base_ptr = in_b.template flat<Scalar>().data();
   auto c_base_ptr = out->template flat<Scalar>().data();
-  IMatmulParam<Scalar> param;
+  IMatmulParam<Scalar, TIndex> param;
   param.A = const_cast<Scalar*>(a_base_ptr);
   param.B = const_cast<Scalar*>(b_base_ptr);
   param.C = c_base_ptr;
-  param.indicators = const_cast<int*>(indicator.template flat<int>().data());
+  param.indicators =
+      const_cast<TIndex*>(indicator.template flat<TIndex>().data());
   param.m = m, param.n = n, param.k = k;
   param.batch_a = batch_a, param.batch_b = batch_b;
-  BlasScratchAllocator scratch_allocator(context);
-  auto stat = LaunchComputePtr<Scalar>(&param, paralle_num, context,
-                                       &scratch_allocator);
-  if (stat != Status::OK()) {
-    LOG(ERROR) << "ComputePtrKernel failed, " << stat.error_message();
-    return;
-  }
+  const int64 size = paralle_num * batch_b;
+  Tensor a_ptrs, b_ptrs, c_ptrs;
+  OP_REQUIRES_OK(
+      context, context->allocate_temp(DT_UINT64, TensorShape({size}), &a_ptrs));
+  OP_REQUIRES_OK(
+      context, context->allocate_temp(DT_UINT64, TensorShape({size}), &b_ptrs));
+  OP_REQUIRES_OK(
+      context, context->allocate_temp(DT_UINT64, TensorShape({size}), &c_ptrs));
+  param.As = reinterpret_cast<Scalar**>(a_ptrs.flat<uint64>().data());
+  param.Bs = reinterpret_cast<Scalar**>(b_ptrs.flat<uint64>().data());
+  param.Cs = reinterpret_cast<Scalar**>(c_ptrs.flat<uint64>().data());
+  //  BlasScratchAllocator scratch_allocator(context);
+  const auto& d = context->eigen_device<GPUDevice>();
+  GpuLaunchConfig config = GetGpuLaunchConfig(param.batch_b, d);
+  TF_CHECK_OK(GpuLaunchKernel(ComputePtrsKernel<Scalar, TIndex>, paralle_num,
+                              config.thread_per_block, 0, d.stream(), param));
   RunGemmBatched<Scalar>(context, trans_a, trans_b, m, n, k, Scalar(1.0),
                          param.As, param.Bs, Scalar(0.0), param.Cs,
                          batch_b * paralle_num);
 }
 
-template struct LaunchIndicatorMatmul<GPUDevice, float>;
-template struct LaunchIndicatorMatmul<GPUDevice, double>;
-template struct LaunchIndicatorMatmul<GPUDevice, Eigen::half>;
+template struct LaunchIndicatorMatmul<GPUDevice, float, int32>;
+template struct LaunchIndicatorMatmul<GPUDevice, double, int32>;
+template struct LaunchIndicatorMatmul<GPUDevice, Eigen::half, int32>;
+template struct LaunchIndicatorMatmul<GPUDevice, float, int64>;
+template struct LaunchIndicatorMatmul<GPUDevice, double, int64>;
+template struct LaunchIndicatorMatmul<GPUDevice, Eigen::half, int64>;
 #endif  // GOOGLE_CUDA
 }  // namespace tensorflow

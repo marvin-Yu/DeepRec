@@ -238,7 +238,9 @@ class Session {
   virtual Status RunCallable(CallableHandle handle,
                              const std::vector<Tensor>& feed_tensors,
                              std::vector<Tensor>* fetch_tensors,
-                             RunMetadata* run_metadata) {
+                             RunMetadata* run_metadata,
+                             uint64_t before_padding = 0,
+                             uint64_t after_padding = 0) {
     return errors::Unimplemented(
         "RunCallable is not supported for this session.");
   }
@@ -253,7 +255,9 @@ class Session {
   virtual Status RunCallable(
       CallableHandle handle, const std::vector<Tensor>& feed_tensors,
       std::vector<Tensor>* fetch_tensors, RunMetadata* run_metadata,
-      const thread::ThreadPoolOptions& threadpool_options) {
+      const thread::ThreadPoolOptions& threadpool_options,
+      uint64_t before_padding = 0,
+      uint64_t after_padding = 0) {
     return errors::Unimplemented(
         "RunCallable with threadpool is not supported for this session.");
   }

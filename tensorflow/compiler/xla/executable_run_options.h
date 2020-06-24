@@ -67,6 +67,11 @@ class RunId {
 // Class containing options for running a LocalExecutable.
 class ExecutableRunOptions {
  public:
+
+  //[DYNAMIC-SHAPE]
+  uint64 before_padding = 0;
+  uint64 after_padding = 0;
+
   // Specifies the allocator to use during execution.
   ExecutableRunOptions& set_allocator(
       stream_executor::DeviceMemoryAllocator* allocator);
