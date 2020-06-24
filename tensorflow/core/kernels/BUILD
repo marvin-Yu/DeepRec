@@ -7958,14 +7958,12 @@ tf_kernel_library(
 
 tf_kernel_library(
     name = "tile_fuse_op",
-    srcs = ["tile_fuse_op.cc"],
-    deps = [
-        "//tensorflow/core:framework",
-        "//tensorflow/core:lib",
-        "//tensorflow/core/util/proto:descriptors",
-        "//tensorflow/core/util/proto:proto_utils",
-        "//third_party/eigen3",
+    hdrs = [
+        "cwise_ops.h",
+        "cwise_ops_common.h",
     ],
+    srcs = ["tile_fuse_op.cc"],
+    deps = MATH_DEPS + [":cwise_op"],
 )
 
 tf_kernel_library(

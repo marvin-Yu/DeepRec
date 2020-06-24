@@ -56,7 +56,7 @@ string TileOptimizer::TileEqual(const NodeDef* node,
     const NodeDef *tile_i1 = node_map->GetNode(tile->input(1));
       //generate new node for tile_euqal
       NodeDef* out = AddNode("TileEqual",  node->name() + "_TileEqual",
-          node->device(), {tile_i0->name(), tile_i1->name(), equal_to->name()},
+          node->device(), {tile_i0->name(),  equal_to->name(), tile_i1->name()},
           graph_def, node_map, new_nodes, node->attr().at("T").type());
       AddNodeAttr("Tmultiples", tile->attr().at("Tmultiples").type(), out);
     return out->name();

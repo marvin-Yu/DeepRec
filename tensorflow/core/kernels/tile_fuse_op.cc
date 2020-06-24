@@ -1,15 +1,29 @@
 #include "tensorflow/core/framework/op_kernel.h"
+#include "tensorflow/core/kernels/cwise_ops_common.h"
 
 namespace tensorflow {
+	typedef Eigen::ThreadPoolDevice CPUDevice;
+	bool CanDoBroadcast(const Tensor& input, const Tensor& tile) {
+		auto tile_tensor = tile.tensor<int, 1>();
+		for (int i = 0; i < input.dims(); ++i) {
+			if (tile_tensor(i) != 1 && input.dim_size(i) != 1) {
+				return false;
+			}
+		}
+		return true;
+	}
+
   template <class T>
     class TileFuseOp : public OpKernel {
       public:
-        explicit TileFuseOp(OpKernelConstruction* context) : OpKernel(context) {}
+        explicit TileFuseOp(OpKernelConstruction* context) : OpKernel(context) {
+					binaryOp_ = new BinaryOp<CPUDevice, functor::equal_to<T> >(context);
+				}
 
         void Compute(OpKernelContext* context) override {
           auto& input0 = context->input(0);
-          auto& input1 = context->input(1);
-          auto& input2 = context->input(2);
+          auto& input1 = context->input(2);
+          auto& input2 = context->input(1);
           const auto* p = input1.flat<int32>().data();
 
           auto nelem = input1.NumElements();
@@ -31,11 +45,16 @@ namespace tensorflow {
             }
           }
 
-          Tensor* output;
-
-          OP_REQUIRES_OK(context, context->allocate_output(0, shape, &output));
-          auto ret = Compute(input0, input1, input2, output, shape);
-          OP_REQUIRES(context, ret, errors::Internal("TileEqual compute failed"));
+					auto useEqualDirect = CanDoBroadcast(input0, input1);
+					if (useEqualDirect) {
+						std::cout << "caixukun useEqualDirect\n";
+						binaryOp_->Compute(context);
+					} else {
+						Tensor* output;
+						OP_REQUIRES_OK(context, context->allocate_output(0, shape, &output));
+						auto ret = Compute(input0, input1, input2, output, shape);
+						OP_REQUIRES(context, ret, errors::Internal("TileEqual compute failed"));
+					}
         }
 
       private:
@@ -135,6 +154,8 @@ namespace tensorflow {
           }
           return false;
         }
+			private:
+				OpKernel* binaryOp_;
     };
 
 #define REGISTER(T) \
