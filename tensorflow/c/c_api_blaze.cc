@@ -699,7 +699,7 @@ void TF_SessionReleaseCallable(TF_Session* tf_sess, TF_CallableHandle callable_h
   status->status = tf_sess->session->ReleaseCallable(callable_handle);
 }
 
-tensorflow::BaseGPUDevice::StreamGroup* GetStreamGroupOfVirtualDevice(int virtual_gpu_id) {
+StreamGroupHandle TF_GetStreamGroupOfVirtualDevice(int virtual_gpu_id) {
   TfGpuId tf_gpu_id(virtual_gpu_id);
   PlatformGpuId platform_gpu_id;
   Status s = GpuIdManager::TfToPlatformGpuId(tf_gpu_id, &platform_gpu_id);
@@ -714,8 +714,9 @@ tensorflow::BaseGPUDevice::StreamGroup* GetStreamGroupOfVirtualDevice(int virtua
       tf_gpu_id, 0, se, gpu_options);
 }
 
-bool TF_CudaMemAlloc(int virtual_gpu_id, void** gpu_ptr, size_t length) {
-  tensorflow::BaseGPUDevice::StreamGroup* stream_group = GetStreamGroupOfVirtualDevice(virtual_gpu_id);
+bool TF_CudaMemAlloc(StreamGroupHandle sg_handle, void** gpu_ptr, size_t length) {
+  tensorflow::BaseGPUDevice::StreamGroup* stream_group =
+      reinterpret_cast<tensorflow::BaseGPUDevice::StreamGroup*>(sg_handle);
   stream_executor::Stream* stream = stream_group->host_to_device;
   if (stream == nullptr) {
     return false;
@@ -724,8 +725,9 @@ bool TF_CudaMemAlloc(int virtual_gpu_id, void** gpu_ptr, size_t length) {
   return true;
 }
 
-bool TF_CudaMemDealloc(int virtual_gpu_id, void* gpu_ptr) {
-  tensorflow::BaseGPUDevice::StreamGroup* stream_group = GetStreamGroupOfVirtualDevice(virtual_gpu_id);
+bool TF_CudaMemDealloc(StreamGroupHandle sg_handle, void* gpu_ptr) {
+  tensorflow::BaseGPUDevice::StreamGroup* stream_group =
+      reinterpret_cast<tensorflow::BaseGPUDevice::StreamGroup*>(sg_handle);
   stream_executor::Stream* stream = stream_group->compute;
   if (stream == nullptr) {
     return false;
@@ -734,8 +736,9 @@ bool TF_CudaMemDealloc(int virtual_gpu_id, void* gpu_ptr) {
   return true;
 }
 
-bool TF_HostMemAlloc(int virtual_gpu_id, void** host_ptr, size_t length) {
-  tensorflow::BaseGPUDevice::StreamGroup* stream_group = GetStreamGroupOfVirtualDevice(virtual_gpu_id);
+bool TF_HostMemAlloc(StreamGroupHandle sg_handle, void** host_ptr, size_t length) {
+  tensorflow::BaseGPUDevice::StreamGroup* stream_group =
+      reinterpret_cast<tensorflow::BaseGPUDevice::StreamGroup*>(sg_handle);
   stream_executor::Stream* stream = stream_group->compute;
   if (stream == nullptr) {
     return false;
@@ -744,8 +747,9 @@ bool TF_HostMemAlloc(int virtual_gpu_id, void** host_ptr, size_t length) {
   return true;
 }
 
-bool TF_HostMemDealloc(int virtual_gpu_id, void* host_ptr) {
-  tensorflow::BaseGPUDevice::StreamGroup* stream_group = GetStreamGroupOfVirtualDevice(virtual_gpu_id);
+bool TF_HostMemDealloc(StreamGroupHandle sg_handle, void* host_ptr) {
+  tensorflow::BaseGPUDevice::StreamGroup* stream_group =
+      reinterpret_cast<tensorflow::BaseGPUDevice::StreamGroup*>(sg_handle);
   stream_executor::Stream* stream = stream_group->compute;
   if (stream == nullptr) {
     return false;
@@ -754,8 +758,9 @@ bool TF_HostMemDealloc(int virtual_gpu_id, void* host_ptr) {
   return true;
 }
 
-bool TF_CudaMemCopyHostToDeviceAsync(int virtual_gpu_id, void* device_ptr, const void* host_ptr, size_t length) {
-  tensorflow::BaseGPUDevice::StreamGroup* stream_group = GetStreamGroupOfVirtualDevice(virtual_gpu_id);
+bool TF_CudaMemCopyHostToDeviceAsync(StreamGroupHandle sg_handle, void* device_ptr, const void* host_ptr, size_t length) {
+  tensorflow::BaseGPUDevice::StreamGroup* stream_group =
+      reinterpret_cast<tensorflow::BaseGPUDevice::StreamGroup*>(sg_handle);
   stream_executor::Stream* stream = stream_group->compute;
   if (stream == nullptr) {
     return false;
@@ -766,8 +771,9 @@ bool TF_CudaMemCopyHostToDeviceAsync(int virtual_gpu_id, void* device_ptr, const
 }
 
 
-bool TF_CudaMemCopyDeviceToHost(int virtual_gpu_id, void* host_ptr, const void* device_ptr, size_t length) {
-  tensorflow::BaseGPUDevice::StreamGroup* stream_group = GetStreamGroupOfVirtualDevice(virtual_gpu_id);
+bool TF_CudaMemCopyDeviceToHost(StreamGroupHandle sg_handle, void* host_ptr, const void* device_ptr, size_t length) {
+  tensorflow::BaseGPUDevice::StreamGroup* stream_group =
+      reinterpret_cast<tensorflow::BaseGPUDevice::StreamGroup*>(sg_handle);
   stream_executor::Stream* stream = stream_group->compute;
   if (stream == nullptr) {
     return false;
