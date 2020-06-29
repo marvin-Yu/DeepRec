@@ -758,32 +758,15 @@ bool TF_HostMemDealloc(StreamGroupHandle sg_handle, void* host_ptr) {
   return true;
 }
 
-bool TF_CudaMemCopyHostToDeviceAsync(StreamGroupHandle sg_handle, void* device_ptr, const void* host_ptr, size_t length) {
+bool TF_CudaMemCopyHostToDevice(StreamGroupHandle sg_handle, void* device_ptr, const void* host_ptr, size_t length) {
   tensorflow::BaseGPUDevice::StreamGroup* stream_group =
       reinterpret_cast<tensorflow::BaseGPUDevice::StreamGroup*>(sg_handle);
-  stream_executor::Stream* stream = stream_group->compute;
+  stream_executor::Stream* stream = stream_group->host_to_device;
   if (stream == nullptr) {
     return false;
   }
   stream_executor::DeviceMemoryBase device_memory(device_ptr, length);
   stream->ThenMemcpy(&device_memory, host_ptr, length);
-  return true;
-}
-
-
-bool TF_CudaMemCopyDeviceToHost(StreamGroupHandle sg_handle, void* host_ptr, const void* device_ptr, size_t length) {
-  tensorflow::BaseGPUDevice::StreamGroup* stream_group =
-      reinterpret_cast<tensorflow::BaseGPUDevice::StreamGroup*>(sg_handle);
-  stream_executor::Stream* stream = stream_group->compute;
-  if (stream == nullptr) {
-    return false;
-  }
-  stream_executor::DeviceMemoryBase device_memory(const_cast<void*>(device_ptr), length);
-  // sync 
-//  stream->parent()->SynchronousMemcpyD2H(device_memory, length, host_ptr);
-
-  // async
-  stream->ThenMemcpy(host_ptr, device_memory, length);
   auto event = std::make_shared<stream_executor::Event>(stream->parent());
   if (!event->Init()) {
     LOG(ERROR) << "event init failed!";
@@ -791,6 +774,28 @@ bool TF_CudaMemCopyDeviceToHost(StreamGroupHandle sg_handle, void* host_ptr, con
   }
   stream->ThenRecordEvent(event.get());
   stream->ThenSynchronizeEvent(event.get());
+  return true;
+}
+
+
+bool TF_CudaMemCopyDeviceToHost(StreamGroupHandle sg_handle, void* host_ptr, const void* device_ptr, size_t length) {
+  tensorflow::BaseGPUDevice::StreamGroup* stream_group =
+      reinterpret_cast<tensorflow::BaseGPUDevice::StreamGroup*>(sg_handle);
+  stream_executor::Stream* compute_stream = stream_group->compute;
+  stream_executor::Stream* d2h_stream = stream_group->device_to_host;
+  if (compute_stream == nullptr || d2h_stream == nullptr) {
+    return false;
+  }
+  d2h_stream->ThenWaitFor(compute_stream);
+  stream_executor::DeviceMemoryBase device_memory(const_cast<void*>(device_ptr), length);
+  d2h_stream->ThenMemcpy(host_ptr, device_memory, length);
+  auto event = std::make_shared<stream_executor::Event>(d2h_stream->parent());
+  if (!event->Init()) {
+    LOG(ERROR) << "event init failed!";
+    return false;
+  }
+  d2h_stream->ThenRecordEvent(event.get());
+  d2h_stream->ThenSynchronizeEvent(event.get());
   return true;
 }
 

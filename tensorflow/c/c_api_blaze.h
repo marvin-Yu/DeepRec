@@ -189,22 +189,7 @@ TF_CAPI_EXPORT extern void TF_SessionReleaseCallable(
 typedef void* StreamGroupHandle;
 TF_CAPI_EXPORT StreamGroupHandle TF_GetStreamGroupOfVirtualDevice(
     int virtual_gpu_id);
-
-TF_CAPI_EXPORT bool TF_CudaMemAlloc(
-    StreamGroupHandle sg_handle,
-    void** gpu_ptr,
-    size_t length);
-TF_CAPI_EXPORT bool TF_CudaMemDealloc(
-    StreamGroupHandle sg_handle,
-    void* gpu_ptr);
-TF_CAPI_EXPORT bool TF_HostMemAlloc(
-    StreamGroupHandle sg_handle,
-    void** host_ptr,
-    size_t length);
-TF_CAPI_EXPORT bool TF_HostMemDealloc(
-    StreamGroupHandle sg_handle,
-    void* host_ptr);
-TF_CAPI_EXPORT bool TF_CudaMemCopyHostToDeviceAsync(
+TF_CAPI_EXPORT bool TF_CudaMemCopyHostToDevice(
     StreamGroupHandle sg_handle,
     void* device_ptr,
     const void* host_ptr,
