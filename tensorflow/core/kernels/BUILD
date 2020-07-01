@@ -7969,15 +7969,15 @@ tf_kernel_library(
 tf_kernel_library(
     name = "tile_fuse_base",
     hdrs = [
-        "cwise_ops.h",
-        "cwise_ops_common.h",
-				"tile_fuse_base.h",
+      "cwise_ops.h",
+      "cwise_ops_common.h",
+     "tile_fuse_base.h",
     ],
     srcs = ["tile_fuse_base.cc",
-						"tile_equal_op.cc",
-						"tile_tile_equal_op.cc",],
+     "tile_equal_op.cc",
+     "tile_tile_equal_op.cc",],
     deps = MATH_DEPS + [":cwise_op"],
-)
+    )
 
 tf_kernel_library(
     name = "rpc_op",

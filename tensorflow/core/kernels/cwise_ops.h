@@ -332,7 +332,7 @@ struct equal_to : std::binary_function<T, T, bool> {
 template <class T>
 struct tile_equal_to : std::binary_function<T, T, bool> {
   EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE bool operator()(const T& x,
-                                                        const T& y) const {
+      const T& y) const {
     return x == y;
   }
 };
@@ -1121,9 +1121,9 @@ struct equal_to : base<T, Eigen::internal::equal_to<T>, bool> {};
 
 template <typename T>
 struct tile_equal_to : base<T, Eigen::internal::equal_to<T>, bool> {
-	bool operator()(const T& x, const T& y) {
-		return x == y;
-	}
+  bool operator()(const T& x, const T& y) {
+    return x == y;
+  }
 };
 
 template <typename T>

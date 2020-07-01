@@ -20,7 +20,7 @@ namespace tensorflow {
     class TileFuseOp : public BinaryOp<Device, Functor> {
       public:
         explicit TileFuseOp(OpKernelConstruction* context) :
-					BinaryOp<Device, Functor>(context, false) {}
+          BinaryOp<Device, Functor>(context, false) {}
 
         void Compute(OpKernelContext* context) override {
           auto& input0 = context->input(1);
@@ -50,9 +50,9 @@ namespace tensorflow {
 
           auto useEqualDirect = CanDoBroadcast(input0, input1);
           if (useEqualDirect) {
-						BinaryOp<Device, Functor>::Compute(context);
-          //  std::cout << "caixukun useEqualDirect\n";
-          //  binaryOp_->Compute(context);
+            BinaryOp<Device, Functor>::Compute(context);
+            //  std::cout << "caixukun useEqualDirect\n";
+            //  binaryOp_->Compute(context);
           } else {
             Tensor* output;
             OP_REQUIRES_OK(context, context->allocate_output(0, shape, &output));
@@ -165,13 +165,13 @@ namespace tensorflow {
 #define REGISTER_TILE_FUSE(T)                     \
   REGISTER_KERNEL_BUILDER(                                     \
       Name("TileEqual")                                                  \
-          .Device(DEVICE_CPU)                                  \
-          .TypeConstraint<T>("T"),                              \
+      .Device(DEVICE_CPU)                                  \
+      .TypeConstraint<T>("T"),                              \
       TileFuseOp<CPUDevice, functor::tile_equal_to<T>, T>);
 
-REGISTER_TILE_FUSE(float);
-REGISTER_TILE_FUSE(double);
-REGISTER_TILE_FUSE(int32);
+  REGISTER_TILE_FUSE(float);
+  REGISTER_TILE_FUSE(double);
+  REGISTER_TILE_FUSE(int32);
 
 #undef REGISTER_TILE_FUSE
 }
