@@ -1120,7 +1120,11 @@ template <typename T>
 struct equal_to : base<T, Eigen::internal::equal_to<T>, bool> {};
 
 template <typename T>
-struct tile_equal_to : base<T, Eigen::internal::equal_to<T>, bool> {};
+struct tile_equal_to : base<T, Eigen::internal::equal_to<T>, bool> {
+	bool operator()(const T& x, const T& y) {
+		return x == y;
+	}
+};
 
 template <typename T>
 struct not_equal_to : base<T, Eigen::internal::not_equal_to<T>, bool> {};

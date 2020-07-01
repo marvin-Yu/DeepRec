@@ -35,6 +35,7 @@ class TileOptimizer : public GraphOptimizer {
                           GraphDef* graph_def, NodeMap* node_map, std::vector<const NodeDef*>* new_nodes,
                           DataType type);
   static bool CheckType(const NodeDef* node);
+	static bool TypeEqual(const NodeDef* node1, const NodeDef* node2, const std::string& key);
 };
 
 }  // end namespace grappler

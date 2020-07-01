@@ -1846,6 +1846,15 @@ void CheckNotInComputeAsync(OpKernelContext* ctx,
     }                                                     \
   } while (0)
 
+#define OP_REQUIRES_TRUE(CTX, EXP, STATUS)                \
+  do {                                                    \
+    if (!TF_PREDICT_TRUE(EXP)) {                          \
+      CheckNotInComputeAsync((CTX), "OP_REQUIRES_ASYNC"); \
+      (CTX)->CtxFailure(__FILE__, __LINE__, (STATUS));    \
+      return false;                                             \
+    }                                                     \
+  } while (0)
+
 #define OP_REQUIRES_OK(CTX, ...)                             \
   do {                                                       \
     ::tensorflow::Status _s(__VA_ARGS__);                    \

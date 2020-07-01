@@ -1,8 +1,11 @@
+#define EIGEN_USE_THREADS
+#define INTEL_MKL
+
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/kernels/cwise_ops_common.h"
 
+
 namespace tensorflow {
-  typedef Eigen::ThreadPoolDevice CPUDevice;
   bool CanDoBroadcast(const Tensor& input, const Tensor& tile) {
     auto tile_tensor = tile.tensor<int, 1>();
     for (int i = 0; i < input.dims(); ++i) {
@@ -13,17 +16,16 @@ namespace tensorflow {
     return true;
   }
 
-  template <class T>
-    class TileFuseOp : public OpKernel {
+  template <typename Device, typename Functor, typename T>
+    class TileFuseOp : public BinaryOp<Device, Functor> {
       public:
-        explicit TileFuseOp(OpKernelConstruction* context) : OpKernel(context) {
-          binaryOp_ = new BinaryOp<CPUDevice, functor::tile_equal_to<T> >(context);
-        }
+        explicit TileFuseOp(OpKernelConstruction* context) :
+					BinaryOp<Device, Functor>(context, false) {}
 
         void Compute(OpKernelContext* context) override {
-          auto& input0 = context->input(0);
+          auto& input0 = context->input(1);
           auto& input1 = context->input(2);
-          auto& input2 = context->input(1);
+          auto& input2 = context->input(0);
           const auto* p = input1.flat<int32>().data();
 
           auto nelem = input1.NumElements();
@@ -34,6 +36,7 @@ namespace tensorflow {
               errors::Internal("input0 dimsize: ", input0.dims(), " != ", input2.dims()));
 
           TensorShape shape;
+
           for (int i = 0; i < input0.dims(); ++i) {
             auto val = p[i] * input0.dim_size(i);
             if (val != 1 && input2.dim_size(i) != 1) {
@@ -47,8 +50,9 @@ namespace tensorflow {
 
           auto useEqualDirect = CanDoBroadcast(input0, input1);
           if (useEqualDirect) {
-            std::cout << "caixukun useEqualDirect\n";
-            binaryOp_->Compute(context);
+						BinaryOp<Device, Functor>::Compute(context);
+          //  std::cout << "caixukun useEqualDirect\n";
+          //  binaryOp_->Compute(context);
           } else {
             Tensor* output;
             OP_REQUIRES_OK(context, context->allocate_output(0, shape, &output));
@@ -158,12 +162,16 @@ namespace tensorflow {
         OpKernel* binaryOp_;
     };
 
-#define REGISTER(T) \
-  REGISTER_KERNEL_BUILDER(Name("TileEqual") \
-      .Device(DEVICE_CPU) \
-      .TypeConstraint<T>("T"), \
-      TileFuseOp<T>);
-  REGISTER(int);
-  REGISTER(float);
-#undef REGISTER
+#define REGISTER_TILE_FUSE(T)                     \
+  REGISTER_KERNEL_BUILDER(                                     \
+      Name("TileEqual")                                                  \
+          .Device(DEVICE_CPU)                                  \
+          .TypeConstraint<T>("T"),                              \
+      TileFuseOp<CPUDevice, functor::tile_equal_to<T>, T>);
+
+REGISTER_TILE_FUSE(float);
+REGISTER_TILE_FUSE(double);
+REGISTER_TILE_FUSE(int32);
+
+#undef REGISTER_TILE_FUSE
 }

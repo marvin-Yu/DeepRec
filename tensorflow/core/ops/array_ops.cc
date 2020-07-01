@@ -2001,6 +2001,64 @@ REGISTER_OP("Tile")
       return Status::OK();
     });
 
+REGISTER_OP("TileFuseEqual")
+    .Input("input: T")
+    .Input("equal_to: T")
+    .Input("multiples: Tmultiples")
+    .Output("output : bool")
+    .Attr("T: {float, double, int32}")
+    .Attr("Tmultiples: {int32, int64} = DT_INT32")
+      .Attr("incompatible_shape_error: bool = true")                       
+    .SetShapeFn([](InferenceContext* c) {
+      ShapeHandle input = c->input(1);
+      // NOTE(mrry): Represent `multiples` as a `TensorShape` because (i)
+      // it is a vector of non-negative integers, and (ii) doing so allows
+      // us to handle partially-known multiples.
+      ShapeHandle multiples;
+      TF_RETURN_IF_ERROR(c->MakeShapeFromShapeTensor(2, &multiples));
+      if (c->RankKnown(input)) {
+        TF_RETURN_IF_ERROR(c->WithRank(multiples, c->Rank(input), &multiples));
+        ShapeHandle dummy;
+        TF_RETURN_IF_ERROR(
+            c->Merge(c->input(2), c->Vector(c->Rank(input)), &dummy));
+      }
+
+      if (!c->RankKnown(multiples)) {
+        return shape_inference::UnknownShape(c);
+      }
+
+      bool incompatible_shape_error;                                    
+      TF_RETURN_IF_ERROR(c->GetAttr("incompatible_shape_error",
+                                      &incompatible_shape_error));
+      int32 rank = c->Rank(multiples);
+      TF_RETURN_IF_ERROR(c->WithRank(input, rank, &input));
+      std::vector<DimensionHandle> dims(rank);
+      for (int i = 0; i < rank; ++i) {
+        TF_RETURN_IF_ERROR(
+            c->Multiply(c->Dim(input, i), c->Dim(multiples, i), &dims[i]));
+      }
+			ShapeHandle output;
+			ShapeHandle equal_to = c->input(0);
+
+      TF_RETURN_IF_ERROR(BroadcastBinaryOpOutputShapeFnHelper(
+          c, equal_to, c->MakeShape(dims), incompatible_shape_error, &output));
+      c->set_output(0, output);
+      return Status::OK();
+    });
+
+REGISTER_OP("TileTileEqual")
+    .Input("tile_1: T")
+    .Input("tile_2: T")
+    .Input("multi_1: Tmultiples")
+    .Input("multi_2: Tmultiples")
+    .Output("output : bool")
+    .Attr("T: {float, double, int32}")
+    .Attr("Tmultiples: {int32, int64} = DT_INT32")
+      .Attr("incompatible_shape_error: bool = true")                       
+    .SetShapeFn([](InferenceContext* c) {
+        return shape_inference::UnknownShape(c);
+    });
+
 REGISTER_OP("TileEqual")
     .Input("input: T")
     .Input("equal_to: T")
@@ -2008,8 +2066,41 @@ REGISTER_OP("TileEqual")
     .Output("output : bool")
     .Attr("T: {float, double, int32}")
     .Attr("Tmultiples: {int32, int64} = DT_INT32")
+      .Attr("incompatible_shape_error: bool = true")                       
     .SetShapeFn([](InferenceContext* c) {
-      c->set_output(0, c->input(2));
+      ShapeHandle input = c->input(1);
+      // NOTE(mrry): Represent `multiples` as a `TensorShape` because (i)
+      // it is a vector of non-negative integers, and (ii) doing so allows
+      // us to handle partially-known multiples.
+      ShapeHandle multiples;
+      TF_RETURN_IF_ERROR(c->MakeShapeFromShapeTensor(2, &multiples));
+      if (c->RankKnown(input)) {
+        TF_RETURN_IF_ERROR(c->WithRank(multiples, c->Rank(input), &multiples));
+        ShapeHandle dummy;
+        TF_RETURN_IF_ERROR(
+            c->Merge(c->input(2), c->Vector(c->Rank(input)), &dummy));
+      }
+
+      if (!c->RankKnown(multiples)) {
+        return shape_inference::UnknownShape(c);
+      }
+
+      bool incompatible_shape_error;                                    
+      TF_RETURN_IF_ERROR(c->GetAttr("incompatible_shape_error",
+                                      &incompatible_shape_error));
+      int32 rank = c->Rank(multiples);
+      TF_RETURN_IF_ERROR(c->WithRank(input, rank, &input));
+      std::vector<DimensionHandle> dims(rank);
+      for (int i = 0; i < rank; ++i) {
+        TF_RETURN_IF_ERROR(
+            c->Multiply(c->Dim(input, i), c->Dim(multiples, i), &dims[i]));
+      }
+			ShapeHandle output;
+			ShapeHandle equal_to = c->input(0);
+
+      TF_RETURN_IF_ERROR(BroadcastBinaryOpOutputShapeFnHelper(
+          c, equal_to, c->MakeShape(dims), incompatible_shape_error, &output));
+      c->set_output(0, output);
       return Status::OK();
     });
 // --------------------------------------------------------------------------
