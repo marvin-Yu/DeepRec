@@ -81,20 +81,27 @@ limitations under the License.
 #include "tensorflow/core/public/session.h"
 #include "tensorflow/core/public/version.h"
 #include "tensorflow/core/util/env_var.h"
+#include "tensorflow/stream_executor/gpu/gpu_executor.h"
 #include "third_party/gpus/cuda/include/cuda.h"
 #include "third_party/gpus/cuda/include/cuda_runtime_api.h"
 
 // The implementation below is at the top level instead of the
 // brain namespace because we are defining 'extern "C"' functions.
 using tensorflow::AllocationDescription;
+using tensorflow::BaseGPUDevice;
 using tensorflow::CallableOptions;
 using tensorflow::DataType;
 using tensorflow::ExtendSessionGraphHelper;
 using tensorflow::Env;
+using tensorflow::errors::FailedPrecondition;
+using tensorflow::errors::Internal;
+using tensorflow::errors::InvalidArgument;
 using tensorflow::GpuIdManager;
 using tensorflow::GpuIdUtil;
 using tensorflow::Graph;
 using tensorflow::GraphDef;
+using tensorflow::gtl::ArraySlice;
+using tensorflow::MetaGraphDef;
 using tensorflow::mutex_lock;
 using tensorflow::NameRangeMap;
 using tensorflow::NameRangesForNode;
@@ -109,9 +116,15 @@ using tensorflow::PartialTensorShape;
 using tensorflow::PlatformGpuId;
 using tensorflow::RunMetadata;
 using tensorflow::RunOptions;
+using tensorflow::se::DeviceMemoryBase;
+using tensorflow::se::Event;
+using tensorflow::se::gpu::GpuExecutor;
+using tensorflow::se::Stream;
+using tensorflow::se::StreamExecutor;
 using tensorflow::Session;
 using tensorflow::Status;
 using tensorflow::string;
+using tensorflow::strings::StrCat;
 using tensorflow::TfGpuId;
 using tensorflow::Tensor;
 using tensorflow::TensorBuffer;
@@ -119,12 +132,6 @@ using tensorflow::TensorId;
 using tensorflow::TensorShape;
 using tensorflow::TensorShapeProto;
 using tensorflow::VersionDef;
-using tensorflow::errors::FailedPrecondition;
-using tensorflow::errors::Internal;
-using tensorflow::errors::InvalidArgument;
-using tensorflow::gtl::ArraySlice;
-using tensorflow::strings::StrCat;
-using tensorflow::MetaGraphDef;
 
 extern "C" {
 
@@ -699,75 +706,53 @@ void TF_SessionReleaseCallable(TF_Session* tf_sess, TF_CallableHandle callable_h
   status->status = tf_sess->session->ReleaseCallable(callable_handle);
 }
 
-StreamGroupHandle TF_GetStreamGroupOfVirtualDevice(int virtual_gpu_id) {
-  TfGpuId tf_gpu_id(virtual_gpu_id);
-  PlatformGpuId platform_gpu_id;
-  Status s = GpuIdManager::TfToPlatformGpuId(tf_gpu_id, &platform_gpu_id);
-  if (!s.ok()) {
-    LOG(ERROR) << "invalid tf gpu id: " << virtual_gpu_id;
-    return nullptr;
-  }
-  stream_executor::StreamExecutor* se =
-      GpuIdUtil::ExecutorForPlatformGpuId(platform_gpu_id).ValueOrDie();
+StreamExecutor* GetStreamExecutorOfVirtualDevice(int virtual_device_id) {
+  TfGpuId tf_gpu_id(virtual_device_id);
+  return GpuIdUtil::ExecutorForTfGpuId(tf_gpu_id).ValueOrDie();
+}
+
+BaseGPUDevice::StreamGroup* GetStreamGroupOfVirtualDevice(int virtual_device_id) {
+  TfGpuId tf_gpu_id(virtual_device_id);
+  StreamExecutor* se = GetStreamExecutorOfVirtualDevice(virtual_device_id);
   static tensorflow::GPUOptions gpu_options;
   return tensorflow::StreamGroupFactory::Global().GetOrCreate(
       tf_gpu_id, 0, se, gpu_options);
 }
 
-bool TF_CudaMemAlloc(StreamGroupHandle sg_handle, void** gpu_ptr, size_t length) {
-  tensorflow::BaseGPUDevice::StreamGroup* stream_group =
-      reinterpret_cast<tensorflow::BaseGPUDevice::StreamGroup*>(sg_handle);
-  stream_executor::Stream* stream = stream_group->host_to_device;
-  if (stream == nullptr) {
+bool TF_CudaMemAlloc(int virtual_device_id, void** gpu_ptr, size_t length) {
+  StreamExecutor* stream_executor =
+      GetStreamExecutorOfVirtualDevice(virtual_device_id);
+  GpuExecutor* gpu_executor =
+      static_cast<GpuExecutor*>(stream_executor->implementation());
+  if (gpu_executor == nullptr) {
     return false;
   }
-  *gpu_ptr = stream->parent()->UnifiedMemoryAllocate(length);
+  *gpu_ptr = gpu_executor->Allocate(length);
   return true;
 }
 
-bool TF_CudaMemDealloc(StreamGroupHandle sg_handle, void* gpu_ptr) {
-  tensorflow::BaseGPUDevice::StreamGroup* stream_group =
-      reinterpret_cast<tensorflow::BaseGPUDevice::StreamGroup*>(sg_handle);
-  stream_executor::Stream* stream = stream_group->compute;
-  if (stream == nullptr) {
+bool TF_CudaMemDealloc(int virtual_device_id, void* gpu_ptr) {
+  StreamExecutor* stream_executor =
+      GetStreamExecutorOfVirtualDevice(virtual_device_id);
+  GpuExecutor* gpu_executor =
+      static_cast<GpuExecutor*>(stream_executor->implementation());
+  if (gpu_executor == nullptr) {
     return false;
   }
-  stream->parent()->UnifiedMemoryDeallocate(gpu_ptr);
+  DeviceMemoryBase device_memory(gpu_ptr); 
+  gpu_executor->Deallocate(&device_memory);
   return true;
 }
 
-bool TF_HostMemAlloc(StreamGroupHandle sg_handle, void** host_ptr, size_t length) {
-  tensorflow::BaseGPUDevice::StreamGroup* stream_group =
-      reinterpret_cast<tensorflow::BaseGPUDevice::StreamGroup*>(sg_handle);
-  stream_executor::Stream* stream = stream_group->compute;
+bool TF_CudaMemCopyHostToDevice(int virtual_device_id, void* device_ptr, const void* host_ptr, size_t length) {
+  BaseGPUDevice::StreamGroup* stream_group = GetStreamGroupOfVirtualDevice(virtual_device_id);
+  Stream* stream = stream_group->host_to_device;
   if (stream == nullptr) {
     return false;
   }
-  *host_ptr = stream->parent()->HostMemoryAllocate(length);
-  return true;
-}
-
-bool TF_HostMemDealloc(StreamGroupHandle sg_handle, void* host_ptr) {
-  tensorflow::BaseGPUDevice::StreamGroup* stream_group =
-      reinterpret_cast<tensorflow::BaseGPUDevice::StreamGroup*>(sg_handle);
-  stream_executor::Stream* stream = stream_group->compute;
-  if (stream == nullptr) {
-    return false;
-  }
-  stream->parent()->HostMemoryDeallocate(host_ptr);
-  return true;
-}
-
-bool TF_CudaMemCopyHostToDevice(StreamGroupHandle sg_handle, void* device_ptr, const void* host_ptr, size_t length) {
-  tensorflow::BaseGPUDevice::StreamGroup* stream_group =
-      reinterpret_cast<tensorflow::BaseGPUDevice::StreamGroup*>(sg_handle);
-  stream_executor::Stream* stream = stream_group->host_to_device;
-  if (stream == nullptr) {
-    return false;
-  }
-  stream_executor::DeviceMemoryBase device_memory(device_ptr, length);
+  DeviceMemoryBase device_memory(device_ptr, length);
   stream->ThenMemcpy(&device_memory, host_ptr, length);
-  auto event = std::make_shared<stream_executor::Event>(stream->parent());
+  auto event = std::make_shared<Event>(stream->parent());
   if (!event->Init()) {
     LOG(ERROR) << "event init failed!";
     return false;
@@ -777,19 +762,17 @@ bool TF_CudaMemCopyHostToDevice(StreamGroupHandle sg_handle, void* device_ptr, c
   return true;
 }
 
-
-bool TF_CudaMemCopyDeviceToHost(StreamGroupHandle sg_handle, void* host_ptr, const void* device_ptr, size_t length) {
-  tensorflow::BaseGPUDevice::StreamGroup* stream_group =
-      reinterpret_cast<tensorflow::BaseGPUDevice::StreamGroup*>(sg_handle);
-  stream_executor::Stream* compute_stream = stream_group->compute;
-  stream_executor::Stream* d2h_stream = stream_group->device_to_host;
+bool TF_CudaMemCopyDeviceToHost(int virtual_device_id, void* host_ptr, const void* device_ptr, size_t length) {
+  BaseGPUDevice::StreamGroup* stream_group = GetStreamGroupOfVirtualDevice(virtual_device_id);
+  Stream* compute_stream = stream_group->compute;
+  Stream* d2h_stream = stream_group->device_to_host;
   if (compute_stream == nullptr || d2h_stream == nullptr) {
     return false;
   }
   d2h_stream->ThenWaitFor(compute_stream);
-  stream_executor::DeviceMemoryBase device_memory(const_cast<void*>(device_ptr), length);
+  DeviceMemoryBase device_memory(const_cast<void*>(device_ptr), length);
   d2h_stream->ThenMemcpy(host_ptr, device_memory, length);
-  auto event = std::make_shared<stream_executor::Event>(d2h_stream->parent());
+  auto event = std::make_shared<Event>(d2h_stream->parent());
   if (!event->Init()) {
     LOG(ERROR) << "event init failed!";
     return false;
