@@ -3,6 +3,10 @@
 
 #define EIGEN_USE_THREADS
 
+#ifdef TILE_VECTORIZE_AVX512
+#include <immintrin.h>
+#endif
+
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/kernels/cwise_ops_common.h"
 #include "tensorflow/core/util/env_var.h"
@@ -32,6 +36,41 @@ namespace tensorflow {
         }
 
       private:
+        void Compute(const float* input0, const float* input1, OT* out, int len) {
+          #ifdef TILE_VECTORIZE_AVX512
+          int packed = (len % 16);
+          if (packed != 0) {
+            for (int i = 0; i < len; ++i) {
+              out[i] = f_(input0[i], input1[i]);
+            }
+          } else {
+            int idx = 0;
+            int times = len / 16;
+            int total = 0;
+            for (int i = 0; i < times; ++i) {
+              __mm512i * i0 = (__mm512i*)(input0 + idx);
+              __mm512i * i1 = (__mm512i*)(input1 + idx);
+              auto ret =  _mm512_cmpeq_epi32_mask(*i0, *i1);
+              for (int j = 0; j < 16; ++j) {
+                out[total++] = (((ret) & (1 << j)) != 0);
+              }
+              idx += 16;
+            }
+            return;
+          }
+          #endif
+          for (int i = 0; i < len; ++i) {
+            out[i] = f_(input0[i], input1[i]);
+          }
+        }
+
+        template<typename TIN>
+        void Compute(const TIN* input0, const TIN* input1, OT* out, int len) {
+          for (int i = 0; i < len; ++i) {
+            out[i] = f_(input0[i], input1[i]);
+          }
+        }
+
         bool Compute(const Tensor& input0, const Tensor& input1,
             Tensor* output, const TensorShape& shape, Functor f) {
           switch (input0.dims()) {
@@ -39,7 +78,6 @@ namespace tensorflow {
                        auto i_data0 = input0.flat<T>().data();
                        auto i_data2 = input1.flat<T>().data();
                        auto out = output->flat<OT>().data();
-
                        for (int i = 0; i < shape.dim_size(0); ++i) {
                          out[i] = f_(i_data0[i % input0.dim_size(0)], i_data2[i % input1.dim_size(0)]);
                        }
@@ -84,11 +122,21 @@ namespace tensorflow {
                          }
                          auto count = 0;
 
-                         for (int i = 0; i < shape.dim_size(0); ++i) {
-                           auto idx = (i % input1.dim_size(0)) * input1.dim_size(2);
-                           for (int j = 0; j < shape.dim_size(1); ++j) {
-                             for (int k = 0; k < shape.dim_size(2); ++k) {
-                               out[count++] = f_(i_data0[d_0_1[j] + k], i_data2[idx + k]);
+                         if (input0.dim_size(2) == input1.dim_size(2)) {
+                           for (int i = 0; i < shape.dim_size(0); ++i) {
+                             auto idx = (i % input1.dim_size(0)) * input1.dim_size(2);
+                             for (int j = 0; j < shape.dim_size(1); ++j) {
+                               Compute(i_data0 + d_0_1[j], i_data2 + idx, out + count, shape.dim_size(2));
+                               count += shape.dim_size(2);
+                             }
+                           }
+                         } else {
+                           for (int i = 0; i < shape.dim_size(0); ++i) {
+                             auto idx = (i % input1.dim_size(0)) * input1.dim_size(2);
+                             for (int j = 0; j < shape.dim_size(1); ++j) {
+                               for (int k = 0; k < shape.dim_size(2); ++k) {
+                                 out[count++] = f_(i_data0[d_0_1[j] + k], i_data2[idx + k]);
+                               }
                              }
                            }
                          }
@@ -110,12 +158,23 @@ namespace tensorflow {
                            d_2_2.push_back(i % shape.dim_size(2));
                          }
                          auto count = 0;
-                         for (int i = 0; i < shape.dim_size(0); ++i) {
-                           auto d_0_0 = (i % input0.dim_size(0)) * input0.dim_size(1) * input0.dim_size(2);
-                           auto d_2_0 = (i % input1.dim_size(0)) * input1.dim_size(1) * input1.dim_size(2);
-                           for (int j = 0; j < shape.dim_size(1); ++j) {
-                             for (int k = 0; k < shape.dim_size(2); ++k) {
-                               out[count++] = f_(i_data0[d_0_0 + d_0_1[j] + d_0_2[k]],  i_data2[d_2_0 + d_2_1[j] + d_2_2[k]]);
+                         if (input0.dim_size(2) == input1.dim_size(2)) {
+                           for (int i = 0; i < shape.dim_size(0); ++i) {
+                             auto d_0_0 = (i % input0.dim_size(0)) * input0.dim_size(1) * input0.dim_size(2);
+                             auto d_2_0 = (i % input1.dim_size(0)) * input1.dim_size(1) * input1.dim_size(2);
+                             for (int j = 0; j < shape.dim_size(1); ++j) {
+                               for (int k = 0; k < shape.dim_size(2); ++k) {
+                                 out[count++] = f_(i_data0[d_0_0 + d_0_1[j] + d_0_2[k]],  i_data2[d_2_0 + d_2_1[j] + d_2_2[k]]);
+                               }
+                             }
+                           }
+                         } else {
+                           for (int i = 0; i < shape.dim_size(0); ++i) {
+                             auto d_0_0 = (i % input0.dim_size(0)) * input0.dim_size(1) * input0.dim_size(2);
+                             auto d_2_0 = (i % input1.dim_size(0)) * input1.dim_size(1) * input1.dim_size(2);
+                             for (int j = 0; j < shape.dim_size(1); ++j) {
+                               Compute(i_data0 + d_0_0 + d_0_1[j], i_data2 + d_2_0 + d_2_1[j], out + count, shape.dim_size(2));
+                               count += shape.dim_size(2);
                              }
                            }
                          }

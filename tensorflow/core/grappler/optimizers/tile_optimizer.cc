@@ -12,7 +12,7 @@
 
 namespace tensorflow {
   namespace grappler {
-
+    const int max_supported_dims = 3;
     Status TileOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
         GraphDef* optimized_graph) {
       *optimized_graph = item.graph;
@@ -39,6 +39,19 @@ namespace tensorflow {
       return false;
     }
 
+    bool TileOptimizer::CheckDims(const NodeDef* node) {
+      const auto iter = node->attr().find("_output_shapes");
+      if (iter == node->attr().end()) {
+        return false;
+      }
+      if (iter->second.has_list()  && iter->second.list().shape_size() == 1) {
+        if (iter->second.list().shape(0).dim_size() <= max_supported_dims) {
+          return true;
+        }
+      }
+      return false;
+    }
+
     string TileOptimizer::TileEqual(const NodeDef* node,
         GraphDef* graph_def, NodeMap* node_map, std::vector<const NodeDef*>* new_nodes)
     {
@@ -57,6 +70,9 @@ namespace tensorflow {
       }
       // tile + tile ---> equal
       if (tile->op() == "Tile" && equal_to->op() == "Tile") {
+        if (!CheckDims(tile) || !CheckDims(equal_to)) {
+          return "";
+        }
         const NodeDef *tile_0 = node_map->GetNode(tile->input(0));
         const NodeDef *mul_0 = node_map->GetNode(tile->input(1));
 
@@ -82,6 +98,9 @@ namespace tensorflow {
         equal_to = tmp;
       }
 
+      if (!CheckDims(tile)) {
+        return "";
+      }
       const NodeDef *tile_i0 = node_map->GetNode(tile->input(0));
       if (!CheckType(node) || !CheckType(tile)) {
         return "";

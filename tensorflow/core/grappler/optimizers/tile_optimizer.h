@@ -36,6 +36,7 @@ namespace tensorflow {
             DataType type);
         static bool CheckType(const NodeDef* node);
         static bool TypeEqual(const NodeDef* node1, const NodeDef* node2, const std::string& key);
+        static bool CheckDims(const NodeDef* node);
     };
 
   }  // end namespace grappler
