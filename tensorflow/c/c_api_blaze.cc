@@ -746,19 +746,12 @@ bool TF_CudaMemDealloc(int virtual_device_id, void* gpu_ptr) {
 
 bool TF_CudaMemCopyHostToDevice(int virtual_device_id, void* device_ptr, const void* host_ptr, size_t length) {
   BaseGPUDevice::StreamGroup* stream_group = GetStreamGroupOfVirtualDevice(virtual_device_id);
-  Stream* stream = stream_group->host_to_device;
+  Stream* stream = stream_group->compute;
   if (stream == nullptr) {
     return false;
   }
   DeviceMemoryBase device_memory(device_ptr, length);
   stream->ThenMemcpy(&device_memory, host_ptr, length);
-  auto event = std::make_shared<Event>(stream->parent());
-  if (!event->Init()) {
-    LOG(ERROR) << "event init failed!";
-    return false;
-  }
-  stream->ThenRecordEvent(event.get());
-  stream->ThenSynchronizeEvent(event.get());
   return true;
 }
 
@@ -772,13 +765,7 @@ bool TF_CudaMemCopyDeviceToHost(int virtual_device_id, void* host_ptr, const voi
   d2h_stream->ThenWaitFor(compute_stream);
   DeviceMemoryBase device_memory(const_cast<void*>(device_ptr), length);
   d2h_stream->ThenMemcpy(host_ptr, device_memory, length);
-  auto event = std::make_shared<Event>(d2h_stream->parent());
-  if (!event->Init()) {
-    LOG(ERROR) << "event init failed!";
-    return false;
-  }
-  d2h_stream->ThenRecordEvent(event.get());
-  d2h_stream->ThenSynchronizeEvent(event.get());
+  d2h_stream->BlockHostUntilDone();
   return true;
 }
 
