@@ -70,7 +70,9 @@ class SessionRef : public Session {
   Status RunCallable(CallableHandle handle,
                      const std::vector<Tensor>& feed_tensors,
                      std::vector<Tensor>* fetch_tensors,
-                     RunMetadata* run_metadata) override;
+                     RunMetadata* run_metadata,
+                     uint64_t before_padding = 0,
+                     uint64_t after_padding = 0) override;
 
   Status ReleaseCallable(CallableHandle handle) override;
 

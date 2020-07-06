@@ -468,7 +468,9 @@ Status SessionRef::MakeCallable(const CallableOptions& callable_options,
 Status SessionRef::RunCallable(CallableHandle handle,
                                const std::vector<Tensor>& feed_tensors,
                                std::vector<Tensor>* fetch_tensors,
-                               RunMetadata* run_metadata) {
+                               RunMetadata* run_metadata,
+                               uint64_t before_padding,
+                               uint64_t after_padding) {
   LOG_AND_RUN_OPERATION(RunCallable, handle, feed_tensors, fetch_tensors,
                         run_metadata);
 }
