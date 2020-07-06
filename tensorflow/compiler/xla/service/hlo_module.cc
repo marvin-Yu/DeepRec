@@ -220,9 +220,8 @@ string HloModule::ToString(const HloPrintOptions& options) const {
   if (!options.print_cluster_id()) {
     std::regex pattern("(cluster_)(\\d+)(__)");
     hlo_module_name = std::regex_replace(hlo_module_name, pattern, "cluster__");
-    LOG(INFO) << "HloModel replaced: " << hlo_module_name;
   }
-  LOG(INFO) << "HloModel to print: " << hlo_module_name;
+  VLOG(2) << "HloModel to print: " << hlo_module_name;
   s << "HloModule " << PrintName(hlo_module_name, options.print_ids());
   if (has_schedule()) {
     TF_CHECK_OK(schedule().Verify());
