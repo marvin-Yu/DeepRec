@@ -55,13 +55,14 @@ port::StatusOr<StreamExecutor*> ExecutorCache::GetOrCreate(
   // In the fast path case, the cache already has an entry and we can just
   // return after Get() which only takes a shared lock and not a unique lock.
   // If we need to create, we take a unique lock on cache_.
-  auto fast_result = Get(config);
+  static int64 num_cuda_contexts = 1;
+  absl::call_once(flag_init, &SetNumCudaContexts, config.ordinal, &num_cuda_contexts);
+
+  auto fast_result = Get(config, num_cuda_contexts);
   if (fast_result.ok()) {
     return fast_result;
   }
 
-  static int64 num_cuda_contexts = 1;
-  absl::call_once(flag_init, &SetNumCudaContexts, config.ordinal, &num_cuda_contexts);
   LOG(INFO) << "TF_NUM_CONTEXTS_PER_GPU = " << num_cuda_contexts;
   std::string key = std::to_string(config.ordinal) + "," +
                     std::to_string(config.virtual_ordinal % num_cuda_contexts);
@@ -98,9 +99,10 @@ port::StatusOr<StreamExecutor*> ExecutorCache::GetOrCreate(
 }
 
 port::StatusOr<StreamExecutor*> ExecutorCache::Get(
-    const StreamExecutorConfig& config) {
+    const StreamExecutorConfig& config,
+    int num_cuda_contexts) {
   std::string key = std::to_string(config.ordinal) + "," +
-                    std::to_string(config.virtual_ordinal);
+                    std::to_string(config.virtual_ordinal % num_cuda_contexts);
   Entry* entry = nullptr;
   {
     absl::ReaderMutexLock lock{&mutex_};
