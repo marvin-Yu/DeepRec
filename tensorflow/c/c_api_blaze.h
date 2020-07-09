@@ -185,30 +185,25 @@ TF_CAPI_EXPORT extern void TF_SessionRunCallable(
 TF_CAPI_EXPORT extern void TF_SessionReleaseCallable(
     TF_Session* tf_sess, TF_CallableHandle callable_handle,
     TF_Status* status);
-TF_CAPI_EXPORT bool TF_CudaMemAlloc(
-    int virtual_gpu_id,
+
+TF_CAPI_EXPORT extern bool TF_CudaMemAlloc(
+    int virtual_device_id,
     void** gpu_ptr,
     size_t length);
-TF_CAPI_EXPORT bool TF_CudaMemDealloc(
-    int virtual_gpu_id,
+TF_CAPI_EXPORT extern bool TF_CudaMemDealloc(
+    int virtual_device_id,
     void* gpu_ptr);
-TF_CAPI_EXPORT bool TF_HostMemAlloc(
-    int virtual_gpu_id,
-    void** host_ptr,
-    size_t length);
-TF_CAPI_EXPORT bool TF_HostMemDealloc(
-    int virtual_gpu_id,
-    void* host_ptr);
-TF_CAPI_EXPORT bool TF_CudaMemCopyHostToDeviceAsync(
-    int virtual_gpu_id,
+TF_CAPI_EXPORT extern bool TF_CudaMemCopyHostToDevice(
+    int virtual_device_id,
     void* device_ptr,
     const void* host_ptr,
     size_t length);
-TF_CAPI_EXPORT bool TF_CudaMemCopyDeviceToHost(
-    int virtual_gpu_id,
+TF_CAPI_EXPORT extern bool TF_CudaMemCopyDeviceToHost(
+    int virtual_device_id,
     void* host_ptr,
     const void* device_ptr,
     size_t length);
+
 TF_CAPI_EXPORT extern void TF_SetPaddingInfo(
     TF_Buffer* run_options, unsigned long long before_padding,
     unsigned long long after_padding, TF_Status* status);

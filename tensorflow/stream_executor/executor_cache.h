@@ -42,7 +42,8 @@ class ExecutorCache {
 
   // Returns a pointer to the described executor (if one with a matching config
   // has been created), or a NOT_FOUND status.
-  port::StatusOr<StreamExecutor*> Get(const StreamExecutorConfig& config);
+  port::StatusOr<StreamExecutor*> Get(const StreamExecutorConfig& config,
+      int num_cuda_contexts);
 
   // Destroys all Executors and clears the cache.
   // Performs no synchronization with the executors - undefined behavior may
