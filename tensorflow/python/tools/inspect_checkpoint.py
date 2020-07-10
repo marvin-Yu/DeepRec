@@ -76,7 +76,7 @@ def print_tensors_in_checkpoint_file(file_name, tensor_name, all_tensors,
     if all_tensors or all_tensor_names:
       var_to_shape_map = reader.get_variable_to_shape_map()
       for key in sorted(var_to_shape_map):
-        print("tensor_name: ", key)
+        print("tensor_name: ", key, var_to_shape_map[key])
         if all_tensors:
           print(reader.get_tensor(key))
     elif not tensor_name:
