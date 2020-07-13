@@ -892,6 +892,10 @@ Status DirectSession::RunInternal(
     args.before_padding = run_options.padding_info().before_padding();
     args.after_padding = run_options.padding_info().after_padding();
   }
+  //[PROF-STATS]
+  ProfStats prof_stats;
+  args.prof_stats = &prof_stats;
+  
 
 #ifdef GOOGLE_CUDA
   if (cuda_graph_device_context && cuda_graph_context) {
@@ -1086,6 +1090,9 @@ Status DirectSession::RunInternal(
           cost_model_manager_.AddToCostGraphDef(item.graph, cost_graph));
     }
   }
+
+  //[PROF-STATS]
+  run_metadata->mutable_prof_stats()->set_flops(prof_stats.flops);
 
   // If requested via RunOptions, output the partition graphs.
   if (run_options.output_partition_graphs()) {

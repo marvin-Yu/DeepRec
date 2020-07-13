@@ -1316,6 +1316,8 @@ class ExecutorState {
   //[DYNAMIC-SHAPE]
   uint64 before_padding_ = 0;
   uint64 after_padding_ = 0;
+  //[PROF-STATUS]
+  ProfStats* prof_stats_ = nullptr;
 
   const bool vlog_;  // true if VLOG_IS_ON(1). Used to check vlog cheaply.
 
@@ -1484,6 +1486,8 @@ ExecutorState::ExecutorState(const Executor::Args& args, ExecutorImpl* impl)
       //[DYNAMIC-SHAPE]
       before_padding_(args.before_padding),
       after_padding_(args.after_padding),
+      //[PROF-STATS]
+      prof_stats_(args.prof_stats),
 
       log_memory_(LogMemory::IsEnabled()),
       step_id_(args.step_id),
@@ -1763,6 +1767,8 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
   //[DYNAMIC-SHAPE]
   params.before_padding = before_padding_;
   params.after_padding = after_padding_;
+  //[PROF-STATS]
+  params.prof_stats = prof_stats_;
 
   params.step_id = step_id_;
   // Override device's threadpool if user provides an intra_op_threadpool
@@ -2066,6 +2072,8 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
           // 'ScopedAnnotation' will trace the OpKernel execution time.
           tracing::ScopedAnnotation annotation(kernel_label);
           device->Compute(op_kernel, &ctx);
+          //[PROF-STATS]
+          op_kernel->RecordStats(prof_stats);
         } else {
           s = Status::OK();
 #ifdef GOOGLE_CUDA
