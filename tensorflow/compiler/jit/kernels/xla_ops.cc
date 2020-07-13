@@ -383,7 +383,7 @@ void XlaLocalLaunchBase::Compute(OpKernelContext* ctx) {
   run_options.before_padding = ctx->before_padding();
   run_options.after_padding = ctx->after_padding();
   //[PROF-STATS]
-  run_options.stats = ctx->prof_stats();
+  run_options.prof_stats = ctx->prof_stats();
 
   run_options.set_stream(stream);
   run_options.set_allocator(allocator);
@@ -586,7 +586,7 @@ void XlaRunOp::Compute(OpKernelContext* ctx) {
   run_options.before_padding = ctx->before_padding();
   run_options.after_padding = ctx->after_padding();
   //[PROF-STATS]
-  run_options.stats = ctx->prof_stats();
+  run_options.prof_stats = ctx->prof_stats();
 
   run_options.set_stream(stream);
   run_options.set_allocator(allocator);
