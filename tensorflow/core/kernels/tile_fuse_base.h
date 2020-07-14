@@ -102,12 +102,12 @@ namespace tensorflow {
                          d_0_2.reserve(shape.dim_size(2));
                          d_2_2.reserve(shape.dim_size(2));
                          for (int i = 0; i < shape.dim_size(1); ++i) {
-                           d_0_1.push_back((i % shape.dim_size(1)) * shape.dim_size(2));
-                           d_2_1.push_back((i % shape.dim_size(1)) * shape.dim_size(2));
+                           d_0_1.push_back((i % input0.dim_size(1)) * input0.dim_size(2));
+                           d_2_1.push_back((i % input1.dim_size(1)) * input1.dim_size(2));
                          }
                          for (int i = 0; i < shape.dim_size(2); ++i) {
-                           d_0_2.push_back(i % shape.dim_size(2));
-                           d_2_2.push_back(i % shape.dim_size(2));
+                           d_0_2.push_back(i % input0.dim_size(2));
+                           d_2_2.push_back(i % input1.dim_size(2));
                          }
                          auto count = 0;
                          for (int i = 0; i < shape.dim_size(0); ++i) {

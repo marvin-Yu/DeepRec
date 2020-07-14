@@ -5,6 +5,7 @@
 #include "tensorflow/core/framework/types.h"
 #include "tensorflow/core/grappler/grappler_item.h"
 #include "tensorflow/core/grappler/mutable_graph_view.h"
+#include "tensorflow/core/grappler/optimizers/graph_optimizer.h"
 #include "tensorflow/core/grappler/op_types.h"
 #include "tensorflow/core/grappler/utils.h"
 #include "tensorflow/core/grappler/utils/symbolic_shapes.h"
@@ -40,6 +41,17 @@ namespace tensorflow {
     }
 
     bool TileOptimizer::CheckDims(const NodeDef* node) {
+      const OpInfo::TensorProperties* properties;
+      /*
+      auto st = GetTensorProperties(node->name(), &properties);
+      if (!st.OK()) {
+        std::cout << st.DebugString() << std::endl;
+        return false;
+      }
+      auto shape = properties->shape();
+      if (shape.dim_size() > max_supported_dims) {
+        return false;
+      }
       const auto iter = node->attr().find("_output_shapes");
       if (iter == node->attr().end()) {
         return false;
@@ -49,7 +61,8 @@ namespace tensorflow {
           return true;
         }
       }
-      return false;
+      return false; */
+      return true;
     }
 
     string TileOptimizer::TileEqual(const NodeDef* node,
