@@ -37,7 +37,7 @@ namespace tensorflow {
 
 //[PROF-STATS]
 struct ProfStats {
-  float flops;
+  float flops = 0;
 };
 
 
