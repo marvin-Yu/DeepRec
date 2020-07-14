@@ -132,17 +132,19 @@ namespace tensorflow {
                          d_0_2.reserve(shape.dim_size(2));
                          d_2_2.reserve(shape.dim_size(2));
                          for (int i = 0; i < shape.dim_size(1); ++i) {
-                           d_0_1.push_back((i % shape.dim_size(1)) * shape.dim_size(2));
-                           d_2_1.push_back((i % shape.dim_size(1)) * shape.dim_size(2));
+                           d_0_1.push_back((i % input0.dim_size(1)) * input0.dim_size(2));
+                           d_2_1.push_back((i % input1.dim_size(1)) * input1.dim_size(2));
                          }
                          for (int i = 0; i < shape.dim_size(2); ++i) {
-                           d_0_2.push_back(i % shape.dim_size(2));
-                           d_2_2.push_back(i % shape.dim_size(2));
+                           d_0_2.push_back(i % input0.dim_size(2));
+                           d_2_2.push_back(i % input1.dim_size(2));
                          }
                          auto count = 0;
+                         auto count_0 = input0.dim_size(1) * input0.dim_size(2);
+                         auto count_1 = input2.dim_size(1) * input2.dim_size(2);
                          for (int i = 0; i < shape.dim_size(0); ++i) {
-                           auto d_0_0 = (i % input0.dim_size(0)) * input0.dim_size(1) * input0.dim_size(2);
-                           auto d_2_0 = (i % input2.dim_size(0)) * input2.dim_size(1) * input2.dim_size(2);
+                           auto d_0_0 = (i % input0.dim_size(0)) * count_0;
+                           auto d_2_0 = (i % input2.dim_size(0)) * count_1;
                            for (int j = 0; j < shape.dim_size(1); ++j) {
                              for (int k = 0; k < shape.dim_size(2); ++k) {
                                out[count++] = (i_data0[d_0_0 + d_0_1[j] + d_0_2[k]]
