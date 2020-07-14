@@ -127,6 +127,10 @@ namespace tensorflow {
           }
           return false;
         }
+
+        bool IsExpensive() override {
+          return true;
+        }
       private:
         virtual bool CanDoBroadcast(OpKernelContext* context) = 0;
         virtual TensorShape GenerateOutShape(OpKernelContext* context) = 0;
