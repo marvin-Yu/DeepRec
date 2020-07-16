@@ -199,7 +199,7 @@ Status RunGemm(const HloInstruction *gemm,
                //[DYNAMIC-SHAPE]
                uint64 before_padding, uint64 after_padding,
                //[PROF-STATS]
-               float* flops
+               uint64* flops
                ) {
   VLOG(2) << "Executing a GemmThunk";
   CHECK(IsCublasGemm(*gemm));

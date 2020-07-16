@@ -95,6 +95,10 @@ limitations under the License.
 extern "C" {
 #endif
 
+typedef struct TF_ProfStats {
+  unsigned long long flops;
+} TF_ProfStats;
+
 TF_CAPI_EXPORT extern TF_Buffer* TF_ReadGraphDefFromFile(
     const char* graph_def_path,
     TF_Status* status);
@@ -180,7 +184,10 @@ TF_CAPI_EXPORT extern void TF_SessionRunCallable(
     TF_Tensor** output_values, int noutputs,
     TF_Buffer* run_metadata, TF_Status* status,
     //[DYNAMIC-SHAPE]
-    uint64_t before_padding = 0, uint64_t after_padding = 0);
+    uint64_t before_padding = 0, uint64_t after_padding = 0,
+    //[PROF-STATS]
+    TF_ProfStats* prof_stats = nullptr
+    );
 
 TF_CAPI_EXPORT extern void TF_SessionReleaseCallable(
     TF_Session* tf_sess, TF_CallableHandle callable_handle,
