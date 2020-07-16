@@ -25,6 +25,7 @@ limitations under the License.
 
 namespace xla {
 
+//[PROF-STATS]
 using ::tensorflow::ProfStats;
 
 using ::tensorflow::string;

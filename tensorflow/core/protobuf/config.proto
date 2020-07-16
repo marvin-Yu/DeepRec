@@ -662,8 +662,9 @@ message RunMetadata {
   // optimization passes might change the structure of the graph significantly).
   repeated FunctionGraphs function_graphs = 4;
 
+  //[PROF-STATS]
   message ProfStats {
-    float flops = 1;
+    uint64 flops = 1;
   }
   ProfStats prof_stats = 5;
 }

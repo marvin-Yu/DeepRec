@@ -86,7 +86,7 @@ static bool DoGemmWithAlgorithm(
     //[DYNAMIC-SHAPE]
     uint64 before_padding, uint64 after_padding,
     //[PROF-STATS]
-    float* flops) {
+    uint64* flops) {
   DCHECK(!output_matrix.transpose);
 
   PrimitiveType type = primitive_util::NativeToPrimitiveType<InT>();
@@ -138,8 +138,9 @@ static bool DoGemmWithAlgorithm(
   }
   //[PROF-STATS]
   if (flops) {
-    *flops = batch_size*k*num_cols_needed*output_matrix.num_rows
+    uint64 delta = batch_size*k*num_cols_needed*output_matrix.num_rows
              *(float)sizeof(InT)/(float)sizeof(float);
+    *flops += delta;
   }
 
   if (algorithm) {

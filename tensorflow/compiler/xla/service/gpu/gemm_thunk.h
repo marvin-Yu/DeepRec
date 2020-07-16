@@ -64,7 +64,7 @@ class GemmThunk : public Thunk {
   GemmBackendConfig backend_config_;
 
   //[PROF-STATS]
-  float flops_ = 0;
+  uint64 flops_ = 0;
 };
 
 // Run the given GEMM instruction `gemm` subject to the configuration
@@ -86,7 +86,7 @@ Status RunGemm(
     //[DYNAMIC-SHAPE]
     uint64 before_padding = 0, uint64 after_padding = 0,
     //[PROF-STATS]
-    float* flops = nullptr);
+    uint64* flops = nullptr);
 
 }  // namespace gpu
 }  // namespace xla

@@ -896,7 +896,6 @@ Status DirectSession::RunInternal(
   ProfStats prof_stats;
   args.prof_stats = &prof_stats;
   
-
 #ifdef GOOGLE_CUDA
   if (cuda_graph_device_context && cuda_graph_context) {
     args.persistent_allocator =
