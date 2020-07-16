@@ -138,8 +138,8 @@ static bool DoGemmWithAlgorithm(
   }
   //[PROF-STATS]
   if (flops) {
-    uint64 delta = batch_size*k*num_cols_needed*output_matrix.num_rows
-             *(float)sizeof(InT)/(float)sizeof(float);
+    uint64 delta = batch_size*(2*k*num_cols_needed*output_matrix.num_rows)
+             *sizeof(InT)/sizeof(float);
     *flops += delta;
   }
 
