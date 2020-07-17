@@ -146,10 +146,6 @@ class OpKernel {
                           kOpIsExpensiveThresholdCycles);
   }
 
-  //[PROF-STATS]
-  virtual void RecordStats(ProfStats* prof_stats) {
-    //do nothing
-  }
   // Updates the dynamic cost estimate, which is used to determine whether this
   // op is expensive. The new cost estimate is a weighted average of the old
   // cost estimate and the latest cost.

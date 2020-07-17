@@ -2072,8 +2072,6 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
           // 'ScopedAnnotation' will trace the OpKernel execution time.
           tracing::ScopedAnnotation annotation(kernel_label);
           device->Compute(op_kernel, &ctx);
-          //[PROF-STATS]
-          op_kernel->RecordStats(prof_stats_);
         } else {
           s = Status::OK();
 #ifdef GOOGLE_CUDA
