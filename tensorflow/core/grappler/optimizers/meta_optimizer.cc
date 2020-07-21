@@ -217,6 +217,9 @@ Status MetaOptimizer::InitializeOptimizers(
     optimizers->push_back(
         MakeUnique<DependencyOptimizer>(cfg_.dependency_optimization()));
   }
+  if (cfg_.tile_equal() != RewriterConfig::OFF) {
+    optimizers->push_back(MakeUnique<TileOptimizer>());
+  }
   if (AutoMixedPrecisionEnabled(cfg_.auto_mixed_precision())) {
     optimizers->push_back(
         MakeUnique<AutoMixedPrecision>(cfg_.auto_mixed_precision()));
@@ -245,9 +248,6 @@ Status MetaOptimizer::InitializeOptimizers(
   }
   if (cfg_.gemm_optimization() != RewriterConfig::OFF) {
     optimizers->push_back(MakeUnique<GemmOptimizer>());
-  }
-  if (cfg_.tile_equal() != RewriterConfig::OFF) {
-    optimizers->push_back(MakeUnique<TileOptimizer>());
   }
   return InitializeCustomGraphOptimizers(std::set<string>(), optimizers);
 }
