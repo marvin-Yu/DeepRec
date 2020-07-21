@@ -74,7 +74,7 @@ class GRUOp : public OpKernel {
     }
 
     //[PROF-STATS]
-    uint64 delta = batch_size*rounds*(12*elt*elt + 25*elt);
+    uint64 delta = batch_size*rounds*(12*elts*elts + 25*elts);
     context->prof_stats()->flops += delta;
     if (VLOG_IS_ON(1)) {
       LOG(INFO) << "FLOPs = " << delta << ", BlazeGRU";

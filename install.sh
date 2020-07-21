@@ -13,11 +13,17 @@ done
 EXTERNAL_DIR="../_external"
 EXTERNAL_DIR=`readlink -f $EXTERNAL_DIR`
 HEADER_DIR=$EXTERNAL_DIR"/usr/local/include/"
+if [ ! -d $EXTERNAL_DIR ]; then
+    mkdir -p $EXTERNAL_DIR
+fi
 
 CURRENT_DIR=`basename $PWD`
 BAZEL_CACHE_DIR=`readlink bazel-$CURRENT_DIR`/../../
 BAZEL_EXTERNAL_DIR=$BAZEL_CACHE_DIR"/external/"
 
+if [ ! -d "$EXTERNAL_DIR/usr/local/lib/" ]; then
+    mkdir -p $EXTERNAL_DIR/usr/local/lib/
+fi
 for target in "${install_targets[@]}"
 do
     IFS='/' read -ra path <<< "$target"
@@ -38,9 +44,9 @@ if [ -d bazel-out/local-opt ]; then
     cd -
 fi
 if [ -d bazel-out/local_linux-opt ]; then
-   cd bazel-out/local_linux-opt/genfiles
-   find tensorflow/ -name '*.h' -exec cp --parents \{\} $HEADER_DIR/ \;
-   cd -
+    cd bazel-out/local_linux-opt/genfiles
+    find tensorflow/ -name '*.h' -exec cp --parents \{\} $HEADER_DIR/ \;
+    cd -
 fi
 if [ -d bazel-out/k8-opt ]; then
    cd bazel-out/k8-opt/genfiles
