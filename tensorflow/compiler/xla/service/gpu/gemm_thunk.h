@@ -53,7 +53,9 @@ class GemmThunk : public Thunk {
 
   //[PROF-STATS]
   void RecordStats(ProfStats* prof_stats) override {
-    prof_stats->flops += flops_;
+    if (prof_stats) {
+      prof_stats->flops += flops_;
+    }
   }
 
  private:
