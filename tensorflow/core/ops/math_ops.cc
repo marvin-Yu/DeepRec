@@ -217,7 +217,7 @@ REGISTER_OP("BlazeGRU")
     .Input("h2h_bias: T")  //[3elts]
     .Input("i2h_bias: T")  //[3elts]
     .Output("y: T")        //[batch_size, rounds, elts]
-    .Attr("T: {float}")
+    .Attr("T: {float, half}")
     .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
       // check param shapes
       c->set_output(0, c->input(0));

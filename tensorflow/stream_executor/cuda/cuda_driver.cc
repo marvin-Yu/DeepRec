@@ -209,13 +209,15 @@ ScopedActivateContext::ScopedActivateContext(GpuContext* cuda_context) {
 
   auto* tls = &tls_data.get();
   tls->depth++;
-  if (tls->id == cuda_context->id()) {
+  // Blaze runtime may change cuda context out of tensorflow, it isn't
+  // safe to use thread local id to cache cuda context
+  /*if (tls->id == cuda_context->id()) {
     if (kVerifyGpuContext) {
       CHECK_EQ(CurrentContext(), cuda_context->context());
     }
     DCHECK_EQ(CurrentContext(), cuda_context->context());
     return;
-  }
+  }*/
 
   VLOG(3) << "ScopedActivateContext switching context from " << tls->id
           << " to " << cuda_context->id();
@@ -224,6 +226,7 @@ ScopedActivateContext::ScopedActivateContext(GpuContext* cuda_context) {
 
   // Set the context and update thread local.
   CHECK_EQ(CUDA_SUCCESS, cuCtxSetCurrent(cuda_context->context()));
+
   tls->id = cuda_context->id();
   tls->context = cuda_context;
 }
