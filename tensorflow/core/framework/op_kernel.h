@@ -622,6 +622,8 @@ class OpKernelContext {
     //[DYNAMIC-SHAPE]
     uint64 before_padding = 0;
     uint64 after_padding = 0;
+    //[PROF-STATS]
+    ProfStats* prof_stats = nullptr;
 
     // The step being executed.
     int64 step_id = 0;
@@ -761,8 +763,10 @@ class OpKernelContext {
   Env* env() const { return params_->device->env(); }
 
   //[DYNAMIC-SHAPE]
-  uint64 before_padding() const {return params_->before_padding; }
-  uint64 after_padding() const {return params_->after_padding; }
+  uint64 before_padding() const { return params_->before_padding; }
+  uint64 after_padding() const { return params_->after_padding; }
+  //[PROF-STATS]
+  ProfStats* prof_stats() const { return params_->prof_stats; };
 
   int64 step_id() const { return params_->step_id; }
 

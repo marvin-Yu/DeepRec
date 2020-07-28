@@ -665,12 +665,22 @@ void TF_SessionMakeCallable(TF_Session* tf_sess, TF_CallableHandle* callable_han
   *callable_handle = handle;
 }
 
+//[PROF-STATS]
+inline void GetProfStats(TF_ProfStats* tf_prof_stats, 
+                         const RunMetadata::ProfStats& meta_prof_stats) {
+  if (tf_prof_stats) {
+    tf_prof_stats->flops = meta_prof_stats.flops();
+  }
+}
+
 void TF_SessionRunCallable(TF_Session* tf_sess, TF_CallableHandle callable_handle,
                            TF_Tensor* const* input_values, int ninputs,
                            TF_Tensor** output_values, int noutputs,
                            TF_Buffer* run_metadata, TF_Status* status,
                            //[DYNAMIC-SHAPE]
-                           uint64_t before_padding, uint64_t after_padding) {
+                           uint64_t before_padding, uint64_t after_padding,
+                           //[PROF-STATS]
+                           TF_ProfStats* prof_stats) {
   std::vector<Tensor> input_tensors(ninputs);
   for (int i = 0; i < ninputs; ++i) {
     status->status = tensorflow::TF_TensorToTensor(input_values[i], &input_tensors[i]);
@@ -685,6 +695,10 @@ void TF_SessionRunCallable(TF_Session* tf_sess, TF_CallableHandle callable_handl
   if (TF_GetCode(status) != TF_OK) {
     LOG(ERROR) << "RunCallabe failed!" << status->status.error_message();
     return;
+  }
+  //[PROF-STATS]
+  if (prof_stats) {
+    GetProfStats(prof_stats, run_metadata_proto.prof_stats());
   }
   // Serialize back to upstream client, who now owns the new buffer
   if (run_metadata != nullptr) {
