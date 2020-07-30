@@ -780,6 +780,8 @@ bool TF_CudaMemCopyDeviceToHost(int virtual_device_id, void* host_ptr, const voi
     LOG(ERROR) << "event init failed!";
     return false;
   }
+  DeviceMemoryBase device_memory(const_cast<void*>(device_ptr), length);
+  stream->ThenMemcpy(host_ptr, device_memory, length);
   stream->ThenRecordEvent(event.get());
   stream->ThenSynchronizeEvent(event.get());
   return true;
