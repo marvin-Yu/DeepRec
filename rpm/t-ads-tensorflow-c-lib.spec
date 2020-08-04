@@ -4,7 +4,7 @@
 ##############################################################
 Name: %(echo t-ads-tensorflow-c-lib${SUFFIX})
 Packager:xianjie.qxj
-Version:1.15.38
+Version:1.15.41
 # if you want get version number from outside, use like this
 Release:%(echo $RELEASE)%{?dist}
 
