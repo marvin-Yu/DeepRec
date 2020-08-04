@@ -17,6 +17,7 @@ limitations under the License.
 #define TENSORFLOW_CORE_PLATFORM_CUDA_LIBDEVICE_PATH_H_
 
 #include <vector>
+
 #include "tensorflow/core/platform/types.h"
 
 namespace tensorflow {
@@ -36,9 +37,11 @@ inline std::vector<string> CandidateCudaRoots(
   }
 
   const char* hippo_binary_path = getenv("HIPPO_APP_INST_ROOT");
-  if (hippo_binary_path){
+  if (hippo_binary_path) {
     candidates.emplace_back(std::string(hippo_binary_path) +
                             "/home/a/xdl-blaze");
+  } else {
+    candidates.emplace_back("/home/a/xdl-blaze");
   }
   // "." is our last resort, even though it probably won't work.
   candidates.push_back(".");
