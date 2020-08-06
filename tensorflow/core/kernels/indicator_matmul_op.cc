@@ -119,6 +119,17 @@ class IndicatorMatmulOp : public OpKernel {
       f(ctx->eigen_device<Device>(), out->flat<Scalar>());
       return;
     }
+    if (VLOG_IS_ON(1)) {
+      int64 flops = 1;
+      for (int i = 0; i < out_shape.dims(); i++) {
+        flops *= out_shape.dim_size(i);
+      }
+      LOG(INFO) << "FLOPs = " << flops * d1 * 2
+                << ", " << type_string()
+                << ", " << name()
+                << ", " << a.shape().DebugString()
+                << ", " << b.shape().DebugString();
+    }
     LaunchIndicatorMatmul<Device, Scalar, TIndex>()(ctx, trans_a_, trans_b_, d0,
                                                     d3, d1, a, b, ind, out,
                                                     batch_a, batch_b, 1);
@@ -200,6 +211,17 @@ class ParallelIndicatorMatmulOp : public OpKernel {
       functor::SetZeroFunctor<Device, Scalar> f;
       f(ctx->eigen_device<Device>(), out->flat<Scalar>());
       return;
+    }
+    if (VLOG_IS_ON(1)) {
+      int64 flops = 1;
+      for (int i = 0; i < out_shape.dims(); i++) {
+        flops *= out_shape.dim_size(i);
+      }
+      LOG(INFO) << "FLOPs = " << flops * d1 * 2
+                << ", " << type_string()
+                << ", " << name()
+                << ", " << a.shape().DebugString()
+                << ", " << b.shape().DebugString();
     }
     LaunchIndicatorMatmul<Device, Scalar, TIndex>()(
         ctx, trans_a_, trans_b_, d0, d3, d1, a, b, ind, out, batch_a, batch_b,
