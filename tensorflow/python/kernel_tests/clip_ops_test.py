@@ -63,8 +63,14 @@ class ClipTest(test.TestCase):
   # [Tensor, Scalar, Scalar]
   def DISABLED_testClipByValue0Type(self):
     for dtype in [
-        dtypes.float16, dtypes.float32, dtypes.float64, dtypes.int8,
-        dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint8, dtypes.uint16
+        dtypes.float16,
+        dtypes.float32,
+        dtypes.float64,
+        dtypes.bfloat16,
+        dtypes.int16,
+        dtypes.int32,
+        dtypes.int64,
+        dtypes.uint8,
     ]:
       with self.cached_session(use_gpu=True):
         x = constant_op.constant([1, 2, 3, 4, 5, 6], shape=[2, 3], dtype=dtype)
@@ -79,8 +85,14 @@ class ClipTest(test.TestCase):
   # [Tensor, Tensor, Scalar]
   def DISABLED_testClipByValue1Type(self):
     for dtype in [
-        dtypes.float16, dtypes.float32, dtypes.float64, dtypes.int8,
-        dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint8, dtypes.uint16
+        dtypes.float16,
+        dtypes.float32,
+        dtypes.float64,
+        dtypes.bfloat16,
+        dtypes.int16,
+        dtypes.int32,
+        dtypes.int64,
+        dtypes.uint8,
     ]:
       with self.cached_session(use_gpu=True):
         x = constant_op.constant([1, 2, 3, 4, 5, 6], shape=[2, 3], dtype=dtype)
@@ -96,8 +108,14 @@ class ClipTest(test.TestCase):
   # [Tensor, Scalar, Tensor]
   def DISABLED_testClipByValue2Type(self):
     for dtype in [
-        dtypes.float16, dtypes.float32, dtypes.float64, dtypes.int8,
-        dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint8, dtypes.uint16
+        dtypes.float16,
+        dtypes.float32,
+        dtypes.float64,
+        dtypes.bfloat16,
+        dtypes.int16,
+        dtypes.int32,
+        dtypes.int64,
+        dtypes.uint8,
     ]:
       with self.cached_session(use_gpu=True):
         x = constant_op.constant([1, 2, 3, 4, 5, 6], shape=[2, 3], dtype=dtype)
@@ -113,8 +131,14 @@ class ClipTest(test.TestCase):
   # [Tensor, Tensor, Tensor]
   def DISABLED_testClipByValue3Type(self):
     for dtype in [
-        dtypes.float16, dtypes.float32, dtypes.float64, dtypes.int8,
-        dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint8, dtypes.uint16
+        dtypes.float16,
+        dtypes.float32,
+        dtypes.float64,
+        dtypes.bfloat16,
+        dtypes.int16,
+        dtypes.int32,
+        dtypes.int64,
+        dtypes.uint8,
     ]:
       with self.cached_session(use_gpu=True):
         x = constant_op.constant([1, 2, 3, 4, 5, 6], shape=[2, 3], dtype=dtype)
