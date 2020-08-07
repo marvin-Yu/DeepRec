@@ -50,8 +50,13 @@ struct LaunchIndicatorMatmul<CPUDevice, Scalar, TIndex> {
     auto ind_ptr = indicator.template flat<TIndex>().data();
     for (int64 p = 0; p < paralle_num; p++) {
       for (int64 batch = 0; batch < batch_b; batch++) {
+        int64 ind = (int64)ind_ptr[batch];
+        if (ind < 0 || ind >= batch_a) {
+          //printf("Indicator ERROR for indicator_matmul, indicator: %d.\n", ind);
+          ind = 0;
+        }
         Gemm<Scalar>(context->eigen_device<CPUDevice>(), m, n, k,
-                     a_ptr + (p * batch_a + ind_ptr[batch]) * m * k,
+                     a_ptr + (p * batch_a + ind) * m * k,
                      b_ptr + (p * batch_b + batch) * k * n,
                      c_ptr + (p * batch_b + batch) * m * n, trans_a, trans_b);
       }
