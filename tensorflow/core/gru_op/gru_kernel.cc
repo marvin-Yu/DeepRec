@@ -99,8 +99,6 @@ class GRUOp : public OpKernel {
   };
 };
 
-
-
 // Register the CPU kernels.
 #define REGISTER_CPU(T)                                           \
   REGISTER_KERNEL_BUILDER(                                        \
