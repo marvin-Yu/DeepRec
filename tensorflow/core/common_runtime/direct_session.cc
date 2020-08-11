@@ -511,6 +511,12 @@ DirectSession::DirectSession(const SessionOptions& options,
     LOG(ERROR) << status.error_message();
   }
 
+  status =
+    ReadBoolFromEnvVar("ENABLE_PROF_STATS", true, &enable_prof_stats_);
+  if (!status.ok()) {
+    LOG(ERROR) << status.error_message();
+  }
+
   session_handle_ =
       strings::StrCat("direct", strings::FpToString(random::New64()));
   int devices_added = 0;
@@ -894,7 +900,11 @@ Status DirectSession::RunInternal(
   }
   //[PROF-STATS]
   ProfStats prof_stats;
-  args.prof_stats = &prof_stats;
+  if (enable_prof_stats_) {
+    args.prof_stats = &prof_stats;
+  } else {
+    args.prof_stats = nullptr;
+  }
   
 #ifdef GOOGLE_CUDA
   if (cuda_graph_device_context && cuda_graph_context) {
@@ -1091,7 +1101,9 @@ Status DirectSession::RunInternal(
   }
 
   //[PROF-STATS]
-  run_metadata->mutable_prof_stats()->set_flops(prof_stats.flops);
+  if (enable_prof_stats_) {
+    run_metadata->mutable_prof_stats()->set_flops(prof_stats.flops);
+  }
 
   // If requested via RunOptions, output the partition graphs.
   if (run_options.output_partition_graphs()) {

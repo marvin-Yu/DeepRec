@@ -400,6 +400,8 @@ class DirectSession : public Session {
 
   //[DYNAMIC-SHAPE]
   bool gemm_dynamic_batchsize_ = false;
+  //[PROF-STATS]
+  bool enable_prof_stats_ = true;
 
   // If true, blocks until device has finished all queued operations in a step.
   bool sync_on_finish_ = true;
