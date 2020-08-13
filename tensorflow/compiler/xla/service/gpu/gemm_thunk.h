@@ -51,12 +51,22 @@ class GemmThunk : public Thunk {
 
   Status ExecuteOnStream(const ExecuteParams& params) override;
 
+  //[PROF-STATS]
+  void RecordStats(ProfStats* prof_stats) override {
+    if (prof_stats) {
+      prof_stats->flops += flops_;
+    }
+  }
+
  private:
   const BufferAllocation::Slice lhs_buffer_;
   const BufferAllocation::Slice rhs_buffer_;
   const BufferAllocation::Slice output_buffer_;
   bool implements_whole_instruction_;
   GemmBackendConfig backend_config_;
+
+  //[PROF-STATS]
+  uint64 flops_ = 0;
 };
 
 // Run the given GEMM instruction `gemm` subject to the configuration
@@ -76,7 +86,9 @@ Status RunGemm(
     se::blas::ProfileResult* profile_result = nullptr,
     absl::optional<se::blas::AlgorithmType> algorithm = absl::nullopt,
     //[DYNAMIC-SHAPE]
-    uint64 before_padding = 0, uint64 after_padding = 0);
+    uint64 before_padding = 0, uint64 after_padding = 0,
+    //[PROF-STATS]
+    uint64* flops = nullptr);
 
 }  // namespace gpu
 }  // namespace xla

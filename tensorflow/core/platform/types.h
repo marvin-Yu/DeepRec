@@ -35,6 +35,11 @@ limitations under the License.
 
 namespace tensorflow {
 
+//[PROF-STATS]
+struct ProfStats {
+  uint64 flops = 0;
+};
+
 // Alias tensorflow::string to std::string.
 using std::string;
 

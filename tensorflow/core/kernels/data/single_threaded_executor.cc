@@ -236,6 +236,12 @@ class SingleThreadedExecutorImpl : public Executor {
     // TODO(mrry): Consider implementing forwarding.
     params.forward_from_array = nullptr;
 
+    //[DYNAMIC-SHAPE]
+    params.before_padding = args.before_padding;
+    params.after_padding = args.after_padding;
+    //[PROF-STATS]
+    params.prof_stats = args.prof_stats;
+
     // Execute the kernels one-at-a-time in topological order.
     for (size_t i = 0; i < kernels_.size(); ++i) {
       const KernelState& kernel_state = kernels_[i];

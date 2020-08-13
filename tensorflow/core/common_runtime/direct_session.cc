@@ -511,6 +511,12 @@ DirectSession::DirectSession(const SessionOptions& options,
     LOG(ERROR) << status.error_message();
   }
 
+  status =
+    ReadBoolFromEnvVar("ENABLE_PROF_STATS", true, &enable_prof_stats_);
+  if (!status.ok()) {
+    LOG(ERROR) << status.error_message();
+  }
+
   session_handle_ =
       strings::StrCat("direct", strings::FpToString(random::New64()));
   int devices_added = 0;
@@ -892,7 +898,14 @@ Status DirectSession::RunInternal(
     args.before_padding = run_options.padding_info().before_padding();
     args.after_padding = run_options.padding_info().after_padding();
   }
-
+  //[PROF-STATS]
+  ProfStats prof_stats;
+  if (enable_prof_stats_) {
+    args.prof_stats = &prof_stats;
+  } else {
+    args.prof_stats = nullptr;
+  }
+  
 #ifdef GOOGLE_CUDA
   if (cuda_graph_device_context && cuda_graph_context) {
     args.persistent_allocator =
@@ -1085,6 +1098,11 @@ Status DirectSession::RunInternal(
       TF_RETURN_IF_ERROR(
           cost_model_manager_.AddToCostGraphDef(item.graph, cost_graph));
     }
+  }
+
+  //[PROF-STATS]
+  if (enable_prof_stats_) {
+    run_metadata->mutable_prof_stats()->set_flops(prof_stats.flops);
   }
 
   // If requested via RunOptions, output the partition graphs.

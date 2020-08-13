@@ -55,13 +55,17 @@ Status GemmThunk::ExecuteOnStream(const ExecuteParams &params) {
   se::DeviceMemoryBase lhs_data = get_device_address(lhs_buffer_);
   se::DeviceMemoryBase rhs_data = get_device_address(rhs_buffer_);
   se::DeviceMemoryBase output_data = get_device_address(output_buffer_);
+  flops_ = 0;
   return RunGemm(hlo_instruction(), backend_config_, lhs_data, rhs_data,
                  output_data, params.stream, implements_whole_instruction_,
                  params.profiler,
                  /*profile_result =*/ nullptr,
                  /*algorithm =*/ absl::nullopt,
                  //[DYNAMIC-SHAPE]
-                 params.before_padding, params.after_padding);
+                 params.before_padding, params.after_padding,
+                 //[PROF-STATS]
+                 &flops_
+                 );
 }
 
 // This struct contains the metadata of a matrix, e.g., its base address and
@@ -80,7 +84,9 @@ static bool DoGemmWithAlgorithm(
     se::Stream *stream, absl::optional<se::blas::AlgorithmType> algorithm,
     se::blas::ProfileResult *output_profile_result,
     //[DYNAMIC-SHAPE]
-    uint64 before_padding, uint64 after_padding) {
+    uint64 before_padding, uint64 after_padding,
+    //[PROF-STATS]
+    uint64* flops) {
   DCHECK(!output_matrix.transpose);
 
   PrimitiveType type = primitive_util::NativeToPrimitiveType<InT>();
@@ -129,6 +135,11 @@ static bool DoGemmWithAlgorithm(
                 <<", using size "<<num_cols_needed<<" instead of "<<after_padding;
       }
     }
+  }
+  //[PROF-STATS]
+  if (flops) {
+    uint64 delta = batch_size*(2*k*num_cols_needed*output_matrix.num_rows);
+    *flops += delta;
   }
 
   if (algorithm) {
@@ -185,7 +196,10 @@ Status RunGemm(const HloInstruction *gemm,
                se::blas::ProfileResult *profile_result,
                absl::optional<se::blas::AlgorithmType> algorithm,
                //[DYNAMIC-SHAPE]
-               uint64 before_padding, uint64 after_padding) {
+               uint64 before_padding, uint64 after_padding,
+               //[PROF-STATS]
+               uint64* flops
+               ) {
   VLOG(2) << "Executing a GemmThunk";
   CHECK(IsCublasGemm(*gemm));
 
@@ -301,7 +315,7 @@ Status RunGemm(const HloInstruction *gemm,
             beta, stream, best_algorithm,
             /*output_profile_result=*/profile_result,
             //[DYNAMIC-SHAPE]
-            before_padding, after_padding);
+            before_padding, after_padding, flops);
       case F32:
         CHECK_EQ(alpha.imag(), 0);
         if (lhs_shape.element_type() == F16) {
@@ -310,14 +324,14 @@ Status RunGemm(const HloInstruction *gemm,
               beta, stream, best_algorithm,
               /*output_profile_result=*/profile_result,
               //[DYNAMIC-SHAPE]
-              before_padding, after_padding);
+              before_padding, after_padding, flops);
         } else {
           return DoGemmWithAlgorithm<float, float, double>(
               batch_size, lhs_matrix, rhs_matrix, output_matrix, alpha.real(),
               beta, stream, best_algorithm,
               /*output_profile_result=*/profile_result,
               //[DYNAMIC-SHAPE]
-              before_padding, after_padding);
+              before_padding, after_padding, flops);
         }
       case F64:
         CHECK_EQ(alpha.imag(), 0);
@@ -326,21 +340,21 @@ Status RunGemm(const HloInstruction *gemm,
             beta, stream, best_algorithm,
             /*output_profile_result=*/profile_result,
             //[DYNAMIC-SHAPE]
-            before_padding, after_padding);
+            before_padding, after_padding, flops);
       case C64:
         return DoGemmWithAlgorithm<complex64, complex64, complex64>(
             batch_size, lhs_matrix, rhs_matrix, output_matrix,
             static_cast<complex64>(alpha), beta, stream, best_algorithm,
             /*output_profile_result=*/profile_result,
             //[DYNAMIC-SHAPE]
-            before_padding, after_padding);
+            before_padding, after_padding, flops);
       case C128:
         return DoGemmWithAlgorithm<complex128, complex128, complex128>(
             batch_size, lhs_matrix, rhs_matrix, output_matrix, alpha, beta,
             stream, best_algorithm,
             /*output_profile_result=*/profile_result,
             //[DYNAMIC-SHAPE]
-            before_padding, after_padding);
+            before_padding, after_padding, flops);
       default:
         LOG(FATAL) << "Unsupported type.";
     }

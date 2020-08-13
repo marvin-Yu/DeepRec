@@ -79,6 +79,10 @@ class Thunk {
   Kind kind() const { return kind_; }
   const HloInstruction* hlo_instruction() const { return hlo_instruction_; }
 
+  //[PROF-STATS]
+  virtual void RecordStats(ProfStats* prof_stats) {
+    //do nothing
+  };
   // Prepares the thunk for execution on the given StreamExecutor.
   //
   // This may be called multiple times.  Its main purpose is to give us a chance

@@ -134,6 +134,8 @@ class Executor {
     //[DYNAMIC-SHAPE]
     uint64 before_padding = 0;
     uint64 after_padding = 0;
+    //[PROF-STATS]
+    ProfStats* prof_stats = nullptr;
   };
   typedef std::function<void(const Status&)> DoneCallback;
   virtual void RunAsync(const Args& args, DoneCallback done) = 0;
