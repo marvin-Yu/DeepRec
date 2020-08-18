@@ -3680,6 +3680,7 @@ cc_library(
         ":fft_ops",
         ":histogram_op",
         ":indicator_matmul_op",
+        ":indicator_batched_small_matmul_op",
         ":matmul_op",
         ":nextafter_op",
         ":population_count_op",
@@ -3721,6 +3722,17 @@ tf_kernel_library(
     gpu_srcs = [
       "indicator_matmul_op.h",
       "indicator_matmul_op_gpu.cu.cc",
+    ],
+    deps = MATH_DEPS,
+)
+
+tf_kernel_library(
+    name = "indicator_batched_small_matmul_op",
+    hdrs = ["indicator_batched_small_matmul_op.h"],
+    srcs = ["indicator_batched_small_matmul_op.cc"],
+    gpu_srcs = [
+        "indicator_batched_small_matmul_op.h",
+        "indicator_batched_small_matmul_op_gpu.cu.cc",
     ],
     deps = MATH_DEPS,
 )
