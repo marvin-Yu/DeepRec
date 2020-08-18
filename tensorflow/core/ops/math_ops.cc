@@ -219,6 +219,7 @@ REGISTER_OP("ParallelIndicatorBatchedSmallMatMul")
     .Attr("Tindices: {int32, int64}")
     .Attr("adj_x: bool = false")
     .Attr("adj_y: bool = false")
+    .Attr("use_tanh: bool = false")
     .Attr("parallel_num: int >= 1")
     .SetShapeFn([](InferenceContext* c) {
       ShapeHandle a;

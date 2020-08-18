@@ -23,7 +23,8 @@
 #define EIGEN_USE_GPU
 #include "tensorflow/core/util/gpu_kernel_helper.h"
 
-namespace {
+namespace tensorflow {
+namespace indicator_batched_small_matmul {
 template <typename Scalar, typename TIndex>
 struct IMatmulParam {
   Scalar* A;
@@ -34,7 +35,7 @@ struct IMatmulParam {
   int batch_a, batch_b;
 };
 
-template <typename Scalar, typename TIndex, int KSIZE, int NSIZE>
+template <bool use_tanh, typename Scalar, typename TIndex, int KSIZE, int NSIZE>
 __global__ void ComputeIndicatorBatchedSmallMatmulKernel(
     IMatmulParam<Scalar, TIndex> param) {
   int bx = blockIdx.x;
@@ -76,19 +77,23 @@ __global__ void ComputeIndicatorBatchedSmallMatmulKernel(
 
   Scalar* C = param.C + bx * (param.batch_b * param.m * NSIZE) +
               by * (param.m * NSIZE) + toff * NSIZE;
+
 #pragma unroll
   for (int j = 0; j < NSIZE; j++) {
-    C[j] = Scalar(Csub[j]);
+    if (use_tanh) {
+      C[j] = Scalar(tanh(Csub[j]));
+    } else {
+      C[j] = Scalar(Csub[j]);
+    }
   }
 }
-}  // namespace
 
-namespace tensorflow {
-template <typename Scalar, typename TIndex>
-void LaunchIndicatorBatchedSmallMatmul<GPUDevice, Scalar, TIndex>::operator()(
-    OpKernelContext* context, bool trans_a, bool trans_b, int64 m, int64 n,
-    int64 k, const Tensor& in_a, const Tensor& in_b, const Tensor& indicator,
-    Tensor* out, int64 batch_a, int64 batch_b, int64 parallel_num) {
+template <bool use_tanh, typename Scalar, typename TIndex>
+void LaunchIndicatorBatchedSmallMatmul<GPUDevice, use_tanh, Scalar, TIndex>::
+operator()(OpKernelContext* context, bool trans_a, bool trans_b, int64 m,
+           int64 n, int64 k, const Tensor& in_a, const Tensor& in_b,
+           const Tensor& indicator, Tensor* out, int64 batch_a, int64 batch_b,
+           int64 parallel_num) {
   IMatmulParam<Scalar, TIndex> param;
   param.A = const_cast<Scalar*>(in_a.template flat<Scalar>().data());
   param.B = const_cast<Scalar*>(in_b.template flat<Scalar>().data());
@@ -104,7 +109,8 @@ void LaunchIndicatorBatchedSmallMatmul<GPUDevice, Scalar, TIndex>::operator()(
   const auto& d = context->eigen_device<GPUDevice>();
   if (k == 5 && n == 4) {
     TF_CHECK_OK(GpuLaunchKernel(
-        ComputeIndicatorBatchedSmallMatmulKernel<Scalar, TIndex, 5, 4>,
+        ComputeIndicatorBatchedSmallMatmulKernel<use_tanh, Scalar, TIndex, 5,
+                                                 4>,
         grid_dim, block_dim, 5 * 4 * sizeof(Scalar), d.stream(), param));
   } else {
     // TODO: add more shape support
@@ -112,13 +118,30 @@ void LaunchIndicatorBatchedSmallMatmul<GPUDevice, Scalar, TIndex>::operator()(
   }
 }  // namespace tensorflow
 
-template struct LaunchIndicatorBatchedSmallMatmul<GPUDevice, float, int32>;
-template struct LaunchIndicatorBatchedSmallMatmul<GPUDevice, double, int32>;
-template struct LaunchIndicatorBatchedSmallMatmul<GPUDevice, Eigen::half,
+template struct LaunchIndicatorBatchedSmallMatmul<GPUDevice, false, float,
                                                   int32>;
-template struct LaunchIndicatorBatchedSmallMatmul<GPUDevice, float, int64>;
-template struct LaunchIndicatorBatchedSmallMatmul<GPUDevice, double, int64>;
-template struct LaunchIndicatorBatchedSmallMatmul<GPUDevice, Eigen::half,
+template struct LaunchIndicatorBatchedSmallMatmul<GPUDevice, false, double,
+                                                  int32>;
+template struct LaunchIndicatorBatchedSmallMatmul<GPUDevice, false, Eigen::half,
+                                                  int32>;
+template struct LaunchIndicatorBatchedSmallMatmul<GPUDevice, true, float,
+                                                  int32>;
+template struct LaunchIndicatorBatchedSmallMatmul<GPUDevice, true, double,
+                                                  int32>;
+template struct LaunchIndicatorBatchedSmallMatmul<GPUDevice, true, Eigen::half,
+                                                  int32>;
+template struct LaunchIndicatorBatchedSmallMatmul<GPUDevice, false, float,
                                                   int64>;
+template struct LaunchIndicatorBatchedSmallMatmul<GPUDevice, false, double,
+                                                  int64>;
+template struct LaunchIndicatorBatchedSmallMatmul<GPUDevice, false, Eigen::half,
+                                                  int64>;
+template struct LaunchIndicatorBatchedSmallMatmul<GPUDevice, true, float,
+                                                  int64>;
+template struct LaunchIndicatorBatchedSmallMatmul<GPUDevice, true, double,
+                                                  int64>;
+template struct LaunchIndicatorBatchedSmallMatmul<GPUDevice, true, Eigen::half,
+                                                  int64>;
+}  // namespace indicator_batched_small_matmul
 }  // namespace tensorflow
 #endif  // GOOGLE_CUDA

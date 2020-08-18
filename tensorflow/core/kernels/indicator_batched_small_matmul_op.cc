@@ -21,7 +21,7 @@
 
 namespace {
 typedef Eigen::ThreadPoolDevice CPUDevice;
-template <typename T>
+template <bool use_tanh, typename T>
 void Gemm(const CPUDevice& d, size_t m, size_t n, size_t k, const T* a,
           const T* b, T* c, bool trans_a, bool trans_b) {
   auto a0 = trans_a ? k : m;
@@ -36,12 +36,18 @@ void Gemm(const CPUDevice& d, size_t m, size_t n, size_t k, const T* a,
   dim_pair[0].first = trans_a ? 0 : 1;
   dim_pair[0].second = trans_b ? 1 : 0;
   c_matrix.device(d) = a_matrix.contract(b_matrix, dim_pair);
+  if (use_tanh) {
+    for (int i = 0; i < m * n; i++) {
+      c[i] = T(tanh(float(c[i])));
+    }
+  }
 }
 }  // namespace
 
 namespace tensorflow {
-template <typename Scalar, typename TIndex>
-struct LaunchIndicatorBatchedSmallMatmul<CPUDevice, Scalar, TIndex> {
+namespace indicator_batched_small_matmul {
+template <bool use_tanh, typename Scalar, typename TIndex>
+struct LaunchIndicatorBatchedSmallMatmul<CPUDevice, use_tanh, Scalar, TIndex> {
   void operator()(OpKernelContext* context, bool trans_a, bool trans_b, int64 m,
                   int64 n, int64 k, const Tensor& in_a, const Tensor& in_b,
                   const Tensor& indicator, Tensor* out, int64 batch_a,
@@ -52,10 +58,11 @@ struct LaunchIndicatorBatchedSmallMatmul<CPUDevice, Scalar, TIndex> {
     auto ind_ptr = indicator.template flat<TIndex>().data();
     for (int64 p = 0; p < paralle_num; p++) {
       for (int64 batch = 0; batch < batch_b; batch++) {
-        Gemm<Scalar>(context->eigen_device<CPUDevice>(), m, n, k,
-                     a_ptr + (p * batch_a + ind_ptr[batch]) * m * k,
-                     b_ptr + (p * batch_b + batch) * k * n,
-                     c_ptr + (p * batch_b + batch) * m * n, trans_a, trans_b);
+        Gemm<use_tanh, Scalar>(context->eigen_device<CPUDevice>(), m, n, k,
+                             a_ptr + (p * batch_a + ind_ptr[batch]) * m * k,
+                             b_ptr + (p * batch_b + batch) * k * n,
+                             c_ptr + (p * batch_b + batch) * m * n, trans_a,
+                             trans_b);
       }
     }
   }
@@ -68,6 +75,7 @@ class ParallelIndicatorBatchedSmallMatmulOp : public OpKernel {
       : OpKernel(context) {
     OP_REQUIRES_OK(context, context->GetAttr("adj_x", &trans_a_));
     OP_REQUIRES_OK(context, context->GetAttr("adj_y", &trans_b_));
+    OP_REQUIRES_OK(context, context->GetAttr("use_tanh", &use_tanh_));
     OP_REQUIRES_OK(context, context->GetAttr("parallel_num", &parallel_num));
   }
 
@@ -131,14 +139,21 @@ class ParallelIndicatorBatchedSmallMatmulOp : public OpKernel {
       f(ctx->eigen_device<Device>(), out->flat<Scalar>());
       return;
     }
-    LaunchIndicatorBatchedSmallMatmul<Device, Scalar, TIndex>()(
-        ctx, trans_a_, trans_b_, d0, d3, d1, a, b, ind, out, batch_a, batch_b,
-        parallel_num);
+    if (use_tanh_) {
+      LaunchIndicatorBatchedSmallMatmul<Device, true, Scalar, TIndex>()(
+          ctx, trans_a_, trans_b_, d0, d3, d1, a, b, ind, out, batch_a, batch_b,
+          parallel_num);
+    } else {
+      LaunchIndicatorBatchedSmallMatmul<Device, false, Scalar, TIndex>()(
+          ctx, trans_a_, trans_b_, d0, d3, d1, a, b, ind, out, batch_a, batch_b,
+          parallel_num);
+    }
   }
 
  private:
   bool trans_a_;
   bool trans_b_;
+  bool use_tanh_;
   int64 parallel_num;
 };
 
@@ -159,17 +174,19 @@ REGISTER_INDICATOR_BATCHED_SMALL_MATMUL_CPU_ALL_INDICES(double);
 REGISTER_INDICATOR_BATCHED_SMALL_MATMUL_CPU_ALL_INDICES(Eigen::half);
 
 #undef REGISTER_INDICATOR_BATCHED_SMALL_MATMUL_CPU_ALL_INDICES
-#undef REGISTER_INDICATOR_BATCHED_SMALL_MATMUL_CPU 
+#undef REGISTER_INDICATOR_BATCHED_SMALL_MATMUL_CPU
 
 #if GOOGLE_CUDA
-#define REGISTER_INDICATOR_BATCHED_SMALL_MATMUL_GPU(TYPE, TIndex)           \
-  extern template struct LaunchIndicatorBatchedSmallMatmul<GPUDevice, TYPE, \
-                                                           TIndex>;         \
-  REGISTER_KERNEL_BUILDER(                                                  \
-      Name("ParallelIndicatorBatchedSmallMatMul")                           \
-          .Device(DEVICE_GPU)                                               \
-          .TypeConstraint<TYPE>("T")                                        \
-          .TypeConstraint<TIndex>("Tindices"),                              \
+#define REGISTER_INDICATOR_BATCHED_SMALL_MATMUL_GPU(TYPE, TIndex) \
+  extern template struct LaunchIndicatorBatchedSmallMatmul<       \
+      GPUDevice, false, TYPE, TIndex>;                     \
+  extern template struct LaunchIndicatorBatchedSmallMatmul<       \
+      GPUDevice, true, TYPE, TIndex>;                       \
+  REGISTER_KERNEL_BUILDER(                                        \
+      Name("ParallelIndicatorBatchedSmallMatMul")                 \
+          .Device(DEVICE_GPU)                                     \
+          .TypeConstraint<TYPE>("T")                              \
+          .TypeConstraint<TIndex>("Tindices"),                    \
       ParallelIndicatorBatchedSmallMatmulOp<GPUDevice, TYPE, TIndex>);
 
 #define REGISTER_INDICATOR_BATCHED_SMALL_MATMUL_GPU_ALL_INDICES(type) \
@@ -183,5 +200,5 @@ REGISTER_INDICATOR_BATCHED_SMALL_MATMUL_GPU_ALL_INDICES(Eigen::half);
 #undef REGISTER_INDICATOR_BATCHED_SMALL_MATMUL_GPU_ALL_INDICES
 #undef REGISTER_INDICATOR_BATCHED_SMALL_MATMUL_GPU
 #endif  // GOOGLE_CUDA
-
+}  // namespace indicator_batched_small_matmul
 }  // namespace tensorflow
