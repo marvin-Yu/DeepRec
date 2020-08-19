@@ -124,13 +124,14 @@ operator()(OpKernelContext* context, bool trans_a, bool trans_b, int64 m,
 
   const auto& d = context->eigen_device<GPUDevice>();
   if (k == 5 && n == 4) {
+    // hold small matmul cases
     TF_CHECK_OK(GpuLaunchKernel(
         ComputeIndicatorBatchedSmallMatmulKernel<use_tanh, Scalar, TIndex, 5,
                                                  4>,
         grid_dim, block_dim, 5 * 4 * sizeof(Scalar), d.stream(), param));
     return Status::OK();
   } else {
-    // TODO: add more shape support
+    // hold general cases
     LaunchIndicatorMatmul<GPUDevice, Scalar, TIndex>()(
         context, trans_a, trans_b, m, n, k, in_a, in_b, indicator, out, batch_a,
         batch_b, parallel_num);
@@ -143,6 +144,7 @@ operator()(OpKernelContext* context, bool trans_a, bool trans_b, int64 m,
                                   dim3(thread_per_block), 0, d.stream(),
                                   param.C, work_elem_count));
     }
+    return Status::OK();
   }
   return Status::OK();
 }  // namespace tensorflow
