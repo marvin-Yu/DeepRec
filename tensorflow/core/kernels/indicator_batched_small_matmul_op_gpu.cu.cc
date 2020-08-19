@@ -10,7 +10,9 @@
 #include "tensorflow/core/framework/types.h"
 #include "tensorflow/core/kernels/fill_functor.h"
 #include "tensorflow/core/kernels/indicator_batched_small_matmul_op.h"
+#include "tensorflow/core/kernels/indicator_matmul_op.h"
 #include "tensorflow/core/lib/core/errors.h"
+#include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/gtl/inlined_vector.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/types.h"
@@ -88,8 +90,16 @@ __global__ void ComputeIndicatorBatchedSmallMatmulKernel(
   }
 }
 
+template <typename Scalar>
+__global__ void ComputeInplaceTanhKernel(Scalar* src, int size) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  // Bound check
+  if (idx >= size) return;
+  src[idx] = Scalar(tanh(float(src[idx])));
+}
+
 template <bool use_tanh, typename Scalar, typename TIndex>
-void LaunchIndicatorBatchedSmallMatmul<GPUDevice, use_tanh, Scalar, TIndex>::
+Status LaunchIndicatorBatchedSmallMatmul<GPUDevice, use_tanh, Scalar, TIndex>::
 operator()(OpKernelContext* context, bool trans_a, bool trans_b, int64 m,
            int64 n, int64 k, const Tensor& in_a, const Tensor& in_b,
            const Tensor& indicator, Tensor* out, int64 batch_a, int64 batch_b,
@@ -102,20 +112,39 @@ operator()(OpKernelContext* context, bool trans_a, bool trans_b, int64 m,
       const_cast<TIndex*>(indicator.template flat<TIndex>().data());
   param.m = m, param.n = n, param.k = k;
   param.batch_a = batch_a, param.batch_b = batch_b;
-  assert(trans_a == false);
-  assert(trans_b == false);
   dim3 grid_dim(parallel_num, batch_b, (m + k * n - 1) / (k * n));
   dim3 block_dim(k, n);
+
+  if (trans_a || trans_b) {
+    LaunchIndicatorMatmul<GPUDevice, Scalar, TIndex>()(
+        context, trans_a, trans_b, m, n, k, in_a, in_b, indicator, out, batch_a,
+        batch_b, parallel_num);
+    return Status::OK();
+  }
+
   const auto& d = context->eigen_device<GPUDevice>();
   if (k == 5 && n == 4) {
     TF_CHECK_OK(GpuLaunchKernel(
         ComputeIndicatorBatchedSmallMatmulKernel<use_tanh, Scalar, TIndex, 5,
                                                  4>,
         grid_dim, block_dim, 5 * 4 * sizeof(Scalar), d.stream(), param));
+    return Status::OK();
   } else {
     // TODO: add more shape support
-    assert(0);
+    LaunchIndicatorMatmul<GPUDevice, Scalar, TIndex>()(
+        context, trans_a, trans_b, m, n, k, in_a, in_b, indicator, out, batch_a,
+        batch_b, parallel_num);
+    if (use_tanh) {
+      const int work_elem_count = parallel_num * batch_b * m * n;
+      const int thread_per_block = std::min(1024, d.maxGpuThreadsPerBlock());
+      const int blocks =
+          (work_elem_count + thread_per_block - 1) / thread_per_block;
+      TF_CHECK_OK(GpuLaunchKernel(ComputeInplaceTanhKernel<Scalar>, dim3(blocks),
+                                  dim3(thread_per_block), 0, d.stream(),
+                                  param.C, work_elem_count));
+    }
   }
+  return Status::OK();
 }  // namespace tensorflow
 
 template struct LaunchIndicatorBatchedSmallMatmul<GPUDevice, false, float,
