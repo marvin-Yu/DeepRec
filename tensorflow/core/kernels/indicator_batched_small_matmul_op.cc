@@ -12,6 +12,7 @@
 #include "tensorflow/core/framework/types.h"
 #include "tensorflow/core/kernels/fill_functor.h"
 #include "tensorflow/core/lib/core/errors.h"
+#include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/gtl/inlined_vector.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/types.h"
@@ -48,10 +49,10 @@ namespace tensorflow {
 namespace indicator_batched_small_matmul {
 template <bool use_tanh, typename Scalar, typename TIndex>
 struct LaunchIndicatorBatchedSmallMatmul<CPUDevice, use_tanh, Scalar, TIndex> {
-  void operator()(OpKernelContext* context, bool trans_a, bool trans_b, int64 m,
-                  int64 n, int64 k, const Tensor& in_a, const Tensor& in_b,
-                  const Tensor& indicator, Tensor* out, int64 batch_a,
-                  int64 batch_b, int64 paralle_num) {
+  Status operator()(OpKernelContext* context, bool trans_a, bool trans_b,
+                    int64 m, int64 n, int64 k, const Tensor& in_a,
+                    const Tensor& in_b, const Tensor& indicator, Tensor* out,
+                    int64 batch_a, int64 batch_b, int64 paralle_num) {
     auto a_ptr = in_a.template flat<Scalar>().data();
     auto b_ptr = in_b.template flat<Scalar>().data();
     auto c_ptr = out->template flat<Scalar>().data();
@@ -59,12 +60,13 @@ struct LaunchIndicatorBatchedSmallMatmul<CPUDevice, use_tanh, Scalar, TIndex> {
     for (int64 p = 0; p < paralle_num; p++) {
       for (int64 batch = 0; batch < batch_b; batch++) {
         Gemm<use_tanh, Scalar>(context->eigen_device<CPUDevice>(), m, n, k,
-                             a_ptr + (p * batch_a + ind_ptr[batch]) * m * k,
-                             b_ptr + (p * batch_b + batch) * k * n,
-                             c_ptr + (p * batch_b + batch) * m * n, trans_a,
-                             trans_b);
+                               a_ptr + (p * batch_a + ind_ptr[batch]) * m * k,
+                               b_ptr + (p * batch_b + batch) * k * n,
+                               c_ptr + (p * batch_b + batch) * m * n, trans_a,
+                               trans_b);
       }
     }
+    return Status::OK();
   }
 };
 
@@ -140,13 +142,17 @@ class ParallelIndicatorBatchedSmallMatmulOp : public OpKernel {
       return;
     }
     if (use_tanh_) {
-      LaunchIndicatorBatchedSmallMatmul<Device, true, Scalar, TIndex>()(
-          ctx, trans_a_, trans_b_, d0, d3, d1, a, b, ind, out, batch_a, batch_b,
-          parallel_num);
+      OP_REQUIRES_OK(
+          ctx,
+          LaunchIndicatorBatchedSmallMatmul<Device, true, Scalar, TIndex>()(
+              ctx, trans_a_, trans_b_, d0, d3, d1, a, b, ind, out, batch_a,
+              batch_b, parallel_num));
     } else {
-      LaunchIndicatorBatchedSmallMatmul<Device, false, Scalar, TIndex>()(
-          ctx, trans_a_, trans_b_, d0, d3, d1, a, b, ind, out, batch_a, batch_b,
-          parallel_num);
+      OP_REQUIRES_OK(
+          ctx,
+          LaunchIndicatorBatchedSmallMatmul<Device, false, Scalar, TIndex>()(
+              ctx, trans_a_, trans_b_, d0, d3, d1, a, b, ind, out, batch_a,
+              batch_b, parallel_num));
     }
   }
 
@@ -177,16 +183,16 @@ REGISTER_INDICATOR_BATCHED_SMALL_MATMUL_CPU_ALL_INDICES(Eigen::half);
 #undef REGISTER_INDICATOR_BATCHED_SMALL_MATMUL_CPU
 
 #if GOOGLE_CUDA
-#define REGISTER_INDICATOR_BATCHED_SMALL_MATMUL_GPU(TYPE, TIndex) \
-  extern template struct LaunchIndicatorBatchedSmallMatmul<       \
-      GPUDevice, false, TYPE, TIndex>;                     \
-  extern template struct LaunchIndicatorBatchedSmallMatmul<       \
-      GPUDevice, true, TYPE, TIndex>;                       \
-  REGISTER_KERNEL_BUILDER(                                        \
-      Name("ParallelIndicatorBatchedSmallMatMul")                 \
-          .Device(DEVICE_GPU)                                     \
-          .TypeConstraint<TYPE>("T")                              \
-          .TypeConstraint<TIndex>("Tindices"),                    \
+#define REGISTER_INDICATOR_BATCHED_SMALL_MATMUL_GPU(TYPE, TIndex)            \
+  extern template struct LaunchIndicatorBatchedSmallMatmul<GPUDevice, false, \
+                                                           TYPE, TIndex>;    \
+  extern template struct LaunchIndicatorBatchedSmallMatmul<GPUDevice, true,  \
+                                                           TYPE, TIndex>;    \
+  REGISTER_KERNEL_BUILDER(                                                   \
+      Name("ParallelIndicatorBatchedSmallMatMul")                            \
+          .Device(DEVICE_GPU)                                                \
+          .TypeConstraint<TYPE>("T")                                         \
+          .TypeConstraint<TIndex>("Tindices"),                               \
       ParallelIndicatorBatchedSmallMatmulOp<GPUDevice, TYPE, TIndex>);
 
 #define REGISTER_INDICATOR_BATCHED_SMALL_MATMUL_GPU_ALL_INDICES(type) \

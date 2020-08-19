@@ -3734,7 +3734,7 @@ tf_kernel_library(
         "indicator_batched_small_matmul_op.h",
         "indicator_batched_small_matmul_op_gpu.cu.cc",
     ],
-    deps = MATH_DEPS,
+    deps = MATH_DEPS + [":indicator_matmul_op"],
 )
 
 tf_mkl_kernel_library(
