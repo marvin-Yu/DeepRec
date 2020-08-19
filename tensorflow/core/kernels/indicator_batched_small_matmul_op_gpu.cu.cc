@@ -115,15 +115,8 @@ operator()(OpKernelContext* context, bool trans_a, bool trans_b, int64 m,
   dim3 grid_dim(parallel_num, batch_b, (m + k * n - 1) / (k * n));
   dim3 block_dim(k, n);
 
-  if (trans_a || trans_b) {
-    LaunchIndicatorMatmul<GPUDevice, Scalar, TIndex>()(
-        context, trans_a, trans_b, m, n, k, in_a, in_b, indicator, out, batch_a,
-        batch_b, parallel_num);
-    return Status::OK();
-  }
-
   const auto& d = context->eigen_device<GPUDevice>();
-  if (k == 5 && n == 4) {
+  if (!trans_a && !trans_b && k == 5 && n == 4) {
     // hold small matmul cases
     TF_CHECK_OK(GpuLaunchKernel(
         ComputeIndicatorBatchedSmallMatmulKernel<use_tanh, Scalar, TIndex, 5,
