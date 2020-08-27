@@ -771,15 +771,19 @@ bool TF_CudaMemCopyHostToDevice(int virtual_device_id, void* device_ptr, const v
 
 bool TF_CudaMemCopyDeviceToHost(int virtual_device_id, void* host_ptr, const void* device_ptr, size_t length) {
   BaseGPUDevice::StreamGroup* stream_group = GetStreamGroupOfVirtualDevice(virtual_device_id);
-  Stream* compute_stream = stream_group->compute;
-  Stream* d2h_stream = stream_group->device_to_host;
-  if (compute_stream == nullptr || d2h_stream == nullptr) {
+  Stream* stream = stream_group->compute;
+  if (stream == nullptr) {
     return false;
   }
-  d2h_stream->ThenWaitFor(compute_stream);
+  auto event = std::make_shared<Event>(stream->parent());
+  if (!event->Init()) {
+    LOG(ERROR) << "event init failed!";
+    return false;
+  }
   DeviceMemoryBase device_memory(const_cast<void*>(device_ptr), length);
-  d2h_stream->ThenMemcpy(host_ptr, device_memory, length);
-  d2h_stream->BlockHostUntilDone();
+  stream->ThenMemcpy(host_ptr, device_memory, length);
+  stream->ThenRecordEvent(event.get());
+  stream->ThenSynchronizeEvent(event.get());
   return true;
 }
 

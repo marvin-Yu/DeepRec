@@ -50,8 +50,13 @@ struct LaunchIndicatorMatmul<CPUDevice, Scalar, TIndex> {
     auto ind_ptr = indicator.template flat<TIndex>().data();
     for (int64 p = 0; p < paralle_num; p++) {
       for (int64 batch = 0; batch < batch_b; batch++) {
+        int64 ind = (int64)ind_ptr[batch];
+        if (ind < 0 || ind >= batch_a) {
+          //printf("Indicator ERROR for indicator_matmul, indicator: %d.\n", ind);
+          ind = 0;
+        }
         Gemm<Scalar>(context->eigen_device<CPUDevice>(), m, n, k,
-                     a_ptr + (p * batch_a + ind_ptr[batch]) * m * k,
+                     a_ptr + (p * batch_a + ind) * m * k,
                      b_ptr + (p * batch_b + batch) * k * n,
                      c_ptr + (p * batch_b + batch) * m * n, trans_a, trans_b);
       }
@@ -118,6 +123,17 @@ class IndicatorMatmulOp : public OpKernel {
       functor::SetZeroFunctor<Device, Scalar> f;
       f(ctx->eigen_device<Device>(), out->flat<Scalar>());
       return;
+    }
+    if (VLOG_IS_ON(1)) {
+      int64 flops = 1;
+      for (int i = 0; i < out_shape.dims(); i++) {
+        flops *= out_shape.dim_size(i);
+      }
+      LOG(INFO) << "FLOPs = " << flops * d1 * 2
+                << ", " << type_string()
+                << ", " << name()
+                << ", " << a.shape().DebugString()
+                << ", " << b.shape().DebugString();
     }
     LaunchIndicatorMatmul<Device, Scalar, TIndex>()(ctx, trans_a_, trans_b_, d0,
                                                     d3, d1, a, b, ind, out,
@@ -200,6 +216,17 @@ class ParallelIndicatorMatmulOp : public OpKernel {
       functor::SetZeroFunctor<Device, Scalar> f;
       f(ctx->eigen_device<Device>(), out->flat<Scalar>());
       return;
+    }
+    if (VLOG_IS_ON(1)) {
+      int64 flops = 1;
+      for (int i = 0; i < out_shape.dims(); i++) {
+        flops *= out_shape.dim_size(i);
+      }
+      LOG(INFO) << "FLOPs = " << flops * d1 * 2
+                << ", " << type_string()
+                << ", " << name()
+                << ", " << a.shape().DebugString()
+                << ", " << b.shape().DebugString();
     }
     LaunchIndicatorMatmul<Device, Scalar, TIndex>()(
         ctx, trans_a_, trans_b_, d0, d3, d1, a, b, ind, out, batch_a, batch_b,
