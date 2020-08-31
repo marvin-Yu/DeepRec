@@ -1847,13 +1847,13 @@ Status AlgebraicSimplifierVisitor::HandleDot(HloInstruction* dot) {
     return ReplaceInstruction(dot, dot_of_reorder_optimized);
   }
 
-  TF_ASSIGN_OR_RETURN(HloInstruction * dot_of_concat_optimized,
-                      OptimizeDotOfConcat(dot));
-  if (dot_of_concat_optimized) {
-    VLOG(10) << "Replaced dot(concat(...), constant) with add(dot(..., "
-                "constant)...)";
-    return ReplaceInstruction(dot, dot_of_concat_optimized);
-  }
+//  TF_ASSIGN_OR_RETURN(HloInstruction * dot_of_concat_optimized,
+//                      OptimizeDotOfConcat(dot));
+//  if (dot_of_concat_optimized) {
+//    VLOG(10) << "Replaced dot(concat(...), constant) with add(dot(..., "
+//                "constant)...)";
+//    return ReplaceInstruction(dot, dot_of_concat_optimized);
+//  }
 
   // Simplify dot(ConstA, Gather(Index, ConstB)) to:
   // Gather(Index, dot*(ConstA, ConstB)), where dot* is an appropriately
