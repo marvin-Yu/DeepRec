@@ -978,7 +978,6 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":lib",
-        ":ptr_util",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:optional",
         "//third_party/eigen3",
@@ -3261,10 +3260,8 @@ tf_cuda_library(
         "public/session_options.h",
         "public/version.h",
     ],
-    hdrs = CORE_CPU_LIB_HEADERS + if_cuda([
-        "common_runtime/gpu_device_context.h"
-    ]),
-    copts = tf_copts() + ["-g"],
+    hdrs = CORE_CPU_LIB_HEADERS,
+    copts = tf_copts(),
     deps = [
         ":bfc_allocator",
         ":graph",
@@ -3282,7 +3279,7 @@ tf_cuda_library(
         "//tensorflow/core/grappler/utils:functions",
         "//tensorflow/core/profiler/lib:traceme",
         "//tensorflow/core/profiler/internal:traceme_recorder",
-    ] + mkl_deps() + if_cuda([":stream_executor"]),
+    ] + mkl_deps(),
     alwayslink = 1,
 )
 
@@ -3390,7 +3387,7 @@ tf_cuda_library(
         "common_runtime/direct_session.h",
         "util/env_var.h",
     ],
-    copts = tf_copts() + ["-g"],
+    copts = tf_copts(),
     deps = [
         ":core_cpu_internal",
         ":framework",
@@ -3407,7 +3404,7 @@ tf_cuda_library(
         "//tensorflow/core/profiler/lib:profiler_session",
         "//tensorflow/core/profiler/lib:traceme",
         "@com_google_absl//absl/container:flat_hash_set",
-    ] + if_cuda([":gpu_runtime"]),
+    ],
     alwayslink = 1,
 )
 
@@ -3491,7 +3488,6 @@ GPU_RUNTIME_HEADERS = [
     "common_runtime/gpu/gpu_bfc_allocator.h",
     "common_runtime/gpu/gpu_cudamalloc_allocator.h",
     "common_runtime/gpu/gpu_debug_allocator.h",
-    "common_runtime/gpu/gpu_persistent_allocator.h",
     "common_runtime/gpu/gpu_device.h",
     "common_runtime/gpu/gpu_host_allocator.h",
     "common_runtime/gpu/gpu_id.h",
@@ -3511,7 +3507,6 @@ tf_cuda_library(
     srcs = [
         "common_runtime/gpu/gpu_cudamalloc_allocator.cc",
         "common_runtime/gpu/gpu_debug_allocator.cc",
-        "common_runtime/gpu/gpu_persistent_allocator.cc",
         "common_runtime/gpu/gpu_device.cc",
         "common_runtime/gpu/gpu_device_factory.cc",
         "common_runtime/gpu/gpu_managed_allocator.cc",
