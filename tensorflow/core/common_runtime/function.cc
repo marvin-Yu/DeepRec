@@ -1330,7 +1330,7 @@ const Edge* GetTheOnlyDataEdge(const EdgeSet& edges) {
       // a ref.
       return nullptr;
     }
-    if (IsRecv(e->src()) || IsSwitch(e->src())) {
+    if (IsRecv(e->src()) || IsFuseRecv(e->src()) || IsSwitch(e->src())) {
       // Don't touch it if the identity is introduced for control flow.
       // Recv disables all its successors if it receives a dead signal.
       // When Recv has an outgoing control edge, the current executor

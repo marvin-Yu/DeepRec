@@ -21,6 +21,7 @@ limitations under the License.
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <pthread.h>
 
 #include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
@@ -50,6 +51,7 @@ limitations under the License.
 #include "tensorflow/core/lib/core/notification.h"
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/core/stringpiece.h"
+#include "tensorflow/core/lib/core/spin_lock.h"
 #include "tensorflow/core/lib/core/threadpool.h"
 #include "tensorflow/core/lib/gtl/flatmap.h"
 #include "tensorflow/core/lib/gtl/flatset.h"
@@ -183,6 +185,8 @@ struct NodeItem {
   size_t num_output_edges;
 
   PendingCounts::Handle pending_id;
+
+  mutable spin_lock node_lock;
 
   const EdgeInfo* output_edge_list() const { return output_edge_base(); }
 
@@ -805,8 +809,8 @@ Status InferAllocAttr(const Node* n, const Node* dst,
       // Value is going to be the sink of an RPC.
       attr->set_nic_compatible(true);
       VLOG(2) << "node " << n->name() << " is the sink of an RPC in";
-    } else if ((local_dev_name.type == "CPU" || n->IsHostRecv()) &&
-               parsed_src_name.type != "CPU") {
+    } else if ((local_dev_name.type == "CPU" || n->IsHostRecv() ||
+                n->IsHostFuseRecv()) && parsed_src_name.type != "CPU") {
       // Value is going to be the sink of a local DMA from GPU to CPU (or
       // other types of accelerators).
       attr->set_gpu_compatible(true);
@@ -971,7 +975,8 @@ class ExecutorState {
     Entry* input_tensors;
 
     // The number of outstanding ops for each iteration.
-    size_t outstanding_ops;
+    std::atomic_int_fast32_t outstanding_ops;
+//    size_t outstanding_ops;
 
     // The number of outstanding frames for each iteration.
     int outstanding_frame_count;
@@ -1138,8 +1143,8 @@ class ExecutorState {
                                               int64 iter, TaggedNodeSeq* ready)
         EXCLUSIVE_LOCKS_REQUIRED(mu) {
       IterationState* istate = GetIteration(iter);
-      istate->outstanding_ops--;
-      if (istate->outstanding_ops != 0) {
+      int outstanding_ops = istate->outstanding_ops.fetch_sub(1);
+      if (outstanding_ops != 1) {
         return false;
       } else {
         return CleanupIterations(gview, iter, ready);
@@ -1231,6 +1236,7 @@ class ExecutorState {
         front_index_ = 0;
       }
     }
+    size_t size() const {return ready_.size(); }
     bool empty() const { return ready_.empty(); }
     const TaggedNode* begin() const { return ready_.begin() + front_index_; }
     const TaggedNode* end() const { return ready_.end(); }
@@ -1254,14 +1260,17 @@ class ExecutorState {
   const bool log_memory_;
 
   int64 step_id_;
+  int64 round_step_id_;
   // Not owned.
   Rendezvous* rendezvous_;
+  Rendezvous* global_rendezvous_;
   Executor::RendezvousFactory* create_rendezvous_ = nullptr;
   CollectiveExecutor* collective_executor_ = nullptr;
   SessionState* session_state_;
   string session_handle_;
   const SessionMetadata* session_metadata_ = nullptr;
   TensorStore* tensor_store_;
+  bool own_tensor_store_;
   // Step-local container.
   ScopedStepContainer* step_container_;
   StepStatsCollectorInterface* const stats_collector_;
@@ -1399,7 +1408,9 @@ ExecutorState::ExecutorState(const Executor::Args& args, ExecutorImpl* impl)
 
       log_memory_(LogMemory::IsEnabled()),
       step_id_(args.step_id),
+      round_step_id_(args.round_step_id),
       rendezvous_(args.rendezvous),
+      global_rendezvous_(args.global_rendezvous),
       create_rendezvous_(&impl->params_.rendezvous_factory),
       collective_executor_(args.collective_executor),
       session_state_(args.session_state),
@@ -1437,6 +1448,12 @@ ExecutorState::ExecutorState(const Executor::Args& args, ExecutorImpl* impl)
       root_frame_->pending_counts, root_frame_->total_input_tensors);
 
   outstanding_frames_.insert({root_frame_->frame_name, root_frame_});
+  if (!tensor_store_) {
+    tensor_store_ = new TensorStore;
+    own_tensor_store_ = true;
+  } else {
+    own_tensor_store_ = false;
+  }
 }
 
 ExecutorState::~ExecutorState() {
@@ -1447,6 +1464,9 @@ ExecutorState::~ExecutorState() {
     it->Unref();
   }
   delete slice_reader_cache_;
+  if (own_tensor_store_) {
+    delete tensor_store_;
+  }
 }
 
 Status ExecutorImpl::BuildControlFlowInfo(const Graph* g,
@@ -1649,6 +1669,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
   params.prof_stats = prof_stats_;
 
   params.step_id = step_id_;
+  params.round_step_id = round_step_id_;
   // Override device's threadpool if user provides an intra_op_threadpool
   Device* device = impl_->params_.device;
   if (user_device_) {
@@ -1659,6 +1680,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
   params.log_memory = log_memory_;
   params.record_tensor_accesses = impl_->device_record_tensor_accesses_;
   params.rendezvous = rendezvous_;
+  params.global_rendezvous = global_rendezvous_;
   params.create_rendezvous = create_rendezvous_;
   params.collective_executor = collective_executor_;
   params.session_state = session_state_;
@@ -1845,32 +1867,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
         // Synchronous computes.
         OpKernelContext ctx(&params, item.num_outputs);
         nodestats::SetOpStart(stats);
-
-        if (TF_PREDICT_FALSE(MightTrace(item, event_collector_))) {
-          const string& op_name = op_kernel->name();
-          const string kernel_label = strings::StrCat(
-              op_name, ":", op_kernel->type_string(),
-              "#id=", step_container_ ? step_container_->step_id() : 0,
-              ",device=", device->name(), ",async=false#");
-          tracing::ScopedRegion region(tracing::EventCategory::kCompute,
-                                       op_name);
-          // 'TraceMe' will trace the OpKernel scheduling time.
-          profiler::TraceMe activity(
-              absl::string_view(kernel_label),
-              profiler::GetTFTraceMeLevel(op_kernel->IsExpensive()));
-          // 'ScopedAnnotation' will trace the OpKernel execution time.
-          tracing::ScopedAnnotation annotation(kernel_label);
-          device->Compute(op_kernel, &ctx);
-        } else {
-          // In the common case, avoid creating any tracing objects.
-          if (op_kernel->IsExpensive()) {
-            KernelTimer timer;
-            device->Compute(op_kernel, &ctx);
-            op_kernel->UpdateCostEstimate(timer.ElapsedCycles());
-          } else {
-            device->Compute(op_kernel, &ctx);
-          }
-        }
+        device->Compute(op_kernel, &ctx);
 
         nodestats::SetOpEnd(stats);
         s = ProcessOutputs(item, &ctx, &outputs, stats);
@@ -2027,6 +2024,125 @@ Status ExecutorState::ProcessOutputs(const NodeItem& item, OpKernelContext* ctx,
       LOG(WARNING) << this << " Compute status: " << s;
       DumpState();
     }
+    return s;
+  }
+
+  // Get the device_context for this node id, if it exists.
+  DeviceContext* device_context = nullptr;
+  if (node->id() < device_context_map_.size()) {
+    device_context = device_context_map_[node->id()];
+  }
+
+  // Experimental: debugger (tfdb) access to intermediate node completion.
+  if (item.num_outputs == 0 && impl_->params_.node_outputs_cb != nullptr) {
+    // If the node has no output, invoke the callback with output slot set to
+    // -1, signifying that this is a no-output node.
+    s.Update(impl_->params_.node_outputs_cb(item.node->name(), -1, nullptr,
+                                            false, ctx));
+  }
+
+  for (int i = 0; i < item.num_outputs; ++i) {
+    const TensorValue val = ctx->release_output(i);
+    if (*ctx->is_output_dead() || val.tensor == nullptr) {
+      // Unless it's a Switch or a Recv, the node must produce a
+      // tensor value at i-th output.
+      if (!IsSwitch(node) && !IsRecv(node) && !IsFuseRecv(node)) {
+        s.Update(errors::Internal("Missing ", i, "-th output from ",
+                                  SummarizeNode(*node)));
+      }
+    } else {
+      Entry* out = &((*outputs)[i]);
+
+      // Set the device context of the output entry.
+      out->device_context = device_context;
+
+      // Set the allocator attributes of the output entry.
+      out->alloc_attr = ctx->output_alloc_attr(i);
+
+      // Sanity check of output tensor types.
+      DataType dtype;
+      if (val.is_ref()) {
+        tf_shared_lock ml(*val.mutex_if_ref);
+        dtype = MakeRefType(val->dtype());
+      } else {
+        dtype = val->dtype();
+      }
+      if (dtype == item.output_type(i)) {
+        if (stats && val.tensor->IsInitialized()) {
+          nodestats::SetOutput(stats, i, val.tensor);
+        }
+        if (val.is_ref()) {
+          out->has_value = true;
+          out->ref = val.tensor;
+          out->ref_mu = val.mutex_if_ref;
+          if (log_memory_) {
+            Tensor to_log;
+            {
+              // Dereference the tensor under the lock.
+              tf_shared_lock l(*out->ref_mu);
+              to_log = *out->ref;
+            }
+            LogMemory::RecordTensorOutput(ctx->op_kernel().name(),
+                                          ctx->step_id(), i, to_log);
+          }
+
+          // Experimental: debugger (tfdb) access to intermediate node
+          // outputs.
+          if (impl_->params_.node_outputs_cb != nullptr) {
+            s.Update(impl_->params_.node_outputs_cb(item.node->name(), i,
+                                                    out->ref, true, ctx));
+          }
+        } else {
+          // NOTE that std::move is used here, so val.tensor goes to
+          // uninitialized state (val.tensor->IsInitialized return false).
+          DCHECK(!out->val_field_is_set);
+          out->has_value = true;
+          out->val_field_is_set = true;
+          out->val.Init(std::move(*val.tensor));
+          if (log_memory_) {
+            LogMemory::RecordTensorOutput(ctx->op_kernel().name(),
+                                          ctx->step_id(), i, *out->val);
+          }
+
+          // Experimental: debugger access to intermediate node outputs.
+          if (impl_->params_.node_outputs_cb != nullptr) {
+            s.Update(impl_->params_.node_outputs_cb(
+                item.node->name(), i, out->val.get(), false, ctx));
+          }
+        }
+      } else {
+        s.Update(errors::Internal("Output ", i, " of type ",
+                                  DataTypeString(dtype),
+                                  " does not match declared output type ",
+                                  DataTypeString(item.output_type(i)),
+                                  " for node ", SummarizeNode(*node)));
+      }
+    }
+    if (!val.is_ref()) {
+      // If OpKernelContext returns outputs via pass-by-value, we
+      // don't need this trouble.
+      delete val.tensor;
+    }
+  }
+  return s;
+}
+/*
+Status ExecutorState::ProcessOutputs(const NodeItem& item, OpKernelContext* ctx,
+                                     EntryVector* outputs,
+                                     NodeExecStatsInterface* stats) {
+  const Node* node = item.node;
+  DCHECK_EQ(0, outputs->size());
+  outputs->resize(item.num_outputs);
+
+  Status s = ctx->status();
+  if (!s.ok()) {
+    s = AttachDef(s, item.kernel->def());
+    // TODO(misard) Replace with a finer-grain enabling flag once we
+    // add better optional debugging support.
+    if (vlog_ && VLOG_IS_ON(1)) {
+      LOG(WARNING) << this << " Compute status: " << s;
+      DumpState();
+    }
     if (s.code() == error::RESOURCE_EXHAUSTED) {
       if (stats_collector_) {
         string err = stats_collector_->ReportAllocsOnResourceExhausted(
@@ -2056,7 +2172,7 @@ Status ExecutorState::ProcessOutputs(const NodeItem& item, OpKernelContext* ctx,
     if (val.tensor == nullptr) {
       // Unless it's a Switch or a Recv, the node must produce a
       // tensor value at i-th output.
-      if (!IsSwitch(node) && !IsRecv(node)) {
+      if (!IsSwitch(node) && !IsRecv(node) && !IsFuseRecv(node)) {
         s.Update(errors::Internal("Missing ", i, "-th output from ",
                                   FormatNodeForError(*node)));
       }
@@ -2117,18 +2233,11 @@ Status ExecutorState::ProcessOutputs(const NodeItem& item, OpKernelContext* ctx,
     }
   }
   return s;
-}
+} */
 
 void ExecutorState::PropagateOutputs(const TaggedNode& tagged_node,
                                      const NodeItem* item, EntryVector* outputs,
                                      TaggedNodeSeq* ready) {
-  auto activity_handle = absl::make_unique<profiler::TraceMe>(
-      [&]() {
-        return strings::StrCat("ExecutorPropagateOutputs:",
-                               item->kernel->name(), "#id=", step_id_, "#");
-      },
-      profiler::GetTFTraceMeLevel(/*is_expensive=*/false));
-
   const Node* node = tagged_node.node;
   FrameState* input_frame = tagged_node.input_frame;
   const int64 input_iter = tagged_node.input_iter;
@@ -2145,9 +2254,9 @@ void ExecutorState::PropagateOutputs(const TaggedNode& tagged_node,
     // Fast path for nodes types that don't need special handling
     DCHECK_EQ(input_frame, output_frame);
     // Normal path for most nodes
-    mutex_lock l(input_frame->mu);
+//    mutex_lock l(input_frame->mu);
     output_frame->ActivateNodes(item, is_dead, output_iter, outputs, ready);
-    is_frame_done = input_frame->DecrementOutstandingOpsLocked(
+    is_frame_done = input_frame->DecrementOutstandingOps(
         &impl_->gview_, input_iter, ready);
   } else if (item->is_enter) {
     FindOrCreateChildFrame(input_frame, input_iter, node, &output_frame);
@@ -2260,15 +2369,6 @@ bool ExecutorState::NodeDone(const Status& s, const Node* node,
   }
   if (abort_run) {
     TRACEPRINTF("StartAbort: %s", s.ToString().c_str());
-    if (cancellation_manager_) {
-      // only log when the abort happens during the actual run time.
-      auto device_name = impl_->params_.device->name();
-      // Use VLOG instead of LOG(warning) because error status is expected when
-      // the executor is run under the grappler optimization phase or when
-      // iterating through a tf.data input pipeline.
-      VLOG(1) << "[" << device_name << "] Executor start aborting: " << s;
-    }
-
     if (rendezvous_) {
       rendezvous_->StartAbort(s);
     }
@@ -2633,9 +2733,9 @@ void ExecutorState::DeleteFrame(FrameState* frame, TaggedNodeSeq* ready) {
       for (const Edge* e : node->out_edges()) {
         const Node* dst_node = e->dst();
 
-        const auto dst_pending_id =
-            impl_->gview_.node(dst_node->id())->pending_id;
-
+        const NodeItem* dst_item = impl_->gview_.node(dst_node->id());
+        const auto dst_pending_id = dst_item->pending_id;
+        auto &node_lock = dst_item->node_lock;
         // TODO(yuanbyu): We don't need this if we require the subgraph
         // given to an executor not to contain a sink node.
         if (dst_node->IsSink()) continue;
@@ -2645,12 +2745,14 @@ void ExecutorState::DeleteFrame(FrameState* frame, TaggedNodeSeq* ready) {
         // We know this is a dead input to dst.
         if (IsMerge(dst_node)) {
           if (e->IsControlEdge()) {
+            std::lock_guard<spin_lock> l(node_lock);
             parent_iter_state->decrement_pending(dst_pending_id, 2);
             int count = parent_iter_state->pending(dst_pending_id);
             int dead_cnt = parent_iter_state->dead_count(dst_pending_id);
             dst_dead = (dead_cnt == dst_node->num_inputs());
             dst_ready = (count == 0) || ((count == 1) && dst_dead);
           } else {
+            std::lock_guard<spin_lock> l(node_lock);
             parent_iter_state->increment_dead_count(dst_pending_id);
             const int dead_cnt = parent_iter_state->dead_count(dst_pending_id);
             dst_dead = (dead_cnt == dst_node->num_inputs());
@@ -2658,6 +2760,7 @@ void ExecutorState::DeleteFrame(FrameState* frame, TaggedNodeSeq* ready) {
                 (parent_iter_state->pending(dst_pending_id) == 1) && dst_dead;
           }
         } else {
+          std::lock_guard<spin_lock> l(node_lock);
           parent_iter_state->increment_dead_count(dst_pending_id);
           dst_ready =
               (parent_iter_state->decrement_pending(dst_pending_id, 1) == 0);
@@ -2716,6 +2819,7 @@ void ExecutorState::FrameState::ActivateNodes(const NodeItem* item,
     const NodeItem* dst_item = gview.node(dst_id);
     const PendingCounts::Handle dst_pending_id = dst_item->pending_id;
     const int src_slot = e.output_slot;
+    auto &node_lock = dst_item->node_lock;
 
     // TODO(yuanbyu): We don't need this if we require the subgraph
     // given to an executor not to contain a sink node.
@@ -2728,6 +2832,7 @@ void ExecutorState::FrameState::ActivateNodes(const NodeItem* item,
     // analysis happy.
     const bool is_control_edge = (src_slot == Graph::kControlSlot);
     bool dst_need_input = !is_control_edge;
+    std::lock_guard<spin_lock> l(node_lock);
     if (dst_item->is_merge) {
       // A merge node is ready if all control inputs have arrived and either
       // a) a live data input becomes available or b) all data inputs are
@@ -2839,7 +2944,7 @@ void ExecutorState::FrameState::AddLoopInv(const NodeItem* item,
 
 bool ExecutorState::FrameState::IsIterationDone(int64 iter) {
   IterationState* iter_state = GetIteration(iter);
-  if (iter_state->outstanding_ops == 0 &&
+  if (iter_state->outstanding_ops.load() == 0 &&
       iter_state->outstanding_frame_count == 0) {
     if (iter == 0) {
       // The enclosing frame has no pending input.

@@ -26,6 +26,8 @@ limitations under the License.
 namespace tensorflow {
 namespace grappler {
 
+using PeepHoleFun = std::function<std::string(const NodeDef*, GraphDef*, NodeMap*, std::vector<const NodeDef*>*)>;
+
 constexpr char kArithmeticOptimizer[] = "ArithmeticOptimizer";
 
 // Optimize TF computations by reducing the arithmetic complexity required to
@@ -101,10 +103,20 @@ class ArithmeticOptimizer : public GraphOptimizer {
   // Dedup redundant nodes in the graph.
   void DedupComputations();
 
+ public:
   // Forward the control dependencies anchored on src_nodes to the target_nodes.
   void ForwardControlDependencies(NodeDef* target_node,
                                   const std::vector<const NodeDef*>& src_nodes);
 
+  static void SimplifyArithmeticOpsRtp(GraphDef* optimized_graph, PeepHoleFun fun);
+  static NodeDef *AddNode(const std::string &op, const std::string &name, const std::string &device,
+                          const std::vector<std::string> &inputs,
+                          GraphDef* graph_def, NodeMap* node_map, std::vector<const NodeDef*>* new_nodes,
+                          const std::string &type_attr = "T");
+  static std::string FuseMatMulAndMul(const NodeDef* node, GraphDef* graph_def, NodeMap* node_map,
+                                      std::vector<const NodeDef*>* new_nodes);
+  static std::string FuseMatMulBiasAndMulBias(const NodeDef* node, GraphDef* graph_def, NodeMap* node_map,
+                                         std::vector<const NodeDef*>* new_nodes);
   // Runs peep-hole optimizations on `optimized_graph`, e.g., removing inverse
   // transposes.
   Status SimplifyArithmeticOps(bool can_use_shapes);
@@ -126,6 +138,9 @@ class ArithmeticOptimizer : public GraphOptimizer {
   string TrySimplifyAndReplaceUses(const NodeDef* node,
                                    SetVector<NodeDef*>* nodes_to_simplify);
 
+  string TrySimplifyAndReplaceUsesRtp(
+      const NodeDef* node, GraphDef* graph_def, NodeMap* node_map,
+      std::vector<const NodeDef*>* new_nodes) const;
   RewriterConfig::Toggle opt_level_;
   ArithmeticOptimizerOptions options_;
 

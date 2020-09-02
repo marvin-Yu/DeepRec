@@ -1282,17 +1282,12 @@ REGISTER_OP("EditDistance")
 
 // --------------------------------------------------------------------------
 REGISTER_OP("Fill")
-    .Input("dims: index_type")
+    .Input("dims: int32")
     .Input("value: T")
     .Output("output: T")
     .Attr("T: type")
-    .Attr("index_type: {int32, int64} = DT_INT32")
     .SetShapeFn([](InferenceContext* c) {
       DataType index_type = DT_INT32;
-      Status s = c->GetAttr("index_type", &index_type);
-      if (!s.ok() && s.code() != error::NOT_FOUND) {
-        return s;
-      }
       ShapeHandle unused;
       TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 1, &unused));
       TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 0, &unused));
@@ -1501,14 +1496,6 @@ REGISTER_OP("IdentityN")
       std::vector<ShapeHandle> input;
       TF_RETURN_IF_ERROR(c->input("input", &input));
       TF_RETURN_IF_ERROR(c->set_output("output", input));
-      // If any of the input shapes are not known, we should return error.
-      for (int i = 0; i < input.size(); i++) {
-        if (!input[i].Handle()) {
-          return errors::InvalidArgument(absl::StrCat(
-              "Cannot infer output shape #", i,
-              " for IdentityN node because input shape #", i, " is unknown."));
-        }
-      }
       return Status::OK();
     });
 
@@ -1555,7 +1542,6 @@ REGISTER_OP("CheckNumerics")
     .Output("output: T")
     .Attr("T: {bfloat16, half, float, double}")
     .Attr("message: string")
-    .SetIsStateful()
     .SetShapeFn(shape_inference::UnchangedShape);
 
 // --------------------------------------------------------------------------
@@ -2015,6 +2001,108 @@ REGISTER_OP("Tile")
       return Status::OK();
     });
 
+REGISTER_OP("TileFuseEqual")
+    .Input("input: T")
+    .Input("equal_to: T")
+    .Input("multiples: Tmultiples")
+    .Output("output : bool")
+    .Attr("T: {float, double, int32}")
+    .Attr("Tmultiples: {int32, int64} = DT_INT32")
+      .Attr("incompatible_shape_error: bool = true")                       
+    .SetShapeFn([](InferenceContext* c) {
+      ShapeHandle input = c->input(1);
+      // NOTE(mrry): Represent `multiples` as a `TensorShape` because (i)
+      // it is a vector of non-negative integers, and (ii) doing so allows
+      // us to handle partially-known multiples.
+      ShapeHandle multiples;
+      TF_RETURN_IF_ERROR(c->MakeShapeFromShapeTensor(2, &multiples));
+      if (c->RankKnown(input)) {
+        TF_RETURN_IF_ERROR(c->WithRank(multiples, c->Rank(input), &multiples));
+        ShapeHandle dummy;
+        TF_RETURN_IF_ERROR(
+            c->Merge(c->input(2), c->Vector(c->Rank(input)), &dummy));
+      }
+
+      if (!c->RankKnown(multiples)) {
+        return shape_inference::UnknownShape(c);
+      }
+
+      bool incompatible_shape_error;                                    
+      TF_RETURN_IF_ERROR(c->GetAttr("incompatible_shape_error",
+                                      &incompatible_shape_error));
+      int32 rank = c->Rank(multiples);
+      TF_RETURN_IF_ERROR(c->WithRank(input, rank, &input));
+      std::vector<DimensionHandle> dims(rank);
+      for (int i = 0; i < rank; ++i) {
+        TF_RETURN_IF_ERROR(
+            c->Multiply(c->Dim(input, i), c->Dim(multiples, i), &dims[i]));
+      }
+			ShapeHandle output;
+			ShapeHandle equal_to = c->input(0);
+
+      TF_RETURN_IF_ERROR(BroadcastBinaryOpOutputShapeFnHelper(
+          c, equal_to, c->MakeShape(dims), incompatible_shape_error, &output));
+      c->set_output(0, output);
+      return Status::OK();
+    });
+
+REGISTER_OP("TileTileEqual")
+    .Input("tile_1: T")
+    .Input("tile_2: T")
+    .Input("multi_1: Tmultiples")
+    .Input("multi_2: Tmultiples")
+    .Output("output : bool")
+    .Attr("T: {float, double, int32}")
+    .Attr("Tmultiples: {int32, int64} = DT_INT32")
+      .Attr("incompatible_shape_error: bool = true")                       
+    .SetShapeFn([](InferenceContext* c) {
+        return shape_inference::UnknownShape(c);
+    });
+
+REGISTER_OP("TileEqual")
+    .Input("input: T")
+    .Input("equal_to: T")
+    .Input("multiples: Tmultiples")
+    .Output("output : bool")
+    .Attr("T: {float, double, int32}")
+    .Attr("Tmultiples: {int32, int64} = DT_INT32")
+      .Attr("incompatible_shape_error: bool = true")                       
+    .SetShapeFn([](InferenceContext* c) {
+      ShapeHandle input = c->input(1);
+      // NOTE(mrry): Represent `multiples` as a `TensorShape` because (i)
+      // it is a vector of non-negative integers, and (ii) doing so allows
+      // us to handle partially-known multiples.
+      ShapeHandle multiples;
+      TF_RETURN_IF_ERROR(c->MakeShapeFromShapeTensor(2, &multiples));
+      if (c->RankKnown(input)) {
+        TF_RETURN_IF_ERROR(c->WithRank(multiples, c->Rank(input), &multiples));
+        ShapeHandle dummy;
+        TF_RETURN_IF_ERROR(
+            c->Merge(c->input(2), c->Vector(c->Rank(input)), &dummy));
+      }
+
+      if (!c->RankKnown(multiples)) {
+        return shape_inference::UnknownShape(c);
+      }
+
+      bool incompatible_shape_error;                                    
+      TF_RETURN_IF_ERROR(c->GetAttr("incompatible_shape_error",
+                                      &incompatible_shape_error));
+      int32 rank = c->Rank(multiples);
+      TF_RETURN_IF_ERROR(c->WithRank(input, rank, &input));
+      std::vector<DimensionHandle> dims(rank);
+      for (int i = 0; i < rank; ++i) {
+        TF_RETURN_IF_ERROR(
+            c->Multiply(c->Dim(input, i), c->Dim(multiples, i), &dims[i]));
+      }
+			ShapeHandle output;
+			ShapeHandle equal_to = c->input(0);
+
+      TF_RETURN_IF_ERROR(BroadcastBinaryOpOutputShapeFnHelper(
+          c, equal_to, c->MakeShape(dims), incompatible_shape_error, &output));
+      c->set_output(0, output);
+      return Status::OK();
+    });
 // --------------------------------------------------------------------------
 REGISTER_OP("TileGrad")
     .Input("input: T")
@@ -2026,8 +2114,7 @@ REGISTER_OP("TileGrad")
 
 // --------------------------------------------------------------------------
 REGISTER_OP("Where")
-    .Input("input: T")
-    .Attr("T: {numbertype, bool} = DT_BOOL")
+    .Input("input: bool") 
     .Output("index: int64")
     .SetShapeFn([](InferenceContext* c) {
       c->set_output(0, c->Matrix(c->UnknownDim(), c->Rank(c->input(0))));
@@ -3398,7 +3485,7 @@ REGISTER_OP("Fingerprint")
           return errors::InvalidArgument("`method` must be rank 0: ",
                                          method->shape());
         }
-        const string& method_string = method->scalar<tstring>()();
+        const string& method_string = method->scalar<string>()();
         if (method_string != "farmhash64") {
           return errors::InvalidArgument("Unsupported method: ", method_string);
         }

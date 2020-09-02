@@ -17,6 +17,7 @@ limitations under the License.
 
 namespace tensorflow {
 REGISTER2(BinaryOp, CPU, "Mod", functor::safe_mod, int32, int64);
+REGISTER2(BinaryOp, CPU, "Mod", functor::safe_mod, uint32, uint64);
 REGISTER2(BinaryOp, CPU, "Mod", functor::fmod, float, double);
 REGISTER2(BinaryOp, CPU, "TruncateMod", functor::safe_mod, int32, int64);
 REGISTER2(BinaryOp, CPU, "TruncateMod", functor::fmod, float, double);

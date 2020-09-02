@@ -84,6 +84,8 @@ void Cluster::DisableOptimizer(bool disable) {
     rewriter_config->set_shape_optimization(RewriterConfig::OFF);
     rewriter_config->set_remapping(RewriterConfig::OFF);
     rewriter_config->set_pin_to_host_optimization(RewriterConfig::OFF);
+    rewriter_config->set_fuse_tile_concat_matmul(RewriterConfig::OFF);
+    rewriter_config->set_tile_equal(RewriterConfig::OFF);
     rewriter_config->mutable_auto_parallel()->set_enable(false);
     rewriter_config->clear_optimizers();
   } else {

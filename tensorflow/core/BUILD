@@ -1167,6 +1167,7 @@ tf_gen_op_libs(
         "rpc_ops",
         "scoped_allocator_ops",
         "sdca_ops",
+        "run_graph_op",
         "set_ops",
         "script_ops",
         "sendrecv_ops",
@@ -1392,6 +1393,7 @@ cc_library(
         ":rpc_ops_op_lib",
         ":scoped_allocator_ops_op_lib",
         ":script_ops_op_lib",
+        ":run_graph_op_op_lib",
         ":sdca_ops_op_lib",
         ":sendrecv_ops_op_lib",
         ":set_ops_op_lib",
@@ -1544,6 +1546,8 @@ cc_library(
         "//tensorflow/core/kernels:data_flow",
         "//tensorflow/core/kernels:decode_proto_op",
         "//tensorflow/core/kernels:encode_proto_op",
+        "//tensorflow/core/kernels:tile_fuse_op",
+        "//tensorflow/core/kernels:tile_fuse_base",
         "//tensorflow/core/kernels:fake_quant_ops",
         "//tensorflow/core/kernels:function_ops",
         "//tensorflow/core/kernels:functional_ops",
@@ -1569,6 +1573,7 @@ cc_library(
         "//tensorflow/core/kernels:random_binomial_op",
         "//tensorflow/core/kernels:random_poisson_op",
         "//tensorflow/core/kernels:remote_fused_graph_ops",
+        "//tensorflow/core/kernels:run_graph_op",
         "//tensorflow/core/kernels:required",
         "//tensorflow/core/kernels:resource_variable_ops",
         "//tensorflow/core/kernels:rnn_ops",
@@ -3109,11 +3114,12 @@ tf_cuda_library(
         "common_runtime/shape_refiner.cc",
         "common_runtime/graph_optimizer.h",
         "graph/graph_constructor.cc",  # Depends on common_runtime.
+        "graph/dist_graph_partition.cc",
         "graph/graph_def_builder_util.cc",  # Depends on common_runtime.
         "public/session_options.h",
         "public/version.h",
     ] + CORE_CPU_BASE_HDRS,
-    hdrs = CORE_CPU_BASE_HDRS + ["public/session.h"],
+    hdrs = CORE_CPU_BASE_HDRS + ["public/session.h", "graph/dist_graph_partition.h"],
     copts = tf_copts(),
     deps = [
         ":graph",
@@ -3406,6 +3412,21 @@ tf_cuda_library(
         "@com_google_absl//absl/container:flat_hash_set",
     ],
     alwayslink = 1,
+)
+
+tf_cuda_library(
+    name = "gpu_tracer",
+    srcs = [],
+    hdrs = [
+        "//tensorflow/core/platform:gpu_tracer.h",
+    ],
+    copts = tf_copts(),
+    cuda_deps = tf_additional_cupti_wrapper_deps(),
+    deps = [
+        ":core_cpu_internal",
+        ":lib",
+        ":protos_all_cc",
+    ],
 )
 
 cc_library(

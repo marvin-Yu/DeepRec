@@ -24,6 +24,8 @@ limitations under the License.
 #include "tensorflow/core/framework/function.pb.h"
 #include "tensorflow/core/framework/graph.pb.h"
 #include "tensorflow/core/framework/node_def.pb.h"
+#include "tensorflow/core/protobuf/config.pb.h"
+#include "tensorflow/core/protobuf/debug.pb.h"
 #include "tensorflow/core/framework/node_def_util.h"
 #include "tensorflow/core/framework/op_def_util.h"
 #include "tensorflow/core/framework/versions.pb_text.h"
@@ -224,6 +226,16 @@ Status StrippedOpListForGraph(const GraphDef& graph_def,
     RemoveDescriptionsFromOpDef(stripped_op);
   }
   return Status::OK();
+}
+
+void AddDebugWatchOpts(const string &node, const int slot, RunOptions *runOptions) {
+  DebugOptions *debugOpts = runOptions->mutable_debug_options();
+  if (debugOpts == nullptr) {
+      return;
+  }
+  auto watch = debugOpts->add_debug_tensor_watch_opts();
+  watch->set_node_name(node);
+  watch->set_output_slot(slot);
 }
 
 }  // namespace tensorflow

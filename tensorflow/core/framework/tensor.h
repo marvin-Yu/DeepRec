@@ -631,6 +631,9 @@ class Tensor {
     TF_CHECK_OK(BitcastFrom(other, dtype, shape));
   }
 
+  template <typename T>
+  T* base() const;
+
  private:
   // Returns true if the refcount on buf_ and any possible underlying root
   // buffer is one.
@@ -688,9 +691,6 @@ class Tensor {
   }
 
   void CopyFromInternal(const Tensor& other, const TensorShape& shape);
-
-  template <typename T>
-  T* base() const;
 
   template <size_t NDIMS>
   void FillDimsAndValidateCompatibleShape(

@@ -26,7 +26,8 @@ namespace {
 // event callback functions. Issues for reconsideration:
 //  - Is this the right number of threads?
 //  - Should EventMgrs be shared between GPUDevices on a multi-GPU machine?
-static const int kNumThreads = 2;
+// RTP modified kNumThreads to 8. original is 2.
+static const int kNumThreads = 8;
 }  // namespace
 
 namespace gpu_event_mgr {
@@ -100,6 +101,7 @@ EventMgr::EventMgr(se::StreamExecutor* se, const GPUOptions& gpu_options)
       accumulated_stream_(nullptr),
       accumulated_tensors_(new TensorReferenceVector),
       accumulated_tensor_bytes_(0),
+      used_events_(100000),
       threadpool_(Env::Default(), "GPU_Event_Manager", kNumThreads) {
   gpu_event_mgr::InitThreadpoolLabels(&threadpool_);
   StartPollingLoop();
@@ -117,7 +119,7 @@ EventMgr::~EventMgr() {
   }
   delete accumulated_tensors_;
   while (!used_events_.empty()) {
-    InUse* ue = &used_events_[0];
+    InUse* ue = &used_events_.front();
     delete ue->event;
     if (ue->mem != nullptr) {
       for (auto& t : *(ue->mem)) {
@@ -223,16 +225,22 @@ void EventMgr::QueueInUse(se::Stream* stream, InUse iu) {
           << " used_events_ " << used_events_.size();
   // Events are created on demand, and repeatedly reused.  There is no
   // limit placed here on the number of allocated Events.
-  if (free_events_.empty()) {
-    free_events_.push_back(new se::Event(exec_));
-    free_events_.back()->Init();
+
+  se::Event* e = NULL;
+  {
+    mutex_lock l(free_events_mu_);
+    if (free_events_.empty()) {
+      free_events_.push_back(new se::Event(exec_));
+      free_events_.back()->Init();
+    }
+    e = free_events_.back();
+    free_events_.pop_back();
   }
-  se::Event* e = free_events_.back();
-  free_events_.pop_back();
   stream->ThenRecordEvent(e);
   iu.event = e;
+  mutex_lock el(used_events_mu_);
   bool was_empty = used_events_.empty();
-  used_events_.push_back(iu);
+  used_events_.push_back(std::move(iu));
   // Maybe wake up the polling thread
   if (was_empty) events_pending_.notify_all();
 }
@@ -241,9 +249,7 @@ void EventMgr::QueueInUse(se::Stream* stream, InUse iu) {
 // events have recorded, and then retire them.  Initial observations
 // suggest that typical behavior in a TensorFlow program is to have
 // 0-3 events pending most of the time, but there are occasionally
-// spikes of up to several hundred outstanding.  (If GPUKernelTracker
-// is used to cap pending kernels there should never be more than
-// that many.)
+// spikes of up to several hundred outstanding.
 //
 // NOTE: If all events are on the same stream, no later event will
 // complete before an earlier event, except possibly if the earlier
@@ -251,10 +257,13 @@ void EventMgr::QueueInUse(se::Stream* stream, InUse iu) {
 // looking past the first kPending event.  However, if we're using
 // multiple streams there may be some gain in looking deeper.
 // As a compromise, PollEvent() calls that are triggered by the queueing
-// of a single event never look past the first kPending event.  Consequently
-// those calls do an expected constant amount of work, unaffected by the
-// length of the pending queue.  Calls coming from the dedicated
-// polling thread always sweep the full queue.
+// of a single event never look past the first kPending event.  Calls
+// coming from the dedicated polling thread always sweep the full queue.
+//
+// Note that allowing the queue to grow very long could cause overall
+// GPU memory use to spike needlessly.  An alternative strategy would
+// be to throttle new Op execution until the pending event queue
+// clears.
 void EventMgr::PollEvents(bool is_dedicated_poller,
                           gtl::InlinedVector<InUse, 4>* to_free) {
   VLOG(2) << "PollEvents  free_events_ " << free_events_.size()
@@ -262,8 +271,16 @@ void EventMgr::PollEvents(bool is_dedicated_poller,
   // Sweep the remaining events in order.  If this is the dedicated
   // polling thread, check the entire set.  Otherwise, just sweep up to
   // the first non-complete record that is still pending.
-  for (auto& iu : used_events_) {
-    if (iu.event == nullptr) continue;
+  int64 event_size = 0;
+  {
+    mutex_lock el(used_events_mu_);
+    event_size = used_events_.size();
+  }
+  for (int64_t i = 0; i < event_size; i++) {
+    auto &iu = used_events_.front();
+    if (iu.event == nullptr) {
+      continue;
+    }
     se::Event::Status s = iu.event->PollForStatus();
     switch (s) {
       case se::Event::Status::kUnknown:
@@ -271,17 +288,21 @@ void EventMgr::PollEvents(bool is_dedicated_poller,
         // We don't expect to see these.  Someday maybe propagate
         // a Status error, but for now fail hard.
         LOG(FATAL) << "Unexpected Event status: " << static_cast<int>(s);
-        break;
+        return;
       case se::Event::Status::kPending:
         if (!is_dedicated_poller) return;  // quit processing queue
-        break;
+        return;
       case se::Event::Status::kComplete:
         // Make a copy of the InUse record so we can free it after releasing
         // the lock
         to_free->push_back(iu);
-        free_events_.push_back(iu.event);
+        {
+          mutex_lock l(free_events_mu_);
+          free_events_.push_back(iu.event);
+        }
         // Mark this InUse record as completed.
         iu.event = nullptr;
+        used_events_.pop_front();
     }
   }
   // Then clear any completed InUse records from the front of the queue.
@@ -316,5 +337,4 @@ EventMgr* EventMgrFactory::GetEventMgr(se::StreamExecutor* se,
     return itr->second;
   }
 }
-
 }  // namespace tensorflow

@@ -51,6 +51,7 @@ bool IsCollective(const NodeDef& node);
 bool IsComplex(const NodeDef& node);
 bool IsComplexAbs(const NodeDef& node);
 bool IsConcat(const NodeDef& node);
+bool IsFuseRecv(const NodeDef& node);
 bool IsConcatOffset(const NodeDef& node);
 bool IsConj(const NodeDef& node);
 bool IsConjugateTranspose(const NodeDef& node);

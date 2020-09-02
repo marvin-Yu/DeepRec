@@ -32,7 +32,7 @@ class ArgOp : public OpKernel {
 
   void Compute(OpKernelContext* ctx) override;
 
-  bool IsExpensive() override { return false; }
+  bool IsExpensive() override { return true; }
 
  private:
   int index_;

@@ -1,34 +1,32 @@
 #export TEST_TMPDIR=
 #python ./configure.py
-declare -a targets=("//tensorflow:libtensorflow.so")
-declare -a install_targets=("libtensorflow.so.1"
-                            "libtensorflow.so")
+declare -a targets=("//tensorflow:libtensorflow_framework.so"
+                    "//tensorflow:libtensorflow_cc.so")
+declare -a install_targets=("libtensorflow_framework.so"
+                            "libtensorflow_framework.so.1"
+                            "libtensorflow_cc.so.1"
+                            "libtensorflow_cc.so")
 ## now loop through the above array
 for target in "${targets[@]}"
 do
-    bazel build --config monolithic --copt=-mavx2 -c opt --copt -g --config=cuda --copt -D_GLIBCXX_USE_CXX11_ABI=0 $target
+#    bazel build --copt=-DTILE_VECTORIZE_AVX512 --copt=-mavx2 -c opt --copt -g --config=cuda  --copt -mfpmath=both --copt -mfma --copt -msse4.2 --copt -mavx512f --copt -D_GLIBCXX_USE_CXX11_ABI=0 $target
+    bazel build --copt=-mavx2 -c opt --copt -g --config=cuda  --copt -mfpmath=both --copt -mfma --copt -msse4.2 --copt -D_GLIBCXX_USE_CXX11_ABI=0 $target
 #    bazel build --define framework_shared_object=false --config=cuda -c opt --copt -g --copt -mavx2 --copt -mfma --copt -DRTP_PLATFORM --copt -D_GLIBCXX_USE_CXX11_ABI=0 --copt -DGOOGLE_CUDA=1 --copt -fno-canonical-system-headers $target
 done
 
 EXTERNAL_DIR="../_external"
 EXTERNAL_DIR=`readlink -f $EXTERNAL_DIR`
 HEADER_DIR=$EXTERNAL_DIR"/usr/local/include/"
-if [ ! -d $EXTERNAL_DIR ]; then
-    mkdir -p $EXTERNAL_DIR
-fi
 
 CURRENT_DIR=`basename $PWD`
 BAZEL_CACHE_DIR=`readlink bazel-$CURRENT_DIR`/../../
 BAZEL_EXTERNAL_DIR=$BAZEL_CACHE_DIR"/external/"
 
-if [ ! -d "$EXTERNAL_DIR/usr/local/lib/" ]; then
-    mkdir -p $EXTERNAL_DIR/usr/local/lib/
-fi
 for target in "${install_targets[@]}"
 do
     IFS='/' read -ra path <<< "$target"
-    rm $EXTERNAL_DIR/usr/local/lib/${path[-1]} -f
-    cp bazel-bin/tensorflow/$target $EXTERNAL_DIR/usr/local/lib/
+    rm $EXTERNAL_DIR/usr/local/lib64/${path[-1]} -f
+    cp bazel-bin/tensorflow/$target $EXTERNAL_DIR/usr/local/lib64/
 done
 
 # copy header
@@ -44,9 +42,9 @@ if [ -d bazel-out/local-opt ]; then
     cd -
 fi
 if [ -d bazel-out/local_linux-opt ]; then
-    cd bazel-out/local_linux-opt/genfiles
-    find tensorflow/ -name '*.h' -exec cp --parents \{\} $HEADER_DIR/ \;
-    cd -
+   cd bazel-out/local_linux-opt/genfiles
+   find tensorflow/ -name '*.h' -exec cp --parents \{\} $HEADER_DIR/ \;
+   cd -
 fi
 if [ -d bazel-out/k8-opt ]; then
    cd bazel-out/k8-opt/genfiles
@@ -69,9 +67,9 @@ ABSL_DIR=$BAZEL_EXTERNAL_DIR"com_google_absl/absl/"
 rm $HEADER_DIR/absl -rf
 cp -r $ABSL_DIR $HEADER_DIR/absl
 
-#DITING_DIR=$BAZEL_EXTERNAL_DIR"diting_repo/sdk/include/diting/"
-#rm $HEADER_DIR/diting -rf
-#cp -r $DITING_DIR $HEADER_DIR/diting
+DITING_DIR=$BAZEL_EXTERNAL_DIR"diting_repo/sdk/include/diting/"
+rm $HEADER_DIR/diting -rf
+cp -r $DITING_DIR $HEADER_DIR/diting
 
 
 FARMHASH=$BAZEL_EXTERNAL_DIR"farmhash_archive/src/farmhash.h"

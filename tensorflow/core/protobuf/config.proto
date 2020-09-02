@@ -543,6 +543,7 @@ message ConfigProto {
   };
 
   Experimental experimental = 16;
+  bool run_graph_mode = 100;
 
   // Next: 17
 }
@@ -607,6 +608,14 @@ message RunOptions {
     uint64 after_padding = 2;
   }
   PaddingInfo padding_info = 600;
+  bool record_flop_count = 109;
+
+  // for RTP
+  // proto3 does not support set default value and no *has_* interface for POD
+  message RunId {
+    int64 value = 1;
+  }
+  RunId run_id = 9;
 
   reserved 4;
 }

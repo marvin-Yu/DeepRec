@@ -670,6 +670,7 @@ tf_cc_shared_object(
         "//tensorflow/cc:scope",
         "//tensorflow/cc/profiler",
         "//tensorflow/core:tensorflow",
+        "//tensorflow/core/debug:debug_gateway_internal",
     ] + if_ngraph(["@ngraph_tf//:ngraph_tf"]),
 )
 

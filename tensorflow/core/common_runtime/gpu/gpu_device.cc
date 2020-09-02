@@ -405,6 +405,8 @@ bool BaseGPUDevice::RequiresRecordingAccessedTensors() const {
 
 Status BaseGPUDevice::FillContextMap(const Graph* graph,
                                      DeviceContextMap* device_context_map) {
+  VLOG(2) << "FillContextMap";
+
   const size_t num_streams = streams_.size();
   // Special case for single stream.
   if (num_streams == 1) {

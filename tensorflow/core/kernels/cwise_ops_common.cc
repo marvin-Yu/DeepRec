@@ -18,8 +18,9 @@ limitations under the License.
 namespace tensorflow {
 
 BinaryOpShared::BinaryOpShared(OpKernelConstruction* ctx, DataType out,
-                               DataType in)
+                               DataType in, bool check)
     : OpKernel(ctx) {
+			if (!check) return;
 #if !defined(INTEL_MKL) || !defined(ENABLE_MKL)
   OP_REQUIRES_OK(ctx, ctx->MatchSignature({in, in}, {out}));
 #endif  // !INTEL_MKL || !ENABLE_MKL

@@ -88,7 +88,9 @@ class Executor {
 
   struct Args {
     int64 step_id = 0;
+    int64 round_step_id = 0;
     Rendezvous* rendezvous = nullptr;
+    Rendezvous* global_rendezvous = nullptr;
     StepStatsCollectorInterface* stats_collector = nullptr;
     CallFrameInterface* call_frame = nullptr;
     CancellationManager* cancellation_manager = nullptr;
@@ -112,7 +114,12 @@ class Executor {
     uint64 after_padding = 0;
     //[PROF-STATS]
     ProfStats* prof_stats = nullptr;
+    typedef std::function<Status(const string& node_name, const int output_slot,
+                                 const Tensor* tensor, const bool is_ref,
+                                 OpKernelContext* ctx)>
+        NodeOutputsCallback;
   };
+
   typedef std::function<void(const Status&)> DoneCallback;
   virtual void RunAsync(const Args& args, DoneCallback done) = 0;
 
@@ -151,6 +158,7 @@ struct LocalExecutorParams {
   std::function<void(OpKernel*)> delete_kernel;
 
   Executor::RendezvousFactory rendezvous_factory;
+  Executor::Args::NodeOutputsCallback node_outputs_cb;
 };
 ::tensorflow::Status NewLocalExecutor(const LocalExecutorParams& params,
                                       std::unique_ptr<const Graph> graph,
