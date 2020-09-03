@@ -1282,12 +1282,17 @@ REGISTER_OP("EditDistance")
 
 // --------------------------------------------------------------------------
 REGISTER_OP("Fill")
-    .Input("dims: int32")
+    .Input("dims: index_type")
     .Input("value: T")
     .Output("output: T")
     .Attr("T: type")
+    .Attr("index_type: {int32, int64} = DT_INT32")
     .SetShapeFn([](InferenceContext* c) {
       DataType index_type = DT_INT32;
+      Status s = c->GetAttr("index_type", &index_type);
+      if (!s.ok() && s.code() != error::NOT_FOUND) {
+        return s;
+      }
       ShapeHandle unused;
       TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 1, &unused));
       TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 0, &unused));
@@ -2114,7 +2119,8 @@ REGISTER_OP("TileGrad")
 
 // --------------------------------------------------------------------------
 REGISTER_OP("Where")
-    .Input("input: bool") 
+    .Input("input: T")
+    .Attr("T: {numbertype, bool} = DT_BOOL")
     .Output("index: int64")
     .SetShapeFn([](InferenceContext* c) {
       c->set_output(0, c->Matrix(c->UnknownDim(), c->Rank(c->input(0))));

@@ -180,8 +180,15 @@ class FillOp : public OpKernel {
   REGISTER_KERNEL_BUILDER(Name("Fill")                             \
                               .Device(DEVICE_##D)                  \
                               .TypeConstraint<TYPE>("T")           \
+                              .TypeConstraint<int32>("index_type") \
                               .HostMemory("dims"),                 \
                           FillOp<D##Device, TYPE, int32>);         \
+  REGISTER_KERNEL_BUILDER(Name("Fill")                             \
+                              .Device(DEVICE_##D)                  \
+                              .TypeConstraint<TYPE>("T")           \
+                              .TypeConstraint<int64>("index_type") \
+                              .HostMemory("dims"),                 \
+                          FillOp<D##Device, TYPE, int64>);
 
 #define REGISTER_CPU_KERNEL(TYPE) REGISTER_KERNEL(CPU, TYPE)
 TF_CALL_ALL_TYPES(REGISTER_CPU_KERNEL);
@@ -204,6 +211,7 @@ REGISTER_KERNEL(SYCL, int64);
 REGISTER_KERNEL_BUILDER(Name("Fill")
                             .Device(DEVICE_SYCL)
                             .TypeConstraint<int32>("T")
+                            .TypeConstraint<int32>("index_type")
                             .HostMemory("dims")
                             .HostMemory("value")
                             .HostMemory("output"),
@@ -233,6 +241,7 @@ REGISTER_KERNEL(GPU, bool);
 REGISTER_KERNEL_BUILDER(Name("Fill")
                             .Device(DEVICE_GPU)
                             .TypeConstraint<int32>("T")
+                            .TypeConstraint<int32>("index_type")
                             .HostMemory("dims")
                             .HostMemory("value")
                             .HostMemory("output"),
