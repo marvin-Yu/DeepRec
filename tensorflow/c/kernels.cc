@@ -247,9 +247,7 @@ TF_Tensor* TF_AllocateOutput(TF_OpKernelContext* context, int index,
                              size_t len) {
   auto* cc_ctx = reinterpret_cast<::tensorflow::OpKernelContext*>(context);
   tensorflow::AllocatorAttributes attr = cc_ctx->output_alloc_attr(index);
-  tensorflow::Allocator* allocator;
-  auto st = cc_ctx->get_allocator(attr, &allocator);
-  if (!st.ok()) { return nullptr; }
+  auto* allocator = cc_ctx->get_allocator(attr);
   void* data = tensorflow::allocate_tensor("TF_AllocateOutput", len, allocator);
   return TF_NewTensor(dtype, dims, num_dims, data, len,
                       tensorflow::deallocate_buffer, allocator);

@@ -31,7 +31,6 @@ load(
     "//third_party/ngraph:build_defs.bzl",
     "if_ngraph",
 )
-load("@local_config_cuda//cuda:build_defs.bzl", "if_cuda")
 
 package(
     default_visibility = visibility,
@@ -4886,7 +4885,6 @@ tf_cuda_library(
     name = "tf_session_helper",
     srcs = ["client/tf_session_helper.cc"],
     hdrs = ["client/tf_session_helper.h"],
-    linkopts = if_cuda(["-lcuda"]),
     deps = [
         ":construction_fails_op",
         ":ndarray_tensor",

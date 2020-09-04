@@ -20,8 +20,6 @@ limitations under the License.
 
 #include <functional>
 #include <limits>
-#include <memory>
-#include <vector>
 
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
@@ -29,7 +27,6 @@ limitations under the License.
 #include "tensorflow/core/framework/type_traits.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/macros.h"
-#include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/numa.h"
 #include "tensorflow/core/platform/types.h"
 
@@ -107,9 +104,6 @@ class Allocator {
 
   // Return a string identifying this allocator
   virtual string Name() = 0;
-
-  // Reset the allocator
-  virtual void Reset() { }
 
   // Return an uninitialized block of memory that is "num_bytes" bytes
   // in size.  The returned pointer is guaranteed to be aligned to a
@@ -226,8 +220,6 @@ class AllocatorWrapper : public Allocator {
 
   string Name() override { return wrapped_->Name(); }
 
-  void Reset() override { wrapped_->Reset(); }
-
   void* AllocateRaw(size_t alignment, size_t num_bytes) override {
     return wrapped_->AllocateRaw(alignment, num_bytes);
   }
@@ -294,8 +286,6 @@ struct AllocatorAttributes {
   bool nic_compatible() const { return value & (0x1 << 1); }
   void set_gpu_compatible(bool v) { value |= (static_cast<int>(v) << 2); }
   bool gpu_compatible() const { return value & (0x1 << 2); }
-  void set_persistent(bool v) { value |= (static_cast<int>(v) << 20); }
-  bool persistent() { return value & (0x1 << 20); }
   void Merge(AllocatorAttributes other) {
     value |= other.value;
     if (scope_id != other.scope_id) {
@@ -377,25 +367,6 @@ class SubAllocator {
 
   const std::vector<Visitor> alloc_visitors_;
   const std::vector<Visitor> free_visitors_;
-};
-
-// A special kind of allocator that keeps copied CPU arguments to
-// various device operations, releasing them at destruction. This is
-// introduced to support CUDA Graph capture.
-class ArgSaver {
- public:
-  template<typename T>
-  T* SaveSingle(T arg) {
-    return reinterpret_cast<T*>(Save(&arg, sizeof(T)));
-  }
-  template<typename T>
-  T* SaveArray(const T* p, size_t n) {
-    return reinterpret_cast<T*>(Save(p, n * sizeof(T)));
-  }
- private:
-  mutex mu_;
-  void* Save(const void* p, size_t size);
-  std::vector<std::unique_ptr<string>> saved_args_;
 };
 
 }  // namespace tensorflow

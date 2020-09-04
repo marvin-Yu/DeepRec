@@ -328,6 +328,15 @@ struct equal_to : std::binary_function<T, T, bool> {
   }
 };
 
+// similar to std::equal_to, but with the DEVICE_FUNC qualifier
+template <class T>
+struct tile_equal_to : std::binary_function<T, T, bool> {
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE bool operator()(const T& x,
+      const T& y) const {
+    return x == y;
+  }
+};
+
 // similar to std::not_equal_to, but with the DEVICE_FUNC qualifier
 template <class T>
 struct not_equal_to : std::binary_function<T, T, bool> {
@@ -1109,6 +1118,13 @@ struct greater_equal : base<T, Eigen::internal::greater_equal<T>, bool> {};
 
 template <typename T>
 struct equal_to : base<T, Eigen::internal::equal_to<T>, bool> {};
+
+template <typename T>
+struct tile_equal_to : base<T, Eigen::internal::equal_to<T>, bool> {
+  bool operator()(const T& x, const T& y) {
+    return x == y;
+  }
+};
 
 template <typename T>
 struct not_equal_to : base<T, Eigen::internal::not_equal_to<T>, bool> {};

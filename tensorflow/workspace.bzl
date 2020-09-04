@@ -418,16 +418,15 @@ def tf_repositories(path_prefix = "", tf_repo_name = ""):
         },
     )
 
-    # 310ba5ee72661c081129eb878c1bbcec936b20f0 is based on 3.8.0 with a fix for protobuf.bzl.
     PROTOBUF_URLS = [
-        "https://storage.googleapis.com/mirror.tensorflow.org/github.com/protocolbuffers/protobuf/archive/310ba5ee72661c081129eb878c1bbcec936b20f0.tar.gz",
-        "https://github.com/protocolbuffers/protobuf/archive/310ba5ee72661c081129eb878c1bbcec936b20f0.tar.gz",
+        "http://gitlab.alibaba-inc.com/odps_tensorflow/other/raw/master/mirror.bazel.build/github.com/google/protobuf/archive/protobuf-fc8c43f15b9e454d9bdec33ccae0a5366c693410.tar.gz",
+        "http://gitlab.alibaba-inc.com/odps_tensorflow/other/raw/master/github.com/google/protobuf/archive/rename-protobuf-fc8c43f15b9e454d9bdec33ccae0a5366c693410.tar.gz",
     ]
-    PROTOBUF_SHA256 = "b9e92f9af8819bbbc514e2902aec860415b70209f31dfc8c4fa72515a5df9d59"
-    PROTOBUF_STRIP_PREFIX = "protobuf-310ba5ee72661c081129eb878c1bbcec936b20f0"
+    PROTOBUF_SHA256 = "e4675b084f947ef1acdb561b3ebec8d6ec48f6a1cd3806a84b6c228d1ea1abf2"
+    PROTOBUF_STRIP_PREFIX = "protobuf-fc8c43f15b9e454d9bdec33ccae0a5366c693410"
 
-    # protobuf depends on @zlib, it has to be renamed to @zlib_archive because "zlib" is already
-    # defined using bind for grpc.
+    # Replace deprecated REPOSITORY_NAME with native.repository_name(), and
+    # PACKAGE_NAME with native.package_name().
     PROTOBUF_PATCH = "//third_party/protobuf:protobuf.patch"
 
     tf_http_archive(

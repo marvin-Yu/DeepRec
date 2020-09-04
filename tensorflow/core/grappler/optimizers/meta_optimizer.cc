@@ -31,6 +31,7 @@ limitations under the License.
 #include "tensorflow/core/grappler/optimizers/custom_graph_optimizer_registry.h"
 #include "tensorflow/core/grappler/optimizers/debug_stripper.h"
 #include "tensorflow/core/grappler/optimizers/dependency_optimizer.h"
+#include "tensorflow/core/grappler/optimizers/unfuse_batch_norm_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/function_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/gemm_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/generic_layout_optimizer.h"
@@ -42,6 +43,7 @@ limitations under the License.
 #include "tensorflow/core/grappler/optimizers/remapper.h"
 #include "tensorflow/core/grappler/optimizers/scoped_allocator_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/shape_optimizer.h"
+#include "tensorflow/core/grappler/optimizers/tile_optimizer.h"
 #include "tensorflow/core/grappler/utils/canonicalizer.h"
 #include "tensorflow/core/grappler/utils/colocation.h"
 #include "tensorflow/core/grappler/utils/functions.h"
@@ -183,6 +185,10 @@ Status MetaOptimizer::InitializeOptimizers(
     optimizers->push_back(
         MakeUnique<FunctionOptimizer>(cfg_.function_optimization()));
   }
+  if (cfg_.fuse_tile_concat_matmul() != RewriterConfig::OFF) {
+    optimizers->push_back(
+        std::unique_ptr<GraphOptimizer>(new UnfuseBatchNormOptimizer(cpu_device_)));
+  }
   if (cfg_.debug_stripper() == RewriterConfig::ON) {
     optimizers->push_back(MakeUnique<DebugStripper>());
   }
@@ -211,8 +217,11 @@ Status MetaOptimizer::InitializeOptimizers(
     optimizers->push_back(
         MakeUnique<DependencyOptimizer>(cfg_.dependency_optimization()));
   }
-  if (cfg_.gemm_optimization() != RewriterConfig::OFF) {
+  if (cfg_.gemm_optimization() == RewriterConfig::ON) {
     optimizers->push_back(MakeUnique<GemmOptimizer>());
+  }
+  if (cfg_.tile_equal() == RewriterConfig::ON) {
+    optimizers->push_back(MakeUnique<TileOptimizer>());
   }
   if (AutoMixedPrecisionEnabled(cfg_.auto_mixed_precision())) {
     optimizers->push_back(
@@ -409,6 +418,13 @@ Status MetaOptimizer::OptimizeGraph(Cluster* cluster, const GrapplerItem& item,
 
     for (const auto& optimizer : optimizers) {
       GRAPPLER_RETURN_IF_DEADLINE_EXCEEDED();
+      if (VLOG_IS_ON(4)) {
+        DumpGraphDefToFile(
+            strings::StrCat("before_MetaOptimizer_iteration_", iteration, "_",
+                            optimizer->name(), "_",
+                            reinterpret_cast<uintptr_t>(optimized_graph)),
+            *optimized_graph);
+      }
       // Some optimizers can run only once.
       if (iteration > 0 && IsRunOnceOptimizer(optimizer->name())) continue;
       // Some must run only on the last iteration.
@@ -819,7 +835,7 @@ bool MetaOptimizerEnabled(const ConfigProto& cfg) {
          rewrite_cfg.debug_stripper() == RewriterConfig::ON ||
          rewrite_cfg.scoped_allocator_optimization() == RewriterConfig::ON ||
          rewrite_cfg.pin_to_host_optimization() == RewriterConfig::ON ||
-         rewrite_cfg.gemm_optimization() != RewriterConfig::OFF;
+         rewrite_cfg.gemm_optimization() != RewriterConfig::OFF ||
          AutoMixedPrecisionEnabled(rewrite_cfg.auto_mixed_precision()) ||
          !rewrite_cfg.optimizers().empty() ||
          !rewrite_cfg.custom_optimizers().empty();

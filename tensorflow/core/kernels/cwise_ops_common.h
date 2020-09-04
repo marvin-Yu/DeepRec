@@ -46,7 +46,8 @@ typedef Eigen::SyclDevice SYCLDevice;
 
 class BinaryOpShared : public OpKernel {
  public:
-  explicit BinaryOpShared(OpKernelConstruction* ctx, DataType out, DataType in);
+  explicit BinaryOpShared(OpKernelConstruction* ctx, DataType out,
+			DataType in, bool check = true);
 
  protected:
   struct BinaryOpState {
@@ -88,6 +89,10 @@ class BinaryOp : public BinaryOpShared {
   explicit BinaryOp(OpKernelConstruction* ctx)
       : BinaryOpShared(ctx, DataTypeToEnum<Tout>::v(),
                        DataTypeToEnum<Tin>::v()) {}
+
+  explicit BinaryOp(OpKernelConstruction* ctx, bool check)
+      : BinaryOpShared(ctx, DataTypeToEnum<Tout>::v(),
+                       DataTypeToEnum<Tin>::v(), check) {}
 
   void Compute(OpKernelContext* ctx) override {
     // 'state': Shared helper not dependent on T to reduce code size

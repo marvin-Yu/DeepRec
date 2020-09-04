@@ -743,7 +743,7 @@ REGISTER_OP("Mod")
     .Input("x: T")
     .Input("y: T")
     .Output("z: T")
-    .Attr("T: {int32, int64, float16, half, bfloat16, float, double}")
+    .Attr("T: {int32, int64, uint32, uint64, float16, half, bfloat16, float, double}")
     .SetShapeFn(shape_inference::BroadcastBinaryOpShapeFn);
 
 REGISTER_OP("FloorMod")

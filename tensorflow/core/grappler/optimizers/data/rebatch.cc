@@ -286,7 +286,7 @@ void SetUnknownShapes(int num_components, AttrValue* output_shapes) {
 Status GetMinibatchDimForReshape(const NodeDef& dataset_node,
                                  int64 num_replicas, int64* result) {
   AttrValue output_shapes;
-  if (!dataset_node.attr().contains(kOutputShapesAttr)) {
+  if (dataset_node.attr().find(kOutputShapesAttr) == dataset_node.attr().end()) {
     return errors::InvalidArgument(
         "Cannot use rebatching fallback when the final dataset node does not "
         "have an `output_shapes` attr. Node: ",
@@ -327,7 +327,7 @@ Status GetMinibatchDimForReshape(const NodeDef& dataset_node,
 Status UpdateOutputShapes(const string& node_name, int64 num_replicas,
                           MutableGraphView* graph) {
   NodeDef* node = graph->GetNode(node_name);
-  if (node->attr().contains(kOutputShapesAttr)) {
+  if (node->attr().find(kOutputShapesAttr) != node->attr().end()) {
     AttrValue output_shapes = node->attr().at(kOutputShapesAttr);
     for (auto& shape : *output_shapes.mutable_list()->mutable_shape()) {
       if (!shape.unknown_rank() && shape.dim(0).size() != -1) {
@@ -809,7 +809,7 @@ Status RebatchWithFallback(const NodeDef* fetch_node, int64 num_replicas,
   }
 
   AttrValue output_shapes;
-  if (fetch_node->attr().contains(kOutputShapesAttr)) {
+  if (fetch_node->attr().find(kOutputShapesAttr) != fetch_node->attr().end()) {
     output_shapes = fetch_node->attr().at(kOutputShapesAttr);
   } else {
     SetUnknownShapes(output_types.size(), &output_shapes);

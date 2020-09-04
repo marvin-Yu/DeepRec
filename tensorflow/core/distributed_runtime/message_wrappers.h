@@ -324,8 +324,10 @@ class MutableRunGraphRequestWrapper : public RunGraphRequestWrapper {
   virtual void add_recv_key(const string& recv_key) = 0;
   virtual void set_is_partial(bool is_partial) = 0;
   virtual void set_is_last_partial_run(bool is_last_partial_run) = 0;
+  virtual void set_run_graph_mode(bool run_graph_mode) = 0;
   virtual void set_store_errors_in_response_body(bool store_errors) = 0;
   virtual void set_request_id(int64 request_id) = 0;
+  virtual void add_send(const string& key, const Tensor& tensor) {};
 };
 
 class InMemoryRunGraphRequest : public MutableRunGraphRequestWrapper {
@@ -362,6 +364,9 @@ class InMemoryRunGraphRequest : public MutableRunGraphRequestWrapper {
   void add_recv_key(const string& recv_key) override;
   void set_is_partial(bool is_partial) override;
   void set_is_last_partial_run(bool is_last_partial_run) override;
+  void set_run_graph_mode(bool run_graph_mode) override {
+    is_run_graph_mode_ = run_graph_mode;
+  }
   void set_store_errors_in_response_body(bool store_errors) override;
   void set_request_id(int64 request_id) override;
 
@@ -377,6 +382,7 @@ class InMemoryRunGraphRequest : public MutableRunGraphRequestWrapper {
   bool is_last_partial_run_ = false;
   bool store_errors_in_response_body_ = false;
   int64 request_id_ = 0;
+  bool is_run_graph_mode_ = false;
 
   // Holds a cached and owned representation of the proto
   // representation of this request, if needed, so that `ToProto()`
@@ -406,7 +412,10 @@ class MutableProtoRunGraphRequest : public MutableRunGraphRequestWrapper {
   bool store_errors_in_response_body() const override;
   int64 request_id() const override;
   const RunGraphRequest& ToProto() const override;
-
+  void add_send(const string& key, const Tensor& tensor) override;
+  void set_run_graph_mode(bool run_graph_mode) override {
+      request_.set_run_graph_mode(run_graph_mode);
+  }
   // MutableRunGraphRequestWrapper methods.
   void set_session_handle(const string& handle) override;
   void set_create_worker_session_called(bool called) override;

@@ -15,9 +15,7 @@ limitations under the License.
 
 #include "tensorflow/core/common_runtime/direct_session.h"
 
-#include <algorithm>
 #include <atomic>
-#include <set>
 #include <string>
 #include <vector>
 
@@ -28,7 +26,6 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/debugger_state_interface.h"
 #include "tensorflow/core/common_runtime/device_factory.h"
 #include "tensorflow/core/common_runtime/device_resolver_local.h"
-#include "tensorflow/core/common_runtime/dma_helper.h"
 #include "tensorflow/core/common_runtime/executor.h"
 #include "tensorflow/core/common_runtime/executor_factory.h"
 #include "tensorflow/core/common_runtime/function.h"
@@ -80,165 +77,8 @@ limitations under the License.
 #include "tensorflow/core/protobuf/config.pb.h"
 #include "tensorflow/core/util/device_name_utils.h"
 #include "tensorflow/core/util/env_var.h"
-#include "tensorflow/core/util/ptr_util.h"
-
-#ifdef GOOGLE_CUDA
-// NOTE(zhujun): Currently the CUDA Graph support is implemented
-// directly here. This is a bit hacky as it is not well
-// encapsulated. But for now we are aiming to make it work, so we only
-// want to clean this up in the future.
-#include "tensorflow/core/common_runtime/gpu/gpu_device.h"
-#include "tensorflow/core/common_runtime/gpu/gpu_persistent_allocator.h"
-
-#include "third_party/gpus/cuda/include/cuda.h"
-#include "third_party/gpus/cuda/include/cuda_runtime_api.h"
-#endif
 
 namespace tensorflow {
-
-#ifdef GOOGLE_CUDA
-struct DirectSession::CUDAGraphContext {
-  CUgraph cuda_graph = nullptr;
-  CUgraphExec cuda_graph_exec = nullptr;
-  std::map<string, std::unique_ptr<Tensor>> inputs;
-  std::map<string, std::unique_ptr<Tensor>> outputs;
-  ~CUDAGraphContext();
-};
-
-struct DirectSession::CUDAGraphArgs {
-  int capture_timeout_secs;
-};
-
-class DirectSession::CUDAGraphDeviceContext {
-
- public:
-  enum State { READY, BORROWED };
-
-  CUDAGraphDeviceContext(BaseGPUDevice* device,
-                         const CUDAGraphOptions& options):
-    device_(device), options_(options) { }
-  ~CUDAGraphDeviceContext();
-
-  Status Init();
-
-  int device_id() { return device_->gpu_id(); }
-
-  CUstream stream() { return stream_; }
-
-  Allocator* persistent_allocator() { return persistent_allocator_.get(); }
-
-  ArgSaver* arg_saver() { return &arg_saver_; }
-
-  void AddContext(const string& key, CUDAGraphContext* context);
-
-  CUDAGraphContext* GetContext(const string& key);
-
-  State state() { return state_; }
-
-  void SetState(State st) { state_ = st; }
-
- private:
-
-  State state_;
-
-  BaseGPUDevice* device_;       // Not own.
-
-  const CUDAGraphOptions options_;
-
-  CUstream stream_ = nullptr;
-
-  ArgSaver arg_saver_;
-
-  std::unique_ptr<Allocator> persistent_allocator_;
-
-  // Must follow persistent_allocator, as CUDAGraphContexts require
-  // the allocator for freeing device memory.
-  std::map<string, std::unique_ptr<CUDAGraphContext>> contexts_;
-};
-
-DirectSession::CUDAGraphContext::~CUDAGraphContext() {
-  if (cuda_graph_exec) {
-    CUresult res = cuGraphExecDestroy(cuda_graph_exec);
-    if (res != CUDA_SUCCESS) {
-      const char* err;
-      cuGetErrorString(res, &err);
-      LOG(ERROR) << "cuGraphExecDestroy failed to destroy " << cuda_graph_exec
-                 << (err ? string(": ") + err : "") ;
-    }
-  }
-  if (cuda_graph) {
-    CUresult res = cuGraphDestroy(cuda_graph);
-    if (res != CUDA_SUCCESS) {
-      const char* err;
-      cuGetErrorString(res, &err);
-      LOG(ERROR) << "cuGraphDestroy failed to destroy " << cuda_graph
-                 << (err ? string(": ") + err : "");
-    }
-  }
-}
-
-DirectSession::CUDAGraphDeviceContext::~CUDAGraphDeviceContext() {
-  if (stream_) {
-    CUresult res = cuStreamDestroy(stream_);
-    if (res != CUDA_SUCCESS) {
-      const char* err;
-      cuGetErrorString(res, &err);
-      LOG(ERROR) << "cuStreamDestroy failed to destroy " << stream_
-                 << (err ? string(": ") + err : "");
-    }
-  }
-}
-
-Status DirectSession::CUDAGraphDeviceContext::Init() {
-  auto dev_id = device_id();
-  int old_dev_id;
-  auto ret0 = cudaGetDevice(&old_dev_id);
-  if (ret0 != cudaSuccess) {
-    return errors::Internal(
-      "Cannot get the old device: ", cudaGetErrorString(ret0));
-  }
-  ret0 = cudaSetDevice(dev_id);
-  if (ret0 != cudaSuccess) {
-    return errors::Internal(
-      "Cannot set the current device: ", cudaGetErrorString(ret0));
-  }
-  auto ret = cuStreamCreate(&stream_, CU_STREAM_NON_BLOCKING);
-  if (ret != CUDA_SUCCESS) {
-    const char* error;
-    cuGetErrorString(ret, &error);
-    return errors::Internal("Cannot create a new stream: ", error);
-  }
-  ret0 = cudaSetDevice(old_dev_id);
-  if (ret0 != cudaSuccess) {
-    return errors::Internal(
-      "Cannot set the old device: ", cudaGetErrorString(ret0));
-  }
-  persistent_allocator_.reset(
-    new GPUPersistentAllocator(options_, PlatformGpuId(dev_id)));
-  return Status::OK();
-}
-
-void DirectSession::CUDAGraphDeviceContext::AddContext(
-  const string& key, CUDAGraphContext* context) {
-  contexts_.emplace(key, WrapUnique<CUDAGraphContext>(context));
-}
-
-DirectSession::CUDAGraphContext*
-DirectSession::CUDAGraphDeviceContext::GetContext(
-  const string& key) {
-  auto it = contexts_.find(key);
-  return it == contexts_.end() ? nullptr : it->second.get();
-}
-
-uint64 CUDAGraphBorrowTimeout(const CUDAGraphOptions& options) {
-  auto res = options.wait_time_in_microseconds();
-  return (res <= 0 ? 100 : res) * 1000;
-}
-#else
-struct DirectSession::CUDAGraphContext { };
-struct DirectSession::CUDAGraphArgs { };
-struct DirectSession::CUDAGraphDeviceContext { };
-#endif
 
 namespace {
 
@@ -517,8 +357,8 @@ DirectSession::DirectSession(const SessionOptions& options,
     LOG(ERROR) << status.error_message();
   }
 
-  session_handle_ =
-      strings::StrCat("direct", strings::FpToString(random::New64()));
+  session_handle_ = "direct";
+//      strings::StrCat("direct", strings::FpToString(random::New64()));
   int devices_added = 0;
   if (options.config.log_device_placement()) {
     const string mapping_str = device_mgr_->DeviceMappingString();
@@ -527,10 +367,7 @@ DirectSession::DirectSession(const SessionOptions& options,
     } else {
       printf("Device mapping:\n%s", mapping_str.c_str());
     }
-    string msg = strings::StrCat("Device mapping:\n", mapping_str);
-    if (!logging::LogToListeners(msg)) {
-      LOG(INFO) << msg;
-    }
+    LOG(INFO) << "Device mapping:\n" << mapping_str;
   }
   for (auto d : device_mgr_->ListDevices()) {
     devices_.push_back(d);
@@ -557,6 +394,9 @@ DirectSession::~DirectSession() {
   callables_.clear();
   for (auto d : device_mgr_->ListDevices()) {
     d->op_segment()->RemoveHold(session_handle_);
+  }
+  for (auto d : device_mgr_->ListDevices()) {
+    d->ClearResourceMgr();
   }
   functions_.clear();
   delete cancellation_manager_;
@@ -621,6 +461,24 @@ Status DirectSession::ExtendLocked(GraphDef graph) {
   return Status::OK();
 }
 
+struct CallbackFrame {
+  CallbackFrame() {
+    call_frame = nullptr;
+    run_state = nullptr;
+    executors_and_keys = nullptr;
+  }
+  ~CallbackFrame() {
+    delete call_frame;
+    delete run_state;
+  }
+  FunctionCallFrame *call_frame;
+  DirectSession::RunState *run_state;
+  DirectSession::ExecutorsAndKeys* executors_and_keys;
+  CancellationManager step_cancellation_manager;
+  CancellationToken cancellation_token;
+  bool update_cost_model;
+};
+
 Status DirectSession::Run(const NamedTensorList& inputs,
                           const std::vector<string>& output_names,
                           const std::vector<string>& target_nodes,
@@ -660,169 +518,17 @@ Status DirectSession::DecorateAndPublishGraphForDebug(
   return Status::OK();
 }
 
-#ifdef GOOGLE_CUDA
-static void* CPUBase(const Tensor* tensor) {
-  return const_cast<void*>(DMAHelper::base(tensor));
-}
-
-static CUdeviceptr GPUBase(const Tensor* tensor) {
-  return reinterpret_cast<CUdeviceptr>(DMAHelper::base(tensor));
-}
-
-static Status CopyTensorCPUToGPU(CUstream stream, const Tensor* in,
-                                 Tensor* out) {
-  CUdeviceptr dst = GPUBase(out);
-  const void* src = CPUBase(in);
-  size_t size = in->TotalBytes();
-  auto ret = cuMemcpyHtoD(dst, src, size);
-  if (ret != CUDA_SUCCESS) {
-    const char* error;
-    cuGetErrorString(ret, &error);
-    return errors::Internal("Failed to copy tensor to GPU: ", error);
-  }
-  return Status::OK();
-}
-
-static Status CopyTensorGPUToCPU(CUstream stream, const Tensor* in,
-                                 Tensor* out) {
-  void* dst = CPUBase(out);
-  CUdeviceptr src = GPUBase(in);
-  size_t size = in->TotalBytes();
-  auto ret = cuMemcpyDtoH(dst, src, size);
-  if (ret != CUDA_SUCCESS) {
-    const char* error;
-    cuGetErrorString(ret, &error);
-    return errors::Internal("Failed to copy tensor to CPU: ", error);
-  }
-  return Status::OK();
-}
-#endif
-
-Status DirectSession::RunWithCUDAGraph(CUDAGraphDeviceContext& device_context,
-                                       CUDAGraphContext& context,
-                                       const NamedTensorList& inputs,
-                                       const std::vector<string>& output_names,
-                                       std::vector<Tensor>* outputs) {
-#ifdef GOOGLE_CUDA
-  auto device_id = device_context.device_id();
-  auto ret0 = cudaSetDevice(device_id);
-  if (ret0 != cudaSuccess) {
-    return errors::Internal("Cannot set to the desired device (", device_id,
-                            "): ", cudaGetErrorString(ret0));
-  }
-
-  string cpu_device_name;
-  Device* cpu_device;
-  TF_RETURN_IF_ERROR(GetAssignedCPUDevice(&cpu_device_name, &cpu_device));
-  AllocatorAttributes aa;
-  auto cpu_allocator = cpu_device->GetAllocator(aa);
-
-  // Check inputs and outputs.
-  std::set<string> all;
-  for (const auto& e: context.inputs) {
-    all.insert(e.first);
-  }
-  for (int i = 0; i < inputs.size(); i++) {
-    auto& entry = inputs[i];
-    auto& name = std::get<0>(entry);
-    auto it = context.inputs.find(name);
-    if (it == context.inputs.end()) {
-      return errors::InvalidArgument("Input not found: ", name);
-    }
-    const Tensor* in = &std::get<1>(entry);
-    Tensor* out = it->second.get();
-    if (in->shape() != out->shape()) {
-      return errors::InvalidArgument(
-        "Mismatched shapes for input ", name, ": expected ",
-        out->shape(), ", provided ", in->shape());
-    }
-    all.erase(name);
-  }
-  if (!all.empty()) {
-    return errors::InvalidArgument("Missing input: ", *all.begin());
-  }
-
-  for (const auto& e: context.outputs) {
-    all.insert(e.first);
-  }
-  for (int i = 0; i < output_names.size(); i++) {
-    auto& name = output_names[i];
-    auto it = context.outputs.find(name);
-    if (it == context.outputs.end()) {
-      return errors::InvalidArgument("Output not found: ", name);
-    }
-    all.erase(name);
-  }
-  if (!all.empty()) {
-    return errors::InvalidArgument("Missing output: ", *all.begin());
-  }
-
-  CUresult ret;
-  auto stream = device_context.stream();
-
-  VLOG(3) << "Feeding inputs to CUDA Graph";
-  for (int i = 0; i < inputs.size(); i++) {
-    auto& entry = inputs[i];
-    auto& name = std::get<0>(entry);
-    const Tensor* in = &std::get<1>(entry);
-    Tensor* out = context.inputs[name].get();
-    TF_RETURN_IF_ERROR(CopyTensorCPUToGPU(stream, in, out));
-  }
-
-  VLOG(3) << "Launching CUDA Graph";
-  ret = cuGraphLaunch(context.cuda_graph_exec, stream);
-  if (ret != CUDA_SUCCESS) {
-    const char* error;
-    cuGetErrorString(ret, &error);
-    return errors::Internal("Failed to launch CUDA Graph: ", error);
-  }
-
-  VLOG(3) << "Fetching outputs from CUDA Graph";
-  outputs->resize(output_names.size());
-  for (int i = 0; i < output_names.size(); i++) {
-    auto& name = output_names[i];
-    const Tensor* in = context.outputs[name].get();
-    Tensor* out = &(*outputs)[i];
-    *out = Tensor(cpu_allocator, in->dtype(), in->shape());
-    TF_RETURN_IF_ERROR(CopyTensorGPUToCPU(stream, in, out));
-  }
-
-  ret = cuStreamSynchronize(stream);
-  if (ret != CUDA_SUCCESS) {
-    const char* error;
-    cuGetErrorString(ret, &error);
-    return errors::Internal("Failed to synchronize CUDA Graph stream: ", error);
-  }
-
-  return Status::OK();
-#else
-  return Status::OK();
-#endif
-}
-
 Status DirectSession::RunInternal(
     int64 step_id, const RunOptions& run_options,
     CallFrameInterface* call_frame, ExecutorsAndKeys* executors_and_keys,
     RunMetadata* run_metadata,
-    const thread::ThreadPoolOptions& threadpool_options,
-    CUDAGraphDeviceContext* cuda_graph_device_context,
-    CUDAGraphContext* cuda_graph_context, CUDAGraphArgs* cuda_graph_args) {
+    const thread::ThreadPoolOptions& threadpool_options) {
   const uint64 start_time_usecs = options_.env->NowMicros();
   const int64 executor_step_count = executors_and_keys->step_count.fetch_add(1);
   RunState run_state(step_id, &devices_);
 
   profiler::TraceMe activity(
-      [&] {
-        if (options_.config.experimental().has_session_metadata()) {
-          const auto& model_metadata =
-              options_.config.experimental().session_metadata();
-          return strings::StrCat("SessionRun #id=", step_id,
-                                 ",model_id=", model_metadata.name(), ":",
-                                 model_metadata.version(), "#");
-        } else {
-          return strings::StrCat("SessionRun #id=", step_id, "#");
-        }
-      },
+      [&] { return strings::StrCat("SessionRun #id=", step_id, "#"); },
       profiler::TraceMeLevel::kInfo);
 
   std::unique_ptr<DebuggerStateInterface> debugger_state;
@@ -833,7 +539,6 @@ Status DirectSession::RunInternal(
                             executor_step_count, &debugger_state));
   }
 
-  run_state.rendez = new IntraProcessRendezvous(device_mgr_.get());
 #ifndef __ANDROID__
   // Set up for collectives if ExecutorsAndKeys declares a key.
   if (executors_and_keys->collective_graph_key !=
@@ -866,6 +571,7 @@ Status DirectSession::RunInternal(
   }
 #endif
 
+  run_state.rendez = new IntraProcessRendezvous(device_mgr_.get());
   // Start parallel Executors.
   const size_t num_executors = executors_and_keys->items.size();
   ExecutorBarrier* barrier = new ExecutorBarrier(
@@ -906,25 +612,6 @@ Status DirectSession::RunInternal(
     args.prof_stats = nullptr;
   }
   
-#ifdef GOOGLE_CUDA
-  if (cuda_graph_device_context && cuda_graph_context) {
-    args.persistent_allocator =
-      cuda_graph_device_context->persistent_allocator();
-    args.cuda_graph = &cuda_graph_context->cuda_graph;
-    auto& inputs = cuda_graph_context->inputs;
-    args.save_input = [&inputs](const string& name, Tensor* tensor) {
-      inputs[name].reset(new Tensor(*tensor));
-    };
-    auto& outputs = cuda_graph_context->outputs;
-    args.save_output = [&outputs](const string& name, Tensor* tensor) {
-      outputs[name].reset(new Tensor(*tensor));
-    };
-    args.cuda_graph_capture_timeout_secs
-      = cuda_graph_args->capture_timeout_secs;
-    args.arg_saver = cuda_graph_device_context->arg_saver();
-  }
-#endif
-
   const bool do_trace = (run_options.trace_level() > RunOptions::NO_TRACE);
 
   bool update_cost_model = false;
@@ -1120,142 +807,330 @@ Status DirectSession::RunInternal(
   return Status::OK();
 }
 
+#define TF_DONE_RETURN_IF_ERROR(s) do {         \
+        if (!(s).ok()) {                        \
+            done((s));                          \
+            return;                             \
+        }                                       \
+    } while (0)
+
+#define DONE_WITH_STATUS(s) do {            \
+    done(s);                                \
+    return;                                 \
+  } while(0)
+
+void DirectSession::RunInternalAsync(
+    int64 step_id, const RunOptions& run_options,
+    CallFrameInterface* call_frame, ExecutorsAndKeys* executors_and_keys,
+    RunMetadata* run_metadata,
+    const thread::ThreadPoolOptions& threadpool_options,
+    const NamedTensorList& inputs,
+    const std::vector<string>& output_names,
+    const std::vector<string>& target_nodes,
+    std::vector<Tensor>* outputs,
+    CallbackFrame* frame,
+    StatusCallback done) {
+  const uint64 start_time_usecs = options_.env->NowMicros();
+  const int64 executor_step_count = executors_and_keys->step_count.fetch_add(1);
+  frame->run_state = new RunState(step_id, &devices_);
+  auto& run_state = *(frame->run_state);
+
+  profiler::TraceMe activity(
+      [&] { return strings::StrCat("SessionRun #id=", step_id, "#"); },
+      profiler::TraceMeLevel::kInfo);
+
+  std::unique_ptr<DebuggerStateInterface> debugger_state;
+  if (!run_options.debug_options().debug_tensor_watch_opts().empty()) {
+    TF_DONE_RETURN_IF_ERROR(
+        CreateDebuggerState(executors_and_keys->callable_options,
+                            run_options.debug_options().global_step(), step_id,
+                            executor_step_count, &debugger_state));
+  }
+
+#ifndef __ANDROID__
+  // Set up for collectives if ExecutorsAndKeys declares a key.
+  if (executors_and_keys->collective_graph_key !=
+      BuildGraphOptions::kNoCollectiveGraphKey) {
+    if (run_options.experimental().collective_graph_key() !=
+        BuildGraphOptions::kNoCollectiveGraphKey) {
+      // If a collective_graph_key was specified in run_options, ensure that it
+      // matches what came out of GraphExecutionState::BuildGraph().
+      if (run_options.experimental().collective_graph_key() !=
+          executors_and_keys->collective_graph_key) {
+         DONE_WITH_STATUS(errors::Internal(
+            "collective_graph_key in RunOptions ",
+            run_options.experimental().collective_graph_key(),
+            " should match collective_graph_key from optimized graph ",
+            executors_and_keys->collective_graph_key));
+      }
+    }
+    if (!collective_executor_mgr_) {
+      std::unique_ptr<DeviceResolverInterface> drl(
+          new DeviceResolverLocal(device_mgr_.get()));
+      std::unique_ptr<ParamResolverInterface> cprl(
+          new CollectiveParamResolverLocal(options_.config, device_mgr_.get(),
+                                           drl.get(),
+                                           "/job:localhost/replica:0/task:0"));
+      collective_executor_mgr_.reset(new CollectiveExecutorMgr(
+          options_.config, device_mgr_.get(), std::move(drl), std::move(cprl)));
+    }
+    run_state.collective_executor.reset(new CollectiveExecutor::Handle(
+        collective_executor_mgr_->FindOrCreate(step_id), true /*inherit_ref*/));
+  }
+#endif
+
+  run_state.rendez = new IntraProcessRendezvous(device_mgr_.get());
+  // Start parallel Executors.
+  const size_t num_executors = executors_and_keys->items.size();
+  ExecutorBarrier* barrier = new ExecutorBarrier(
+      num_executors, run_state.rendez, [this, &run_state, done, run_options,
+      inputs, output_names, target_nodes,
+      outputs, run_metadata, frame, start_time_usecs](const Status& ret) {
+        {
+          mutex_lock l(run_state.mu_);
+          run_state.status.Update(ret);
+        }
+        run_state.executors_done.Notify();
+        auto s = this->AfterRunAsync(run_options, inputs, output_names, target_nodes,
+            outputs, frame, run_metadata, start_time_usecs);
+        done(s);
+      });
+
+  Executor::Args args;
+  args.step_id = step_id;
+  args.call_frame = call_frame;
+  args.rendezvous = run_state.rendez;
+  args.collective_executor =
+      (run_state.collective_executor ? run_state.collective_executor->get()
+                                     : nullptr);
+  args.cancellation_manager = &frame->step_cancellation_manager;
+  args.session_state = &session_state_;
+  args.session_handle = session_handle_;
+  args.tensor_store = &run_state.tensor_store;
+  args.step_container = &run_state.step_container;
+  args.sync_on_finish = sync_on_finish_;
+  args.user_intra_op_threadpool = threadpool_options.intra_op_threadpool;
+
+  const bool do_trace = (run_options.trace_level() > RunOptions::NO_TRACE);
+
+  bool update_cost_model = false;
+  if (options_.config.graph_options().build_cost_model() > 0) {
+    const int64 build_cost_model_every =
+        options_.config.graph_options().build_cost_model();
+    const int64 build_cost_model_after =
+        options_.config.graph_options().build_cost_model_after();
+    int64 measure_step_count = executor_step_count - build_cost_model_after;
+    if (measure_step_count >= 0) {
+      update_cost_model =
+          ((measure_step_count + 1) % build_cost_model_every == 0);
+    }
+  }
+  if (do_trace || update_cost_model ||
+      run_options.report_tensor_allocations_upon_oom()) {
+    run_state.collector.reset(
+        new StepStatsCollector(run_metadata->mutable_step_stats()));
+    args.stats_collector = run_state.collector.get();
+  }
+
+  frame->update_cost_model = update_cost_model;
+  std::unique_ptr<ProfilerSession> profiler_session;
+  if (run_options.trace_level() >= RunOptions::HARDWARE_TRACE) {
+    profiler_session = ProfilerSession::Create();
+  }
+
+  if (run_options.inter_op_thread_pool() < -1 ||
+      run_options.inter_op_thread_pool() >=
+          static_cast<int32>(thread_pools_.size())) {
+    run_state.executors_done.Notify();
+    delete barrier;
+	DONE_WITH_STATUS(errors::InvalidArgument("Invalid inter_op_thread_pool"));
+  }
+
+  // Register this step with session's cancellation manager, so that
+  // `Session::Close()` will cancel the step.
+  const CancellationToken cancellation_token =
+      cancellation_manager_->get_cancellation_token();
+  frame->cancellation_token = cancellation_token;
+  auto &step_cancellation_manager = frame->step_cancellation_manager;
+  const bool already_cancelled = !cancellation_manager_->RegisterCallback(
+      cancellation_token, [&step_cancellation_manager]() {
+        step_cancellation_manager.StartCancel();
+      });
+  if (already_cancelled) {
+    // NOTE(mrry): If we don't explicitly notify
+    // `run_state.executors_done`, the RunState destructor would
+    // block on this notification.
+    run_state.executors_done.Notify();
+    delete barrier;
+	DONE_WITH_STATUS(errors::Cancelled("Run call was cancelled"));
+  }
+
+  // Use std::unique_ptr to ensure garbage collection
+  std::unique_ptr<thread::ThreadPool> threadpool_wrapper;
+  thread::ThreadPool* pool = nullptr;
+
+  if (run_in_caller_thread_) {
+    pool = nullptr;
+  } else if (threadpool_options.inter_op_threadpool != nullptr) {
+    threadpool_wrapper = absl::make_unique<thread::ThreadPool>(
+        threadpool_options.inter_op_threadpool);
+    pool = threadpool_wrapper.get();
+  } else if (run_options.inter_op_thread_pool() >= 0) {
+    pool = thread_pools_[run_options.inter_op_thread_pool()].first;
+  }
+
+  if (pool == nullptr) {
+    // We allow using the caller thread only when having a single executor
+    // specified.
+    if (executors_and_keys->items.size() > 1) {
+      pool = thread_pools_[0].first;
+    } else {
+      VLOG(1) << "Executing Session::Run() synchronously!";
+    }
+  }
+
+  std::unique_ptr<RunHandler> handler;
+  if (ShouldUseRunHandlerPool(run_options) &&
+      run_options.experimental().use_run_handler_pool()) {
+    VLOG(1) << "Using RunHandler to scheduler inter-op closures.";
+    handler = GetOrCreateRunHandlerPool(options_)->Get(step_id);
+  }
+  auto* handler_ptr = handler.get();
+
+  Executor::Args::Runner default_runner = nullptr;
+
+  if (pool == nullptr) {
+    default_runner = [](Executor::Args::Closure c) { c(); };
+  } else if (handler_ptr != nullptr) {
+    default_runner = [handler_ptr](Executor::Args::Closure c) {
+      handler_ptr->ScheduleInterOpClosure(std::move(c));
+    };
+  } else {
+    default_runner = [this, pool](Executor::Args::Closure c) {
+      pool->Schedule(std::move(c));
+    };
+  }
+
+  for (const auto& item : executors_and_keys->items) {
+    // TODO(azaks): support partial run.
+    // TODO(azaks): if the device picks its own threadpool, we need to assign
+    //     less threads to the main compute pool by default.
+    thread::ThreadPool* device_thread_pool =
+        item.device->tensorflow_device_thread_pool();
+    // TODO(crk): Investigate usage of RunHandlerPool when using device specific
+    // thread pool(s).
+    if (!device_thread_pool) {
+      args.runner = default_runner;
+    } else {
+      args.runner = [this, device_thread_pool](Executor::Args::Closure c) {
+        device_thread_pool->Schedule(std::move(c));
+      };
+    }
+    if (handler != nullptr) {
+      args.user_intra_op_threadpool = handler->AsIntraThreadPoolInterface();
+    }
+
+    item.executor->RunAsync(args, barrier->Get());
+  }
+}
+
+void DirectSession::RunAsync(const RunOptions& run_options,
+                             const NamedTensorList& inputs,
+                             const std::vector<string>& output_names,
+                             const std::vector<string>& target_nodes,
+                             std::vector<Tensor>* outputs,
+                             RunMetadata* run_metadata,
+                             StatusCallback done)
+{
+  auto frame = new CallbackFrame;
+  StatusCallback new_done = [frame, done](const Status& ret) {
+    delete frame;
+    done(ret);
+  };
+  RunAsync(run_options, inputs, output_names, target_nodes, outputs,
+           run_metadata, frame, new_done);
+}
+
+void DirectSession::RunAsync(const RunOptions& run_options,
+                          const NamedTensorList& inputs,
+                          const std::vector<string>& output_names,
+                          const std::vector<string>& target_nodes,
+                          std::vector<Tensor>* outputs,
+                          RunMetadata* run_metadata,
+                          CallbackFrame* frame,
+                          StatusCallback done) {
+  TF_DONE_RETURN_IF_ERROR(CheckNotClosed());
+  TF_DONE_RETURN_IF_ERROR(CheckGraphCreated("Run()"));
+  direct_session_runs->GetCell()->IncrementBy(1);
+
+  // Extract the inputs names for this run of the session.
+  std::vector<string> input_tensor_names;
+  input_tensor_names.reserve(inputs.size());
+  size_t input_size = 0;
+  for (const auto& it : inputs) {
+    input_tensor_names.push_back(it.first);
+    input_size += it.second.AllocatedBytes();
+  }
+  metrics::RecordGraphInputTensors(input_size);
+
+  // Check if we already have an executor for these arguments.
+  ExecutorsAndKeys* executors_and_keys;
+  RunStateArgs run_state_args(run_options.debug_options());
+  run_state_args.collective_graph_key =
+      run_options.experimental().collective_graph_key();
+
+  TF_DONE_RETURN_IF_ERROR(GetOrCreateExecutors(input_tensor_names, output_names,
+                                          target_nodes, &executors_and_keys,
+                                          &run_state_args));
+  {
+    mutex_lock l(collective_graph_key_lock_);
+    collective_graph_key_ = executors_and_keys->collective_graph_key;
+  }
+
+  frame->executors_and_keys = executors_and_keys;
+  // Configure a call frame for the step, which we use to feed and
+  // fetch values to and from the executors.
+  frame->call_frame = new FunctionCallFrame(executors_and_keys->input_types,
+                               executors_and_keys->output_types);
+  auto& call_frame = *(frame->call_frame);
+  gtl::InlinedVector<Tensor, 4> feed_args(inputs.size());
+  for (const auto& it : inputs) {
+    if (it.second.dtype() == DT_RESOURCE) {
+      Tensor tensor_from_handle;
+      TF_DONE_RETURN_IF_ERROR(
+          ResourceHandleToInputTensor(it.second, &tensor_from_handle));
+      feed_args[executors_and_keys->input_name_to_index[it.first]] =
+          tensor_from_handle;
+    } else {
+      feed_args[executors_and_keys->input_name_to_index[it.first]] = it.second;
+    }
+  }
+  const Status s = call_frame.SetArgs(feed_args);
+  if (errors::IsInternal(s)) {
+    DONE_WITH_STATUS(s);
+  } else if (!s.ok()) {
+    DONE_WITH_STATUS(s);
+  }
+
+  const int64 step_id = run_options.has_run_id() ? 
+                        run_options.run_id().value() : step_id_counter_.fetch_add(1);
+
+  if (LogMemory::IsEnabled()) {
+    LogMemory::RecordStep(step_id, run_state_args.handle);
+  }
+
+  RunInternalAsync(step_id, run_options, &call_frame,
+      executors_and_keys, run_metadata,
+      thread::ThreadPoolOptions(), inputs,
+      output_names, target_nodes, outputs, frame, done);
+}
+
 Status DirectSession::Run(const RunOptions& run_options,
                           const NamedTensorList& inputs,
                           const std::vector<string>& output_names,
                           const std::vector<string>& target_nodes,
                           std::vector<Tensor>* outputs,
                           RunMetadata* run_metadata) {
-#ifdef GOOGLE_CUDA
-  auto cuda_graph_options = run_options.cuda_graph_options();
-  if (!cuda_graph_options.enable()) {
-    return Run0(run_options, inputs, output_names, target_nodes, outputs,
-                run_metadata);
-  }
-
-  string device_name;
-  BaseGPUDevice* device;
-  TF_RETURN_IF_ERROR(GetAssignedGPUDevice(&device_name, &device));
-  VLOG(2) << "Using device " << device_name << " for CUDA Graphs";
-
-  std::vector<string> input_names;
-  std::vector<::tensorflow::int64> input_dims;
-  input_names.reserve(inputs.size());
-  input_dims.reserve(inputs.size());
-  for (const auto& e: inputs) {
-    input_names.push_back(e.first);
-    input_dims.push_back(e.second.dim_size(0));
-  }
-  string key;
-  BuildCUDAGraphKey(input_names, input_dims, output_names, &key);
-  VLOG(2) << "CUDA Graph key is " << key;
-  uint64 timeout = CUDAGraphBorrowTimeout(cuda_graph_options);
-
-  if (cuda_graph_options.initializing()) {
-    auto count = cuda_graph_options.count();
-    for (auto k = 0; k < count; k++) {
-      CUDAGraphDeviceContext* device_context;
-      TF_RETURN_IF_ERROR(
-        BorrowOrCreateCUDAGraphDeviceContext(device_name, key, k, timeout,
-                                             device, cuda_graph_options,
-                                             &device_context));
-      CUDAGraphContext* context = new CUDAGraphContext;
-      LOG(INFO) << "Creating instance " << k
-                << " of CUDA Graph context for key " << key;
-      auto st = RecordCUDAGraph(run_options, inputs, output_names, target_nodes,
-                                outputs, run_metadata, device_context, context);
-      if (!st.ok()) {
-        delete context;
-        ReturnCUDAGraphDeviceContext(device_name, device_context);
-        return st;
-      }
-      device_context->AddContext(key, context);
-      ReturnCUDAGraphDeviceContext(device_name, device_context);
-    }
-    LOG(INFO) << "Finished creating CUDA Graphs";
-    return Status::OK();
-  }
-
-  CUDAGraphDeviceContext* device_context;
-  CUDAGraphContext* context;
-  TF_RETURN_IF_ERROR(BorrowCUDAGraphContext(device_name, key, timeout,
-                                            &device_context, &context));
-  if (!context) {
-    LOG(WARNING) << "Existing CUDA Graph context was not found, run in the "
-                 << "plain old TensorFlow way";
-    return Run0(run_options, inputs, output_names, target_nodes, outputs,
-                run_metadata);
-  }
-  VLOG(2) << "Running with CUDA Graph context " << context;
-  auto st = RunWithCUDAGraph(*device_context, *context, inputs,
-                             output_names, outputs);
-  ReturnCUDAGraphDeviceContext(device_name, device_context);
-  return st;
-#else
-  return Run0(run_options, inputs, output_names, target_nodes, outputs,
-              run_metadata);
-#endif
-}
-
-Status DirectSession::RecordCUDAGraph(
-  const ::tensorflow::RunOptions& run_options, const NamedTensorList& inputs,
-  const std::vector<string>& output_names,
-  const std::vector<string>& target_nodes, std::vector<Tensor>* outputs,
-  RunMetadata* run_metadata, CUDAGraphDeviceContext* cuda_graph_device_context,
-  CUDAGraphContext* cuda_graph_context) {
-#ifdef GOOGLE_CUDA
-  auto cuda_graph = &cuda_graph_context->cuda_graph;
-  auto ret = cuGraphCreate(cuda_graph, 0);
-  if (ret != CUDA_SUCCESS) {
-    const char* error;
-    cuGetErrorString(ret, &error);
-    return errors::Internal("Failed to create CUDA Graph object: ", error);
-  }
-  auto capture_timeout_secs =
-    run_options.cuda_graph_options().capture_timeout_secs();
-  if (capture_timeout_secs <= 0) {
-    capture_timeout_secs = 10;
-  }
-  CUDAGraphArgs args;
-  args.capture_timeout_secs = capture_timeout_secs;
-  TF_RETURN_IF_ERROR(Run0(run_options, inputs, output_names, target_nodes,
-                          outputs, run_metadata, cuda_graph_device_context,
-                          cuda_graph_context, &args));
-  cuda_graph_device_context->persistent_allocator()->Reset();
-  size_t n;
-  ret = cuGraphGetNodes(*cuda_graph, nullptr, &n);
-  if (ret != CUDA_SUCCESS) {
-    const char* error;
-    cuGetErrorString(ret, &error);
-    LOG(WARNING) << "Cannot get the number of nodes for CUDA Graph "
-                 << *cuda_graph;
-  } else {
-    LOG(INFO) << "Number of nodes in the captured CUDA Graph is " << n;
-  }
-  std::vector<char> error_buf(1024);
-  ret = cuGraphInstantiate(&cuda_graph_context->cuda_graph_exec, *cuda_graph,
-                           nullptr, error_buf.data(), 1024);
-  if (ret != CUDA_SUCCESS) {
-    const char* error;
-    cuGetErrorString(ret, &error);
-    return errors::Internal(
-      "Cannot instantiate CUDA Graph exec for captured graph: ",
-      error, ": ", reinterpret_cast<char*>(error_buf.data()));
-  }
-  return Status::OK();
-#else
-  return Status::OK();
-#endif
-}
-
-Status DirectSession::Run0(
-  const RunOptions& run_options,
-  const NamedTensorList& inputs,
-  const std::vector<string>& output_names,
-  const std::vector<string>& target_nodes,
-  std::vector<Tensor>* outputs,
-  RunMetadata* run_metadata, CUDAGraphDeviceContext* cuda_graph_device_context,
-  CUDAGraphContext* cuda_graph_context, CUDAGraphArgs* cuda_graph_args) {
   TF_RETURN_IF_ERROR(CheckNotClosed());
   TF_RETURN_IF_ERROR(CheckGraphCreated("Run()"));
   direct_session_runs->GetCell()->IncrementBy(1);
@@ -1307,7 +1182,9 @@ Status DirectSession::Run0(
     return s;
   }
 
-  const int64 step_id = step_id_counter_.fetch_add(1);
+  const int64 step_id = run_options.has_run_id() ? 
+                        run_options.run_id().value() : step_id_counter_.fetch_add(1);
+  //const int64 step_id = step_id_counter_.fetch_add(1);
 
   if (LogMemory::IsEnabled()) {
     LogMemory::RecordStep(step_id, run_state_args.handle);
@@ -1315,9 +1192,7 @@ Status DirectSession::Run0(
 
   TF_RETURN_IF_ERROR(RunInternal(step_id, run_options, &call_frame,
                                  executors_and_keys, run_metadata,
-                                 thread::ThreadPoolOptions(),
-                                 cuda_graph_device_context,
-                                 cuda_graph_context, cuda_graph_args));
+                                 thread::ThreadPoolOptions()));
 
   // Receive outputs.
   if (outputs) {
@@ -1362,6 +1237,126 @@ Status DirectSession::Run0(
     metrics::RecordGraphOutputTensors(output_size);
   }
 
+  return Status::OK();
+}
+
+Status DirectSession::AfterRunAsync(const ::tensorflow::RunOptions& run_options,
+                                    const NamedTensorList& inputs,
+                                    const std::vector<string>& output_names,
+                                    const std::vector<string>& target_nodes,
+                                    std::vector<Tensor> *outputs,
+                                    CallbackFrame* frame,
+                                    RunMetadata* run_metadata,
+									uint64 start_time_usecs) {
+  auto &run_state = *(frame->run_state);
+  if (!cancellation_manager_->DeregisterCallback(frame->cancellation_token)) {
+    // The step has been cancelled: make sure we don't attempt to receive the
+    // outputs as this would make it block forever.
+    mutex_lock l(run_state.mu_);
+    run_state.status.Update(errors::Cancelled("Run call was cancelled"));
+  }
+
+  std::unique_ptr<ProfilerSession> profiler_session;
+  if (run_options.trace_level() >= RunOptions::HARDWARE_TRACE) {
+    profiler_session = ProfilerSession::Create();
+  }
+  if (profiler_session) {
+    TF_RETURN_IF_ERROR(profiler_session->CollectData(run_metadata));
+  }
+
+  {
+    mutex_lock l(run_state.mu_);
+    TF_RETURN_IF_ERROR(run_state.status);
+  }
+  auto executors_and_keys = frame->executors_and_keys;
+  // Save the output tensors of this run we choose to keep.
+  if (!run_state.tensor_store.empty()) {
+    TF_RETURN_IF_ERROR(run_state.tensor_store.SaveTensors(
+        {executors_and_keys->callable_options.fetch().begin(),
+         executors_and_keys->callable_options.fetch().end()},
+        &session_state_));
+  }
+
+  if (run_state.collector) {
+    run_state.collector->Finalize();
+  }
+
+  auto update_cost_model = frame->update_cost_model;
+  // Build and return the cost model as instructed.
+  if (update_cost_model) {
+    // Build the cost model
+    std::unordered_map<string, const Graph*> device_to_graph;
+    for (const PerPartitionExecutorsAndLib& partition :
+         executors_and_keys->items) {
+      const Graph* graph = partition.graph;
+      const string device = partition.flib->device()->name();
+      device_to_graph[device] = graph;
+    }
+
+    mutex_lock l(executor_lock_);
+    run_state.collector->BuildCostModel(&cost_model_manager_, device_to_graph);
+
+    // annotate stats onto cost graph.
+    CostGraphDef* cost_graph = run_metadata->mutable_cost_graph();
+    for (const auto& item : executors_and_keys->items) {
+      TF_RETURN_IF_ERROR(
+          cost_model_manager_.AddToCostGraphDef(item.graph, cost_graph));
+    }
+  }
+
+  // If requested via RunOptions, output the partition graphs.
+  if (run_options.output_partition_graphs()) {
+    protobuf::RepeatedPtrField<GraphDef>* partition_graph_defs =
+        run_metadata->mutable_partition_graphs();
+    for (const PerPartitionExecutorsAndLib& exec_and_lib :
+         executors_and_keys->items) {
+      GraphDef* partition_graph_def = partition_graph_defs->Add();
+      exec_and_lib.graph->ToGraphDef(partition_graph_def);
+    }
+  }
+  metrics::UpdateGraphExecTime(options_.env->NowMicros() - start_time_usecs);
+  // Receive outputs.
+  if (outputs) {
+    std::vector<Tensor> sorted_outputs;
+    const Status s = frame->call_frame->ConsumeRetvals(
+        &sorted_outputs, /* allow_dead_tensors = */ false);
+    if (errors::IsInternal(s)) {
+      return errors::InvalidArgument(s.error_message());
+    } else if (!s.ok()) {
+      return s;
+    }
+    const bool unique_outputs =
+        output_names.size() == frame->executors_and_keys->output_name_to_index.size();
+    // first_indices[i] = j implies that j is the smallest value for which
+    // output_names[i] == output_names[j].
+    std::vector<int> first_indices;
+    if (!unique_outputs) {
+      first_indices.resize(output_names.size());
+      for (int i = 0; i < output_names.size(); ++i) {
+        for (int j = 0; j <= i; ++j) {
+          if (output_names[i] == output_names[j]) {
+            first_indices[i] = j;
+            break;
+          }
+        }
+      }
+    }
+    outputs->clear();
+    size_t output_size = 0;
+    outputs->reserve(sorted_outputs.size());
+    for (int i = 0; i < output_names.size(); ++i) {
+      const string& output_name = output_names[i];
+      if (first_indices.empty() || first_indices[i] == i) {
+        outputs->emplace_back(
+            std::move(sorted_outputs[frame->executors_and_keys
+                                         ->output_name_to_index[output_name]]));
+      } else {
+        outputs->push_back((*outputs)[first_indices[i]]);
+      }
+      output_size += outputs->back().AllocatedBytes();
+    }
+    metrics::RecordGraphOutputTensors(output_size);
+  }
   return Status::OK();
 }
 
@@ -1742,7 +1737,6 @@ Status DirectSession::CreateExecutors(
   TF_RETURN_IF_ERROR(CreateGraphs(
       options, &graphs, &func_info->flib_def, run_state_args, &ek->input_types,
       &ek->output_types, &ek->collective_graph_key));
-
   if (run_state_args->is_partial_run) {
     ek->graph = std::move(run_state_args->graph);
     std::unordered_set<StringPiece, StringPieceHasher> names;
@@ -1766,14 +1760,9 @@ Status DirectSession::CreateExecutors(
 
   int graph_def_version = graphs.begin()->second->versions().producer();
 
-  const auto* session_metadata =
-      options_.config.experimental().has_session_metadata()
-          ? &options_.config.experimental().session_metadata()
-          : nullptr;
   func_info->proc_flr.reset(new ProcessFunctionLibraryRuntime(
       device_mgr_.get(), options_.env, graph_def_version,
-      func_info->flib_def.get(), optimizer_opts, thread_pools_[0].first,
-      nullptr, nullptr, session_metadata));
+      func_info->flib_def.get(), optimizer_opts, thread_pools_[0].first));
 
   GraphOptimizer optimizer(optimizer_opts);
   for (auto iter = graphs.begin(); iter != graphs.end(); ++iter) {
@@ -1793,7 +1782,10 @@ Status DirectSession::CreateExecutors(
 
     LocalExecutorParams params;
     params.device = device;
-    params.session_metadata = session_metadata;
+    params.session_metadata =
+        options_.config.experimental().has_session_metadata()
+            ? &options_.config.experimental().session_metadata()
+            : nullptr;
     params.function_library = lib;
     auto opseg = device->op_segment();
     params.create_kernel = [this, lib, opseg](const NodeDef& ndef,
@@ -1824,6 +1816,7 @@ Status DirectSession::CreateExecutors(
       return Status::OK();
     };
 
+	params.node_outputs_cb = node_outputs_callback_;
     optimizer.Optimize(lib, options_.env, device, &partition_graph,
                        /*shape_map=*/nullptr);
 
@@ -1880,7 +1873,6 @@ Status DirectSession::CreateExecutors(
                            FrameAndIter(0, 0));
     }
   }
-
   *out_executors_and_keys = std::move(ek);
   *out_func_info = std::move(func_info);
   return Status::OK();
@@ -1982,15 +1974,12 @@ Status DirectSession::GetOrCreateExecutors(
 
   // Reacquire the lock, try to insert into the map.
   mutex_lock l(executor_lock_);
+  functions_.push_back(std::move(func_info));
 
   // Another thread may have created the entry before us, in which case we will
   // reuse the already created one.
   auto insert_result = executors_.emplace(
       sorted_key, std::shared_ptr<ExecutorsAndKeys>(std::move(ek)));
-  if (insert_result.second) {
-    functions_.push_back(std::move(func_info));
-  }
-
   // Insert the value under the original key, so the fast path lookup will work
   // if the user uses the same order of inputs, outputs, and targets again.
   executors_.emplace(key, insert_result.first->second);
@@ -2076,6 +2065,7 @@ Status DirectSession::CreateGraphs(
   // Partition the graph across devices.
   PartitionOptions popts;
   popts.node_to_loc = [](const Node* node) {
+    auto& st = node->assigned_device_name();
     return node->assigned_device_name();
   };
   popts.new_name = [this](const string& prefix) {
@@ -2112,15 +2102,15 @@ Status DirectSession::CreateGraphs(
     }
   }
 
-  for (auto& partition : partitions) {
+  for (const auto& partition : partitions) {
     std::unique_ptr<Graph> device_graph(
         new Graph(client_graph->flib_def.get()));
     GraphConstructorOptions device_opts;
     // There are internal operations (e.g., send/recv) that we now allow.
     device_opts.allow_internal_ops = true;
     device_opts.expect_device_spec = true;
-    TF_RETURN_IF_ERROR(ConvertGraphDefToGraph(
-        device_opts, std::move(partition.second), device_graph.get()));
+    TF_RETURN_IF_ERROR(ConvertGraphDefToGraph(device_opts, partition.second,
+                                              device_graph.get()));
     outputs->emplace(partition.first, std::move(device_graph));
   }
 
@@ -2135,7 +2125,6 @@ Status DirectSession::CreateGraphs(
   for (auto& partition : *outputs) {
     const string& partition_name = partition.first;
     std::unique_ptr<Graph>* graph = &partition.second;
-
     VLOG(2) << "Created " << DebugString(graph->get()) << " for "
             << partition_name;
 
@@ -2152,200 +2141,6 @@ Status DirectSession::CreateGraphs(
   std::swap(*input_types, client_graph->feed_types);
   std::swap(*output_types, client_graph->fetch_types);
   return s;
-}
-
-void DirectSession::BuildCUDAGraphKey(
-  gtl::ArraySlice<string> inputs,
-  gtl::ArraySlice<::tensorflow::int64> input_dims,
-  gtl::ArraySlice<string> outputs, string* key) {
-  std::vector<string> input_dim_strs(input_dims.size());
-  std::transform(input_dims.begin(), input_dims.end(), input_dim_strs.begin(),
-                 [](::tensorflow::int64 v) { return std::to_string(v); });
-  *key = strings::StrCat(
-    absl::StrJoin(inputs, ","), "/(",
-    absl::StrJoin(input_dim_strs, ","), ")->", absl::StrJoin(outputs, ","));
-}
-
-Status DirectSession::BorrowOrCreateCUDAGraphDeviceContext(
-  const string& device_name, const string& key, int id, uint64 timeout,
-  GPU_DEVICE_T device, const CUDAGraphOptions& options,
-  CUDAGraphDeviceContext** context) {
-#ifdef GOOGLE_CUDA
-  struct Checker {
-    CUDAGraphDeviceContexts& device_contexts;
-    const string& device_name;
-    int id;
-    CUDAGraphDeviceContext** context;
-    Checker(CUDAGraphDeviceContexts& device_contexts, const string& device_name,
-            int id, CUDAGraphDeviceContext** context):
-      device_contexts(device_contexts), device_name(device_name),
-      id(id), context(context) { }
-    bool Check() {
-      auto& p = device_contexts[device_name][id];
-      if (p->state() == CUDAGraphDeviceContext::State::READY) {
-        *context = p.get();
-        return true;
-      }
-      return false;
-    }
-  };
-  cuda_graph_lock_.lock();
-  auto& dctxs = cuda_graph_device_contexts_[device_name];
-  if (dctxs.size() <= id) {
-    auto p = new CUDAGraphDeviceContext(device, options);
-    auto st = p->Init();
-    if (!st.ok()) {
-      delete p;
-      *context = nullptr;
-      cuda_graph_lock_.unlock();
-      return st;
-    }
-    dctxs.resize(id + 1);
-    dctxs[id].reset(p);
-    p->SetState(CUDAGraphDeviceContext::State::BORROWED);
-    *context = p;
-    cuda_graph_lock_.unlock();
-    return Status::OK();
-  }
-  *context = nullptr;
-  Checker checker(cuda_graph_device_contexts_, device_name, id, context);
-  if (checker.Check()) {
-    cuda_graph_lock_.unlock();
-    return Status::OK();
-  }
-  Condition cond(&checker, &Checker::Check);
-  if (cuda_graph_lock_.AwaitWithDeadline(cond, timeout)) {
-    cuda_graph_lock_.unlock();
-    return Status::OK();
-  }
-  cuda_graph_lock_.unlock();
-  return errors::Internal(
-    "Timed out while borrowing instance ", id, " of CUDA Graph device context",
-    " on device ", device_name, " to create a CUDA graph for key ", key);
-#else
-  return Status::OK();
-#endif
-}
-
-Status DirectSession::BorrowCUDAGraphContext(
-  const string& device_name, const string& key, uint64 timeout,
-  CUDAGraphDeviceContext** device_context, CUDAGraphContext** context) {
-#ifdef GOOGLE_CUDA
-  struct Finder {
-    CUDAGraphDeviceContexts& device_contexts;
-    const string& device_name;
-    const string& key;
-    CUDAGraphDeviceContext** device_context;
-    CUDAGraphContext** context;
-    Finder(CUDAGraphDeviceContexts& device_contexts, const string& device_name,
-           const string& key, CUDAGraphDeviceContext** device_context,
-           CUDAGraphContext** context):
-      device_contexts(device_contexts), device_name(device_name), key(key),
-      device_context(device_context), context(context) { }
-    bool Find() { return Find(nullptr); }
-    bool Find(bool* not_found) {
-      auto& dctxs = device_contexts[device_name];
-      for (auto& dctx: dctxs) {
-        CUDAGraphContext* ctx;
-        if (dctx->state() == CUDAGraphDeviceContext::State::READY
-            && (ctx = dctx->GetContext(key)) != nullptr) {
-          *device_context = dctx.get();
-          *context = ctx;
-          return true;
-        }
-      }
-      if (not_found) { *not_found = true; }
-      return false;
-    }
-  };
-  *device_context = nullptr;
-  *context = nullptr;
-  cuda_graph_lock_.lock();
-  Finder finder(cuda_graph_device_contexts_, device_name, key,
-                device_context, context);
-  bool not_found;
-  if (finder.Find(&not_found)) {
-    (*device_context)->SetState(CUDAGraphDeviceContext::State::BORROWED);
-    cuda_graph_lock_.unlock();
-    return Status::OK();
-  }
-  if (not_found) {
-    cuda_graph_lock_.unlock();
-    return Status::OK();
-  }
-  Condition cond(&finder, &Finder::Find);
-  if (cuda_graph_lock_.AwaitWithDeadline(cond, timeout)) {
-    (*device_context)->SetState(CUDAGraphDeviceContext::State::BORROWED);
-    cuda_graph_lock_.unlock();
-    return Status::OK();
-  }
-  cuda_graph_lock_.unlock();
-  return errors::Internal(
-    "Timed out while borrowing CUDA Graph context for key ", key,
-    " on device ", device_name);
-#else
-  *context = nullptr;
-  return Status::OK();
-#endif
-}
-
-void DirectSession::ReturnCUDAGraphDeviceContext(
-  const string& device_name, CUDAGraphDeviceContext* device_context) {
-#ifdef GOOGLE_CUDA
-  cuda_graph_lock_.lock();
-  device_context->SetState(CUDAGraphDeviceContext::State::READY);
-  cuda_graph_lock_.unlock();
-#else
-#endif
-}
-
-Status DirectSession::GetAssignedCPUDevice(string* device_name,
-                                           Device** device) {
-#ifdef GOOGLE_CUDA
-  mutex_lock l(graph_state_lock_);
-  auto execution_state = execution_state_.get();
-  for (auto node: execution_state->full_graph()->op_nodes()) {
-    auto name = node->assigned_device_name();
-    Device* candidate;
-    TF_RETURN_IF_ERROR(device_mgr_->LookupDevice(name, &candidate));
-    if (candidate->attributes().device_type() == "CPU") {
-      *device_name = name;
-      *device = candidate;
-      return Status::OK();
-    }
-  }
-  for (auto dev: device_mgr_->ListDevices()) {
-    if (dev->attributes().device_type() == "CPU") {
-      *device_name = dev->name();
-      *device = dev;
-      return Status::OK();
-    }
-  }
-  return errors::Internal("Not assigned to any CPU device");
-#else
-  return Status::OK();
-#endif
-}
-
-Status DirectSession::GetAssignedGPUDevice(string* device_name,
-                                           GPU_DEVICE_T* device) {
-#ifdef GOOGLE_CUDA
-  mutex_lock l(graph_state_lock_);
-  auto execution_state = execution_state_.get();
-  for (auto node: execution_state->full_graph()->op_nodes()) {
-    auto name = node->assigned_device_name();
-    Device* candidate;
-    TF_RETURN_IF_ERROR(device_mgr_->LookupDevice(name, &candidate));
-    if (candidate->attributes().device_type() == "GPU") {
-      *device_name = name;
-      *device = reinterpret_cast<BaseGPUDevice*>(candidate);
-      return Status::OK();
-    }
-  }
-  return errors::Internal("Not assigned to any GPU device");
-#else
-  return Status::OK();
-#endif
 }
 
 ::tensorflow::Status DirectSession::ListDevices(

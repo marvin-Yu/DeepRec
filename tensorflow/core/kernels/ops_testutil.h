@@ -98,6 +98,7 @@ class OpsTestBase : public ::testing::Test {
 
   // Allow kernel unit tests to run on GPU
   void SetDevice(const DeviceType& device_type, std::unique_ptr<Device> device);
+  void SetDevice(const DeviceType& device_type);
 
   void set_node_def(const NodeDef& node_def) { node_def_.CopyFrom(node_def); }
 
@@ -216,6 +217,10 @@ class OpsTestBase : public ::testing::Test {
   //
   // REQUIRES: 0 <= output_index < context_->num_outputs()
   Tensor* GetOutput(int output_index);
+
+  Status GetOutputList(StringPiece name, OpOutputList *output) {
+    return context_->output_list(name, output);
+  }
 
   Allocator* allocator() { return allocator_; }
 

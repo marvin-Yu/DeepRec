@@ -68,6 +68,7 @@ const std::unordered_map<string, Node::NodeClass>& Node::kNodeClassTable =
         {"ControlTrigger", NC_CONTROL_TRIGGER},
         {"_Send", NC_SEND},
         {"_HostSend", NC_HOST_SEND},
+        {"_HostFuseRecv", NC_HOST_FUSE_RECV},
         {"_Recv", NC_RECV},
         {"_HostRecv", NC_HOST_RECV},
         {"Const", NC_CONSTANT},

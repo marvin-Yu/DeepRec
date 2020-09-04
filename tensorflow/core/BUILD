@@ -978,7 +978,6 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":lib",
-        ":ptr_util",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:optional",
         "//third_party/eigen3",
@@ -1168,6 +1167,7 @@ tf_gen_op_libs(
         "rpc_ops",
         "scoped_allocator_ops",
         "sdca_ops",
+        "run_graph_op",
         "set_ops",
         "script_ops",
         "sendrecv_ops",
@@ -1393,6 +1393,7 @@ cc_library(
         ":rpc_ops_op_lib",
         ":scoped_allocator_ops_op_lib",
         ":script_ops_op_lib",
+        ":run_graph_op_op_lib",
         ":sdca_ops_op_lib",
         ":sendrecv_ops_op_lib",
         ":set_ops_op_lib",
@@ -1545,6 +1546,8 @@ cc_library(
         "//tensorflow/core/kernels:data_flow",
         "//tensorflow/core/kernels:decode_proto_op",
         "//tensorflow/core/kernels:encode_proto_op",
+        "//tensorflow/core/kernels:tile_fuse_op",
+        "//tensorflow/core/kernels:tile_fuse_base",
         "//tensorflow/core/kernels:fake_quant_ops",
         "//tensorflow/core/kernels:function_ops",
         "//tensorflow/core/kernels:functional_ops",
@@ -1570,6 +1573,7 @@ cc_library(
         "//tensorflow/core/kernels:random_binomial_op",
         "//tensorflow/core/kernels:random_poisson_op",
         "//tensorflow/core/kernels:remote_fused_graph_ops",
+        "//tensorflow/core/kernels:run_graph_op",
         "//tensorflow/core/kernels:required",
         "//tensorflow/core/kernels:resource_variable_ops",
         "//tensorflow/core/kernels:rnn_ops",
@@ -3110,11 +3114,12 @@ tf_cuda_library(
         "common_runtime/shape_refiner.cc",
         "common_runtime/graph_optimizer.h",
         "graph/graph_constructor.cc",  # Depends on common_runtime.
+        "graph/dist_graph_partition.cc",
         "graph/graph_def_builder_util.cc",  # Depends on common_runtime.
         "public/session_options.h",
         "public/version.h",
     ] + CORE_CPU_BASE_HDRS,
-    hdrs = CORE_CPU_BASE_HDRS + ["public/session.h"],
+    hdrs = CORE_CPU_BASE_HDRS + ["public/session.h", "graph/dist_graph_partition.h"],
     copts = tf_copts(),
     deps = [
         ":graph",
@@ -3261,10 +3266,8 @@ tf_cuda_library(
         "public/session_options.h",
         "public/version.h",
     ],
-    hdrs = CORE_CPU_LIB_HEADERS + if_cuda([
-        "common_runtime/gpu_device_context.h"
-    ]),
-    copts = tf_copts() + ["-g"],
+    hdrs = CORE_CPU_LIB_HEADERS,
+    copts = tf_copts(),
     deps = [
         ":bfc_allocator",
         ":graph",
@@ -3282,7 +3285,7 @@ tf_cuda_library(
         "//tensorflow/core/grappler/utils:functions",
         "//tensorflow/core/profiler/lib:traceme",
         "//tensorflow/core/profiler/internal:traceme_recorder",
-    ] + mkl_deps() + if_cuda([":stream_executor"]),
+    ] + mkl_deps(),
     alwayslink = 1,
 )
 
@@ -3390,7 +3393,7 @@ tf_cuda_library(
         "common_runtime/direct_session.h",
         "util/env_var.h",
     ],
-    copts = tf_copts() + ["-g"],
+    copts = tf_copts(),
     deps = [
         ":core_cpu_internal",
         ":framework",
@@ -3407,8 +3410,23 @@ tf_cuda_library(
         "//tensorflow/core/profiler/lib:profiler_session",
         "//tensorflow/core/profiler/lib:traceme",
         "@com_google_absl//absl/container:flat_hash_set",
-    ] + if_cuda([":gpu_runtime"]),
+    ],
     alwayslink = 1,
+)
+
+tf_cuda_library(
+    name = "gpu_tracer",
+    srcs = [],
+    hdrs = [
+        "//tensorflow/core/platform:gpu_tracer.h",
+    ],
+    copts = tf_copts(),
+    cuda_deps = tf_additional_cupti_wrapper_deps(),
+    deps = [
+        ":core_cpu_internal",
+        ":lib",
+        ":protos_all_cc",
+    ],
 )
 
 cc_library(
@@ -3491,7 +3509,6 @@ GPU_RUNTIME_HEADERS = [
     "common_runtime/gpu/gpu_bfc_allocator.h",
     "common_runtime/gpu/gpu_cudamalloc_allocator.h",
     "common_runtime/gpu/gpu_debug_allocator.h",
-    "common_runtime/gpu/gpu_persistent_allocator.h",
     "common_runtime/gpu/gpu_device.h",
     "common_runtime/gpu/gpu_host_allocator.h",
     "common_runtime/gpu/gpu_id.h",
@@ -3511,7 +3528,6 @@ tf_cuda_library(
     srcs = [
         "common_runtime/gpu/gpu_cudamalloc_allocator.cc",
         "common_runtime/gpu/gpu_debug_allocator.cc",
-        "common_runtime/gpu/gpu_persistent_allocator.cc",
         "common_runtime/gpu/gpu_device.cc",
         "common_runtime/gpu/gpu_device_factory.cc",
         "common_runtime/gpu/gpu_managed_allocator.cc",

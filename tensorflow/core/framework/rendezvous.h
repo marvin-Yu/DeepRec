@@ -75,11 +75,11 @@ class Rendezvous : public core::RefCounted {
     ParsedKey& operator=(const ParsedKey& b);
     StringPiece FullKey() const { return buf_; }
 
+    string buf_;
    private:
     friend class Rendezvous;
     friend class SendOp;
     friend class RecvOp;
-    string buf_;
   };
   static Status ParseKey(StringPiece key, ParsedKey* out);
 
@@ -109,6 +109,16 @@ class Rendezvous : public core::RefCounted {
 
   virtual void RecvAsync(const ParsedKey& key, const Args& args,
                          DoneCallback done) = 0;
+
+  typedef std::function<void(const Status&, const std::vector<Args>&,
+                             const Args&,
+                             const std::vector<Tensor>&,
+                             const std::vector<bool>&)>
+      FuseDoneCallback;
+
+  // NOTE(rangeng.llb): Local rendezvous does not need this.
+  virtual void FuseRecvAsync(const std::vector<ParsedKey>& parsed_keys,
+                             const Args& args, FuseDoneCallback done) {}
 
   // Synchronous wrapper for RecvAsync.
   Status Recv(const ParsedKey& key, const Args& args, Tensor* val,

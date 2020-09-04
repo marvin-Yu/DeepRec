@@ -42,7 +42,7 @@ struct DeviceInfo {
   // Read bandwidth to intermediate memory in GB per second.
   double intermediate_read_gb_per_sec;
 
-  // Read bandwidth to intermediate memory in GB per second.
+  // Write bandwidth to intermediate memory in GB per second.
   double intermediate_write_gb_per_sec;
 
   DeviceInfo()
@@ -210,7 +210,7 @@ Costs CombineCosts(const Costs& left, const Costs& right);
 // Equivalent to applying CombineCosts "multiplier" times.
 Costs MultiplyCosts(const Costs& costs, int multiplier);
 
-// Given a GrapperItem and an optimized implementation of the corresponding
+// Given a GrapplerItem and an optimized implementation of the corresponding
 // TensorFlow graph, the CostEstimator attempts to predicts the actual cost of
 // running the graph.
 class CostEstimator {

@@ -63,7 +63,9 @@ void WarnIfInCallback(std::function<void()> f);
 // Events are recorded.
 class EventMgr {
  public:
-  virtual ~EventMgr();
+  EventMgr(se::StreamExecutor* se, const GPUOptions& gpu_options);
+
+  ~EventMgr();
 
   // Releases the references on the elements of "tensors" as soon as
   // all events currently enqueued on "stream" have completed.
@@ -105,14 +107,14 @@ class EventMgr {
   }
 
  private:
-  friend class TEST_EventMgr;
   friend class TEST_EventMgrHelper;
-  friend class EventMgrFactory;
   se::StreamExecutor* const exec_;
   const int64 deferred_bytes_threshold_;
   const int32 polling_active_delay_usecs_;
   mutex mu_;
-  condition_variable events_pending_ GUARDED_BY(mu_);
+  mutex used_events_mu_;
+  mutex free_events_mu_;
+  condition_variable events_pending_ GUARDED_BY(used_events_mu_);
 
   void FlushAccumulatedTensors() EXCLUSIVE_LOCKS_REQUIRED(mu_);
 
@@ -124,8 +126,6 @@ class EventMgr {
   };
 
   typedef gtl::InlinedVector<InUse, 4> ToFreeVector;
-
-  EventMgr(se::StreamExecutor* se, const GPUOptions& gpu_options);
 
   void FreeMemory(const ToFreeVector& to_free) {
     for (const auto& iu : to_free) {
@@ -186,7 +186,7 @@ class EventMgr {
   void StopPollingLoop();
 
   // A stack of unused events
-  std::vector<se::Event*> free_events_ GUARDED_BY(mu_);
+  std::vector<se::Event*> free_events_ GUARDED_BY(free_events_mu_);
 
   // Buffered list of tensors waiting to have an event queued for deletion
   se::Stream* accumulated_stream_ GUARDED_BY(mu_);
@@ -194,8 +194,8 @@ class EventMgr {
   // Sum of the TotalBytes() of the tensors in "accumulated_tensors_"
   int64 accumulated_tensor_bytes_ GUARDED_BY(mu_);
 
-  // A FIFO queue of InUse events and associated tensors.
-  std::deque<InUse> used_events_ GUARDED_BY(mu_);
+  // A FIFO queue of InUsep events and associated tensors.
+  std::deque<InUse> used_events_ GUARDED_BY(used_events_mu_);
 
   bool stop_polling_ GUARDED_BY(mu_);
   std::unique_ptr<Notification> polling_stopped_;
@@ -218,6 +218,5 @@ class EventMgrFactory {
   // per-physical-device).
   std::map<se::StreamExecutor*, EventMgr*> event_mgr_map_ GUARDED_BY(mu_);
 };
-
 }  // namespace tensorflow
 #endif  // TENSORFLOW_CORE_COMMON_RUNTIME_GPU_GPU_EVENT_MGR_H_
