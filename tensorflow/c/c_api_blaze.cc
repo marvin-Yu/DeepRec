@@ -23,7 +23,6 @@ limitations under the License.
 #include <vector>
 
 #include "absl/strings/match.h"
-#include <google/protobuf/util/json_util.h>
 // Required for IS_MOBILE_PLATFORM
 #include "tensorflow/core/platform/platform.h"  // NOLINT
 
@@ -139,8 +138,6 @@ using tensorflow::se::Stream;
 using tensorflow::se::StreamExecutor;
 using tensorflow::TfGpuId;
 #endif
-
-using google::protobuf::util::JsonParseOptions;
 
 extern "C" {
 
@@ -430,19 +427,6 @@ void TF_EnableGemmOptimization(TF_SessionOptions* options,
   } else {
     rewrite_config->set_gemm_optimization(tensorflow::RewriterConfig::OFF);
   }
-}
-
-bool TF_InitSessionOptionsFromPB(const char* pb_char, TF_SessionOptions* options) {
-  auto& config = options->options.config;
-  tensorflow::ConfigProto config_proto;
-  if (!config_proto.ParseFromString(pb_char)) {
-    LOG(ERROR) << "parse pb from char failed";
-    return false;
-  }
-
-  config.MergeFrom(config_proto);
-  LOG(INFO) << "session will create with conf " << config.DebugString();
-  return true;
 }
 
 void TF_EnableAutoMixedPrecision(TF_SessionOptions* options,
