@@ -25,7 +25,7 @@ struct LaunchCoActionIndicator {
                   const Tensor& indicator, Tensor* out, int64 batch_a,
                   int64 batch_b, int64 paralle_num, int64 pow_num);
 };
-#define GOOGLE_CUDA 1
+
 #if GOOGLE_CUDA
 template <typename Scalar>
 struct LaunchCoAction<GPUDevice, Scalar> {
