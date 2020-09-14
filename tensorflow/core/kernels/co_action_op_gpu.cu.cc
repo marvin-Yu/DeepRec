@@ -119,7 +119,7 @@ __global__ void ComputeCoActionIndicator(IMatmulParam<Scalar, TIndex> param) {
   // step 3: tanh and wrap reduce.
 #pragma unroll
   for (int n = 0; n < N_SIZE; n++) {
-    C_local[n] = tanh(C_local[n]);
+    C_local[n] = tanhf(C_local[n]);
     C_local[n] = blockReduceSum<float, M_SIZE, N_SIZE>(C_local[n], n);
     if (threadIdx.x == 0) {
       C[n] = Scalar(C_local[n]);
