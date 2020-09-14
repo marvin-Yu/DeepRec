@@ -429,6 +429,19 @@ void TF_EnableGemmOptimization(TF_SessionOptions* options,
   }
 }
 
+bool TF_InitSessionOptionsFromPB(const char* pb_char, TF_SessionOptions* options) {
+  auto& config = options->options.config;
+  tensorflow::ConfigProto config_proto;
+  if (!config_proto.ParseFromString(pb_char)) {
+    LOG(ERROR) << "parse pb from char failed";
+    return false;
+  }
+
+  config.MergeFrom(config_proto);
+  LOG(INFO) << "session will create with conf " << config.DebugString();
+  return true;
+}
+
 void TF_EnableAutoMixedPrecision(TF_SessionOptions* options,
                                  unsigned char enable) {
   tensorflow::ConfigProto& config = options->options.config;
