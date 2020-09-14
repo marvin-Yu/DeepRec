@@ -50,11 +50,6 @@ class MklEagerOpRewrite : public EagerOpRewrite {
   static Status CreateGenericMklOp(EagerOperation* orig_op,
                                    std::unique_ptr<EagerOperation>* mkl_op);
 
-  // Creates new OneDNN op for Conv2D, Conv2DBackpropInput and
-  // Conv2DBackpropFilter.
-  static Status CreateMklConv2DOp(
-      EagerOperation* orig_op, std::unique_ptr<EagerOperation>* mkl_conv2d_op);
-
   // Rewrite rule for Conv2D, Conv2DBackpropInput and Conv2DBackpropFilter.
   static bool RewriteConv2D(EagerOperation* op);
 
@@ -90,9 +85,21 @@ MklEagerOpRewrite::MklEagerOpRewrite(string name, string file, string line)
     : EagerOpRewrite(name, file, line) {
   InsertMKLEagerOps({"BatchMatMul", AlwaysRewrite, CreateGenericMklOp});
   InsertMKLEagerOps({"BatchMatMulV2", AlwaysRewrite, CreateGenericMklOp});
-  InsertMKLEagerOps({"Conv2D", RewriteConv2D, CreateMklConv2DOp});
-  InsertMKLEagerOps({"Conv2DBackpropInput", RewriteConv2D, CreateMklConv2DOp});
-  InsertMKLEagerOps({"Conv2DBackpropFilter", RewriteConv2D, CreateMklConv2DOp});
+  InsertMKLEagerOps({"Conv2D", RewriteConv2D, CreateGenericMklOp});
+  InsertMKLEagerOps(
+      {"Conv2DBackpropFilter", RewriteConv2D, CreateGenericMklOp});
+  InsertMKLEagerOps({"Conv2DBackpropInput", RewriteConv2D, CreateGenericMklOp});
+  InsertMKLEagerOps({"Conv3D", RewriteConv2D, CreateGenericMklOp});
+  InsertMKLEagerOps(
+      {"Conv3DBackpropFilterV2", RewriteConv2D, CreateGenericMklOp});
+  InsertMKLEagerOps(
+      {"Conv3DBackpropInputV2", RewriteConv2D, CreateGenericMklOp});
+  InsertMKLEagerOps(
+      {"DepthwiseConv2dNative", RewriteConv2D, CreateGenericMklOp});
+  InsertMKLEagerOps({"DepthwiseConv2dNativeBackpropFilter", RewriteConv2D,
+                     CreateGenericMklOp});
+  InsertMKLEagerOps({"DepthwiseConv2dNativeBackpropInput", RewriteConv2D,
+                     CreateGenericMklOp});
   InsertMKLEagerOps({"MatMul", AlwaysRewrite, CreateGenericMklOp});
 };
 
@@ -154,15 +161,6 @@ Status MklEagerOpRewrite::CreateGenericMklOp(
   const string mkl_op_name =
       mkl_op_registry::GetMklNativeOpName(orig_op->Name());
   TF_CHECK_OK(SetupNewOp(orig_op, mkl_op_name, mkl_op));
-  return Status::OK();
-}
-
-// TODO(mabuzain): Replace this call with above generic one.
-Status MklEagerOpRewrite::CreateMklConv2DOp(
-    EagerOperation* orig_op, std::unique_ptr<EagerOperation>* mkl_conv2d_op) {
-  const string mkl_op_name =
-      mkl_op_registry::GetMklNativeOpName(orig_op->Name());
-  TF_CHECK_OK(SetupNewOp(orig_op, mkl_op_name, mkl_conv2d_op));
   return Status::OK();
 }
 
