@@ -68,7 +68,7 @@ struct LaunchCoAction<CPUDevice, Scalar> {
               a_ptr + (batch * paralle_num + p) * m * k,
               tmp_pow_ptr + (batch * paralle_num + p) * pow_num * m * k +
                   pow * m * k,
-              pow));
+              pow + 1));
         }
       }
     }
@@ -113,7 +113,7 @@ struct LaunchCoActionIndicator<CPUDevice, Scalar, TIndex> {
               a_ptr + (batch * paralle_num + p) * m * k,
               tmp_pow_ptr + (batch * paralle_num + p) * pow_num * m * k +
                   pow * m * k,
-              pow));
+              pow + 1));
         }
       }
     }
