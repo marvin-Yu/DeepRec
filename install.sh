@@ -10,7 +10,7 @@ declare -a install_targets=("libtensorflow_framework.so"
 for target in "${targets[@]}"
 do
 #    bazel build --copt=-DTILE_VECTORIZE_AVX512 --copt=-mavx2 -c opt --copt -g --config=cuda  --copt -mfpmath=both --copt -mfma --copt -msse4.2 --copt -mavx512f --copt -D_GLIBCXX_USE_CXX11_ABI=0 $target
-    bazel build --copt=-mavx2 -c opt --copt -g --config=cuda  --copt -mfpmath=both --copt -mfma --copt -msse4.2 --copt -D_GLIBCXX_USE_CXX11_ABI=0 $target
+    bazel build --copt=-mavx2 -c opt --config=cuda  --copt -mfpmath=both --copt -mfma --copt -msse4.2 --copt -D_GLIBCXX_USE_CXX11_ABI=0 $target
 #    bazel build --define framework_shared_object=false --config=cuda -c opt --copt -g --copt -mavx2 --copt -mfma --copt -DRTP_PLATFORM --copt -D_GLIBCXX_USE_CXX11_ABI=0 --copt -DGOOGLE_CUDA=1 --copt -fno-canonical-system-headers $target
 done
 
@@ -22,6 +22,7 @@ CURRENT_DIR=`basename $PWD`
 BAZEL_CACHE_DIR=`readlink bazel-$CURRENT_DIR`/../../
 BAZEL_EXTERNAL_DIR=$BAZEL_CACHE_DIR"/external/"
 
+mkdir -p $EXTERNAL_DIR/usr/local/lib64/
 for target in "${install_targets[@]}"
 do
     IFS='/' read -ra path <<< "$target"
