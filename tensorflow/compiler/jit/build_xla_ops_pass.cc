@@ -415,13 +415,17 @@ Status ReplaceNodeWithXlaCompileAndXlaRun(
       GetXlaRunArgs(root, cluster_info, debugging_opts);
 
   if (requires_compilation) {
-    // "Strict" compilation:  every _XlaCompile invocation must compile the
-    // cluster.
-    ops::_XlaRun xla_run(root.WithOpName("xla_run"), xla_run_args,
-                         xla_compile.key, n->output_types());
-
+    ops::XlaLaunch xla_launch(root.WithOpName("xla_launch"),
+                               /*constants=*/cluster_info.constant_inputs,
+                               /*args=*/cluster_info.non_constant_inputs,
+                               /*resources=*/cluster_info.resource_inputs,
+                               n->output_types(),
+                               cluster_info.function);
+    TF_RETURN_IF_ERROR(
+          CopyIncomingControlEdges(g, /*from=*/n, /*to=*/xla_launch.operation.node()));
+ 
     MoveOutgoingEdges(g, /*old_node=*/n,
-                      /*new_node=*/xla_run.operation.node());
+                      /*new_node=*/xla_launch.operation.node());
     g->RemoveNode(n);
   } else {
     // "Lazy" compilation: an _XlaCompile invocation may decide not to compile

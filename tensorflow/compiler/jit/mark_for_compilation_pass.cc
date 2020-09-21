@@ -859,8 +859,9 @@ Status MarkForCompilationPassImpl::CreateClusters() {
     // to (recursively) verify this fact, but that's probably not worth the
     // trouble.
 
-    if (cluster->effective_cluster_size() >= debug_options_.min_cluster_size ||
-        cluster->has_functional_control_flow() ||
+    if ((cluster->effective_cluster_size() >= debug_options_.min_cluster_size &&
+        cluster->effective_cluster_size() <= debug_options_.max_cluster_size) ||
+        cluster->has_functional_control_flow()  ||
         cluster->is_xla_compile_attr_true()) {
       string& name = cluster_names[cluster->cycles_graph_node_id()];
 

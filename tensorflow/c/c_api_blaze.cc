@@ -202,12 +202,10 @@ TF_Buffer* TF_ReadMetaGraphDefFromFile(
   }
 }
 
-void TF_GraphSetDevice(TF_Graph* graph, int cpu_id, int gpu_id) {
+void TF_GraphSetDevice(TF_Graph* graph, int cpu_id, int gpu_id, bool enable_cpu_xla) {
   mutex_lock l(graph->mu);
   Graph* g = &(graph->graph);
 
-  LOG(INFO) << "TF_GraphSetDevice: cpu_id, gpu_id = "
-            << cpu_id << ", " << gpu_id;
   std::string cpu_device = "/device:CPU:" + std::to_string(cpu_id);
   std::string gpu_device = "/device:GPU:" + std::to_string(gpu_id);
   std::string device;
@@ -216,18 +214,31 @@ void TF_GraphSetDevice(TF_Graph* graph, int cpu_id, int gpu_id) {
   } else {
     device = cpu_device;
   }
+
+  /// for logging whether use cpu xla
+  bool ret_enable_cpu = false;
   for (Node* node : g->nodes()) {
     std::string requested_device = node->requested_device();
     if (requested_device.find("CPU") != std::string::npos ||
         requested_device.find("cpu") != std::string::npos) {
       node->set_requested_device(cpu_device);
-      node->AddAttr("_XlaCompile", false);
       VLOG(1) << "Place node " << node->name() << " on " << cpu_device;
     } else {
       node->set_requested_device(device);
       VLOG(1) << "Place node " << node->name() << " on " << device;
     }
+    if (node->requested_device().find("CPU") != std::string::npos ||
+        node->requested_device().find("cpu") != std::string::npos) {
+       if (enable_cpu_xla) {
+         node->AddAttr("_XlaCompile", true);
+         ret_enable_cpu = true;
+       } else {
+         node->AddAttr("_XlaCompile", false);
+       }
+    }
   }
+  LOG(INFO) << "TF_GraphSetDevice: cpu_id, gpu_id, set_enable_cpu_xla, actual_use_cpu_xla,"
+            << cpu_id << ", " << gpu_id << "," << enable_cpu_xla << "," << ret_enable_cpu;
 }
 
 static void GraphImportGraphDefLocked(TF_Graph* graph, const GraphDef& def,
