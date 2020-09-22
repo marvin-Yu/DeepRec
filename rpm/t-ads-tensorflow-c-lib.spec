@@ -47,6 +47,8 @@ env PYTHON_BIN_PATH=/opt/conda/bin/python \
     LD_LIBRARY_PATH="/usr/local/cuda-10.1/lib64:/usr/local/cuda-10.1/extras/CUPTI/lib64/:" \
     TF_SET_ANDROID_WORKSPACE=0 ./configure
 export LD_LIBRARY_PATH="/usr/local/cuda-10.1/lib64:/usr/local/cuda-10.1/extras/CUPTI/lib64/:"
+sh install.sh
+# compatible with older versions
 sh build_tflib.sh
 sudo /usr/bin/strip bazel-bin/tensorflow/libtensorflow.so.1.15.0
 ln -s -f libtensorflow.so.1.15.0 bazel-bin/tensorflow/libtensorflow.so
@@ -55,12 +57,13 @@ ln -s -f libtensorflow.so.1.15.0 bazel-bin/tensorflow/libtensorflow.so.1
 %install
 export DONT_STRIP=1
 
-mkdir -p .%{_prefix}/tensorflow/include/tensorflow/c/
+mkdir -p .%{_prefix}/tensorflow/include
 mkdir -p .%{_prefix}/tensorflow/lib
 
-cp $OLDPWD/../tensorflow/c/*.h .%{_prefix}/tensorflow/include/tensorflow/c/
-cp -r $OLDPWD/../tensorflow/c/eager .%{_prefix}/tensorflow/include/tensorflow/c/
-cp -a $OLDPWD/../bazel-bin/tensorflow/libtensorflow.so* .%{_prefix}/tensorflow/lib/
+cp -r $OLDPWD/../../_external/usr/local/include/* .%{_prefix}/tensorflow/include
+cp -a $OLDPWD/../../_external/usr/local/lib64/* .%{_prefix}/tensorflow/lib
+# compatible with older versions
+cp -a $OLDPWD/../bazel-bin/tensorflow/libtensorflow.* .%{_prefix}/tensorflow/lib
 
 %files
 %defattr(-,ads,users)
