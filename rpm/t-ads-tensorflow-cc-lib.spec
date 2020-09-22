@@ -2,9 +2,9 @@
 # http://twiki.corp.alimama.com/twiki/bin/view/Alimm_OPS/RPM #
 # http://www.rpm.org/max-rpm/ch-rpm-inside.html              #
 ##############################################################
-Name: %(echo t-ads-tensorflow-c-lib${SUFFIX})
-Packager:xianjie.qxj
-Version:1.15.45
+Name: %(echo t-ads-tensorflow-cc-lib${SUFFIX})
+Packager:wenqi.gwq
+Version:1.15.0
 # if you want get version number from outside, use like this
 Release:%(echo $RELEASE)%{?dist}
 
@@ -14,7 +14,7 @@ Release:%(echo $RELEASE)%{?dist}
 
 # if you want use the parameter of rpm_create on build time,
 # uncomment below
-Summary:tensorflow c library
+Summary:tensorflow cc library
 
 URL: http://gitlab.alibaba-inc.com/TargetAdvertising/tensorflow
 Group: alimama
