@@ -747,9 +747,7 @@ REGISTER_OP("MaxPool3DGrad")
     .Attr(GetConvnet3dDataFormatAttrString())
     .Attr("T: {half, bfloat16, float} = DT_FLOAT")
     .Attr("TInput: {half, bfloat16, float} = DT_FLOAT")
-    .SetShapeFn([](InferenceContext* c) {
-      return UnchangedShapeWithRank(c, 5);
-    });
+    .SetShapeFn(shape_inference::MaxPool3DGradShape);
 
 REGISTER_OP("MaxPool3DGradGrad")
     .Input("orig_input: T")
@@ -851,9 +849,7 @@ REGISTER_OP("MaxPoolGrad")
     .Input("grad: T")
     .Output("output: T")
     .Attr("T: realnumbertype = DT_FLOAT")
-    .SetShapeFn([](InferenceContext* c) {
-      return UnchangedShapeWithRank(c, 4);
-    });
+    .SetShapeFn(shape_inference::MaxPoolGradShape);
 
 REGISTER_OP("MaxPoolGradV2")
     .Attr(GetPaddingAttrString())
@@ -865,9 +861,7 @@ REGISTER_OP("MaxPoolGradV2")
     .Input("strides: int32")
     .Output("output: T")
     .Attr("T: realnumbertype = DT_FLOAT")
-    .SetShapeFn([](InferenceContext* c) {
-      return UnchangedShapeWithRank(c, 4);
-    });
+    .SetShapeFn(shape_inference::MaxPoolGradShape);
 
 REGISTER_OP("MaxPoolGradGrad")
     .Attr("ksize: list(int) >= 4")
@@ -2378,14 +2372,12 @@ REGISTER_OP("_MklMaxPoolGrad")
     .Input("mkl_workspace: uint8")
     .Output("output: T")
     .Output("mkl_output: uint8")
-    .SetShapeFn([](InferenceContext* c) {
-      return UnchangedShapeWithRank(c, 4);
-    })
+    .SetShapeFn(shape_inference::MaxPoolGradShape)
     .Doc(R"doc(
-MKL version of MaxPoolGrad. Uses MKL DNN APIs to compute gradients of
+oneDNN version of MaxPoolGrad. Uses oneDNN APIs to compute gradients of
 MaxPool operator.
 
-NOTE Do not invoke this operator directly in Python. Graph rewrite pass is
+*NOTE*: Do not invoke this operator directly in Python. Graph rewrite pass is
 expected to invoke these operators.
 )doc");
 
@@ -2509,14 +2501,12 @@ REGISTER_OP("_MklMaxPool3DGrad")
     .Attr("T: {half, bfloat16, float} = DT_FLOAT")
     .Attr("TInput: {half, bfloat16, float} = DT_FLOAT")
     .Attr("workspace_enabled: bool = false")
-    .SetShapeFn([](InferenceContext* c) {
-      return UnchangedShapeWithRank(c, 5);
-    })
+    .SetShapeFn(shape_inference::MaxPool3DGradShape)
     .Doc(R"doc(
-MKL version of MklPool3DGrad operator. Uses MKL DNN APIs to compute gradients
-of MklPool function.
+oneDNN version of MaxPool3DGrad operator. Uses oneDNN APIs to compute gradients
+of MaxPool3D function.
 
-NOTE Do not invoke this operator directly in Python. Graph rewrite pass is
+*NOTE*: Do not invoke this operator directly in Python. Graph rewrite pass is
 expected to invoke these operators.
 )doc");
 
