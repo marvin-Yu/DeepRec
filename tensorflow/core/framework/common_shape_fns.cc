@@ -1117,6 +1117,14 @@ Status AvgPoolShape(shape_inference::InferenceContext* c) {
   return Status::OK();
 }
 
+Status AvgPoolGradShape(shape_inference::InferenceContext* c) {
+  ShapeHandle s;
+  TF_RETURN_IF_ERROR(c->MakeShapeFromShapeTensor(0, &s));
+  TF_RETURN_IF_ERROR(c->WithRank(s, 4, &s));
+  c->set_output(0, s);
+  return Status::OK();
+}
+
 Status FusedBatchNormShape(shape_inference::InferenceContext* c) {
   ShapeHandle x;
   TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 4, &x));
@@ -1480,6 +1488,14 @@ Status Pool3DShape(shape_inference::InferenceContext* c) {
   }
 
   c->set_output(0, output_shape);
+  return Status::OK();
+}
+
+Status AvgPool3DGradShape(shape_inference::InferenceContext* c) {
+  ShapeHandle s;
+  TF_RETURN_IF_ERROR(c->MakeShapeFromShapeTensor(0, &s));
+  TF_RETURN_IF_ERROR(c->WithRank(s, 5, &s));
+  c->set_output(0, s);
   return Status::OK();
 }
 

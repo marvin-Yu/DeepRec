@@ -49,12 +49,14 @@ struct MklPoolingParams {
   dnnl::prop_kind prop_kind;
   MEMORY_FORMAT src_format;
   memory::desc src_md;
+  bool native_format;
 
   MklPoolingParams(memory::dims src_dims, memory::dims dst_dims,
                    memory::dims filter_dims, memory::dims strides,
                    memory::dims padding_left, memory::dims padding_right,
                    dnnl::algorithm alg_kind, dnnl::prop_kind prop_kind,
-                   MEMORY_FORMAT src_format, memory::desc src_md)
+                   MEMORY_FORMAT src_format, memory::desc src_md,
+                   bool native_format)
       : src_dims(src_dims),
         dst_dims(dst_dims),
         filter_dims(filter_dims),
@@ -64,7 +66,8 @@ struct MklPoolingParams {
         alg_kind(alg_kind),
         prop_kind(prop_kind),
         src_format(src_format),
-        src_md(src_md) {}
+        src_md(src_md),
+        native_format(native_format) {}
 };
 
 template <typename T>
@@ -564,7 +567,8 @@ class MklPoolingOpBase : public OpKernel {
       output_tf_shape = MklDnnDimsToTFShape(output_dims_order);
     }
     AllocateOutputSetMklShape(context, kOutputIndex, output_tensor,
-                              output_tf_shape, output_mkl_shape);
+                              output_tf_shape, output_mkl_shape,
+                              native_format_);
     DCHECK(output_tensor);
   }
 
@@ -589,6 +593,7 @@ class MklPoolingOpBase : public OpKernel {
   // Either memory::format (OneDNN v-0.x) or memory::format_tag (OneDNN v-1.x)
   MEMORY_FORMAT data_format_dnnl_;
   bool workspace_enabled_;
+  bool native_format_ = false;
 };
 
 template <class T>
@@ -652,8 +657,13 @@ class MklPoolingForwardOpBase : public MklPoolingOpBase<T> {
                                  output_dims_mkl_order, output_tf_format);
     // Only allocate enough space for the elements we need.
     output_tf_shape.AddDim(this->GetNumTElements(dst_pd));
+
+    if (this->native_format_) {
+      output_tf_shape = output_mkl_shape.GetTfShape();
+    }
     AllocateOutputSetMklShape(context, kOutputTensorIndexOutput, output_tensor,
-                              output_tf_shape, output_mkl_shape);
+                              output_tf_shape, output_mkl_shape,
+                              this->native_format_);
     DCHECK(*output_tensor);
   }
 
@@ -700,8 +710,12 @@ class MklPoolingBackwardOpBase : public MklPoolingOpBase<T> {
 
     TensorShape output_tf_shape;
     output_tf_shape.AddDim(this->GetNumTElements(dst_pd));
+    if (this->native_format_) {
+      output_tf_shape = output_mkl_shape.GetTfShape();
+    }
     AllocateOutputSetMklShape(context, kOutputTensorIndexOutput, output_tensor,
-                              output_tf_shape, output_mkl_shape);
+                              output_tf_shape, output_mkl_shape,
+                              this->native_format_);
     DCHECK(*output_tensor);
   }
 };
