@@ -88,13 +88,7 @@ REGISTER_OP("AvgPoolGrad")
     .Attr(GetPaddingAttrString())
     .Attr(GetConvnetDataFormatAttrString())
     .Attr("T: {half, bfloat16, float, double}")
-    .SetShapeFn([](InferenceContext* c) {
-      ShapeHandle s;
-      TF_RETURN_IF_ERROR(c->MakeShapeFromShapeTensor(0, &s));
-      TF_RETURN_IF_ERROR(c->WithRank(s, 4, &s));
-      c->set_output(0, s);
-      return Status::OK();
-    });
+    .SetShapeFn(shape_inference::AvgPoolGradShape);
 
 // --------------------------------------------------------------------------
 
@@ -728,13 +722,7 @@ REGISTER_OP("AvgPool3DGrad")
     .Attr(GetPaddingAttrString())
     .Attr(GetConvnet3dDataFormatAttrString())
     .Attr("T: {half, bfloat16, float, double}")
-    .SetShapeFn([](InferenceContext* c) {
-      ShapeHandle s;
-      TF_RETURN_IF_ERROR(c->MakeShapeFromShapeTensor(0, &s));
-      TF_RETURN_IF_ERROR(c->WithRank(s, 5, &s));
-      c->set_output(0, s);
-      return Status::OK();
-    });
+    .SetShapeFn(shape_inference::AvgPool3DGradShape);
 
 // --------------------------------------------------------------------------
 
@@ -2432,18 +2420,12 @@ REGISTER_OP("_MklAvgPoolGrad")
     .Attr(GetPaddingAttrString())
     .Attr(GetConvnetDataFormatAttrString())
     .Attr("T: {float, half, double, bfloat16}")
-    .SetShapeFn([](InferenceContext* c) {
-      ShapeHandle s;
-      TF_RETURN_IF_ERROR(c->MakeShapeFromShapeTensor(0, &s));
-      TF_RETURN_IF_ERROR(c->WithRank(s, 4, &s));
-      c->set_output(0, s);
-      return Status::OK();
-    })
+    .SetShapeFn(shape_inference::AvgPoolGradShape)
     .Doc(R"doc(
-MKL version of AvgPoolGrad operator. Uses MKL DNN APIs to compute gradients
+oneDNN version of AvgPoolGrad operator. Uses oneDNN APIs to compute gradients
 of AvgPool function.
 
-NOTE Do not invoke this operator directly in Python. Graph rewrite pass is
+*NOTE*: Do not invoke this operator directly in Python. Graph rewrite pass is
 expected to invoke these operators.
 )doc");
 
@@ -2478,18 +2460,12 @@ REGISTER_OP("_MklAvgPool3DGrad")
     .Attr(GetPaddingAttrString())
     .Attr(GetConvnet3dDataFormatAttrString())
     .Attr("T: {float, half, double, bfloat16}")
-    .SetShapeFn([](InferenceContext* c) {
-      ShapeHandle s;
-      TF_RETURN_IF_ERROR(c->MakeShapeFromShapeTensor(0, &s));
-      TF_RETURN_IF_ERROR(c->WithRank(s, 5, &s));
-      c->set_output(0, s);
-      return Status::OK();
-    })
+    .SetShapeFn(shape_inference::AvgPool3DGradShape)
     .Doc(R"doc(
-MKL version of AvgPool3DGrad operator. Uses MKL DNN APIs to compute gradients
+oneDNN version of AvgPool3DGrad operator. Uses oneDNN APIs to compute gradients
 of AvgPool function.
 
-NOTE Do not invoke this operator directly in Python. Graph rewrite pass is
+*NOTE*: Do not invoke this operator directly in Python. Graph rewrite pass is
 expected to invoke these operators.
 )doc");
 
