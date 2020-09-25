@@ -57,7 +57,8 @@ void ExpectClose(const Tensor& x, const Tensor& y, double atol, double rtol) {
       ExpectClose<Eigen::half>(x, y, atol, rtol);
       break;
     case DT_BFLOAT16:
-      return ExpectClose<Eigen::bfloat16>(x, y, atol, rtol);
+      ExpectClose<Eigen::bfloat16>(x, y, atol, rtol);
+      break;
     case DT_FLOAT:
       ExpectClose<float>(x, y, atol, rtol);
       break;
