@@ -886,10 +886,9 @@ class MklConvOp : public OpKernel {
       }
       // Check if reorder is needed
       if (add_mkl_shape == *output_mkl_shape &&
-          context->forward_input_to_output_with_shape(
-            kInputIndex_Add, kOutputIndex_Dst, output_tf_shape,
-            output_tensor)) {
-        AllocateOutputSetMklShape(context, kOutputIndex_Dst, *output_mkl_shape);
+          ForwardMklTensorInToOutWithMklShape(context, kInputIndex_Add,
+                                              kOutputIndex_Dst, output_tensor,
+                                              add_mkl_shape, false)) {
         return;
       } else {
         AllocateOutputSetMklShape(context, kOutputIndex_Dst, output_tensor,
