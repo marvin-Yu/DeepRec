@@ -107,6 +107,14 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
       if (config.beta() == 0 && bias->user_count() == 1 &&
           existing_gemm->user_count() == 1 &&
           bias->shape() == existing_gemm->shape()) {
+        // skip broadcast(constant(bias))
+        if (bias->opcode() == HloOpcode::kBroadcast &&
+            bias->operand_count() == 1 &&
+            bias->operand(0)->opcode() == HloOpcode::kConstant) {
+          VLOG(2) << "Skip broadcast(constant(bias)) for bias: "
+                    << bias->ToShortString();
+          return Status::OK();
+        }
         config.set_beta(1.0);
         CHECK_EQ(existing_gemm->operand_count(), 2);
         std::unique_ptr<HloInstruction> gemm_call =
