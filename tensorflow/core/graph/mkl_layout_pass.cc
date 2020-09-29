@@ -311,6 +311,7 @@ class MklLayoutRewritePass : public GraphOptimizationPass {
     csinfo_.mkl_native_fused_conv2d = "_MklNativeFusedConv2D";
     csinfo_.mkl_native_fused_depthwise_conv2d =
         "_MklNativeFusedDepthwiseConv2dNative";
+    csinfo_.mkl_native_fused_matmul = "_MklNativeFusedMatMul";
     csinfo_.mkl_native_pad_with_conv2d = "_MklNativePadWithConv2D";
     csinfo_.mkl_native_pad_with_fused_conv2d = "_MklNativePadWithFusedConv2D";
     csinfo_.mkl_pad_with_conv2d = "_MklPadWithConv2D";
@@ -508,8 +509,11 @@ class MklLayoutRewritePass : public GraphOptimizationPass {
                                  : csinfo_.mkl_fused_depthwise_conv2d,
                       CopyAttrsFusedConv2D, FusedDepthwiseConv2DRewrite,
                       GetRewriteCause()});
-    rinfo_.push_back({csinfo_.fused_matmul, csinfo_.mkl_fused_matmul,
-                      CopyAttrsAllCheckConstFilter, FusedMatMulRewrite});
+    rinfo_.push_back({csinfo_.fused_matmul,
+                      native_fmt ? csinfo_.mkl_native_fused_matmul
+                                 : csinfo_.mkl_fused_matmul,
+                      CopyAttrsAllCheckConstFilter, FusedMatMulRewrite,
+                      GetRewriteCause()});
     rinfo_.push_back({csinfo_.fused_batch_matmul,
                       csinfo_.mkl_fused_batch_matmul, CopyAttrsAll,
                       AlwaysRewrite, kRewriteForOpNameChange});
@@ -1003,6 +1007,7 @@ class MklLayoutRewritePass : public GraphOptimizationPass {
     string mkl_native_fused_batch_norm_ex;
     string mkl_native_fused_conv2d;
     string mkl_native_fused_depthwise_conv2d;
+    string mkl_native_fused_matmul;
     string mkl_native_pad_with_conv2d;
     string mkl_native_pad_with_fused_conv2d;
     string mkl_pad_with_conv2d;
