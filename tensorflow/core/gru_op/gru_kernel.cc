@@ -97,9 +97,10 @@ class GRUOp : public OpKernel {
     const T* i2hBias_p = i2hBias.flat<T>().data();
 
     // Do the computation.
-    GRUFunctor<Device, T>()(context->eigen_device<Device>(), context,
-                            batch_size, rounds, elts, y_p, x_p, h2h_p, i2h_p,
-                            h2hBias_p, i2hBias_p);
+    OP_REQUIRES_OK(context, GRUFunctor<Device, T>()(
+                                context->eigen_device<Device>(), context,
+                                batch_size, rounds, elts, y_p, x_p, h2h_p,
+                                i2h_p, h2hBias_p, i2hBias_p));
   };
 };
 
