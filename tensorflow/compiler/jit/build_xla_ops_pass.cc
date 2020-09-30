@@ -402,19 +402,20 @@ Status ReplaceNodeWithXlaCompileAndXlaRun(
                    .WithDevice(n->requested_device())
                    .WithAssignedDevice(device_name_str);
 
-  ops::_XlaCompile xla_compile(root.WithOpName("xla_compile"),
-                               /*constants=*/cluster_info.constant_inputs,
-                               /*args=*/cluster_info.non_constant_inputs,
-                               /*resources=*/cluster_info.resource_inputs,
-                               /*must_compile=*/requires_compilation,
-                               cluster_info.function);
-  TF_RETURN_IF_ERROR(
-      CopyIncomingControlEdges(g, /*from=*/n, /*to=*/xla_compile.key.node()));
-
-  std::vector<Output> xla_run_args =
-      GetXlaRunArgs(root, cluster_info, debugging_opts);
 
   if (requires_compilation) {
+    ops::_XlaCompile xla_compile(root.WithOpName("xla_compile"),
+                                 /*constants=*/cluster_info.constant_inputs,
+                                 /*args=*/cluster_info.non_constant_inputs,
+                                 /*resources=*/cluster_info.resource_inputs,
+                                 /*must_compile=*/requires_compilation,
+                                 cluster_info.function);
+    TF_RETURN_IF_ERROR(
+        CopyIncomingControlEdges(g, /*from=*/n, /*to=*/xla_compile.key.node()));
+
+    std::vector<Output> xla_run_args =
+        GetXlaRunArgs(root, cluster_info, debugging_opts);
+
     ops::XlaLaunch xla_launch(root.WithOpName("xla_launch"),
                                /*constants=*/cluster_info.constant_inputs,
                                /*args=*/cluster_info.non_constant_inputs,
