@@ -3680,6 +3680,7 @@ cc_library(
         ":fft_ops",
         ":histogram_op",
         ":co_action_op",
+        ":blaze_attention_op",
         ":indicator_matmul_op",
         ":indicator_batched_small_matmul_op",
         ":matmul_op",
@@ -3723,6 +3724,17 @@ tf_kernel_library(
     gpu_srcs = [
       "co_action_op.h",
       "co_action_op_gpu.cu.cc",
+    ],
+    deps = MATH_DEPS,
+)
+
+tf_kernel_library(
+    name = "blaze_attention_op",
+    hdrs = ["blaze_attention_op.h"],
+    srcs = ["blaze_attention_op.cc"],
+    gpu_srcs = [
+        "blaze_attention_op.h",
+        "blaze_attention_op_gpu.cu.cc",
     ],
     deps = MATH_DEPS,
 )
