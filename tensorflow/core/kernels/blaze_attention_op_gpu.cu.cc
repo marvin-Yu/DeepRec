@@ -172,7 +172,7 @@ Status LaunchBlazeAttention<GPUDevice, Scalar>::operator()(
   }
   dim3 grid_dim(batch_query, pnum);
   dim3 block_dim(32);
-  size_t shared_memory_size = (1024 + 32 * 33 + 2) * sizeof(float);
+  size_t shared_memory_size = (1024 + 32 * 33 + 32 + 2) * sizeof(float);
   const auto& d = context->eigen_device<GPUDevice>();
   TF_CHECK_OK(GpuLaunchKernel(
       ComputeBlazeAttentionV2<false, Scalar, int32, 32>, grid_dim, block_dim,
@@ -199,7 +199,7 @@ Status LaunchBlazeAttentionIndicator<GPUDevice, Scalar, TIndex>::operator()(
   }
   dim3 grid_dim(batch_query, pnum);
   dim3 block_dim(32);
-  int shared_memory_size = (1024 + 32 * 33 + 2) * sizeof(float);
+  int shared_memory_size = (1024 + 32 * 33 + 32 + 2) * sizeof(float);
   const auto& d = context->eigen_device<GPUDevice>();
   TF_CHECK_OK(GpuLaunchKernel(
       ComputeBlazeAttentionV2<true, Scalar, TIndex, 32>, grid_dim, block_dim,
