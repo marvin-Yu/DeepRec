@@ -96,10 +96,12 @@ __global__ void ComputeBlazeAttentionV2(
 
   __shared__ float s_buf[1024];
   __shared__ float s_fact[32][33];
+  __shared__ float s_query[32];
   const Scalar* fact = in_fact + blockIdx.y * batch_fact * seq_len * UNITS +
                        ind * seq_len * UNITS;
   const Scalar* query =
       in_query + blockIdx.y * batch_query * UNITS + blockIdx.x * UNITS;
+  s_query[threadIdx.x] = (float)query[threadIdx.x];
   int block = (seq_len + 31) / 32;
   for (int b = 0; b < block; b++) {
     int i = threadIdx.x;
@@ -112,7 +114,7 @@ __global__ void ComputeBlazeAttentionV2(
     int q = b * 32 + threadIdx.x;
 #pragma unroll
     for (int i = 0; i < UNITS; i++) {
-      sum += s_fact[threadIdx.x][i] * (float)query[i];
+      sum += s_fact[threadIdx.x][i] * s_query[i];
     }
     s_buf[q] = sum;
   }
