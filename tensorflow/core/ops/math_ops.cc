@@ -395,6 +395,19 @@ REGISTER_OP("BlazeAttentionIndicator")
       return Status::OK();
     });
 
+REGISTER_OP("BlazeBiasDice")
+    .Input("input: T")
+    .Input("bias: T")
+    .Input("alpha: T")
+    .Input("moving_mean: T")
+    .Input("gamma: T")
+    .Output("output: T")
+    .Attr("T: {half, float}")
+    .SetShapeFn([](InferenceContext* c) {
+      c->set_output(0, c->input(0));
+      return Status::OK();
+    });
+
 REGISTER_OP("BlazeGRU")
     .Input("x: T")         //[batch_size, rounds, elts]
     .Input("h2h: T")       //[elts, 3elts]

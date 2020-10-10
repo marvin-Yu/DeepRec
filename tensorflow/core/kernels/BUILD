@@ -3681,6 +3681,7 @@ cc_library(
         ":histogram_op",
         ":co_action_op",
         ":blaze_attention_op",
+        ":blaze_bias_dice_op",
         ":indicator_matmul_op",
         ":indicator_batched_small_matmul_op",
         ":matmul_op",
@@ -3735,6 +3736,17 @@ tf_kernel_library(
     gpu_srcs = [
         "blaze_attention_op.h",
         "blaze_attention_op_gpu.cu.cc",
+    ],
+    deps = MATH_DEPS,
+)
+
+tf_kernel_library(
+    name = "blaze_bias_dice_op",
+    hdrs = ["blaze_bias_dice_op.h"],
+    srcs = ["blaze_bias_dice_op.cc"],
+    gpu_srcs = [
+        "blaze_bias_dice_op.h",
+        "blaze_bias_dice_op_gpu.cu.cc",
     ],
     deps = MATH_DEPS,
 )
