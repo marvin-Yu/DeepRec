@@ -6,6 +6,20 @@
 
 namespace tensorflow {
 
+#define TF_RETURN_IF_CUDA_ERROR(result)                   \
+  do {                                                    \
+    cudaError_t error(result);                            \
+    if (!SE_PREDICT_TRUE(error == cudaSuccess)) {         \
+      return errors::Internal("Cuda call failed with ",   \
+                              cudaGetErrorString(error)); \
+    }                                                     \
+  } while (0)
+
+template <typename Scalar>
+__global__ void GRUPadZeros(Scalar* x, Scalar* y, int* padded_iterations,
+                            unsigned int* finished, const int round,
+                            const int elts, const int hidden_num) {}
+template <>
 __global__ void GRUPadZeros(float* x, float* y, int* padded_iterations,
                             unsigned int* finished, const int round,
                             const int elts, const int hidden_num) {
@@ -47,7 +61,7 @@ __global__ void GRUPadZeros(float* x, float* y, int* padded_iterations,
     finished[i] = 0;
   }
 }
-
+template <>
 __global__ void GRUPadZeros(Eigen::half* x, Eigen::half* y,
                             int* padded_iterations, unsigned int* finished,
                             const int round, const int elts,
@@ -512,20 +526,19 @@ inline int GetThreadsNum(int data_size, bool upper = false) {
 }
 
 template <typename T>
-void GRUFunctor<Eigen::GpuDevice, T>::operator()(
+Status GRUFunctor<Eigen::GpuDevice, T>::operator()(
     const Eigen::GpuDevice& d, OpKernelContext* context, int batch_size,
     int rounds, int elts, T* y, const T* x, const T* h2h, const T* i2h,
     const T* h2hBias, const T* i2hBias) {
   VLOG(2) << "== GPU GRUFunctor ===";
 
   Tensor finished;  //[batch_size]
-  OP_REQUIRES_OK(context, context->allocate_temp(
-                              DT_UINT32, TensorShape({rounds}), &finished));
+  TF_RETURN_IF_ERROR(
+      context->allocate_temp(DT_UINT32, TensorShape({rounds}), &finished));
   unsigned int* finished_p = finished.flat<unsigned int>().data();
   Tensor padded_iterations;  // [batch_size]
-  OP_REQUIRES_OK(context,
-                 context->allocate_temp(DT_INT32, TensorShape({batch_size}),
-                                        &padded_iterations));
+  TF_RETURN_IF_ERROR(context->allocate_temp(DT_INT32, TensorShape({batch_size}),
+                                            &padded_iterations));
   int* padded_iterations_p = padded_iterations.flat<int>().data();
   T* init_h = nullptr;
 
@@ -541,23 +554,26 @@ void GRUFunctor<Eigen::GpuDevice, T>::operator()(
   const size_t cache_size =
       sizeof(T) * slot_per_block * threads_per_slot;  // 84 * 4 = 336
 
-   GRUPadZeros<<<batch_size, GetThreadsNum(elts*sizeof(T)/sizeof(float),
-   true), 0, d.stream()>>>(
-      const_cast<T*>(x), y, padded_iterations_p, finished_p, rounds, elts, hidden_num);
-//  TF_CHECK_OK(GpuLaunchKernel(
-//      GRUPadZeros, batch_size,
-//      GetThreadsNum(elts * sizeof(T) / sizeof(float), true), 0, d.stream(), const_cast<T*>(x),
-//      y, padded_iterations_p, finished_p, rounds, elts, hidden_num));
+  //   GRUPadZeros<<<batch_size, GetThreadsNum(elts*sizeof(T)/sizeof(float),
+  //   true), 0, d.stream()>>>(
+  //      const_cast<T*>(x), y, padded_iterations_p, finished_p, rounds, elts,
+  //      hidden_num);
+  TF_CHECK_OK(
+      GpuLaunchKernel(GRUPadZeros<T>, batch_size,
+                      GetThreadsNum(elts * sizeof(T) / sizeof(float), true), 0,
+                      d.stream(), const_cast<T*>(x), y, padded_iterations_p,
+                      finished_p, rounds, elts, hidden_num));
 
-
-   GRUKernel<gru_weights_per_thread><<<block_count, gru_threads_per_block,
-   cache_size, d.stream()>>>(
-      x, h2h, h2hBias, i2h, i2hBias,
-      y, finished_p, batch_size, rounds, elts,hidden_num, padded_iterations_p, init_h);
-//  TF_CHECK_OK(GpuLaunchKernel(
-//      GRUKernel<T,gru_weights_per_thread>, block_count, gru_threads_per_block,
-//      cache_size, d.stream(), x, h2h, h2hBias, i2h, i2hBias, y, finished_p,
-//      batch_size, rounds, elts, hidden_num, padded_iterations_p, init_h));
+  GRUKernel<gru_weights_per_thread>
+      <<<block_count, gru_threads_per_block, cache_size, d.stream()>>>(
+          x, h2h, h2hBias, i2h, i2hBias, y, finished_p, batch_size, rounds,
+          elts, hidden_num, padded_iterations_p, init_h);
+  TF_RETURN_IF_CUDA_ERROR(cudaGetLastError());
+  //  TF_CHECK_OK(GpuLaunchKernel(
+  //      GRUKernel<gru_weights_per_thread>, block_count, gru_threads_per_block,
+  //      cache_size, d.stream(), x, h2h, h2hBias, i2h, i2hBias, y, finished_p,
+  //      batch_size, rounds, elts, hidden_num, padded_iterations_p, init_h));
+  return Status::OK();
 }
 
 template struct GRUFunctor<Eigen::GpuDevice, float>;

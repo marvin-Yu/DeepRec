@@ -88,58 +88,49 @@ void GRUKernel(const CPUDevice& d, int batch_size, int rounds, int elts, T* y,
 
 template <typename T>
 struct GRUFunctor<CPUDevice, T> {
-  void operator()(const CPUDevice& d, OpKernelContext* context, int batch_size,
-                  int rounds, int elts, T* y, const T* x, const T* h2h,
-                  const T* i2h, const T* h2hBias, const T* i2hBias);
+  Status operator()(const CPUDevice& d, OpKernelContext* context,
+                    int batch_size, int rounds, int elts, T* y, const T* x,
+                    const T* h2h, const T* i2h, const T* h2hBias,
+                    const T* i2hBias);
 };
 
 template <typename T>
-void GRUFunctor<CPUDevice, T>::operator()(const CPUDevice& d,
-                                          OpKernelContext* context,
-                                          int batch_size, int rounds, int elts,
-                                          T* y, const T* x, const T* h2h,
-                                          const T* i2h, const T* h2hBias,
-                                          const T* i2hBias) {
+Status GRUFunctor<CPUDevice, T>::operator()(
+    const CPUDevice& d, OpKernelContext* context, int batch_size, int rounds,
+    int elts, T* y, const T* x, const T* h2h, const T* i2h, const T* h2hBias,
+    const T* i2hBias) {
   VLOG(2) << "=== CPU GRUFunctor ===";
 
   Tensor act, preact;
   if (std::is_same<float, T>::value) {
-    OP_REQUIRES_OK(
-        context,
-        context->allocate_temp(
-            DT_FLOAT, TensorShape({batch_size, rounds * 3, elts}), &preact));
-    OP_REQUIRES_OK(
-        context,
-        context->allocate_temp(
-            DT_FLOAT,
-            TensorShape({batch_size, elts *
-                                         (alignN(elts, gru_weights_per_thread) /
-                                          gru_weights_per_thread) *
-                                         3 * 2}),
-            &act));
+    TF_RETURN_IF_ERROR(context->allocate_temp(
+        DT_FLOAT, TensorShape({batch_size, rounds * 3, elts}), &preact));
+    TF_RETURN_IF_ERROR(context->allocate_temp(
+        DT_FLOAT,
+        TensorShape({batch_size, elts *
+                                     (alignN(elts, gru_weights_per_thread) /
+                                      gru_weights_per_thread) *
+                                     3 * 2}),
+        &act));
   } else if (std::is_same<double, T>::value) {
-    OP_REQUIRES_OK(
-        context,
-        context->allocate_temp(
-            DT_DOUBLE, TensorShape({batch_size, rounds * 3, elts}), &preact));
-    OP_REQUIRES_OK(
-        context,
-        context->allocate_temp(
-            DT_DOUBLE,
-            TensorShape({batch_size, elts *
-                                         (alignN(elts, gru_weights_per_thread) /
-                                          gru_weights_per_thread) *
-                                         3 * 2}),
-            &act));
+    TF_RETURN_IF_ERROR(context->allocate_temp(
+        DT_DOUBLE, TensorShape({batch_size, rounds * 3, elts}), &preact));
+    TF_RETURN_IF_ERROR(context->allocate_temp(
+        DT_DOUBLE,
+        TensorShape({batch_size, elts *
+                                     (alignN(elts, gru_weights_per_thread) /
+                                      gru_weights_per_thread) *
+                                     3 * 2}),
+        &act));
   } else {
-    OP_REQUIRES(context, false,
-                errors::InvalidArgument("Unsupported Datatype"));
+    return errors::InvalidArgument("Unsupported Datatype");
   }
   T* act_p = act.flat<T>().data();
   T* preact_p = preact.flat<T>().data();
 
   GRUKernel(d, batch_size, rounds, elts, y, x, h2h, i2h, h2hBias, i2hBias,
             act_p, preact_p);
+  return Status::OK();
 };
 
 template struct GRUFunctor<CPUDevice, float>;
