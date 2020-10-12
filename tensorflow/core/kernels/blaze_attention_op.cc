@@ -225,6 +225,12 @@ class BlazeAttentionIndicatorOp : public OpKernel {
       return;
     }
     int seq_len = fact.dim_size(2);
+    if (VLOG_IS_ON(1)) {
+      int64 flops = 2 * batch_query * query_pnum * seq_len * query_units;
+      LOG(INFO) << "FLOPs = " << flops << ", " << type_string() << ", "
+                << name() << ", " << fact.shape().DebugString() << ", "
+                << query.shape().DebugString();
+    }
     OP_REQUIRES_OK(ctx, LaunchBlazeAttentionIndicator<Device, Scalar, TIndex>()(
                             ctx, fact, query, ind, out, query_pnum, batch_fact,
                             batch_query, seq_len, query_units));

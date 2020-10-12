@@ -129,8 +129,25 @@ class BlazeBiasDiceOp : public OpKernel {
     out_shape.AddDim(batch);
     out_shape.AddDim(units);
     OP_REQUIRES_OK(ctx, ctx->allocate_output(0, out_shape, &out));
-    LaunchBlazeBiasDice<Device, Scalar> launch;
-    launch(ctx, input, bias, alpha, moving_mean, gamma, out, batch, units);
+    if (out->NumElements() == 0) {
+      return;
+    }
+    if (input.NumElements() == 0) {
+      functor::SetZeroFunctor<Device, Scalar> f;
+      f(ctx->eigen_device<Device>(), out->flat<Scalar>());
+      return;
+    }
+    if (VLOG_IS_ON(1)) {
+      int64 flops = 1;
+      for (int i = 0; i < out_shape.dims(); i++) {
+        flops *= out_shape.dim_size(i);
+      }
+      LOG(INFO) << "FLOPs = " << flops * 12 << ", " << type_string() << ", "
+                << name() << ", " << input.shape().DebugString();
+    }
+    OP_REQUIRES_OK(ctx, LaunchBlazeBiasDice<Device, Scalar>()(
+                            ctx, input, bias, alpha, moving_mean, gamma, out,
+                            batch, units));
   }
 };
 
