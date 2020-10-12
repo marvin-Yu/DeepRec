@@ -44,7 +44,7 @@ class BlazeBiasDiceOpTest(test.TestCase):
       moving_mean_in = GetRandomNormalInput([units], dtype)
       gamma_in = GetRandomNormalInput([units], dtype)
       if dtype == "float16":
-        tol = 0.1
+        tol = 0.01
       elif dtype == "float32":
         tol = 1e-5
       with self.cached_session(use_gpu=False) as sess:
@@ -78,7 +78,7 @@ class BlazeBiasDiceOpTest(test.TestCase):
       moving_mean_in = GetRandomNormalInput([units], dtype)
       gamma_in = GetRandomNormalInput([units], dtype)
       if dtype == "float16":
-        tol = 0.1
+        tol = 0.01
       elif dtype == "float32":
         tol = 1e-5
       with self.cached_session(use_gpu=True) as sess:
