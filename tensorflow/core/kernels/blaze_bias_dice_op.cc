@@ -63,7 +63,7 @@ struct BlazeBiasDiceCPUFunctor {
       for (int i = 0; i < units; i++) {
         float fc_out = (float)*input + (float)bias[i];
         float bn_out = (float)alpha[i] * (fc_out - (float)moving_mean[i]);
-        float logits = 1.0f / (1.0f + std::exp(-bn_out));
+        float logits = (std::tanh(bn_out / 2.0f) + 1.0f) / 2.0f;
         float out = (float)gamma[i] * (1.0f - logits) * fc_out + logits * fc_out;
         *output = (T)out;
         output++;

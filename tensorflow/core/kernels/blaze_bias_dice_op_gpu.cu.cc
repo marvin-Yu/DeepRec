@@ -24,7 +24,7 @@ __global__ void ComputeBlazeBiasDice(const Scalar* input, const Scalar* bias,
     float fc_out = (float)input[units_idx] + (float)bias[units_idx];
     float bn_out =
         (float)alpha[units_idx] * (fc_out - (float)moving_mean[units_idx]);
-    float logits = 1.0f / (1.0f + __expf(-bn_out));
+    float logits = (__tanhf(bn_out / 2.0f) + 1.0f) / 2.0f;
     float out =
         (float)gamma[units_idx] * (1.0f - logits) * fc_out + logits * fc_out;
     output[b * units + units_idx] = (Scalar)out;
