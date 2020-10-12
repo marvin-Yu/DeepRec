@@ -64,7 +64,8 @@ struct BlazeBiasDiceCPUFunctor {
         float fc_out = (float)*input + (float)bias[i];
         float bn_out = (float)alpha[i] * (fc_out - (float)moving_mean[i]);
         float logits = (std::tanh(bn_out / 2.0f) + 1.0f) / 2.0f;
-        float out = (float)gamma[i] * (1.0f - logits) * fc_out + logits * fc_out;
+        float out =
+            (float)gamma[i] * (1.0f - logits) * fc_out + logits * fc_out;
         *output = (T)out;
         output++;
         input++;
@@ -73,9 +74,6 @@ struct BlazeBiasDiceCPUFunctor {
   }
 };
 }  // namespace functor
-
-
-
 
 template <typename Scalar>
 struct LaunchBlazeBiasDice<CPUDevice, Scalar> {
@@ -110,17 +108,29 @@ class BlazeBiasDiceOp : public OpKernel {
     auto& gamma = ctx->input(4);
     OP_REQUIRES(
         ctx, input.dims() == 2,
-        errors::InvalidArgument("In[0] ndims must be 2: ", input.dims()));
+        errors::InvalidArgument("input ndims must be 2: ", input.dims()));
     int batch = input.dim_size(0);
     int units = input.dim_size(1);
+    OP_REQUIRES(ctx, bias.dims() == 1 && bias.dim_size(0) == units,
+                errors::InvalidArgument("unexpected bias shape: ",
+                                        bias.shape().DebugString()));
+    OP_REQUIRES(ctx, alpha.dims() == 1 && alpha.dim_size(0) == units,
+                errors::InvalidArgument("unexpected alpha shape: ",
+                                        alpha.shape().DebugString()));
+    OP_REQUIRES(ctx,
+                moving_mean.dims() == 1 && moving_mean.dim_size(0) == units,
+                errors::InvalidArgument("unexpected moving_mean shape: ",
+                                        moving_mean.shape().DebugString()));
+    OP_REQUIRES(ctx, gamma.dims() == 1 && gamma.dim_size(0) == units,
+                errors::InvalidArgument("unexpected gamma shape: ",
+                                        gamma.shape().DebugString()));
     Tensor* out = nullptr;
     TensorShape out_shape;
     out_shape.AddDim(batch);
     out_shape.AddDim(units);
     OP_REQUIRES_OK(ctx, ctx->allocate_output(0, out_shape, &out));
     LaunchBlazeBiasDice<Device, Scalar> launch;
-    launch(ctx, input, bias, alpha, moving_mean, gamma,
-           out, batch, units);
+    launch(ctx, input, bias, alpha, moving_mean, gamma, out, batch, units);
   }
 };
 
