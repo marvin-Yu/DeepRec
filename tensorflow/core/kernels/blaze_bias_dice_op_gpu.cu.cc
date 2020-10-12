@@ -38,9 +38,10 @@ Status LaunchBlazeBiasDice<GPUDevice, Scalar>::operator()(
     OpKernelContext* context, const Tensor& input, const Tensor& bias,
     const Tensor& alpha, const Tensor& moving_mean, const Tensor& gamma,
     Tensor* output, int batch, int units) {
-  dim3 grid_dim(batch, (units + 127) / 128);
-  dim3 block_dim(128);
   const auto& d = context->eigen_device<GPUDevice>();
+  const int thread_per_block = std::min(1024, d.maxGpuThreadsPerBlock());
+  dim3 grid_dim(batch, (units + thread_per_block - 1) / thread_per_block);
+  dim3 block_dim(thread_per_block);
   TF_CHECK_OK(GpuLaunchKernel(
       ComputeBlazeBiasDice<Scalar>, grid_dim, block_dim, 0, d.stream(),
       input.template flat<Scalar>().data(), bias.template flat<Scalar>().data(),
@@ -55,4 +56,4 @@ template struct LaunchBlazeBiasDice<GPUDevice, Eigen::half>;
 template struct LaunchBlazeBiasDice<GPUDevice, float>;
 }  // namespace tensorflow
 
-#endif // GOOGLE_CUDA
+#endif  // GOOGLE_CUDA
