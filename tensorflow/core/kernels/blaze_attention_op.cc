@@ -120,8 +120,8 @@ class BlazeAttentionOp : public OpKernel {
         ctx, query.dims() == 3,
         errors::InvalidArgument("In[1] ndims must be 3: ", query.dims()));
 
-    OP_REQUIRES(ctx, fact.dim_size(2) <= 1024,
-                errors::InvalidArgument("seq length of fact must <= 1024: got ",
+    OP_REQUIRES(ctx, fact.dim_size(2) <= 256,
+                errors::InvalidArgument("seq length of fact must <= 256: got ",
                                         fact.dim_size(2)));
     OP_REQUIRES(
         ctx, fact.dim_size(3) == 32,
@@ -186,8 +186,8 @@ class BlazeAttentionIndicatorOp : public OpKernel {
     OP_REQUIRES(ctx, ind.dims() == 1,
                 errors::InvalidArgument("In[2] ndims must be 1: ", ind.dims()));
     OP_REQUIRES(
-        ctx, fact.dim_size(2) <= 1024,
-        errors::InvalidArgument("seq length of fact must be <= 1024: got ",
+        ctx, fact.dim_size(2) <= 256,
+        errors::InvalidArgument("seq length of fact must be <= 256: got ",
                                 fact.dim_size(2)));
     OP_REQUIRES(
         ctx, fact.dim_size(3) == 32,
