@@ -312,9 +312,17 @@ DirectSession::DirectSession(const SessionOptions& options,
       factory_(factory),
       cancellation_manager_(new CancellationManager()),
       operation_timeout_in_ms_(options_.config.operation_timeout_in_ms()) {
+
+  const bool force_run_in_caller_thread = 
+    options_.config.force_run_in_caller_thread();
+
   const int thread_pool_size =
       options_.config.session_inter_op_thread_pool_size();
-  if (thread_pool_size > 0) {
+  
+  if (force_run_in_caller_thread_) {
+    VLOG(0) << "force running in caller thread";
+    force_run_in_caller_thread_ = force_run_in_caller_thread;
+  } else if (thread_pool_size > 0) {
     for (int i = 0; i < thread_pool_size; ++i) {
       thread::ThreadPool* pool = nullptr;
       bool owned = false;
@@ -668,7 +676,9 @@ Status DirectSession::RunInternal(
   std::unique_ptr<thread::ThreadPool> threadpool_wrapper;
   thread::ThreadPool* pool = nullptr;
 
-  if (run_in_caller_thread_) {
+  if (force_run_in_caller_thread_) {
+    pool = nullptr;
+  } else if (run_in_caller_thread_) {
     pool = nullptr;
   } else if (threadpool_options.inter_op_threadpool != nullptr) {
     threadpool_wrapper = absl::make_unique<thread::ThreadPool>(
@@ -678,7 +688,7 @@ Status DirectSession::RunInternal(
     pool = thread_pools_[run_options.inter_op_thread_pool()].first;
   }
 
-  if (pool == nullptr) {
+  if (pool == nullptr && !force_run_in_caller_thread_) {
     // We allow using the caller thread only when having a single executor
     // specified.
     if (executors_and_keys->items.size() > 1) {
@@ -969,7 +979,9 @@ void DirectSession::RunInternalAsync(
   std::unique_ptr<thread::ThreadPool> threadpool_wrapper;
   thread::ThreadPool* pool = nullptr;
 
-  if (run_in_caller_thread_) {
+  if (force_run_in_caller_thread_) {
+    pool = nullptr;
+  } else if (run_in_caller_thread_) {
     pool = nullptr;
   } else if (threadpool_options.inter_op_threadpool != nullptr) {
     threadpool_wrapper = absl::make_unique<thread::ThreadPool>(
@@ -979,7 +991,7 @@ void DirectSession::RunInternalAsync(
     pool = thread_pools_[run_options.inter_op_thread_pool()].first;
   }
 
-  if (pool == nullptr) {
+  if (pool == nullptr && !force_run_in_caller_thread_) {
     // We allow using the caller thread only when having a single executor
     // specified.
     if (executors_and_keys->items.size() > 1) {

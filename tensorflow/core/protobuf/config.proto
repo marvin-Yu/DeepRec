@@ -544,7 +544,7 @@ message ConfigProto {
 
   Experimental experimental = 16;
   bool run_graph_mode = 100;
-
+  bool force_run_in_caller_thread = 110;
   // Next: 17
 }
 
