@@ -38,31 +38,6 @@ __global__ void ComputeBlazeBiasDice(const Scalar* input, const Scalar* bias,
     idx += blockDim.x;
   }
 }
-// template <typename Scalar, int TILE>
-// __global__ void ComputeBlazeBiasDice(const Scalar* input, const Scalar* bias,
-//                                      const Scalar* alpha,
-//                                      const Scalar* moving_mean,
-//                                      const Scalar* gamma, Scalar* output,
-//                                      int batch, int units) {
-//   int b = blockIdx.x * TILE;
-//   int units_idx = blockIdx.y * blockDim.x + threadIdx.x;
-//   input = input + b * units;
-//   output = output + b * units + units_idx;
-// #pragma unroll
-//   for (int i = 0; i < TILE; i++) {
-//     if (units_idx < units && b < batch) {
-//       float fc_out = (float)input[units_idx] + (float)bias[units_idx];
-//       float bn_out =
-//           (float)alpha[units_idx] * (fc_out - (float)moving_mean[units_idx]);
-//       float logits = (tanh(bn_out * 0.5f) + 1.0f) * 0.5f;
-//       float out = ((float)gamma[units_idx] * (1.0f - logits) + logits) *
-//       fc_out; *output = (Scalar)out;
-//     }
-//     input += units;
-//     output += units;
-//     b++;
-//   }
-// }
 }  // namespace
 
 template <typename Scalar>
