@@ -351,8 +351,8 @@ REGISTER_OP("BlazeAttention")
         return errors::InvalidArgument("batch of fact(dim1) must be 1: ",
                                        c->Value(c->Dim(a, 1)));
       }
-      if (c->Value(c->Dim(a, 2)) > 1024) {
-        return errors::InvalidArgument("seq length of fact must <= 1024: ",
+      if (c->Value(c->Dim(a, 2)) > 256) {
+        return errors::InvalidArgument("seq length of fact must <= 256: ",
                                        c->Value(c->Dim(a, 2)));
       }
       if (c->Value(c->Dim(a, 3)) != 32) {
@@ -383,8 +383,8 @@ REGISTER_OP("BlazeAttentionIndicator")
       DimensionHandle parallel_merged;
       TF_RETURN_IF_ERROR(
           c->Merge(c->Dim(a, 0), c->Dim(b, 0), &parallel_merged));
-      if (c->Value(c->Dim(a, 2)) > 1024) {
-        return errors::InvalidArgument("seq length of fact must <= 1024: ",
+      if (c->Value(c->Dim(a, 2)) > 256) {
+        return errors::InvalidArgument("seq length of fact must <= 256: ",
                                        c->Value(c->Dim(a, 2)));
       }
       if (c->Value(c->Dim(a, 3)) != 32) {
