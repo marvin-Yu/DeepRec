@@ -94,7 +94,7 @@ __global__ void ComputeBlazeAttentionV2(
     }
   }
 
-  __shared__ float s_buf[1024];
+  __shared__ float s_buf[256];
   __shared__ float s_fact[32][33];
   __shared__ float s_query[32];
   const Scalar* fact = in_fact + blockIdx.y * batch_fact * seq_len * UNITS +
@@ -104,10 +104,11 @@ __global__ void ComputeBlazeAttentionV2(
   s_query[threadIdx.x] = (float)query[threadIdx.x];
   int block = (seq_len + 31) / 32;
   for (int b = 0; b < block; b++) {
-    int i = threadIdx.x;
-    for (int iq = 0; iq < 32; iq++) {
-      int q = b * 32 + iq;
-      s_fact[iq][i] = q < seq_len ? (float)fact[q * UNITS + i] : 0.0f;
+    int iq_end = min(seq_len - b * 32, 32);
+    int idx = b * 32 * UNITS + threadIdx.x;
+    for (int iq = 0; iq < iq_end; iq++) {
+      s_fact[iq][threadIdx.x] = (float)fact[idx];
+      idx += UNITS;
     }
     __syncthreads();
     float sum = 0.0f;
@@ -117,8 +118,8 @@ __global__ void ComputeBlazeAttentionV2(
       sum += s_fact[threadIdx.x][i] * s_query[i];
     }
     s_buf[q] = sum;
+    __syncthreads();
   }
-  __syncthreads();
 
   __shared__ float s_max, s_sum;
   float t_max = -1e20f;
@@ -172,7 +173,7 @@ Status LaunchBlazeAttention<GPUDevice, Scalar>::operator()(
   }
   dim3 grid_dim(batch_query, pnum);
   dim3 block_dim(32);
-  size_t shared_memory_size = (1024 + 32 * 33 + 32 + 2) * sizeof(float);
+  size_t shared_memory_size = (256 + 32 * 33 + 32 + 2) * sizeof(float);
   const auto& d = context->eigen_device<GPUDevice>();
   TF_CHECK_OK(GpuLaunchKernel(
       ComputeBlazeAttentionV2<false, Scalar, int32, 32>, grid_dim, block_dim,
@@ -199,7 +200,7 @@ Status LaunchBlazeAttentionIndicator<GPUDevice, Scalar, TIndex>::operator()(
   }
   dim3 grid_dim(batch_query, pnum);
   dim3 block_dim(32);
-  int shared_memory_size = (1024 + 32 * 33 + 32 + 2) * sizeof(float);
+  int shared_memory_size = (256 + 32 * 33 + 32 + 2) * sizeof(float);
   const auto& d = context->eigen_device<GPUDevice>();
   TF_CHECK_OK(GpuLaunchKernel(
       ComputeBlazeAttentionV2<true, Scalar, TIndex, 32>, grid_dim, block_dim,
