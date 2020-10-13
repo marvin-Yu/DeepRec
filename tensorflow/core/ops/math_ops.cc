@@ -404,6 +404,22 @@ REGISTER_OP("BlazeBiasDice")
     .Output("output: T")
     .Attr("T: {half, float}")
     .SetShapeFn([](InferenceContext* c) {
+      ShapeHandle a;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 2, &a));
+      ShapeHandle bias;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 1, &bias));
+      ShapeHandle alpha;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &alpha));
+      ShapeHandle moving_mean;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 1, &moving_mean));
+      ShapeHandle gamma;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(4), 1, &gamma));
+      DimensionHandle merged;
+      TF_RETURN_IF_ERROR(c->Merge(c->Dim(a, 1), c->Dim(bias, 0), &merged));
+      TF_RETURN_IF_ERROR(c->Merge(c->Dim(a, 1), c->Dim(alpha, 0), &merged));
+      TF_RETURN_IF_ERROR(
+          c->Merge(c->Dim(a, 1), c->Dim(moving_mean, 0), &merged));
+      TF_RETURN_IF_ERROR(c->Merge(c->Dim(a, 1), c->Dim(gamma, 0), &merged));
       c->set_output(0, c->input(0));
       return Status::OK();
     });
