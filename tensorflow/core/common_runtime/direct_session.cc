@@ -319,10 +319,7 @@ DirectSession::DirectSession(const SessionOptions& options,
   const int thread_pool_size =
       options_.config.session_inter_op_thread_pool_size();
   
-  if (force_run_in_caller_thread_) {
-    VLOG(0) << "force running in caller thread";
-    force_run_in_caller_thread_ = force_run_in_caller_thread;
-  } else if (thread_pool_size > 0) {
+  if (thread_pool_size > 0) {
     for (int i = 0; i < thread_pool_size; ++i) {
       thread::ThreadPool* pool = nullptr;
       bool owned = false;
@@ -336,13 +333,18 @@ DirectSession::DirectSession(const SessionOptions& options,
                                true /* owned */);
   } else {
     thread_pools_.emplace_back(GlobalThreadPool(options), false /* owned */);
-    // Run locally if environment value of TF_NUM_INTEROP_THREADS is negative
-    // and config.inter_op_parallelism_threads is unspecified or negative.
-    static const int env_num_threads = NumInterOpThreadsFromEnvironment();
-    if (options_.config.inter_op_parallelism_threads() < 0 ||
-        (options_.config.inter_op_parallelism_threads() == 0 &&
-         env_num_threads < 0)) {
-      run_in_caller_thread_ = true;
+    if (force_run_in_caller_thread) {
+      VLOG(0) << "force running in caller thread";
+      force_run_in_caller_thread_ = force_run_in_caller_thread;
+    } else {
+      // Run locally if environment value of TF_NUM_INTEROP_THREADS is negative
+      // and config.inter_op_parallelism_threads is unspecified or negative.
+      static const int env_num_threads = NumInterOpThreadsFromEnvironment();
+      if (options_.config.inter_op_parallelism_threads() < 0 ||
+          (options_.config.inter_op_parallelism_threads() == 0 &&
+           env_num_threads < 0)) {
+        run_in_caller_thread_ = true;
+      }
     }
   }
   // The default value of sync_on_finish will be flipped soon and this
