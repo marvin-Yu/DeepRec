@@ -23,6 +23,7 @@ limitations under the License.
 #include <vector>
 
 #include "absl/strings/match.h"
+#include <google/protobuf/text_format.h>
 // Required for IS_MOBILE_PLATFORM
 #include "tensorflow/core/platform/platform.h"  // NOLINT
 
@@ -432,11 +433,11 @@ void TF_EnableGemmOptimization(TF_SessionOptions* options,
 bool TF_InitSessionOptionsFromPB(const char* pb_char, TF_SessionOptions* options) {
   auto& config = options->options.config;
   tensorflow::ConfigProto config_proto;
-  if (!config_proto.ParseFromString(pb_char)) {
+  if (!::google::protobuf::TextFormat::ParseFromString(std::string(pb_char), &config_proto)) {
     LOG(ERROR) << "parse pb from char failed";
-    return false;
+  } else {
+    LOG(INFO) << "parse pb from char succ" << config_proto.DebugString();
   }
-
   config.MergeFrom(config_proto);
   LOG(INFO) << "session will create with conf " << config.DebugString();
   return true;
