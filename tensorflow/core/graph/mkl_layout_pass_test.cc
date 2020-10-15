@@ -3426,6 +3426,96 @@ TEST_F(MklLayoutPassTest, NodeRewrite_FusedBatchNormGradV2_Positive) {
             "E->F:4;F->G:1");
 }
 
+#define REGISTER_TEST(NAME, T, INPUT)                                                \
+  TEST_F(MklLayoutPassTest, NAME##_##T) {                                            \
+    DCHECK_EQ(kTensorOrdering, MklTfTensorOrdering::TENSORS_CONTIGUOUS);             \
+    InitGraph(                                                                       \
+      "node { name: 'A' op: '" #INPUT "'}"                                           \
+      "node { name: 'B' op: 'Float32Input'}"                                         \
+      "node { name: 'C' op: 'Float32Input'}"                                         \
+      "node { name: 'D' op: 'Float32Input'}"                                         \
+      "node { name: 'E' op: 'Float32Input'}"                                         \
+      "node { name: 'F' op: 'FusedBatchNormV3'"                                      \
+      " attr { key: 'T'            value { type: " #T " } }"                         \
+      " attr { key: 'U'            value { type: DT_FLOAT } }"                       \
+      " attr { key: 'data_format'  value { s: 'NCHW' } }"                            \
+      " attr { key: 'epsilon'      value { f: 0.0001 } }"                            \
+      " attr { key: 'is_training'  value { b: true } }"                              \
+      " input: ['A', 'B', 'C', 'D', 'E'] }"                                          \
+      "node { name: 'G' op: 'Zeta' attr { key: 'T' value { type: " #T " } }"         \
+      " input: ['A', 'F'] }");                                                       \
+  EXPECT_EQ(DoMklLayoutOptimizationPass(),                                           \
+            "A(" #INPUT ");B(Float32Input);C(Float32Input);D(Float32Input);"         \
+            "DMT/_0(Const);DMT/_1(Const);DMT/_2(Const);DMT/_3(Const);DMT/_4(Const);" \
+            "E(Float32Input);F(_MklFusedBatchNormV3);G(Zeta)|A->F;A->G;"             \
+            "A:control->DMT/_0:control;A:control->DMT/_1:control;"                   \
+            "A:control->DMT/_2:control;A:control->DMT/_3:control;"                   \
+            "A:control->DMT/_4:control;B->F:1;C->F:2;D->F:3;"                        \
+            "DMT/_0->F:5;DMT/_1->F:6;DMT/_2->F:7;DMT/_3->F:8;DMT/_4->F:9;"           \
+            "E->F:4;F->G:1");                                                        \
+}
+REGISTER_TEST_ALL_TYPES(NodeRewrite_FusedBatchNormV3_Positive);
+#undef REGISTER_TEST
+
+#define REGISTER_TEST(NAME, T, INPUT)                                                \
+  TEST_F(MklLayoutPassTest, NAME##_##T) {                                            \
+    InitGraph(                                                                       \
+      "node { name: 'A' op: '" #INPUT "'}"                                           \
+      "node { name: 'B' op: 'Float32Input'}"                                         \
+      "node { name: 'C' op: 'Float32Input'}"                                         \
+      "node { name: 'D' op: 'Float32Input'}"                                         \
+      "node { name: 'E' op: 'Float32Input'}"                                         \
+      "node { name: 'F' op: 'FusedBatchNormV3'"                                      \
+      " attr { key: 'T'            value { type: " #T " } }"                         \
+      " attr { key: 'U'            value { type: DT_FLOAT } }"                       \
+      " attr { key: 'data_format'  value { s: " DATA_FORMAT " } }"                   \
+      " attr { key: 'epsilon'      value { f: 0.0001 } }"                            \
+      " attr { key: 'is_training'  value { b: true } }"                              \
+      " input: ['A', 'B', 'C', 'D', 'E'] }"                                          \
+      "node { name: 'G' op: 'Zeta' attr { key: 'T' value { type: " #T " } }"         \
+      " input: ['A', 'F'] }");                                                       \
+  EXPECT_EQ(DoMklLayoutOptimizationPass(),                                           \
+            "A(" #INPUT ");B(Float32Input);C(Float32Input);"                         \
+            "D(Float32Input);E(Float32Input);F(FusedBatchNormV3);G(Zeta)"            \
+            "|A->F;A->G;B->F:1;C->F:2;D->F:3;E->F:4;F->G:1");                        \
+}
+#define DATA_FORMAT "'NCDHW'"
+REGISTER_TEST_ALL_TYPES(NodeRewrite_FusedBatchNormV3_5D_Negative_1);
+
+#define DATA_FORMAT "'NDHWC'"
+REGISTER_TEST_ALL_TYPES(NodeRewrite_FusedBatchNormV3_5D_Negative_2);
+
+#undef DATA_FORMAT
+#undef REGISTER_TEST
+
+TEST_F(MklLayoutPassTest, NodeRewrite_FusedBatchNormV3_Negative) {
+  DCHECK_EQ(kTensorOrdering, MklTfTensorOrdering::TENSORS_CONTIGUOUS);
+  InitGraph(
+      "node { name: 'A' op: 'Input'}"
+      "node { name: 'B' op: 'Input'}"
+      "node { name: 'C' op: 'Input'}"
+      "node { name: 'D' op: 'Input'}"
+      "node { name: 'E' op: 'Input'}"
+      "node { name: 'F' op: 'FusedBatchNormGradV2'"
+      " attr { key: 'T'            value { type: DT_FLOAT } }"
+      " attr { key: 'U'            value { type: DT_FLOAT } }"
+      " attr { key: 'data_format'  value { s: 'NCHW' } }"
+      " attr { key: 'epsilon'      value { f: 0.0001 } }"
+      " attr { key: 'is_training'  value { b: true } }"
+      " input: ['A', 'B', 'C', 'D', 'E'] }"
+      "node { name: 'G' op: 'Zeta' attr { key: 'T' value { type: DT_FLOAT } }"
+      " input: ['A', 'F'] }");
+  EXPECT_EQ(DoMklLayoutOptimizationPass(),
+            "A(Input);B(Input);C(Input);D(Input);DMT/_0(Const);DMT/_1(Const);"
+            "DMT/_2(Const);DMT/_3(Const);DMT/_4(Const);E(Input);"
+            "F(_MklFusedBatchNormGradV2);G(Zeta)|A->F;A->G;"
+            "A:control->DMT/_0:control;A:control->DMT/_1:control;"
+            "A:control->DMT/_2:control;A:control->DMT/_3:control;"
+            "A:control->DMT/_4:control;B->F:1;C->F:2;D->F:3;"
+            "DMT/_0->F:5;DMT/_1->F:6;DMT/_2->F:7;DMT/_3->F:8;DMT/_4->F:9;"
+            "E->F:4;F->G:1");
+}
+
 // T, U combination is not supported by OneDNN. Node will not be rewritten
 // into OneDNN node.
 TEST_F(MklLayoutPassTest, NodeRewrite_FusedBatchNormGradV2_Negative) {
