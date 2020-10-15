@@ -53,6 +53,9 @@ class MklEagerOpRewrite : public EagerOpRewrite {
   // Rewrite rule for Conv2D, Conv2DBackpropInput and Conv2DBackpropFilter.
   static bool RewriteConv2D(EagerOperation* op);
 
+  // Rewrite rule for FusedBatchNormV3 and FusedBatchNormGradV3
+  static bool RewriteFusedBatchNormV3(EagerOperation* op);
+
   // Calls op-specific rewrite function to create new MKL op.
   Status RewriteToMklOp(EagerOperation* orig_op,
                         std::unique_ptr<EagerOperation>* mkl_op);
@@ -109,9 +112,10 @@ MklEagerOpRewrite::MklEagerOpRewrite(string name, string file, string line)
   InsertMKLEagerOps(
       {"FusedBatchNormGradV2", AlwaysRewrite, CreateGenericMklOp});
   InsertMKLEagerOps(
-      {"FusedBatchNormGradV3", AlwaysRewrite, CreateGenericMklOp});
+      {"FusedBatchNormGradV3", RewriteFusedBatchNormV3, CreateGenericMklOp});
   InsertMKLEagerOps({"FusedBatchNormV2", AlwaysRewrite, CreateGenericMklOp});
-  InsertMKLEagerOps({"FusedBatchNormV3", AlwaysRewrite, CreateGenericMklOp});
+  InsertMKLEagerOps(
+      {"FusedBatchNormV3", RewriteFusedBatchNormV3, CreateGenericMklOp});
   InsertMKLEagerOps({"MatMul", AlwaysRewrite, CreateGenericMklOp});
 };
 
@@ -253,6 +257,16 @@ bool MklEagerOpRewrite::RewriteConv2D(EagerOperation* op) {
   TF_CHECK_OK(GetNodeAttr(ndef, "padding", &padding));
   // Right now MKL Conv2D does not support explicit padding.
   return (padding != "EXPLICIT");
+}
+
+bool MklEagerOpRewrite::RewriteFusedBatchNormV3(EagerOperation* op) {
+  const NodeDef& ndef = op->MutableAttrs()->BuildNodeDef();
+  if (Check5DFormat(ndef)) {
+    VLOG(1) << "Eager Op Rewrite: FusedBatchNorm(Grad)V3 op currently does not "
+            << "support 5D tensors.";
+    return false;
+  }
+  return true;
 }
 
 }  // namespace tensorflow
