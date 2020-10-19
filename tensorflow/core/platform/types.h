@@ -17,6 +17,7 @@ limitations under the License.
 #define TENSORFLOW_CORE_PLATFORM_TYPES_H_
 
 #include <string>
+#include <atomic>
 
 #include "tensorflow/core/platform/platform.h"
 #include "tensorflow/core/platform/tstring.h"
@@ -37,7 +38,8 @@ namespace tensorflow {
 
 //[PROF-STATS]
 struct ProfStats {
-  uint64 flops = 0;
+  std::atomic<uint64> flops;
+  ProfStats() {flops = 0;}
 };
 
 // Alias tensorflow::string to std::string.

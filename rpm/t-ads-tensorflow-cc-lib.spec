@@ -2,9 +2,9 @@
 # http://twiki.corp.alimama.com/twiki/bin/view/Alimm_OPS/RPM #
 # http://www.rpm.org/max-rpm/ch-rpm-inside.html              #
 ##############################################################
-Name: %(echo t-ads-tensorflow-c-lib${SUFFIX})
-Packager:xianjie.qxj
-Version:1.15.52
+Name: %(echo t-ads-tensorflow-cc-lib${SUFFIX})
+Packager:wenqi.gwq
+Version:1.15.1
 # if you want get version number from outside, use like this
 Release:%(echo $RELEASE)%{?dist}
 
@@ -14,7 +14,7 @@ Release:%(echo $RELEASE)%{?dist}
 
 # if you want use the parameter of rpm_create on build time,
 # uncomment below
-Summary:tensorflow c library
+Summary:tensorflow cc library
 
 URL: http://gitlab.alibaba-inc.com/TargetAdvertising/tensorflow
 Group: alimama
@@ -47,20 +47,16 @@ env PYTHON_BIN_PATH=/opt/conda/bin/python \
     LD_LIBRARY_PATH="/usr/local/cuda-10.1/lib64:/usr/local/cuda-10.1/extras/CUPTI/lib64/:" \
     TF_SET_ANDROID_WORKSPACE=0 ./configure
 export LD_LIBRARY_PATH="/usr/local/cuda-10.1/lib64:/usr/local/cuda-10.1/extras/CUPTI/lib64/:"
-sh build_tflib.sh
-sudo /usr/bin/strip bazel-bin/tensorflow/libtensorflow.so.1.15.0
-ln -s -f libtensorflow.so.1.15.0 bazel-bin/tensorflow/libtensorflow.so
-ln -s -f libtensorflow.so.1.15.0 bazel-bin/tensorflow/libtensorflow.so.1
+sh install.sh
 
 %install
 export DONT_STRIP=1
 
-mkdir -p .%{_prefix}/tensorflow/include/tensorflow/c/
+mkdir -p .%{_prefix}/tensorflow/include
 mkdir -p .%{_prefix}/tensorflow/lib
 
-cp $OLDPWD/../tensorflow/c/*.h .%{_prefix}/tensorflow/include/tensorflow/c/
-cp -r $OLDPWD/../tensorflow/c/eager .%{_prefix}/tensorflow/include/tensorflow/c/
-cp -a $OLDPWD/../bazel-bin/tensorflow/libtensorflow.so* .%{_prefix}/tensorflow/lib/
+cp -r $OLDPWD/../../_external/usr/local/include/* .%{_prefix}/tensorflow/include
+cp -a $OLDPWD/../../_external/usr/local/lib64/* .%{_prefix}/tensorflow/lib
 
 %files
 %defattr(-,ads,users)
