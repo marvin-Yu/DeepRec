@@ -545,6 +545,7 @@ message ConfigProto {
   Experimental experimental = 16;
   bool run_graph_mode = 100;
   bool force_run_in_caller_thread = 110;
+  bool enable_graph_opt_place = 111;
   // Next: 17
 }
 
