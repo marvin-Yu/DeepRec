@@ -1,12 +1,12 @@
 //
 // Created by luoxinchen on 2020-10-01
 //
-
-#include "tensorflow/core/platform/stream_executor.h"
-
-#define EIGEN_USE_GPU
-#if GOOGLE_CUDA
 #include "tensorflow/core/kernels/blaze_bias_dice_op.h"
+#include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
+
+#if GOOGLE_CUDA
+#include "tensorflow/core/platform/stream_executor.h"
+#define EIGEN_USE_GPU
 #include "tensorflow/core/util/gpu_kernel_helper.h"
 
 namespace tensorflow {
