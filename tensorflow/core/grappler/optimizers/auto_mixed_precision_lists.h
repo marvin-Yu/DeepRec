@@ -81,6 +81,8 @@ class AutoMixedPrecisionLists {
       list.insert("BatchMatMulV2");
       list.insert("IndicatorMatMul");
       list.insert("ParallelIndicatorMatMul");
+      list.insert("BlazeBiasDice");
+      list.insert("BlazeAttentionIndicator");
     }
     UpdateList(&list, to_add, to_remove);
     return list;

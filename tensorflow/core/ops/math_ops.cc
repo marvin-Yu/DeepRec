@@ -331,6 +331,99 @@ REGISTER_OP("CoActionIndicator")
       return Status::OK();
     });
 
+REGISTER_OP("BlazeAttention")
+    .Input("fact: T")
+    .Input("query: T")
+    .Output("output: T")
+    .Attr("T: {half, float}")
+    .SetShapeFn([](InferenceContext* c) {
+      ShapeHandle a;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 4, &a));
+      ShapeHandle b;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 3, &b));
+      // Validate that the dim of the units is compatible
+      DimensionHandle merged;
+      TF_RETURN_IF_ERROR(c->Merge(c->Dim(a, 3), c->Dim(b, 2), &merged));
+      DimensionHandle parallel_merged;
+      TF_RETURN_IF_ERROR(
+          c->Merge(c->Dim(a, 0), c->Dim(b, 0), &parallel_merged));
+      if (c->Value(c->Dim(a, 1)) != 1) {
+        return errors::InvalidArgument("batch of fact(dim1) must be 1: ",
+                                       c->Value(c->Dim(a, 1)));
+      }
+      if (c->Value(c->Dim(a, 2)) > 256) {
+        return errors::InvalidArgument("seq length of fact must <= 256: ",
+                                       c->Value(c->Dim(a, 2)));
+      }
+      if (c->Value(c->Dim(a, 3)) != 32) {
+        return errors::InvalidArgument("units must == 32: ",
+                                       c->Value(c->Dim(a, 3)));
+      }
+      c->set_output(0, c->MakeShape({c->Dim(b, 1), parallel_merged, merged}));
+      return Status::OK();
+    });
+
+REGISTER_OP("BlazeAttentionIndicator")
+    .Input("fact: T")
+    .Input("query: T")
+    .Input("indicator: Tindices")
+    .Output("output: T")
+    .Attr("T: {half, float}")
+    .Attr("Tindices: {int32, int64}")
+    .SetShapeFn([](InferenceContext* c) {
+      ShapeHandle a;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 4, &a));
+      ShapeHandle b;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 3, &b));
+      ShapeHandle ind;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &ind));
+      // Validate that the dim of the units is compatible
+      DimensionHandle merged;
+      TF_RETURN_IF_ERROR(c->Merge(c->Dim(a, 3), c->Dim(b, 2), &merged));
+      DimensionHandle parallel_merged;
+      TF_RETURN_IF_ERROR(
+          c->Merge(c->Dim(a, 0), c->Dim(b, 0), &parallel_merged));
+      if (c->Value(c->Dim(a, 2)) > 256) {
+        return errors::InvalidArgument("seq length of fact must <= 256: ",
+                                       c->Value(c->Dim(a, 2)));
+      }
+      if (c->Value(c->Dim(a, 3)) != 32) {
+        return errors::InvalidArgument("units must == 32: ",
+                                       c->Value(c->Dim(a, 3)));
+      }
+      c->set_output(0, c->MakeShape({c->Dim(b, 1), parallel_merged, merged}));
+      return Status::OK();
+    });
+
+REGISTER_OP("BlazeBiasDice")
+    .Input("input: T")
+    .Input("bias: T")
+    .Input("alpha: T")
+    .Input("moving_mean: T")
+    .Input("gamma: T")
+    .Output("output: T")
+    .Attr("T: {half, float}")
+    .SetShapeFn([](InferenceContext* c) {
+      ShapeHandle a;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 2, &a));
+      ShapeHandle bias;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 1, &bias));
+      ShapeHandle alpha;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &alpha));
+      ShapeHandle moving_mean;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 1, &moving_mean));
+      ShapeHandle gamma;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(4), 1, &gamma));
+      DimensionHandle merged;
+      TF_RETURN_IF_ERROR(c->Merge(c->Dim(a, 1), c->Dim(bias, 0), &merged));
+      TF_RETURN_IF_ERROR(c->Merge(c->Dim(a, 1), c->Dim(alpha, 0), &merged));
+      TF_RETURN_IF_ERROR(
+          c->Merge(c->Dim(a, 1), c->Dim(moving_mean, 0), &merged));
+      TF_RETURN_IF_ERROR(c->Merge(c->Dim(a, 1), c->Dim(gamma, 0), &merged));
+      c->set_output(0, c->input(0));
+      return Status::OK();
+    });
+
 REGISTER_OP("BlazeGRU")
     .Input("x: T")         //[batch_size, rounds, elts]
     .Input("h2h: T")       //[elts, 3elts]
