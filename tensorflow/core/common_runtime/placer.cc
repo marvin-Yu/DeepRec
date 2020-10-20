@@ -235,10 +235,12 @@ Status Placer::Run() {
           CanAssignToDevice(output->assigned_device_name(), *devices)) {
           assigned_device = output_device_name;
         if (allow_device_opt_) {
-          if(device_name.size() == 0 && output->assigned_device_name().find("GPU") != std::string::npos) {
-            device_name = output->assigned_device_name();
-          } else if(device_name != output->assigned_device_name()) {
-            on_same_device = false;
+          if (output->assigned_device_name().find("GPU") != std::string::npos) {
+            if(device_name.size() == 0) {
+              device_name = output->assigned_device_name();
+            } else if(device_name != output->assigned_device_name()) {
+              on_same_device = false;
+            }
           }
         }
       }
@@ -249,10 +251,12 @@ Status Placer::Run() {
       assigned_device = graph_->InternDeviceName((*devices)[0]->name());
       if (allow_device_opt_) {
         auto first_dev = (*devices)[0]->name();
-        if(device_name.size() == 0 && first_dev.find("GPU") != std::string::npos) {
-          device_name = first_dev;
-        } else if(device_name != first_dev) {
-          on_same_device = false;
+        if (first_dev.find("GPU") != std::string::npos) {
+          if(device_name.size() == 0) {
+            device_name = first_dev;
+          } else if(device_name != first_dev) {
+            on_same_device = false;
+          }
         }
       }
     }
