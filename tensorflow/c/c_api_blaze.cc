@@ -23,6 +23,7 @@ limitations under the License.
 #include <vector>
 
 #include "absl/strings/match.h"
+#include <google/protobuf/text_format.h>
 // Required for IS_MOBILE_PLATFORM
 #include "tensorflow/core/platform/platform.h"  // NOLINT
 
@@ -41,9 +42,6 @@ limitations under the License.
 #include "tensorflow/c/tf_tensor.h"
 #include "tensorflow/core/common_runtime/device_mgr.h"
 #include "tensorflow/core/common_runtime/eval_const_tensor.h"
-#include "tensorflow/core/common_runtime/gpu/gpu_device.h"
-#include "tensorflow/core/common_runtime/gpu/gpu_id_manager.h"
-#include "tensorflow/core/common_runtime/gpu/gpu_id_utils.h"
 #include "tensorflow/core/common_runtime/shape_refiner.h"
 #include "tensorflow/core/framework/allocation_description.pb.h"
 #include "tensorflow/core/framework/kernel_def.pb.h"
@@ -81,14 +79,19 @@ limitations under the License.
 #include "tensorflow/core/public/session.h"
 #include "tensorflow/core/public/version.h"
 #include "tensorflow/core/util/env_var.h"
+
+#if GOOGLE_CUDA
+#include "tensorflow/core/common_runtime/gpu/gpu_device.h"
+#include "tensorflow/core/common_runtime/gpu/gpu_id_manager.h"
+#include "tensorflow/core/common_runtime/gpu/gpu_id_utils.h"
 #include "tensorflow/stream_executor/gpu/gpu_executor.h"
 #include "third_party/gpus/cuda/include/cuda.h"
 #include "third_party/gpus/cuda/include/cuda_runtime_api.h"
+#endif  // GOOGLE_CUDA
 
 // The implementation below is at the top level instead of the
 // brain namespace because we are defining 'extern "C"' functions.
 using tensorflow::AllocationDescription;
-using tensorflow::BaseGPUDevice;
 using tensorflow::CallableOptions;
 using tensorflow::DataType;
 using tensorflow::ExtendSessionGraphHelper;
@@ -96,8 +99,6 @@ using tensorflow::Env;
 using tensorflow::errors::FailedPrecondition;
 using tensorflow::errors::Internal;
 using tensorflow::errors::InvalidArgument;
-using tensorflow::GpuIdManager;
-using tensorflow::GpuIdUtil;
 using tensorflow::Graph;
 using tensorflow::GraphDef;
 using tensorflow::gtl::ArraySlice;
@@ -113,25 +114,31 @@ using tensorflow::OpDef;
 using tensorflow::OpRegistry;
 using tensorflow::OutputTensor;
 using tensorflow::PartialTensorShape;
-using tensorflow::PlatformGpuId;
 using tensorflow::RunMetadata;
 using tensorflow::RunOptions;
-using tensorflow::se::DeviceMemoryBase;
-using tensorflow::se::Event;
-using tensorflow::se::gpu::GpuExecutor;
-using tensorflow::se::Stream;
-using tensorflow::se::StreamExecutor;
 using tensorflow::Session;
 using tensorflow::Status;
 using tensorflow::string;
 using tensorflow::strings::StrCat;
-using tensorflow::TfGpuId;
 using tensorflow::Tensor;
 using tensorflow::TensorBuffer;
 using tensorflow::TensorId;
 using tensorflow::TensorShape;
 using tensorflow::TensorShapeProto;
 using tensorflow::VersionDef;
+
+#if GOOGLE_CUDA
+using tensorflow::BaseGPUDevice;
+using tensorflow::GpuIdManager;
+using tensorflow::GpuIdUtil;
+using tensorflow::PlatformGpuId;
+using tensorflow::se::DeviceMemoryBase;
+using tensorflow::se::Event;
+using tensorflow::se::gpu::GpuExecutor;
+using tensorflow::se::Stream;
+using tensorflow::se::StreamExecutor;
+using tensorflow::TfGpuId;
+#endif
 
 extern "C" {
 
@@ -196,115 +203,9 @@ TF_Buffer* TF_ReadMetaGraphDefFromFile(
   }
 }
 
-static std::unordered_set<string> GetNonComputeIntensiveNodes() {
-  std::unordered_set<string> ops = {
-      //"ExpandDims",
-      //"Gather",
-      //"GatherV2",
-      //"GatherNd",
-      //"Identity",
-      //"Pack",
-      //"Slice",
-      //"Squeeze",
-      //"StridedSlice",
-      //"Split",
-      //"SplitV",
-      //"Tile",
-      //"Transpose",
-      //"Unpack",
-      //"Where",
-      "TakeAxis",
-      "Sum",
-      "NotEqual",
-      "Reshape",
-      "Concat",
-      "ConcatV2"};
-  return ops;
-}
-
-static int InsertToCPUSet(Node* node,
-                   const std::unordered_set<string>& candidates,
-                   std::unordered_set<Node*>* cpu_nodes) {
-  // Put Placeholders on CPU
-  if (node->type_string() == "Placeholder" ||
-      node->type_string() == "PlaceholderV2") {
-    VLOG(2) << "InsertToCPUSet: " << node->DebugString();
-    return cpu_nodes->insert(node).second;
-  }
-  // Put INT32/INT64 node, which is also the input of CPU nodes, on CPU.
-  DataType output_type = node->output_type(0);
-  if ((output_type == tensorflow::DT_INT32 ||
-       output_type == tensorflow::DT_INT64) &&
-      node->type_string() != "Shape") {
-    for (const tensorflow::Edge* e : node->out_edges()) {
-      Node* n = e->dst();
-      if (cpu_nodes->find(n) != cpu_nodes->end()) {
-        VLOG(2) << "InsertToCPUSet: " << n->DebugString();
-        return cpu_nodes->insert(node).second;
-      }
-    }
-    return 0;
-  }
-
-  // Put Concats/Reshapes/... after Placeholders on CPU
-  if (candidates.find(node->type_string()) == candidates.end()) {
-    return 0;
-  }
-  std::vector<Node*> int_or_const_inputs;
-  for (const tensorflow::Edge* e : node->in_edges()) {
-    Node* n = e->src();
-    DataType type = n->output_type(e->src_output());
-    if (((type == tensorflow::DT_INT32 || type == tensorflow::DT_INT64) &&
-         n->type_string() != "Shape") ||
-        n->type_string() == "Const") {
-      int_or_const_inputs.emplace_back(n);
-      continue;
-    }
-    if (cpu_nodes->find(n) == cpu_nodes->end()) {
-      return 0;
-    }
-  }
-  int new_insertion = 0;
-  for (Node* n : int_or_const_inputs) {
-    VLOG(2) << "InsertToCPUSet: " << n->DebugString();
-    if (cpu_nodes->insert(n).second) new_insertion++;
-  }
-  VLOG(2) << "InsertToCPUSet: " << node->DebugString();
-  if (cpu_nodes->insert(node).second) new_insertion++;
-  return new_insertion;
-}
-
-static void AutoPlaceNodesOnCPU(Graph* graph) {
-  // To improve CPU-GPU memcpy and GPU compute efficiency,
-  // we place some memory intensive nodes to run on CPU.
-  // Traverse from placeholders, mark cheap nodes
-  // after placeholders to run on CPU.
-  std::unordered_set<Node*> cpu_nodes;
-  std::unordered_set<string> candidates =
-      GetNonComputeIntensiveNodes();
-  while(1) {
-    int new_insertion = 0;
-    for (Node* node : graph->nodes()) {
-      VLOG(2) << "Check node: " << node->DebugString();
-      new_insertion += InsertToCPUSet(node, candidates, &cpu_nodes);
-      VLOG(2) << "Check node: new_insertion = " << new_insertion;
-    }
-    if (new_insertion == 0) break;
-  }
-
-  std::string cpu_device = "/device:CPU:0";
-  for (Node* node : cpu_nodes) {
-    node->set_requested_device(cpu_device);
-    VLOG(2) << "Place on CPU: " << node->DebugString();
-  }
-}
-
 void TF_GraphSetDevice(TF_Graph* graph, int cpu_id, int gpu_id) {
   mutex_lock l(graph->mu);
   Graph* g = &(graph->graph);
-
-  // TODO
-//  AutoPlaceNodesOnCPU(g);
 
   LOG(INFO) << "TF_GraphSetDevice: cpu_id, gpu_id = "
             << cpu_id << ", " << gpu_id;
@@ -529,6 +430,19 @@ void TF_EnableGemmOptimization(TF_SessionOptions* options,
   }
 }
 
+bool TF_InitSessionOptionsFromPB(const char* pb_char, TF_SessionOptions* options) {
+  auto& config = options->options.config;
+  tensorflow::ConfigProto config_proto;
+  if (!::google::protobuf::TextFormat::ParseFromString(std::string(pb_char), &config_proto)) {
+    LOG(ERROR) << "parse pb from char failed";
+  } else {
+    LOG(INFO) << "parse pb from char succ" << config_proto.DebugString();
+  }
+  config.MergeFrom(config_proto);
+  LOG(INFO) << "session will create with conf " << config.DebugString();
+  return true;
+}
+
 void TF_EnableAutoMixedPrecision(TF_SessionOptions* options,
                                  unsigned char enable) {
   tensorflow::ConfigProto& config = options->options.config;
@@ -588,28 +502,9 @@ void TF_SetGPUMemoryOptions(TF_SessionOptions* options,
   gpu_options->set_force_gpu_compatible(force_gpu_compatible);
 }
 
+// This API is deprecated.
 void TF_EnableCudaGraph(TF_Buffer* run_options, unsigned char enable,
                         unsigned char init, int count, TF_Status* status) {
-  tensorflow::RunOptions run_options_proto;
-  if (run_options != nullptr &&
-      !run_options_proto.ParseFromArray(run_options->data,
-                                        run_options->length)) {
-    status->status = InvalidArgument("Unparseable RunOptions proto");
-    return;
-  }
-  if (run_options->data_deallocator != nullptr) {
-    (*run_options->data_deallocator)(const_cast<void*>(run_options->data),
-                                     run_options->length);
-  }
-  run_options->data = nullptr;
-  run_options->length = 0;
-
-  run_options_proto.mutable_cuda_graph_options()->set_enable(enable);
-  run_options_proto.mutable_cuda_graph_options()->set_initializing(init);
-  if (count != -1) {
-    run_options_proto.mutable_cuda_graph_options()->set_count(count);
-  }
-  TF_CHECK_OK(MessageToBuffer(run_options_proto, run_options));
   status->status = Status::OK();
 }
 
@@ -720,6 +615,7 @@ void TF_SessionReleaseCallable(TF_Session* tf_sess, TF_CallableHandle callable_h
   status->status = tf_sess->session->ReleaseCallable(callable_handle);
 }
 
+#if GOOGLE_CUDA
 StreamExecutor* GetStreamExecutorOfVirtualDevice(int virtual_device_id) {
   TfGpuId tf_gpu_id(virtual_device_id);
   return GpuIdUtil::ExecutorForTfGpuId(tf_gpu_id).ValueOrDie();
@@ -732,8 +628,10 @@ BaseGPUDevice::StreamGroup* GetStreamGroupOfVirtualDevice(int virtual_device_id)
   return tensorflow::StreamGroupFactory::Global().GetOrCreate(
       tf_gpu_id, 0, se, gpu_options);
 }
+#endif  // GOOGLE_CUDA
 
 bool TF_CudaMemAlloc(int virtual_device_id, void** gpu_ptr, size_t length) {
+#if GOOGLE_CUDA
   StreamExecutor* stream_executor =
       GetStreamExecutorOfVirtualDevice(virtual_device_id);
   GpuExecutor* gpu_executor =
@@ -743,9 +641,13 @@ bool TF_CudaMemAlloc(int virtual_device_id, void** gpu_ptr, size_t length) {
   }
   *gpu_ptr = gpu_executor->Allocate(length);
   return true;
+#else
+  return false;
+#endif  // GOOGLE_CUDA 
 }
 
 bool TF_CudaMemDealloc(int virtual_device_id, void* gpu_ptr) {
+#if GOOGLE_CUDA
   StreamExecutor* stream_executor =
       GetStreamExecutorOfVirtualDevice(virtual_device_id);
   GpuExecutor* gpu_executor =
@@ -756,9 +658,13 @@ bool TF_CudaMemDealloc(int virtual_device_id, void* gpu_ptr) {
   DeviceMemoryBase device_memory(gpu_ptr); 
   gpu_executor->Deallocate(&device_memory);
   return true;
+#else
+  return false;
+#endif  // GOOGLE_CUDA 
 }
 
 bool TF_CudaMemCopyHostToDevice(int virtual_device_id, void* device_ptr, const void* host_ptr, size_t length) {
+#if GOOGLE_CUDA
   BaseGPUDevice::StreamGroup* stream_group = GetStreamGroupOfVirtualDevice(virtual_device_id);
   Stream* stream = stream_group->compute;
   if (stream == nullptr) {
@@ -767,9 +673,13 @@ bool TF_CudaMemCopyHostToDevice(int virtual_device_id, void* device_ptr, const v
   DeviceMemoryBase device_memory(device_ptr, length);
   stream->ThenMemcpy(&device_memory, host_ptr, length);
   return true;
+#else
+  return false;
+#endif  // GOOGLE_CUDA 
 }
 
 bool TF_CudaMemCopyDeviceToHost(int virtual_device_id, void* host_ptr, const void* device_ptr, size_t length) {
+#if GOOGLE_CUDA
   BaseGPUDevice::StreamGroup* stream_group = GetStreamGroupOfVirtualDevice(virtual_device_id);
   Stream* stream = stream_group->compute;
   if (stream == nullptr) {
@@ -785,6 +695,9 @@ bool TF_CudaMemCopyDeviceToHost(int virtual_device_id, void* host_ptr, const voi
   stream->ThenRecordEvent(event.get());
   stream->ThenSynchronizeEvent(event.get());
   return true;
+#else
+  return false;
+#endif  // GOOGLE_CUDA 
 }
 
 void TF_SetPaddingInfo(TF_Buffer* run_options, unsigned long long before_padding,

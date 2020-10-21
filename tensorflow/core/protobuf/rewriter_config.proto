@@ -88,10 +88,8 @@ message RewriterConfig {
   // Note that this can change the numerical stability of the graph and may
   // require the use of loss scaling to maintain model convergence.
   Toggle auto_mixed_precision = 23;
-  // Kernel fusion optimizations (default is ON).
-  Toggle kernel_fusion_optimization = 24;
   // Gemm optimizations (default is ON).
-  Toggle gemm_optimization = 25;
+  Toggle gemm_optimization = 24;
 
   // Disable the entire meta optimizer (off by default).
   bool disable_meta_optimizer = 19;
@@ -189,4 +187,12 @@ message RewriterConfig {
   // VerifierConfig specifying the verifiers to be run at the end, after all
   // optimizers have run.
   VerifierConfig post_optimization_verifier_config = 301;
+  // nn_batchnorm (default is ON)
+  Toggle unfuse_batchnorm = 400;
+
+  // fuse tile concat and matmul (default is OFF)
+  Toggle fuse_tile_concat_matmul = 401;
+
+  // tile equal optimizer
+  Toggle tile_equal = 402;
 }

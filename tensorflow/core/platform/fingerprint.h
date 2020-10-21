@@ -77,6 +77,20 @@ inline uint64 FingerprintCat64(const uint64 fp1, const uint64 fp2) {
 
 // This is a portable fingerprint interface for strings that will never change.
 // However, it is not suitable for cryptography.
+
+inline uint64 Fingerprint64(const char* data, size_t size) {
+#ifdef USE_OSS_FARMHASH
+  return ::util::Fingerprint64(data, size);
+#else
+  // Fingerprint op depends on the fact that Fingerprint64() is implemented by
+  // Farmhash. If the implementation ever changes, Fingerprint op should be
+  // modified to keep using Farmhash.
+  // LINT.IfChange
+  return farmhash::Fingerprint64(data, size);
+  // LINT.ThenChange(//third_party/tensorflow/core/kernels/fingerprint_op.cc)
+#endif
+}
+
 inline uint64 Fingerprint64(const StringPiece s) {
 #ifdef USE_OSS_FARMHASH
   return ::util::Fingerprint64(s.data(), s.size());

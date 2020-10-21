@@ -17,7 +17,6 @@ limitations under the License.
 #define TENSORFLOW_CORE_COMMON_RUNTIME_DIRECT_SESSION_H_
 
 #include <atomic>
-#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -46,23 +45,13 @@ limitations under the License.
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/public/session.h"
 
-#ifdef GOOGLE_CUDA
-// NOTE(zhujun): Currently the CUDA Graph support is implemented
-// directly here. This is a bit hacky as it is not well
-// encapsulated. But for now we are aiming to make it work, so we only
-// want to clean this up in the future.
-#include "tensorflow/core/common_runtime/gpu/gpu_device.h"
-using GPU_DEVICE_T = tensorflow::BaseGPUDevice*;
-#else
-using GPU_DEVICE_T = void*;
-#endif
-
 namespace tensorflow {
 
 class CostModel;
 class DebugGateway;
 class Device;
 class DirectSessionFactory;
+class CallbackFrame;
 
 class DirectSession : public Session {
  public:
@@ -110,10 +99,6 @@ class DirectSession : public Session {
   // If 'containers' is empty, then Reset clears the default container.
   ::tensorflow::Status Reset(const std::vector<string>& containers);
 
-  ::tensorflow::Status GetAssignedCPUDevice(string* device_name,
-                                            Device** device);
-  ::tensorflow::Status GetAssignedGPUDevice(string* device_name,
-                                            GPU_DEVICE_T* device);
   ::tensorflow::Status ListDevices(
       std::vector<DeviceAttributes>* response) override;
   ::tensorflow::Status Close() override;
@@ -146,6 +131,23 @@ class DirectSession : public Session {
   ::tensorflow::Status ReleaseCallable(CallableHandle handle) override;
 
   const SessionOptions& options() const { return options_; }
+  void RunAsync(const RunOptions& run_options,
+      const NamedTensorList& inputs,
+      const std::vector<string>& output_names,
+      const std::vector<string>& target_nodes,
+      std::vector<Tensor>* outputs,
+      RunMetadata* run_metadata,
+      StatusCallback done) override;
+
+  void RunAsync(const RunOptions& run_options,
+      const NamedTensorList& inputs,
+      const std::vector<string>& output_names,
+      const std::vector<string>& target_nodes,
+      std::vector<Tensor>* outputs,
+      RunMetadata* run_metadata,
+      CallbackFrame* frame,
+      StatusCallback done);
+
 
  private:
   // For access to collective_graph_key_.
@@ -242,27 +244,6 @@ class DirectSession : public Session {
     int64 collective_graph_key = BuildGraphOptions::kNoCollectiveGraphKey;
   };
 
-  struct CUDAGraphContext;
-  struct CUDAGraphArgs;
-  struct CUDAGraphDeviceContext;
-  ::tensorflow::Status Run0(
-    const ::tensorflow::RunOptions& run_options,
-    const NamedTensorList& inputs,
-    const std::vector<string>& output_names,
-    const std::vector<string>& target_nodes,
-    std::vector<Tensor>* outputs,
-    RunMetadata* run_metadata,
-    CUDAGraphDeviceContext* cuda_graph_device_context = nullptr,
-    CUDAGraphContext* cuda_graph_context = nullptr,
-    CUDAGraphArgs* cuda_graph_args = nullptr);
-  ::tensorflow::Status RecordCUDAGraph(
-    const ::tensorflow::RunOptions& run_options, const NamedTensorList& inputs,
-    const std::vector<string>& output_names,
-    const std::vector<string>& target_nodes, std::vector<Tensor>* outputs,
-    RunMetadata* run_metadata,
-    CUDAGraphDeviceContext* cuda_graph_device_context,
-    CUDAGraphContext* cuda_graph_context);
-
   // Retrieves an already existing set of executors to run 'inputs' and
   // 'outputs', or creates and caches them for future use.
   ::tensorflow::Status GetOrCreateExecutors(
@@ -288,35 +269,32 @@ class DirectSession : public Session {
       RunStateArgs* run_state_args, DataTypeVector* input_types,
       DataTypeVector* output_types, int64* collective_graph_key);
 
-  void BuildCUDAGraphKey(gtl::ArraySlice<string> inputs,
-                         gtl::ArraySlice<::tensorflow::int64> input_dims,
-                         gtl::ArraySlice<string> outputs,
-                         string* key);
-  ::tensorflow::Status BorrowOrCreateCUDAGraphDeviceContext(
-    const string& device_name, const string& key, int id, uint64 timeout,
-    GPU_DEVICE_T device, const CUDAGraphOptions& options,
-    CUDAGraphDeviceContext** context);
-  ::tensorflow::Status BorrowCUDAGraphContext(
-    const string& device_name, const string& key, uint64 timeout,
-    CUDAGraphDeviceContext** device_context, CUDAGraphContext** context);
-  void ReturnCUDAGraphDeviceContext(const string& device_name,
-                                    CUDAGraphDeviceContext* device_context);
-
-  ::tensorflow::Status RunWithCUDAGraph(CUDAGraphDeviceContext& device_context,
-                                        CUDAGraphContext& context,
-                                        const NamedTensorList& inputs,
-                                        const std::vector<string>& output_names,
-                                        std::vector<Tensor>* outputs);
-
   ::tensorflow::Status RunInternal(
       int64 step_id, const RunOptions& run_options,
       CallFrameInterface* call_frame, ExecutorsAndKeys* executors_and_keys,
       RunMetadata* run_metadata,
-      const thread::ThreadPoolOptions& threadpool_options,
-      CUDAGraphDeviceContext* cuda_graph_device_context = nullptr,
-      CUDAGraphContext* cuda_graph_context = nullptr,
-      CUDAGraphArgs* cuda_graph_args = nullptr);
+      const thread::ThreadPoolOptions& threadpool_options);
 
+  void RunInternalAsync(
+      int64 step_id, const RunOptions& run_options,
+      CallFrameInterface* call_frame, ExecutorsAndKeys* executors_and_keys,
+      RunMetadata* run_metadata,
+      const thread::ThreadPoolOptions& threadpool_options,
+      const NamedTensorList& inputs,
+      const std::vector<string>& output_names,
+      const std::vector<string>& target_nodes,
+      std::vector<Tensor>* outputs,
+      CallbackFrame* frame,
+      StatusCallback done);
+
+  ::tensorflow::Status AfterRunAsync(const ::tensorflow::RunOptions& run_options,
+       const NamedTensorList& inputs,
+       const std::vector<string>& output_names,
+       const std::vector<string>& target_nodes,
+       std::vector<Tensor> *outputs,
+       CallbackFrame* frame,
+       RunMetadata* run_metadata,
+	   uint64 start_time_usecs);
   // Returns whether inter-op execution uses a global pool or the input
   // `run_options` requests being run on inter_op_thread_pool = 0 in case
   // multiple pools are configured.
@@ -418,13 +396,6 @@ class DirectSession : public Session {
   std::unordered_map<string, std::shared_ptr<ExecutorsAndKeys>> executors_
       GUARDED_BY(executor_lock_);
 
-  mutex cuda_graph_lock_; // protects cuda_graph_device_contexts_
-  using CUDAGraphDeviceContexts =
-    std::unordered_map<string,
-                       std::vector<std::unique_ptr<CUDAGraphDeviceContext>>>;
-  CUDAGraphDeviceContexts cuda_graph_device_contexts_
-      GUARDED_BY(cuda_graph_lock_);
-
   class RunCallableCallFrame;
   struct Callable {
     std::shared_ptr<ExecutorsAndKeys> executors_and_keys;
@@ -479,6 +450,8 @@ class DirectSession : public Session {
   // Manages all the cost models for the graphs executed in this session.
   CostModelManager cost_model_manager_;
 
+  Executor::Args::NodeOutputsCallback node_outputs_callback_ = nullptr;
+
   // For testing collective graph key generation.
   mutex collective_graph_key_lock_;
   int64 collective_graph_key_ GUARDED_BY(collective_graph_key_lock_) = -1;
@@ -494,11 +467,13 @@ class DirectSession : public Session {
   // Otherwise run in global thread pool, session owned thread pool or handler
   // pool according to other specifications of RunOptions and ConfigProto.
   bool run_in_caller_thread_ = false;
+  bool force_run_in_caller_thread_ = false;
 
   TF_DISALLOW_COPY_AND_ASSIGN(DirectSession);
 
   // EXPERIMENTAL: debugger (tfdbg) related
   friend class DebugGateway;
+  friend class CallbackFrame;
 };
 
 }  // end namespace tensorflow

@@ -209,7 +209,7 @@ REGISTER_OP("ParallelIndicatorMatMul")
                                      output_cols}));
       return Status::OK();
     });
-    
+
 REGISTER_OP("ParallelIndicatorBatchedSmallMatMul")
     .Input("x: T")
     .Input("y: T")
@@ -249,6 +249,178 @@ REGISTER_OP("ParallelIndicatorBatchedSmallMatMul")
       DimensionHandle batch_shape = c->Dim(b, 1);
       c->set_output(0, c->MakeShape({parallel_merged, batch_shape, output_rows,
                                      output_cols}));
+      return Status::OK();
+    });
+
+REGISTER_OP("CoAction")
+    .Input("x: T")
+    .Input("y: T")
+    .Output("output: T")
+    .Attr("T: {half, float}")
+    .Attr("pow_num: int >= 1")
+    .SetShapeFn([](InferenceContext* c) {
+      ShapeHandle a;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 4, &a));
+      ShapeHandle b;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 4, &b));
+      int pow_num;
+      TF_RETURN_IF_ERROR(c->GetAttr("pow_num", &pow_num));
+      DimensionHandle batch_a;
+      TF_RETURN_IF_ERROR(c->WithValue(c->Dim(a, 0), 1, &batch_a));
+      // Validate that the inner shapes are compatible.
+      DimensionHandle merged;
+      TF_RETURN_IF_ERROR(c->Merge(c->Dim(a, 3), c->Dim(b, 2), &merged));
+      // currently only support k=5, n=4, pow_num=2
+      DimensionHandle k, n;
+      TF_RETURN_IF_ERROR(c->WithValue(c->Dim(b, 2), 5, &k));
+      TF_RETURN_IF_ERROR(c->WithValue(c->Dim(b, 3), 4, &n));
+      if (c->Value(c->Dim(a, 2)) != 50 && c->Value(c->Dim(a, 2)) != 150) {
+        return errors::InvalidArgument(
+            "Currently we only support m = 150 or 50");
+      }
+      if (pow_num != 2) {
+        return errors::InvalidArgument("Currently we only support pow_num = 2");
+      }
+
+      // Validate that the parallel_num are compatible.
+      DimensionHandle parallel_merged;
+      TF_RETURN_IF_ERROR(
+          c->Merge(c->Dim(a, 1), c->Dim(b, 1), &parallel_merged));
+      c->set_output(0, c->MakeShape({c->Dim(b, 0), parallel_merged, pow_num,
+                                     c->Dim(b, 3)}));
+      return Status::OK();
+    });
+
+REGISTER_OP("CoActionIndicator")
+    .Input("x: T")
+    .Input("y: T")
+    .Input("indicator: Tindices")
+    .Output("output: T")
+    .Attr("T: {half, float}")
+    .Attr("Tindices: {int32, int64}")
+    .Attr("pow_num: int >= 1")
+    .SetShapeFn([](InferenceContext* c) {
+      ShapeHandle a;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 4, &a));
+      ShapeHandle b;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 4, &b));
+      ShapeHandle ind;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &ind));
+      int pow_num;
+      TF_RETURN_IF_ERROR(c->GetAttr("pow_num", &pow_num));
+      // Validate that the inner shapes are compatible.
+      DimensionHandle merged;
+      TF_RETURN_IF_ERROR(c->Merge(c->Dim(a, 3), c->Dim(b, 2), &merged));
+      // currently only support k=5, n=4, pow_num=2
+      DimensionHandle k, n;
+      TF_RETURN_IF_ERROR(c->WithValue(c->Dim(b, 2), 5, &k));
+      TF_RETURN_IF_ERROR(c->WithValue(c->Dim(b, 3), 4, &n));
+      if (c->Value(c->Dim(a, 2)) != 50 && c->Value(c->Dim(a, 2)) != 150) {
+        return errors::InvalidArgument(
+            "Currently we only support m = 150 or 50");
+      }
+      if (pow_num != 2) {
+        return errors::InvalidArgument("Currently we only support pow_num = 2");
+      }
+      // Validate that the parallel_num are compatible.
+      DimensionHandle parallel_merged;
+      TF_RETURN_IF_ERROR(
+          c->Merge(c->Dim(a, 1), c->Dim(b, 1), &parallel_merged));
+      c->set_output(0, c->MakeShape({c->Dim(b, 0), parallel_merged, pow_num,
+                                     c->Dim(b, 3)}));
+      return Status::OK();
+    });
+
+REGISTER_OP("BlazeAttention")
+    .Input("fact: T")
+    .Input("query: T")
+    .Output("output: T")
+    .Attr("T: {half, float}")
+    .SetShapeFn([](InferenceContext* c) {
+      ShapeHandle a;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 4, &a));
+      ShapeHandle b;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 3, &b));
+      // Validate that the dim of the units is compatible
+      DimensionHandle merged;
+      TF_RETURN_IF_ERROR(c->Merge(c->Dim(a, 3), c->Dim(b, 2), &merged));
+      DimensionHandle parallel_merged;
+      TF_RETURN_IF_ERROR(
+          c->Merge(c->Dim(a, 0), c->Dim(b, 0), &parallel_merged));
+      if (c->Value(c->Dim(a, 1)) != 1) {
+        return errors::InvalidArgument("batch of fact(dim1) must be 1: ",
+                                       c->Value(c->Dim(a, 1)));
+      }
+      if (c->Value(c->Dim(a, 2)) > 256) {
+        return errors::InvalidArgument("seq length of fact must <= 256: ",
+                                       c->Value(c->Dim(a, 2)));
+      }
+      if (c->Value(c->Dim(a, 3)) != 32) {
+        return errors::InvalidArgument("units must == 32: ",
+                                       c->Value(c->Dim(a, 3)));
+      }
+      c->set_output(0, c->MakeShape({c->Dim(b, 1), parallel_merged, merged}));
+      return Status::OK();
+    });
+
+REGISTER_OP("BlazeAttentionIndicator")
+    .Input("fact: T")
+    .Input("query: T")
+    .Input("indicator: Tindices")
+    .Output("output: T")
+    .Attr("T: {half, float}")
+    .Attr("Tindices: {int32, int64}")
+    .SetShapeFn([](InferenceContext* c) {
+      ShapeHandle a;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 4, &a));
+      ShapeHandle b;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 3, &b));
+      ShapeHandle ind;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &ind));
+      // Validate that the dim of the units is compatible
+      DimensionHandle merged;
+      TF_RETURN_IF_ERROR(c->Merge(c->Dim(a, 3), c->Dim(b, 2), &merged));
+      DimensionHandle parallel_merged;
+      TF_RETURN_IF_ERROR(
+          c->Merge(c->Dim(a, 0), c->Dim(b, 0), &parallel_merged));
+      if (c->Value(c->Dim(a, 2)) > 256) {
+        return errors::InvalidArgument("seq length of fact must <= 256: ",
+                                       c->Value(c->Dim(a, 2)));
+      }
+      if (c->Value(c->Dim(a, 3)) != 32) {
+        return errors::InvalidArgument("units must == 32: ",
+                                       c->Value(c->Dim(a, 3)));
+      }
+      c->set_output(0, c->MakeShape({c->Dim(b, 1), parallel_merged, merged}));
+      return Status::OK();
+    });
+
+REGISTER_OP("BlazeBiasDice")
+    .Input("input: T")
+    .Input("bias: T")
+    .Input("alpha: T")
+    .Input("moving_mean: T")
+    .Input("gamma: T")
+    .Output("output: T")
+    .Attr("T: {half, float}")
+    .SetShapeFn([](InferenceContext* c) {
+      ShapeHandle a;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 2, &a));
+      ShapeHandle bias;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 1, &bias));
+      ShapeHandle alpha;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &alpha));
+      ShapeHandle moving_mean;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 1, &moving_mean));
+      ShapeHandle gamma;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(4), 1, &gamma));
+      DimensionHandle merged;
+      TF_RETURN_IF_ERROR(c->Merge(c->Dim(a, 1), c->Dim(bias, 0), &merged));
+      TF_RETURN_IF_ERROR(c->Merge(c->Dim(a, 1), c->Dim(alpha, 0), &merged));
+      TF_RETURN_IF_ERROR(
+          c->Merge(c->Dim(a, 1), c->Dim(moving_mean, 0), &merged));
+      TF_RETURN_IF_ERROR(c->Merge(c->Dim(a, 1), c->Dim(gamma, 0), &merged));
+      c->set_output(0, c->input(0));
       return Status::OK();
     });
 
@@ -743,7 +915,7 @@ REGISTER_OP("Mod")
     .Input("x: T")
     .Input("y: T")
     .Output("z: T")
-    .Attr("T: {int32, int64, float16, half, bfloat16, float, double}")
+    .Attr("T: {int32, int64, uint32, uint64, float16, half, bfloat16, float, double}")
     .SetShapeFn(shape_inference::BroadcastBinaryOpShapeFn);
 
 REGISTER_OP("FloorMod")

@@ -3679,6 +3679,9 @@ cc_library(
         ":cwise_op",
         ":fft_ops",
         ":histogram_op",
+        ":co_action_op",
+        ":blaze_attention_op",
+        ":blaze_bias_dice_op",
         ":indicator_matmul_op",
         ":indicator_batched_small_matmul_op",
         ":matmul_op",
@@ -3713,6 +3716,39 @@ tf_kernel_library(
     deps = MATH_DEPS + [":eigen_contraction_kernel"] + if_mkl_ml([
         "//third_party/mkl:intel_binary_blob",
     ]),
+)
+
+tf_kernel_library(
+    name = "co_action_op",
+    hdrs = ["co_action_op.h"],
+    srcs = ["co_action_op.cc"],
+    gpu_srcs = [
+      "co_action_op.h",
+      "co_action_op_gpu.cu.cc",
+    ],
+    deps = MATH_DEPS,
+)
+
+tf_kernel_library(
+    name = "blaze_attention_op",
+    hdrs = ["blaze_attention_op.h"],
+    srcs = ["blaze_attention_op.cc"],
+    gpu_srcs = [
+        "blaze_attention_op.h",
+        "blaze_attention_op_gpu.cu.cc",
+    ],
+    deps = MATH_DEPS,
+)
+
+tf_kernel_library(
+    name = "blaze_bias_dice_op",
+    hdrs = ["blaze_bias_dice_op.h"],
+    srcs = ["blaze_bias_dice_op.cc"],
+    gpu_srcs = [
+        "blaze_bias_dice_op.h",
+        "blaze_bias_dice_op_gpu.cu.cc",
+    ],
+    deps = MATH_DEPS,
 )
 
 tf_kernel_library(
@@ -4897,6 +4933,7 @@ cc_library(
     deps = [
         ":no_op",
         ":sendrecv_ops",
+        ":fuserecv_ops"
     ],
 )
 
@@ -4929,6 +4966,30 @@ tf_cc_test(
         "//tensorflow/core:test",
         "//tensorflow/core:test_main",
         "//tensorflow/core:testlib",
+    ],
+)
+
+tf_kernel_library(
+    name = "fuserecv_ops",
+    prefix = "fuserecv_ops",
+    deps = REQUIRED_DEPS,
+)
+
+tf_kernel_library(
+    name = "run_graph_op",
+    prefix = "run_graph_op",
+    deps = REQUIRED_DEPS + [
+        "//tensorflow/core:lib_internal",
+        "//tensorflow/core:core_cpu",
+        "//tensorflow/core:master_proto_cc",
+        "//tensorflow/core:proto_text",
+        "//tensorflow/core:worker_proto_cc",
+        "//tensorflow/core/distributed_runtime:worker_cache",
+        "//tensorflow/core/distributed_runtime:worker_resource",
+        "//tensorflow/core/distributed_runtime:call_options",
+        "//tensorflow/core/distributed_runtime:worker_interface",
+        "//tensorflow/core/distributed_runtime:message_wrappers",
+        "//tensorflow/core:run_graph_op_op_lib",
     ],
 )
 
@@ -6100,6 +6161,7 @@ filegroup(
         "gather_nd_op_cpu_impl_6.cc",
         "gather_nd_op_cpu_impl_7.cc",
         "gather_op.cc",
+        "tile_fuse_op.cc",
         "identity_n_op.cc",
         "identity_n_op.h",
         "identity_op.cc",
@@ -7957,6 +8019,29 @@ tf_kernel_library(
 )
 
 tf_kernel_library(
+    name = "tile_fuse_op",
+    hdrs = [
+        "cwise_ops.h",
+        "cwise_ops_common.h",
+    ],
+    srcs = ["tile_fuse_op.cc"],
+    deps = MATH_DEPS + [":cwise_op"],
+)
+
+tf_kernel_library(
+    name = "tile_fuse_base",
+    hdrs = [
+      "cwise_ops.h",
+      "cwise_ops_common.h",
+     "tile_fuse_base.h",
+    ],
+    srcs = ["tile_fuse_base.cc",
+     "tile_equal_op.cc",
+     "tile_tile_equal_op.cc",],
+    deps = MATH_DEPS + [":cwise_op"],
+    )
+
+tf_kernel_library(
     name = "rpc_op",
     srcs = [
         "rpc_op.cc",
@@ -7989,6 +8074,7 @@ cc_library(
     srcs = [
         "cwise_ops_common.cc",
         "meta_support.cc",
+        "tile_fuse_op.cc",
     ],
     hdrs = [
         "cwise_ops.h",

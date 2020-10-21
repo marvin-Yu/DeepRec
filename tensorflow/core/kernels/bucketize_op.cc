@@ -61,17 +61,24 @@ class BucketizeOp : public OpKernel {
 
   void Compute(OpKernelContext* context) override {
     const Tensor& input_tensor = context->input(0);
-    const auto input = input_tensor.flat<T>();
-
+    auto input = input_tensor.flat<T>();
     Tensor* output_tensor = nullptr;
     OP_REQUIRES_OK(context, context->allocate_output(0, input_tensor.shape(),
                                                      &output_tensor));
     auto output = output_tensor->template flat<int32>();
-    OP_REQUIRES_OK(context, functor::BucketizeFunctor<Device, T>::Compute(
-                                context, input, boundaries_, output));
+
+    const int N = input.size();
+    for (int i = 0; i < N; i++) {
+      output(i) = CalculateBucketIndex(input(i));
+    }
   }
 
  private:
+  int32 CalculateBucketIndex(const T value) {
+    auto first_bigger_it =
+        std::upper_bound(boundaries_.begin(), boundaries_.end(), value);
+    return first_bigger_it - boundaries_.begin();
+  }
   std::vector<float> boundaries_;
 };
 

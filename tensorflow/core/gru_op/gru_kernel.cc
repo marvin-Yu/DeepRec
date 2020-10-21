@@ -74,13 +74,14 @@ class GRUOp : public OpKernel {
     }
 
     //[PROF-STATS]
-    uint64 delta = batch_size*rounds*(12*elts*elts + 25*elts);
+    uint64 delta = batch_size * rounds * (12 * elts * elts + 25 * elts);
     ProfStats* prof_stats = context->prof_stats();
     if (prof_stats) {
       prof_stats->flops += delta;
     }
     if (VLOG_IS_ON(1)) {
-      LOG(INFO) << "FLOPs = " << delta << ", BlazeGRU";
+      LOG(INFO) << "FLOPs = " << delta << ", " << type_string() << ", "
+                << name() << ", " << x.shape().DebugString() << ", ";
     }
 
     // Create an output tensor
@@ -96,9 +97,10 @@ class GRUOp : public OpKernel {
     const T* i2hBias_p = i2hBias.flat<T>().data();
 
     // Do the computation.
-    GRUFunctor<Device, T>()(context->eigen_device<Device>(), context,
-                            batch_size, rounds, elts, y_p, x_p, h2h_p, i2h_p,
-                            h2hBias_p, i2hBias_p);
+    OP_REQUIRES_OK(context, GRUFunctor<Device, T>()(
+                                context->eigen_device<Device>(), context,
+                                batch_size, rounds, elts, y_p, x_p, h2h_p,
+                                i2h_p, h2hBias_p, i2hBias_p));
   };
 };
 

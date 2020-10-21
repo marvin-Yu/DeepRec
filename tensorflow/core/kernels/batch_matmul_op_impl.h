@@ -286,8 +286,6 @@ class BlasScratchAllocator : public se::ScratchAllocator {
             temporary_memory.flat<uint8>().size()));
   }
 
-  ArgSaver* GetArgSaver() override { return context_->get_arg_saver(); }
-
  private:
   OpKernelContext* context_;
   std::vector<Tensor> allocated_tensors_;

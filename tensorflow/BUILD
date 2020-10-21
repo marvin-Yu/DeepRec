@@ -31,7 +31,6 @@ load(
     "//third_party/mkl:build_defs.bzl",
     "if_mkl_ml",
 )
-load("@local_config_cuda//cuda:build_defs.bzl", "if_cuda")
 
 package(
     default_visibility = [":internal"],
@@ -574,7 +573,7 @@ tf_cc_shared_object(
         "//conditions:default": [
             "-Wl,--version-script,$(location //tensorflow:tf_framework_version_script.lds)",
         ],
-    }) + if_cuda(["-lcuda"]),
+    }),
     linkstatic = 1,
     per_os_targets = True,
     soversion = VERSION,
@@ -617,7 +616,7 @@ tf_cc_shared_object(
             "-z defs",
             "-Wl,--version-script,$(location //tensorflow/c:version_script.lds)",
         ],
-    }) + if_cuda(["-lcuda"]),
+    }),
     per_os_targets = True,
     soversion = VERSION,
     visibility = ["//visibility:public"],
@@ -651,7 +650,7 @@ tf_cc_shared_object(
             "-z defs",
             "-Wl,--version-script,$(location //tensorflow:tf_version_script.lds)",
         ],
-    }) + if_cuda(["-lcuda"]),
+    }),
     per_os_targets = True,
     soversion = VERSION,
     visibility = ["//visibility:public"],
@@ -665,12 +664,15 @@ tf_cc_shared_object(
         "//tensorflow:tf_exported_symbols.lds",
         "//tensorflow:tf_version_script.lds",
         "//tensorflow/c:c_api",
+        "//tensorflow/c:c_api_blaze",
+        "//tensorflow/c:c_graph_editor",
         "//tensorflow/c/eager:c_api",
         "//tensorflow/cc:cc_ops",
         "//tensorflow/cc:client_session",
         "//tensorflow/cc:scope",
         "//tensorflow/cc/profiler",
         "//tensorflow/core:tensorflow",
+        "//tensorflow/core/debug:debug_gateway_internal",
     ] + if_ngraph(["@ngraph_tf//:ngraph_tf"]),
 )
 

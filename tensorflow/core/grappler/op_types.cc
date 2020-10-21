@@ -264,6 +264,11 @@ bool IsFusedBatchNormGrad(const NodeDef& node) {
          op == "FusedBatchNormGradV3";
 }
 
+bool IsFuseRecv(const NodeDef& node) {
+   const auto op = node.op();
+   return op == "_FuseRecv";
+}
+
 bool IsGreater(const NodeDef& node) { return node.op() == "Greater"; }
 
 bool IsGreaterEqual(const NodeDef& node) { return node.op() == "GreaterEqual"; }

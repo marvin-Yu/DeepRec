@@ -49,6 +49,77 @@ tf_cuda_cc_test(
 )
 
 cc_library(
+    name = "unfuse_batch_norm_optimizer",
+    srcs = ["unfuse_batch_norm_optimizer.cc"],
+    hdrs = ["unfuse_batch_norm_optimizer.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":graph_optimizer",
+        ":arithmetic_optimizer",
+        ":constant_folding",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:lib_internal",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core/grappler:grappler_item",
+        "//tensorflow/core/grappler:op_types",
+        "//tensorflow/core/grappler:utils",
+    ],
+)
+
+tf_cc_test(
+    name = "unfuse_batch_norm_optimizer_test",
+    size = "small",
+    srcs = ["unfuse_batch_norm_optimizer_test.cc"],
+    deps = [
+        ":arithmetic_optimizer",
+        ":model_pruner",
+        "//tensorflow/cc:cc_ops",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core/grappler:grappler_item",
+        "//tensorflow/core/grappler:utils",
+        "//tensorflow/core/grappler/inputs:trivial_test_graph_input_yielder",
+    ],
+)
+
+cc_library(
+    name = "tile_optimizer",
+    srcs = ["tile_optimizer.cc"],
+    hdrs = ["tile_optimizer.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":graph_optimizer",
+        ":arithmetic_optimizer",
+        ":constant_folding",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:lib_internal",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core/grappler:grappler_item",
+        "//tensorflow/core/grappler:op_types",
+        "//tensorflow/core/grappler:utils",
+    ],
+)
+
+tf_cc_test(
+    name = "tile_optimizer_test",
+    size = "small",
+    srcs = ["tile_optimizer_test.cc"],
+    deps = [
+        ":arithmetic_optimizer",
+        "//tensorflow/cc:cc_ops",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core/grappler:grappler_item",
+        "//tensorflow/core/grappler:utils",
+        "//tensorflow/core/grappler/inputs:trivial_test_graph_input_yielder",
+    ],
+)
+
+cc_library(
     name = "auto_parallel",
     srcs = ["auto_parallel.cc"],
     hdrs = [
@@ -604,6 +675,8 @@ cc_library(
         ":pin_to_host_optimizer",
         ":remapper",
         ":scoped_allocator_optimizer",
+        ":unfuse_batch_norm_optimizer",
+        ":tile_optimizer",
         ":shape_optimizer",
         "//tensorflow/core:core_cpu_base",
         "//tensorflow/core:framework",

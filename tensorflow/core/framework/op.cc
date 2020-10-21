@@ -220,11 +220,20 @@ Status OpRegistry::RegisterAlreadyLocked(
     const OpRegistrationDataFactory& op_data_factory) const {
   std::unique_ptr<OpRegistrationData> op_reg_data(new OpRegistrationData);
   Status s = op_data_factory(op_reg_data.get());
+  // Author: weiyi.lwy, liukan.lk
+  // For RTP, an Op may be loaded more than one time.
+  // A warning will be logged when it happens and return Status::OK.
+  //
+  // NOTE(zycao): Above change was re-implemented to keep the origin behaviour
+  // of the watcher function defined in LoadLibrary (load_library.cc) function.
+  // Thus no unexpected operations should be done, and 'AlreadyExists' error
+  // would be also ignored.
   if (s.ok()) {
     s = ValidateOpDef(op_reg_data->op_def);
     if (s.ok() &&
         !gtl::InsertIfNotPresent(&registry_, op_reg_data->op_def.name(),
                                  op_reg_data.get())) {
+      VLOG(2) << "Op with name " << op_reg_data->op_def.name() << " already exists";
       s = errors::AlreadyExists("Op with name ", op_reg_data->op_def.name());
     }
   }
@@ -236,6 +245,9 @@ Status OpRegistry::RegisterAlreadyLocked(
     op_reg_data.release();
   } else {
     op_reg_data.reset();
+  }
+  if (errors::IsAlreadyExists(watcher_status)) {
+    return Status::OK();
   }
   return watcher_status;
 }

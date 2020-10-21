@@ -31,13 +31,13 @@ class GemmOptimizer : public GraphOptimizer {
   bool UsesFunctionLibrary() const override { return false; }
 
   Status Optimize(Cluster* cluster, const GrapplerItem& item,
-                          GraphDef* optimized_graph) override;
+                  GraphDef* optimized_graph) override;
 
   void Feedback(Cluster* cluster, const GrapplerItem& item,
-                        const GraphDef& optimized_graph, double result) override;
+                const GraphDef& optimized_graph, double result) override;
 };
 
-}  // namespace grappler
-}  // namespace tensorflow
+}  // end namespace grappler
+}  // end namespace tensorflow
 
 #endif  // TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_GEMM_OPTIMIZER_H_

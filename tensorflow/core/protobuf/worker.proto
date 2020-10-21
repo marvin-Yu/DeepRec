@@ -265,6 +265,7 @@ message RunGraphRequest {
   int64 request_id = 11;
 
   // Next: 12
+  bool run_graph_mode = 100;
 }
 
 message RunGraphResponse {
