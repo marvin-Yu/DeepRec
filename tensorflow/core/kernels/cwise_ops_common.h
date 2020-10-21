@@ -113,15 +113,26 @@ class BinaryOp : public BinaryOpShared {
     if (state.out_num_elements == 0) {
       return;
     }
-    if (VLOG_IS_ON(1)) {
-      if (type_string() == "Mul" || type_string() == "Sub" ||
+
+    //[PROF-STATS]
+    int64 delta = 0;
+    if (type_string() == "Mul" || type_string() == "Sub" ||
           type_string() == "Add" || type_string() == "AddV2") {
-        LOG(INFO) << "FLOPs = " << state.out_num_elements
-                  << ", " << type_string()
-                  << ", " << name()
-                  << ", " << out->shape().DebugString();
+      delta =  state.out_num_elements;
+    }
+    if (delta > 0) {
+      ProfStats* prof_stats = context->prof_stats();
+      if (prof_stats) {
+        prof_stats->flops += delta;
       }
     }
+    if (VLOG_IS_ON(1)) {
+      LOG(INFO) << "FLOPs = " << delta
+                << ", " << type_string()
+                << ", " << name()
+                << ", " << out->shape().DebugString();
+    }
+
     const int ndims = state.ndims;
     bool error = false;
     bool* const error_ptr = Functor::has_errors ? &error : nullptr;
@@ -261,19 +272,27 @@ class UnaryOp : public OpKernel {
 
   void Compute(OpKernelContext* ctx) override {
     const Tensor& inp = ctx->input(0);
-    if (VLOG_IS_ON(1)) {
-      if (type_string() == "Sigmoid") {
-        LOG(INFO) << "FLOPs = " << 4 * inp.NumElements()
-                  << ", " << type_string()
-                  << ", " << name()
-                  << ", " << inp.shape().DebugString();
-      } else if (type_string() == "Rsqrt") {
-        LOG(INFO) << "FLOPs = " << 2 * inp.NumElements()
-                  << ", " << type_string()
-                  << ", " << name()
-                  << ", " << inp.shape().DebugString();
+
+    //[PROF-STATS]
+    int64 delta = 0;
+    if (type_string() == "Sigmoid") {
+      delta = 4 * inp.NumElements();
+    } else if (type_string() == "Rsqrt") {
+      delta = 2 * inp.NumElements();
+    }
+    if (delta > 0) {
+      ProfStats* prof_stats = context->prof_stats();
+      if (prof_stats) {
+        prof_stats->flops += delta;
       }
     }
+    if (VLOG_IS_ON(1)) {
+      LOG(INFO) << "FLOPs = " << delta
+                << ", " << type_string()
+                << ", " << name()
+                << ", " << inp.shape().DebugString();
+    }
+
     Tensor* out = nullptr;
     if (std::is_same<Tin, Tout>::value) {
       OP_REQUIRES_OK(ctx, ctx->forward_input_or_allocate_output(

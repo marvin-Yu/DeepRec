@@ -1316,7 +1316,7 @@ class ExecutorState {
   //[DYNAMIC-SHAPE]
   uint64 before_padding_ = 0;
   uint64 after_padding_ = 0;
-  //[PROF-STATUS]
+  //[PROF-STATS]
   ProfStats* prof_stats_ = nullptr;
 
   const bool vlog_;  // true if VLOG_IS_ON(1). Used to check vlog cheaply.

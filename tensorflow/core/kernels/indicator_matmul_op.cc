@@ -110,10 +110,7 @@ class IndicatorMatmulOp : public OpKernel {
             "b_batch mismatch indicator length: ", batch_b, " vs. ", ind_length,
             ": ", b.shape().DebugString(), " ", ind.shape().DebugString()));
 
-    TensorShape out_shape;
-    out_shape.AddDim(batch_b);
-    out_shape.AddDim(d0);
-    out_shape.AddDim(d3);
+    TensorShape out_shape({batch_b, d0, d3});
     Tensor* out = nullptr;
     OP_REQUIRES_OK(ctx, ctx->allocate_output(0, out_shape, &out));
     if (out->NumElements() == 0) {
@@ -124,17 +121,23 @@ class IndicatorMatmulOp : public OpKernel {
       f(ctx->eigen_device<Device>(), out->flat<Scalar>());
       return;
     }
-    if (VLOG_IS_ON(1)) {
-      int64 flops = 1;
-      for (int i = 0; i < out_shape.dims(); i++) {
-        flops *= out_shape.dim_size(i);
+
+    //[PROF-STATS]
+    int64 delta = 2 * d1 * out_shape.num_elements();
+    if (delta > 0) {
+      ProfStats* prof_stats = context->prof_stats();
+      if (prof_stats) {
+        prof_stats->flops += delta;
       }
-      LOG(INFO) << "FLOPs = " << flops * d1 * 2
+    }
+    if (VLOG_IS_ON(1)) {
+      LOG(INFO) << "FLOPs = " << delta
                 << ", " << type_string()
                 << ", " << name()
                 << ", " << a.shape().DebugString()
                 << ", " << b.shape().DebugString();
     }
+
     LaunchIndicatorMatmul<Device, Scalar, TIndex>()(ctx, trans_a_, trans_b_, d0,
                                                     d3, d1, a, b, ind, out,
                                                     batch_a, batch_b, 1);
@@ -202,11 +205,7 @@ class ParallelIndicatorMatmulOp : public OpKernel {
             "b_batch mismatch indicator length: ", batch_b, " vs. ", ind_length,
             ": ", b.shape().DebugString(), " ", ind.shape().DebugString()));
 
-    TensorShape out_shape;
-    out_shape.AddDim(parallel_a);
-    out_shape.AddDim(batch_b);
-    out_shape.AddDim(d0);
-    out_shape.AddDim(d3);
+    TensorShape out_shape({parallel_a, batch_b, d0, d3});
     Tensor* out = nullptr;
     OP_REQUIRES_OK(ctx, ctx->allocate_output(0, out_shape, &out));
     if (out->NumElements() == 0) {
@@ -217,17 +216,23 @@ class ParallelIndicatorMatmulOp : public OpKernel {
       f(ctx->eigen_device<Device>(), out->flat<Scalar>());
       return;
     }
-    if (VLOG_IS_ON(1)) {
-      int64 flops = 1;
-      for (int i = 0; i < out_shape.dims(); i++) {
-        flops *= out_shape.dim_size(i);
+
+    //[PROF-STATS]
+    int64 delta = 2 * d1 * out_shape.num_elements();
+    if (delta > 0) {
+      ProfStats* prof_stats = context->prof_stats();
+      if (prof_stats) {
+        prof_stats->flops += delta;
       }
-      LOG(INFO) << "FLOPs = " << flops * d1 * 2
+    }
+    if (VLOG_IS_ON(1)) {
+      LOG(INFO) << "FLOPs = " << delta
                 << ", " << type_string()
                 << ", " << name()
                 << ", " << a.shape().DebugString()
                 << ", " << b.shape().DebugString();
     }
+
     LaunchIndicatorMatmul<Device, Scalar, TIndex>()(
         ctx, trans_a_, trans_b_, d0, d3, d1, a, b, ind, out, batch_a, batch_b,
         parallel_num);

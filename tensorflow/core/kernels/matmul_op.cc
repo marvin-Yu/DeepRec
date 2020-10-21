@@ -484,17 +484,22 @@ class MatMulOp : public OpKernel {
       return;
     }
 
-    if (VLOG_IS_ON(1)) {
-      int64 flops = 1;
-      for (int i = 0; i < out_shape.dims(); i++) {
-        flops *= out_shape.dim_size(i);
+    //[PROF-STATS]
+    int64 delta = 2 * a.dim_size(dim_pair[0].first) * out_shape.num_elements();
+    if (delta > 0) {
+      ProfStats* prof_stats = context->prof_stats();
+      if (prof_stats) {
+        prof_stats->flops += delta;
       }
-      LOG(INFO) << "FLOPs = " << flops * a.dim_size(dim_pair[0].first) * 2
+    }
+    if (VLOG_IS_ON(1)) {
+      LOG(INFO) << "FLOPs = " << delta
                 << ", " << type_string()
                 << ", " << name()
                 << ", " << a.shape().DebugString()
                 << ", " << b.shape().DebugString();
     }
+
     if (a.NumElements() == 0 && b.NumElements() == 0) {
       // If a has shape [x, 0] and b has shape [0, y], the
       // output shape is [x, y] where x and y are non-zero, so we fill

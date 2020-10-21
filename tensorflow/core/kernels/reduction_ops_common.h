@@ -151,8 +151,16 @@ class ReductionOp : public OpKernel {
     VLOG(1) << "data shape: " << data.shape().DebugString();
     VLOG(1) << "axes      : " << axes.SummarizeValue(10);
 
+    //[PROF-STATS]
+    int64 delta = data.NumElements();
+    if (delta > 0) {
+      ProfStats* prof_stats = context->prof_stats();
+      if (prof_stats) {
+        prof_stats->flops += delta;
+      }
+    }
     if (VLOG_IS_ON(1)) {
-      LOG(INFO) << "FLOPs = " << data.NumElements()
+      LOG(INFO) << "FLOPs = " << delta;
                 << ", " << type_string()
                 << ", " << name()
                 << ", " << data.shape().DebugString();
