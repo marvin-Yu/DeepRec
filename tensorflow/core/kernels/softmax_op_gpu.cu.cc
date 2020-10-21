@@ -140,7 +140,7 @@ class SoftmaxOpGPU : public OpKernel {
     const Tensor& logits_in_ = context->input(0);
 
     //[PROF-STATS]
-    int64 delta = 5 * logits_in.NumElements();
+    int64 delta = 5 * logits_in_.NumElements();
     if (delta > 0) {
       ProfStats* prof_stats = context->prof_stats();
       if (prof_stats) {

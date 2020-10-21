@@ -86,7 +86,7 @@ static bool DoGemmWithAlgorithm(
     //[DYNAMIC-SHAPE]
     uint64 before_padding, uint64 after_padding,
     //[PROF-STATS]
-    uint64* flops) {
+    int64* flops) {
   DCHECK(!output_matrix.transpose);
 
   PrimitiveType type = primitive_util::NativeToPrimitiveType<InT>();
@@ -124,7 +124,7 @@ static bool DoGemmWithAlgorithm(
   auto k = lhs_matrix.transpose ? lhs_matrix.num_rows : lhs_matrix.num_cols;
 
   //[DYNAMIC-SHAPE]
-  uint64 num_cols_needed = output_matrix.num_cols;
+  int64 num_cols_needed = output_matrix.num_cols;
   if (before_padding != 0 && after_padding != 0) {
     if (num_cols_needed == after_padding){
       num_cols_needed = (before_padding+7)/8*8; // make it multiple of 8
@@ -138,8 +138,7 @@ static bool DoGemmWithAlgorithm(
   }
   //[PROF-STATS]
   if (flops) {
-    uint64 delta = batch_size*(2*k*num_cols_needed*output_matrix.num_rows);
-    *flops += delta;
+    *flops = batch_size*(2*k*num_cols_needed*output_matrix.num_rows);
   }
 
   if (algorithm) {
@@ -198,7 +197,7 @@ Status RunGemm(const HloInstruction *gemm,
                //[DYNAMIC-SHAPE]
                uint64 before_padding, uint64 after_padding,
                //[PROF-STATS]
-               uint64* flops
+               int64* flops
                ) {
   VLOG(2) << "Executing a GemmThunk";
   CHECK(IsCublasGemm(*gemm));

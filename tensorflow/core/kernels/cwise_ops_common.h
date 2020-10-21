@@ -126,7 +126,7 @@ class BinaryOp : public BinaryOpShared {
       delta =  state.out_num_elements;
     }
     if (delta > 0) {
-      ProfStats* prof_stats = context->prof_stats();
+      ProfStats* prof_stats = ctx->prof_stats();
       if (prof_stats) {
         prof_stats->flops += delta;
       }
@@ -286,7 +286,7 @@ class UnaryOp : public OpKernel {
       delta = 2 * inp.NumElements();
     }
     if (delta > 0) {
-      ProfStats* prof_stats = context->prof_stats();
+      ProfStats* prof_stats = ctx->prof_stats();
       if (prof_stats) {
         prof_stats->flops += delta;
       }

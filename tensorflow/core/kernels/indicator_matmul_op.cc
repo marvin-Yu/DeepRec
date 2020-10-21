@@ -125,7 +125,7 @@ class IndicatorMatmulOp : public OpKernel {
     //[PROF-STATS]
     int64 delta = 2 * d1 * out_shape.num_elements();
     if (delta > 0) {
-      ProfStats* prof_stats = context->prof_stats();
+      ProfStats* prof_stats = ctx->prof_stats();
       if (prof_stats) {
         prof_stats->flops += delta;
       }
@@ -220,7 +220,7 @@ class ParallelIndicatorMatmulOp : public OpKernel {
     //[PROF-STATS]
     int64 delta = 2 * d1 * out_shape.num_elements();
     if (delta > 0) {
-      ProfStats* prof_stats = context->prof_stats();
+      ProfStats* prof_stats = ctx->prof_stats();
       if (prof_stats) {
         prof_stats->flops += delta;
       }

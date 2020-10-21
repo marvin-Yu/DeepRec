@@ -122,9 +122,7 @@ class BlazeBiasDiceOp : public OpKernel {
                 errors::InvalidArgument("unexpected gamma shape: ",
                                         gamma.shape().DebugString()));
     Tensor* out = nullptr;
-    TensorShape out_shape;
-    out_shape.AddDim(batch);
-    out_shape.AddDim(units);
+    TensorShape out_shape({batch, units});
     OP_REQUIRES_OK(ctx, ctx->allocate_output(0, out_shape, &out));
     if (out->NumElements() == 0) {
       return;
@@ -134,14 +132,22 @@ class BlazeBiasDiceOp : public OpKernel {
       f(ctx->eigen_device<Device>(), out->flat<Scalar>());
       return;
     }
-    if (VLOG_IS_ON(1)) {
-      int64 flops = 1;
-      for (int i = 0; i < out_shape.dims(); i++) {
-        flops *= out_shape.dim_size(i);
+
+    //[PROF-STATS]
+    int64 delta = 12 * out_shape.num_elements();
+    if (delta > 0) {
+      ProfStats* prof_stats = ctx->prof_stats();
+      if (prof_stats) {
+        prof_stats->flops += delta;
       }
-      LOG(INFO) << "FLOPs = " << flops * 12 << ", " << type_string() << ", "
-                << name() << ", " << input.shape().DebugString();
     }
+    if (VLOG_IS_ON(1)) {
+      LOG(INFO) << "FLOPs = " << delta
+                << ", " << type_string()
+                << ", " << name()
+                << ", " << input.shape().DebugString();
+    }
+
     OP_REQUIRES_OK(ctx, LaunchBlazeBiasDice<Device, Scalar>()(
                             ctx, input, bias, alpha, moving_mean, gamma, out,
                             batch, units));
