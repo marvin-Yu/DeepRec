@@ -655,6 +655,7 @@ message RunMetadata {
   //[PROF-STATS]
   message ProfStats {
     uint64 flops = 1;
+    uint64 tao_op_calls = 2;
   }
   ProfStats prof_stats = 5;
 }
