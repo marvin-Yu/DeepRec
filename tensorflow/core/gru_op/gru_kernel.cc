@@ -74,10 +74,12 @@ class GRUOp : public OpKernel {
     }
 
     //[PROF-STATS]
-    uint64 delta = batch_size * rounds * (12 * elts * elts + 25 * elts);
-    ProfStats* prof_stats = context->prof_stats();
-    if (prof_stats) {
-      prof_stats->flops += delta;
+    int64 delta = batch_size * rounds * (12 * elts * elts + 25 * elts);
+    if (delta > 0) {
+      ProfStats* prof_stats = context->prof_stats();
+      if (prof_stats) {
+        prof_stats->flops += delta;
+      }
     }
     if (VLOG_IS_ON(1)) {
       LOG(INFO) << "FLOPs = " << delta << ", " << type_string() << ", "

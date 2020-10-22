@@ -53,8 +53,10 @@ class GemmThunk : public Thunk {
 
   //[PROF-STATS]
   void RecordStats(ProfStats* prof_stats) override {
-    if (prof_stats) {
-      prof_stats->flops += flops_;
+    if (flops_ > 0) {
+      if (prof_stats) {
+        prof_stats->flops += flops_;
+      }
     }
   }
 
@@ -66,7 +68,7 @@ class GemmThunk : public Thunk {
   GemmBackendConfig backend_config_;
 
   //[PROF-STATS]
-  uint64 flops_ = 0;
+  int64 flops_ = 0;
 };
 
 // Run the given GEMM instruction `gemm` subject to the configuration
@@ -88,7 +90,7 @@ Status RunGemm(
     //[DYNAMIC-SHAPE]
     uint64 before_padding = 0, uint64 after_padding = 0,
     //[PROF-STATS]
-    uint64* flops = nullptr);
+    int64* flops = nullptr);
 
 }  // namespace gpu
 }  // namespace xla

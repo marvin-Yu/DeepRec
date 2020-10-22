@@ -61,12 +61,22 @@ class SoftmaxOp : public OpKernel {
 
   void Compute(OpKernelContext* context) override {
     const Tensor& logits_in = context->input(0);
+
+    //[PROF-STATS]
+    int64 delta = 5 * logits_in.NumElements();
+    if (delta > 0) {
+      ProfStats* prof_stats = context->prof_stats();
+      if (prof_stats) {
+        prof_stats->flops += delta;
+      }
+    }
     if (VLOG_IS_ON(1)) {
-      LOG(INFO) << "FLOPs = " << 5 * logits_in.NumElements()
+      LOG(INFO) << "FLOPs = " << delta
                 << ", " << type_string()
                 << ", " << name()
                 << ", " << logits_in.shape().DebugString();
     }
+
     OP_REQUIRES(context, TensorShapeUtils::IsVectorOrHigher(logits_in.shape()),
                 errors::InvalidArgument("logits must have >= 1 dimension, got ",
                                         logits_in.shape().DebugString()));

@@ -143,10 +143,7 @@ class BlazeAttentionOp : public OpKernel {
         ctx, batch_fact == 1,
         errors::InvalidArgument("batch_fact must be 1: got ", batch_fact));
     int batch_query = query.dim_size(1);
-    TensorShape out_shape;
-    out_shape.AddDim(batch_query);
-    out_shape.AddDim(query_pnum);
-    out_shape.AddDim(query_units);
+    TensorShape out_shape({batch_query, query_pnum, query_units});
     Tensor* out = nullptr;
     OP_REQUIRES_OK(ctx, ctx->allocate_output(0, out_shape, &out));
     if (out->NumElements() == 0) {
@@ -158,6 +155,23 @@ class BlazeAttentionOp : public OpKernel {
       return;
     }
     int seq_len = fact.dim_size(2);
+
+    //[PROF-STATS]
+    int64 delta = 2 * seq_len * out_shape.num_elements();
+    if (delta > 0) {
+      ProfStats* prof_stats = ctx->prof_stats();
+      if (prof_stats) {
+        prof_stats->flops += delta;
+      }
+    }
+    if (VLOG_IS_ON(1)) {
+      LOG(INFO) << "FLOPs = " << delta
+                << ", " << type_string()
+                << ", " << name()
+                << ", " << fact.shape().DebugString()
+                << ", " << query.shape().DebugString();
+    }
+
     OP_REQUIRES_OK(ctx, LaunchBlazeAttention<Device, Scalar>()(
                             ctx, fact, query, out, query_pnum, batch_fact,
                             batch_query, seq_len, query_units));
@@ -210,10 +224,7 @@ class BlazeAttentionIndicatorOp : public OpKernel {
     OP_REQUIRES(ctx, ind_length == batch_query,
                 errors::InvalidArgument("ind_length mismatch batch_query: ",
                                         ind_length, " vs. ", batch_query));
-    TensorShape out_shape;
-    out_shape.AddDim(batch_query);
-    out_shape.AddDim(query_pnum);
-    out_shape.AddDim(query_units);
+    TensorShape out_shape({batch_query, query_pnum, query_units});
     Tensor* out = nullptr;
     OP_REQUIRES_OK(ctx, ctx->allocate_output(0, out_shape, &out));
     if (out->NumElements() == 0) {
@@ -225,12 +236,23 @@ class BlazeAttentionIndicatorOp : public OpKernel {
       return;
     }
     int seq_len = fact.dim_size(2);
-    if (VLOG_IS_ON(1)) {
-      int64 flops = 2 * batch_query * query_pnum * seq_len * query_units;
-      LOG(INFO) << "FLOPs = " << flops << ", " << type_string() << ", "
-                << name() << ", " << fact.shape().DebugString() << ", "
-                << query.shape().DebugString();
+
+    //[PROF-STATS]
+    int64 delta = 2 * seq_len * out_shape.num_elements();
+    if (delta > 0) {
+      ProfStats* prof_stats = ctx->prof_stats();
+      if (prof_stats) {
+        prof_stats->flops += delta;
+      }
     }
+    if (VLOG_IS_ON(1)) {
+      LOG(INFO) << "FLOPs = " << delta
+                << ", " << type_string()
+                << ", " << name()
+                << ", " << fact.shape().DebugString()
+                << ", " << query.shape().DebugString();
+    }
+
     OP_REQUIRES_OK(ctx, LaunchBlazeAttentionIndicator<Device, Scalar, TIndex>()(
                             ctx, fact, query, ind, out, query_pnum, batch_fact,
                             batch_query, seq_len, query_units));
