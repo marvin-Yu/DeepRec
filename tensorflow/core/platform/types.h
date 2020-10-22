@@ -38,6 +38,7 @@ namespace tensorflow {
 //[PROF-STATS]
 struct ProfStats {
   uint64 flops = 0;
+  uint64 tao_op_calls = 0;
 };
 
 // Alias tensorflow::string to std::string.
