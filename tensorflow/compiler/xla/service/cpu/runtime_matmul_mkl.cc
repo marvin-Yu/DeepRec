@@ -52,7 +52,7 @@ void MatMulF32(const void* run_options_ptr, float* out, float* lhs, float* rhs,
   //[PROF-STATS]
   auto ptr = static_cast<const xla::ExecutableRunOptions*>(run_options_ptr);
   if(ptr && ptr->prof_stats) {
-    ptr->prof_stats->flops = m * k *n * 2;
+    ptr->prof_stats->flops += m * k *n * 2;
   }
 }
 
@@ -79,7 +79,7 @@ void MatMulF64(const void* run_options_ptr, double* out, double* lhs,
   //[PROF-STATS]
   auto ptr = static_cast<const xla::ExecutableRunOptions*>(run_options_ptr);
   if(ptr && ptr->prof_stats) {
-    ptr->prof_stats->flops = m * k *n * 2;
+    ptr->prof_stats->flops += m * k *n * 2;
   }
 }
 
