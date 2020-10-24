@@ -638,17 +638,22 @@ class BaseBatchMatMulOp : public OpKernel {
       return;
     }
 
-    if (VLOG_IS_ON(1)) {
-      int64 flops = 1;
-      for (int i = 0; i < out_shape.dims(); i++) {
-        flops *= out_shape.dim_size(i);
+    //[PROF-STATS]
+    int64 delta = 2 * d1 * out_shape.num_elements();
+    if (delta > 0) {
+      ProfStats* prof_stats = ctx->prof_stats();
+      if (prof_stats) {
+        prof_stats->flops += delta;
       }
-      LOG(INFO) << "FLOPs = " << flops * d1 * 2
+    }
+    if (VLOG_IS_ON(1)) {
+      LOG(INFO) << "FLOPs = " << delta
                 << ", " << type_string()
                 << ", " << name()
                 << ", " << in0.shape().DebugString()
                 << ", " << in1.shape().DebugString();
     }
+
     if (in0.NumElements() == 0 || in1.NumElements() == 0) {
       functor::SetZeroFunctor<Device, Scalar> f;
       f(ctx->eigen_device<Device>(), out->flat<Scalar>());

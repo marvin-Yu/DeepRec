@@ -53,6 +53,7 @@ limitations under the License.
 #include "tensorflow/core/lib/strings/stringprintf.h"
 #include "tensorflow/core/public/version.h"
 #include "tensorflow/core/util/dump_graph.h"
+#include "tensorflow/core/util/env_var.h"
 
 namespace tensorflow {
 
@@ -1263,6 +1264,13 @@ bool MarkForCompilationPassImpl::CompilationDisallowedByXlaCompileAttr(
               << kXlaCompileAttr << ") is false.";
     }
     return !compile;
+  }
+
+  bool ignore_const_op;
+  ReadBoolFromEnvVar("TF_XLA_IGNORE_CONST", false, &ignore_const_op);
+  if (ignore_const_op && node->type_string() == "Const") {
+    VLOG(1) << "XLA ignore const op " << node->name() << ";  node type: " << node->type_string();
+    return true;
   }
 
   status = flib_def_->GetAttr(*node, kXlaCompileAttr, &compile);

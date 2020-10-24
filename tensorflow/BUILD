@@ -664,6 +664,8 @@ tf_cc_shared_object(
         "//tensorflow:tf_exported_symbols.lds",
         "//tensorflow:tf_version_script.lds",
         "//tensorflow/c:c_api",
+        "//tensorflow/c:c_api_blaze",
+        "//tensorflow/c:c_graph_editor",
         "//tensorflow/c/eager:c_api",
         "//tensorflow/cc:cc_ops",
         "//tensorflow/cc:client_session",

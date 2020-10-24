@@ -162,6 +162,8 @@ TF_CAPI_EXPORT extern void TF_SetGPUMemoryOptions(
     TF_SessionOptions* opt,
     unsigned char allow_growth,
     unsigned char force_gpu_compatible);
+TF_CAPI_EXPORT extern bool TF_InitSessionOptionsFromPB(const char* pb_char,
+    TF_SessionOptions* options);
 TF_CAPI_EXPORT extern void TF_EnableAutoMixedPrecision(
     TF_SessionOptions* opt,
     unsigned char enable);
