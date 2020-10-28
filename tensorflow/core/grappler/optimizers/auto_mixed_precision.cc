@@ -846,6 +846,14 @@ NodeDef BuildCastNode(const MutableGraphView::OutputPort& src, bool to_fp16,
   (*node.mutable_attr())["SrcT"].set_type(to_fp16 ? DT_FLOAT : DT_HALF);
   (*node.mutable_attr())["DstT"].set_type(to_fp16 ? DT_HALF : DT_FLOAT);
   (*node.mutable_attr())["Truncate"].set_b(false);
+
+  bool src_node_xlacompile = false;
+  if (TryGetNodeAttr(*src.node, "_XlaCompile", &src_node_xlacompile)) {
+    if (!src_node_xlacompile) {
+      VLOG(2) << "Adding _XlaCompile false to node " << node.name();
+      (*node.mutable_attr())["_XlaCompile"].set_b(false);
+    }
+  }
   return node;
 }
 
