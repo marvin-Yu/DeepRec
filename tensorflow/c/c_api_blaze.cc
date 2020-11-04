@@ -746,5 +746,19 @@ void TF_SaveRunMetadata(const TF_Buffer* run_metadata, const char* dir,
   LOG(INFO) << "Dumped run_metadata " << file_path;
 }
 
-}  // end extern "C"
+bool TF_IsXlaFalseNode(TF_Graph* graph, const char* node_name) {
+  auto iter = graph->name_map.find(node_name);
+  if (iter == graph->name_map.end()) {
+    LOG(ERROR) << "Cannot find node " << node_name << "in graph";
+    return false;
+  }
+  auto node = iter->second;
+  bool xla_compile = true;
+  if (TryGetNodeAttr(node->def(), "_XlaCompile", &xla_compile) &&
+      !xla_compile) {
+    return true;
+  }
+  return false;
+}
 
+}  // end extern "C"
