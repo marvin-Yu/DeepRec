@@ -42,6 +42,24 @@ limitations under the License.
 #include "tensorflow/stream_executor/platform/logging.h"
 #include "tensorflow/stream_executor/platform/port.h"
 
+#define RETURN_IF_CUDA_RES_ERROR(expr, ...)                            \
+  do {                                                                 \
+    CUresult _res = (expr);                                            \
+    if (TF_PREDICT_FALSE(_res != CUDA_SUCCESS)) {                      \
+      return port::InternalError(absl::StrCat(                         \
+          __VA_ARGS__, ": ", ::stream_executor::gpu::ToString(_res))); \
+    }                                                                  \
+  } while (0)
+
+#define FAIL_IF_CUDA_RES_ERROR(expr, ...)                   \
+  do {                                                      \
+    CUresult _res = (expr);                                 \
+    if (TF_PREDICT_FALSE(_res != CUDA_SUCCESS)) {           \
+      LOG(FATAL) << absl::StrCat(__VA_ARGS__) << ": "       \
+                 << ::stream_executor::gpu::ToString(_res); \
+    }                                                       \
+  } while (0)
+
 bool FLAGS_gpuexec_cuda_driver_inject_init_error = false;
 bool FLAGS_gpuexec_cuda_sync_around_driver_calls = false;
 bool FLAGS_gpuexec_cuda_device_0_only = false;
