@@ -27,6 +27,12 @@ limitations under the License.
 #include "tensorflow/core/protobuf/config.pb.h"
 #include "tensorflow/core/public/session_options.h"
 
+
+#ifdef GOOGLE_CUDA
+#include <cuda_runtime.h>
+#endif
+
+
 namespace tensorflow {
 class DeviceMgr;
 
@@ -111,6 +117,22 @@ class Session {
   virtual Status Extend(GraphDef&& graph) { return Extend(graph); }
 #endif
 
+
+#ifdef GOOGLE_CUDA
+  virtual bool SupportsCudaGraph() { return false; }
+  virtual cudaStream_t  EnableGraphCapture(std::string model_name) {return nullptr;} 
+  virtual void DisableGraphCapture() { }
+  virtual Status RunCudaGraph(const std::string & model_name, int graph_idx, cudaStream_t stream) { return Status::OK(); }
+  virtual Status DestroyCudaGraphs() { return Status::OK(); }
+  virtual int NumCapturedModels() { return 0;}
+  virtual std::string CapturedModelName(int idx) { return "";}
+  virtual int NumCapturedGraphs(const std::string & model_name) { return 0; }
+  virtual int AllocatedBytesCudaGraph(const std::string & model_name) { return 0; }
+  virtual std::vector<std::pair<void*, void*>> GetSrcDstMapping(const std::string & model_name, int graph_idx){
+      return std::vector<std::pair<void*, void*>>();
+  }
+#endif
+  
   /// \brief Runs the graph with the provided input tensors and fills
   /// `outputs` for the endpoints specified in `output_tensor_names`.
   /// Runs to but does not return Tensors for the nodes in

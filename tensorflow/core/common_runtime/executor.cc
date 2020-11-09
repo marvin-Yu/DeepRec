@@ -866,6 +866,9 @@ class ExecutorState {
   void RunAsync(Executor::DoneCallback done);
 
  private:
+
+  TensorHolder * tensor_holder = nullptr;
+    
   // Either a tensor pointer (pass-by-reference) or a tensor (pass-by-value).
   // TODO(yuanbyu): A better way to do "has_value"?
   struct Entry {
@@ -1310,7 +1313,8 @@ class ExecutorState {
   // number at which the parent frame is creating the new frame, and the
   // name of the new frame from nodedef.
   gtl::FlatMap<string, FrameState*> outstanding_frames_ GUARDED_BY(mu_);
-
+  
+    
   // The unique name of a frame.
   inline string MakeFrameName(FrameState* frame, int64 iter_id,
                               const string& name) {
@@ -1395,6 +1399,7 @@ ExecutorState::ExecutorState(const Executor::Args& args, ExecutorImpl* impl)
     : vlog_(VLOG_IS_ON(1)),
       log_memory_(LogMemory::IsEnabled()),
       step_id_(args.step_id),
+      tensor_holder(args.tensor_holder),
       round_step_id_(args.round_step_id),
       rendezvous_(args.rendezvous),
       global_rendezvous_(args.global_rendezvous),
@@ -1594,7 +1599,12 @@ struct ExecutorState::AsyncState {
     params.input_device_contexts = &saved_input_device_contexts;
     params.input_alloc_attrs = &saved_input_alloc_attrs;
   }
-
+  
+  void SetTensorHolder(TensorHolder * tensor_holder){
+      ctx.tensor_holder = tensor_holder;
+      ctx.rendezvous()->tensor_holder = tensor_holder;
+  }
+    
   TensorValueVec saved_inputs;
   DeviceContextVec saved_input_device_contexts;
   AllocatorAttributeVec saved_input_alloc_attrs;
@@ -1778,6 +1788,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
       params.output_attr_array = item.output_attrs();
       params.forward_from_array = item.forward_from();
 
+      
       if (item.kernel_is_async) {
         // Asynchronous computes.
         AsyncOpKernel* async = item.kernel->AsAsync();
@@ -1785,7 +1796,11 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
         launched_asynchronously = true;
         AsyncState* state =
             new AsyncState(params, tagged_node, &item, first_input, stats);
-
+      
+        if(tensor_holder){
+            state->SetTensorHolder(tensor_holder);
+        }
+        
         auto done = [this, state]() {
           Device* device = impl_->params_.device;
           NodeExecStatsInterface* stats = state->stats;  // Shorthand
@@ -1846,8 +1861,13 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
       } else {
         // Synchronous computes.
         OpKernelContext ctx(&params, item.num_outputs);
+        
+        if(tensor_holder){
+            ctx.tensor_holder = tensor_holder;
+        }
+
         nodestats::SetOpStart(stats);
-            device->Compute(op_kernel, &ctx);
+        device->Compute(op_kernel, &ctx);
 
         nodestats::SetOpEnd(stats);
         s = ProcessOutputs(item, &ctx, &outputs, stats);
@@ -2377,6 +2397,7 @@ bool ExecutorState::NodeDone(const Status& s, const Node* node,
 
 void ExecutorState::ScheduleReady(const TaggedNodeSeq& ready,
                                   TaggedNodeReadyQueue* inline_ready) {
+  
   if (ready.empty()) return;
 
   int64 scheduled_nsec = 0;
@@ -2761,7 +2782,9 @@ void ExecutorState::DeleteFrame(FrameState* frame, TaggedNodeSeq* ready) {
     mutex_lock executor_lock(mu_);
     outstanding_frames_.erase(frame_name);
   }
+
   delete frame;
+  
 }
 
 void ExecutorState::CleanupFramesIterations(FrameState* frame, int64 iter,

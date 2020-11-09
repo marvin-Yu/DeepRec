@@ -126,6 +126,7 @@ cc_library(
     ],
 )
 
+
 tf_kernel_library(
     name = "strided_slice_op",
     srcs = [
@@ -3647,6 +3648,7 @@ cc_library(
         ":sparse_matmul_op",
     ],
 )
+
 
 tf_kernel_library(
     name = "sparse_matmul_op",

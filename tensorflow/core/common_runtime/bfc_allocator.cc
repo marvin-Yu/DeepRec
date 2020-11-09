@@ -44,6 +44,7 @@ BFCAllocator::BFCAllocator(SubAllocator* sub_allocator, size_t total_memory,
         RoundedBytes(std::min(total_memory, size_t{1048576}));
   } else {
     curr_region_allocation_bytes_ = RoundedBytes(total_memory);
+    LOG(INFO) << "curr_region_allocation_bytes_ = " << curr_region_allocation_bytes_;
   }
 
   // Allocate the requested amount of memory.
@@ -67,6 +68,7 @@ BFCAllocator::BFCAllocator(SubAllocator* sub_allocator, size_t total_memory,
       CHECK_NE(BinForSize(bin_size * 2), BinFromIndex(b));
     }
   }
+  //assert(Extend(4, RoundedBytes(total_memory)));
 }
 
 BFCAllocator::~BFCAllocator() {

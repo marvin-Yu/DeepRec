@@ -92,6 +92,31 @@ inline const gpuStream_t& GetGpuStream(OpKernelContext* context) {
   return *ptr;
 }
 
+// Begin capture graph from stream, support to cudaGraph
+// Support since version 10.0
+// If use TENSORFLOW_USE_ROCM, do nothing
+inline const void StreamBeginCaptureGraph(OpKernelContext* context) {
+  const gpuStream_t* stream_ptr = GetGpuStream(context);
+#if GOOGLE_CUDA
+  cudaStreamBeginCapture(stream_ptr);
+#elif TENSORFLOW_USE_ROCM
+  // do nothing
+#endif
+}
+
+// Begin capture graph from stream, support to cudaGraph
+inline const void StreamEndCaptureGraph(OpKernelContext* context) {
+  const gpuStream_t* stream_ptr = GetGpuStream(context);
+#if GOOGLE_CUDA
+  cudaGraph_t graph = nullptr; // todo: fetch graph or graphs from context
+  cudaGraphExec_t graphExec = null;
+  cudaStreamEndCapture(stream_ptr, graph);
+  cudaGraphInstantiate(&graphExec, graph, NULL, NULL, 0);
+#elif TENSORFLOW_USE_ROCM
+  // do nothing
+#endif
+}
+
 // Launches a GPU kernel through cudaLaunchKernel in CUDA environment, or
 // hipLaunchKernel in ROCm environment with the given arguments.
 //

@@ -108,6 +108,11 @@ class Executor {
     typedef std::function<void()> Closure;
     typedef std::function<void(Closure)> Runner;
     Runner runner = nullptr;
+
+    // in normal TF session run,
+    // it will be nullptr.
+    TensorHolder * tensor_holder = nullptr;
+
     typedef std::function<Status(const string& node_name, const int output_slot,
                                  const Tensor* tensor, const bool is_ref,
                                  OpKernelContext* ctx)>

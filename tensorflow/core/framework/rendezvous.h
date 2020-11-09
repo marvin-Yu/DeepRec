@@ -46,6 +46,7 @@ namespace tensorflow {
 // Tensor as soon as it is available.  A producer never blocks.
 class Rendezvous : public core::RefCounted {
  public:
+    
   struct Args {
     DeviceContext* device_context = nullptr;
     AllocatorAttributes alloc_attrs;
@@ -132,6 +133,11 @@ class Rendezvous : public core::RefCounted {
   // REQUIRES: !status.ok()
   virtual void StartAbort(const Status& status) = 0;
 
+  // In cuda graph capture mode
+  // if new tensors are allocated after receving contents from host
+  // it will be held in tensor_holder, for subsequent cuda graph runs.
+  TensorHolder * tensor_holder = nullptr;
+  
  protected:
   ~Rendezvous() override;
 };

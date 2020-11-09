@@ -612,6 +612,8 @@ class OpKernelContext {
   // TrackingAllocator
   typedef std::pair<Allocator*, TrackingAllocator*> WrappedAllocator;
 
+  TensorHolder * tensor_holder = nullptr;
+  
   // TODO(zhifengc): Do some cleanup of Params.
   // The Params struct is passed in to initialize an OpKernelContext,
   // and must outlive the OpKernelContext.
@@ -1132,7 +1134,7 @@ class OpKernelContext {
     retrieved.swap(wrapped_allocators_);
     return retrieved;
   }
-
+  
   // Communication.
   //
   // An op kernel communicates with outside environment through

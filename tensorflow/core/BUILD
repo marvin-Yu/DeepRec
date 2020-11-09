@@ -3395,6 +3395,9 @@ tf_cuda_library(
     hdrs = [
         "common_runtime/direct_session.h",
         "util/env_var.h",
+        "common_runtime/gpu/gpu_device.h",
+        "common_runtime/gpu/gpu_id_utils.h",
+        "common_runtime/gpu_device_context.h",
     ],
     copts = tf_copts() + ["-g"],
     deps = [

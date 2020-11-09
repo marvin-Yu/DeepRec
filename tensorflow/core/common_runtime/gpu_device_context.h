@@ -67,7 +67,8 @@ class GPUDeviceContext : public DeviceContext {
   Status ThenExecute(Device* device, se::Stream* stream,
                      std::function<void()> func) override;
 
- private:
+
+ public:
   int stream_id_;
   // The default primary stream to use for this context.
   // All the memory belongs to this stream.

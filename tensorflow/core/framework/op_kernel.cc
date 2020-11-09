@@ -735,6 +735,35 @@ Status OpKernelContext::allocate_output(StringPiece name,
 Status OpKernelContext::allocate_tensor(
     DataType type, const TensorShape& shape, Tensor* out_tensor,
     AllocatorAttributes attr, const AllocationAttributes& allocation_attr) {
+
+  if(shape.num_elements() > 0 && tensor_holder){
+      Tensor reuse_tensor = tensor_holder->FindUsableTensor(type, shape);
+      if(reuse_tensor.TotalBytes() > 0){
+          // Debug info
+          // LOG(INFO) << "Find reusable tensor, size: " << reuse_tensor.TotalBytes()
+          //           << ", allocated_size: " << reuse_tensor.AllocatedBytes()
+          //           << ", buff@" << reuse_tensor.buf_;
+
+          out_tensor->shape_ = shape;
+          out_tensor->set_dtype(type);
+          if(out_tensor->buf_){
+              out_tensor->buf_->Unref();
+          }
+          out_tensor->buf_ = reuse_tensor.buf_;
+          out_tensor->buf_->Ref();
+
+          // LOG(INFO) << "Allocate out tensor, num elements: "
+          //           << shape.num_elements() << ","
+          //           << out_tensor->shape_.num_elements()
+          //           << ",  size:"
+          //           << out_tensor->TotalBytes()
+          //           << ", allocated_size: " << out_tensor->AllocatedBytes()
+          //           << ", buff@" << out_tensor->buf_;
+
+          return Status::OK();
+      }
+  }
+
   Allocator* a;
   TF_RETURN_IF_ERROR(get_allocator(attr, &a));
   Tensor new_tensor(a, type, shape,
@@ -753,6 +782,13 @@ Status OpKernelContext::allocate_tensor(
                                       params_->step_id, new_tensor);
   }
   record_tensor_reference(new_tensor);
+  
+  if(tensor_holder){
+      if(new_tensor.AllocatedBytes() > 0){
+          tensor_holder->Add(&new_tensor);
+      }
+  }
+  
   *out_tensor = std::move(new_tensor);
   return Status::OK();
 }

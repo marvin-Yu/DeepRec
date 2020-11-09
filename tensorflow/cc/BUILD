@@ -736,6 +736,39 @@ tf_cc_binary(
     ],
 )
 
+
+tf_cc_binary(
+    name = "tutorials_example_cudagraph",
+    srcs = ["tutorials/cuda_graph_inference.cc"],
+    copts = tf_copts(),
+    linkopts = select({
+        "//tensorflow:windows": [],
+        "//tensorflow:macos": [
+            "-lm",
+            "-lpthread",
+        ],
+        "//tensorflow:ios": [
+            "-lm",
+            "-lpthread",
+        ],
+        "//conditions:default": [
+            "-lm",
+            "-lpthread",
+            "-lrt",
+        ],
+    }),
+    deps = [
+        ":cc_ops",
+        ":client_session",
+        "//tensorflow/core:core_cpu",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core:tensorflow",
+    ],
+)
+
+
 cc_library(
     name = "queue_runner",
     srcs = ["training/queue_runner.cc"],

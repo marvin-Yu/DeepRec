@@ -2290,6 +2290,9 @@ bool CUDABlas::DoBlasGemmBatched(
     int ldc, int batch_count, ScratchAllocator *scratch_allocator) {
   // Note: The func passed here (cublasSgemmBatched) is not actually called,
   // due to special handling of fp16 inside DoBlasGemmBatchedInternal.
+
+  //std::cout << "Do Blas Gemm Batched !!!!!!!! " << std::endl; 
+    
   port::Status status = DoBlasGemmBatchedInternal(
       cublasSgemmBatched, stream, transa, transb, m, n, k, alpha, a_array, lda,
       b_array, ldb, beta, c_array, ldc, batch_count, scratch_allocator);

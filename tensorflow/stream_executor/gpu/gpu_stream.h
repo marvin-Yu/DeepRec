@@ -51,7 +51,7 @@ class GpuStream : public internal::StreamInterface {
 
   // Explicitly destroy the CUDA resources associated with this stream, used by
   // StreamExecutor::DeallocateStream().
-  void Destroy();
+  void Destroy() override;
 
   // Returns true if no work is pending or executing on the stream.
   bool IsIdle() const;

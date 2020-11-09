@@ -87,6 +87,8 @@ Status PrepareCopy(Device* device, const DeviceContext* ctx, const Tensor& src,
                               DataTypeString(dst->dtype()));
     }
     if (src.TotalBytes() != dst->TotalBytes()) {
+      LOG(INFO) << "src allocated size: " << src.AllocatedBytes();
+      LOG(INFO) << "dst allocated size: " << dst->AllocatedBytes();
       return errors::Internal("Can't copy ", src.TotalBytes(),
                               " bytes of a tensor into another with ",
                               dst->TotalBytes(), " bytes buffer.");
@@ -263,6 +265,13 @@ void GPUUtil::CopyGPUTensorToCPU(Device* gpu_device,
   Status s = PrepareCopy(gpu_device, device_context, *gpu_tensor, cpu_tensor,
                          &dev_info, &send_stream);
   if (!s.ok()) {
+    LOG(INFO) << "CopyGPUTensorToCPU";
+    LOG(INFO) << "gpu_tensor size: " << gpu_tensor->TotalBytes();
+    LOG(INFO) << "gpu_tensor buffer size: " << gpu_tensor->AllocatedBytes();
+    LOG(INFO) << "gpu_bufer@" << gpu_tensor->buf_;
+    LOG(INFO) << "cpu_tensor size: " << cpu_tensor->TotalBytes();
+    LOG(INFO) << "cpu_tensor buffer size: " << cpu_tensor->AllocatedBytes();
+    LOG(INFO) << "cpu_bufer@" << cpu_tensor->buf_;
     done(s);
     return;
   }
@@ -284,6 +293,7 @@ void GPUUtil::CopyGPUTensorToCPU(Device* gpu_device,
     void* dst_ptr = GetBase(cpu_tensor);
     send_device_to_host_stream->ThenMemcpy(dst_ptr, gpu_src_ptr, total_bytes);
   }
+  
   // Use of the input may outlive stack scope, so keep a ref.
   TensorReference input_ref(*gpu_tensor);
   dev_info->event_mgr->ThenExecute(
@@ -302,16 +312,22 @@ void GPUUtil::CopyCPUTensorToGPU(const Tensor* cpu_tensor,
                                  const DeviceContext* device_context,
                                  Device* gpu_device, Tensor* gpu_tensor,
                                  StatusCallback done, bool sync_dst_compute) {
+        
   VLOG(1) << "CopyCPUTensorToGPU";
   const DeviceBase::GpuDeviceInfo* dev_info = nullptr;
   se::Stream* recv_stream = nullptr;
   Status s = PrepareCopy(gpu_device, device_context, *cpu_tensor, gpu_tensor,
                          &dev_info, &recv_stream);
   if (!s.ok()) {
+    LOG(INFO) << "CopyCPUTensorToGPU";
+    LOG(INFO) << "cpu_tensor size: " << cpu_tensor->TotalBytes();
+    LOG(INFO) << "cpu_tensor buffer size: " << cpu_tensor->AllocatedBytes();
+    LOG(INFO) << "gpu_tensor size: " << gpu_tensor->TotalBytes();
+    LOG(INFO) << "gpu_tensor buffer size: " << gpu_tensor->AllocatedBytes();
     done(s);
     return;
   }
-
+  
   auto recv_host_to_device_stream =
       static_cast<const GPUDeviceContext*>(device_context)
           ->host_to_device_stream();
@@ -332,6 +348,7 @@ void GPUUtil::CopyCPUTensorToGPU(const Tensor* cpu_tensor,
     DeviceMemoryBase gpu_dst_ptr(dst_ptr, total_bytes);
     recv_host_to_device_stream->ThenMemcpy(&gpu_dst_ptr, src_ptr, total_bytes);
   }
+
   // Use of cpu_tensor may outlive stack scope, so keep a ref.
   TensorReference input_ref(*cpu_tensor);
   dev_info->event_mgr->ThenExecute(

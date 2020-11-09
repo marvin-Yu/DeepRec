@@ -22,7 +22,7 @@ limitations under the License.
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-
+#include <mutex>
 #include "tensorflow/core/common_runtime/costmodel_manager.h"
 #include "tensorflow/core/common_runtime/debugger_state_interface.h"
 #include "tensorflow/core/common_runtime/device_mgr.h"
@@ -44,6 +44,11 @@ limitations under the License.
 #include "tensorflow/core/platform/thread_annotations.h"
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/public/session.h"
+
+
+#ifdef GOOGLE_CUDA
+#include <cuda_runtime.h>
+#endif
 
 namespace tensorflow {
 
@@ -127,6 +132,20 @@ class DirectSession : public Session {
   ::tensorflow::Status ReleaseCallable(CallableHandle handle) override;
 
   const SessionOptions& options() const { return options_; }
+
+#ifdef GOOGLE_CUDA
+  bool SupportsCudaGraph() override { return true; };
+  cudaStream_t EnableGraphCapture(std::string model_name) override;
+  void DisableGraphCapture() override;
+  ::tensorflow::Status RunCudaGraph(const std::string & model_name, int graph_idx, cudaStream_t stream) override;
+  ::tensorflow::Status DestroyCudaGraphs() override;
+  int NumCapturedModels() override;
+  std::string CapturedModelName(int idx) override;
+  int NumCapturedGraphs(const std::string & model_name) override;
+  int AllocatedBytesCudaGraph(const std::string & model_name) override;
+  std::vector<std::pair<void*, void*>> GetSrcDstMapping(const std::string& model_name, int graph_idx) override;
+#endif
+
   void RunAsync(const RunOptions& run_options,
       const NamedTensorList& inputs,
       const std::vector<string>& output_names,
@@ -146,6 +165,43 @@ class DirectSession : public Session {
 
 
  private:
+
+#ifdef GOOGLE_CUDA
+  bool cuda_graph_capture_mode_ = false;
+  cudaStream_t capturing_stream_ = nullptr;
+  std::string captured_model_name_ = "";
+  // holds the tensors allocated during graph capturing
+  // model_name --> tensor_holders
+  // for each model, multiple graphs can be captured,
+  // so we can run multiple graph instances in parallel
+  // (to separate their memory, mutiple graphs are needed).
+  std::map<std::string, std::vector<TensorHolder>> cuda_graph_gpu_tensors_;
+  std::map<std::string, std::vector<cudaGraph_t>> cuda_graphs_;
+  std::map<std::string, std::vector<cudaGraphExec_t>> cuda_graph_instances_;
+  std::map<std::pair<string, int>, std::vector<std::pair<void*, void*>>> src_dst_mapping_;
+
+  using tensor_holder_pair = std::pair<std::string, std::vector<TensorHolder>>;
+  using cuda_graph_pair = std::pair<std::string, std::vector<cudaGraph_t>>;
+  using cuda_graph_instance_pair = std::pair<std::string, std::vector<cudaGraphExec_t>>;
+
+  std::mutex cuda_graph_instance_mutex_;
+
+  ::tensorflow::Status GetTensorHolder(TensorHolder ** tensor_holder);
+  const TensorHolder * GetCurrentTensorHolder();
+  cudaGraphExec_t GetGraphExecInstance(const std::string & model_name, int graph_idx);
+  bool RemoveH2DNodes(cudaGraph_t graph, std::vector<std::pair<void*, void*>> &mappings);
+  std::vector<const void*> input_host_address_;
+  size_t num_output_tensors_;
+
+  // Names of place holders which will be the host_memory_inputs of GPU ops
+  // No H2D will be inserted for these data, so cannot be captured by CUDA
+  // Only const values (given specific input shape) are allowed.
+  // these values will be sent to the CUDA Graph in the form of launch parameters
+  // like block/grid sizes.
+  std::vector<std::string> host_memory_inputs_;
+  std::vector<const void*> host_memory_inputs_address_;
+#endif
+
   // For access to collective_graph_key_.
   friend class DirectSessionCollectiveTest;
 
@@ -157,7 +213,7 @@ class DirectSession : public Session {
     FunctionLibraryRuntime* flib = nullptr;  // not owned.
     std::unique_ptr<Executor> executor;
   };
-
+  
   // An ExecutorsAndKeys is created for a given set of feeds/fetches.
   // 'step_count' is the number of times this graph is executed.
   // 'graph' is the entire graph being executed. 'name_to_node'

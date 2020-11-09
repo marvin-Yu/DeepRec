@@ -279,6 +279,56 @@ class BaseGPUDevice::StreamGroupFactory {
     return group;
   }
 
+  
+  // assume the streams are already destroyed.
+  // This function is thread safe.
+  void Reset(TfGpuId tf_gpu_id,
+             int stream_group_within_gpu,
+             se::StreamExecutor* executor,
+             const GPUOptions& options) {
+      
+    mutex_lock guard(lock_);
+    StreamGroup* group =
+        &streams_[key_type(tf_gpu_id.value(), stream_group_within_gpu)];
+    
+    group->compute = new se::Stream(executor);
+    group->compute->Init();
+    VLOG(2) << "Created stream[" << stream_group_within_gpu
+            << "] = " << group->compute;
+
+    group->host_to_device = new se::Stream(executor);
+    group->host_to_device->Init();
+    VLOG(2) << "Created host_to_device_stream[" << stream_group_within_gpu
+            << "] = " << group->host_to_device;
+    
+    group->device_to_host = new se::Stream(executor);
+    group->device_to_host->Init();
+    VLOG(2) << "Created device_to_host_stream[" << stream_group_within_gpu
+            << "] = " << group->device_to_host;
+    
+    int num_d2d_streams =
+        options.experimental().num_dev_to_dev_copy_streams();
+    if (num_d2d_streams == 0) num_d2d_streams = 1;
+    if (num_d2d_streams < 1 || num_d2d_streams > 4) {
+        LOG(ERROR)
+            << "Illegal GPUOptions.experimental.num_dev_to_dev_copy_streams="
+            << num_d2d_streams << " set to 1 instead.";
+        num_d2d_streams = 1;
+    }
+
+    group->device_to_device.clear();
+    
+    for (int i = 0; i < num_d2d_streams; ++i) {
+        se::Stream* stream = new se::Stream(executor);
+        stream->Init();
+        group->device_to_device.push_back(stream);
+        VLOG(2) << "Created device_to_device_stream[" << stream_group_within_gpu
+                << "] = " << group->device_to_device.back();
+    }
+    
+  }
+
+    
   // Returns a reference to the StreamGroupFactory singleton. Note that this is
   // never destroyed, so the objects it owns are never deleted.
   static StreamGroupFactory& Global() {
@@ -321,6 +371,45 @@ BaseGPUDevice::~BaseGPUDevice() {
   for (auto ctx : device_contexts_) ctx->Unref();
 }
 
+#ifdef GOOGLE_CUDA
+// For enabling cuda-graph
+void BaseGPUDevice::SetSingleStream(){
+    if(stream_catpure_mode_) return;
+
+    stream_backup_ = *stream_;
+
+    stream_->device_to_host = stream_->host_to_device = stream_->compute;
+
+    size_t d2d_size = stream_->device_to_device.size();
+    for(size_t i = 0; i < d2d_size; i ++){
+        stream_->device_to_device[i] = stream_->compute;
+    }
+
+    stream_->compute->SetStreamCaptureMode(true);
+
+    device_context_->stream_ = stream_->compute;
+    device_context_->host_to_device_stream_ = stream_->host_to_device;
+    device_context_->device_to_device_stream_ = stream_->device_to_device;
+    device_context_->device_to_host_stream_ = stream_->device_to_host;
+}
+
+void BaseGPUDevice::ResetStreams(){
+    if(! stream_catpure_mode_) return;
+
+    stream_->compute->SetStreamCaptureMode(false);
+
+    *stream_ = stream_backup_;
+
+    device_context_->stream_ = stream_->compute;
+    device_context_->host_to_device_stream_ = stream_->host_to_device;
+    device_context_->device_to_device_stream_ = stream_->device_to_device;
+    device_context_->device_to_host_stream_ = stream_->device_to_host;
+    gpu_device_info_->stream = stream_->compute;
+
+}
+#endif
+
+
 // This should be idempotent if already initialized.
 Status BaseGPUDevice::InitScratchBuffers() {
   mutex_lock l(scratch_init_mutex_);
@@ -354,6 +443,8 @@ Status BaseGPUDevice::InitScratchBuffers() {
 }
 
 Status BaseGPUDevice::Init(const SessionOptions& options) {
+  session_options_ = options;
+    
   auto executor_status = GpuIdUtil::ExecutorForTfGpuId(tf_gpu_id_);
   if (!executor_status.status().ok()) {
     return errors::Internal("Failed to get StreamExecutor for device ",

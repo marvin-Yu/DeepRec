@@ -52,6 +52,9 @@ constexpr bool kVerifyGpuContext = false;
 
 namespace stream_executor {
 namespace gpu {
+
+bool GpuDriver::cuda_stream_capture_mode_ = false;
+    
 namespace {
 
 // Manages the singleton map of contexts that we've created, mapping
@@ -186,10 +189,9 @@ void CheckPointerIsValid(const PtrT ptr, absl::string_view name) {
 
 // Call cuCtxtSynchronize and crash if it doesn't succeed.
 void SynchronizeOrDie() {
-  auto res = cuCtxSynchronize();
-  if (res != CUDA_SUCCESS) {
-    LOG(FATAL) << "Synchronize found " << ToString(res)
-               << " :: " << port::CurrentStackTrace();
+  if(!GpuDriver::cuda_stream_capture_mode_){
+      FAIL_IF_CUDA_RES_ERROR(cuCtxSynchronize(),
+                               "Synchronize fail: ", port::CurrentStackTrace());
   }
 }
 
@@ -317,6 +319,7 @@ static port::Status InternalInit() {
 
   LOG(ERROR) << "failed call to cuInit: " << ToString(res);
   Diagnostician::LogDiagnosticInformation();
+  
   return port::Status(port::error::ABORTED,
                       absl::StrCat("failed call to cuInit: ", ToString(res)));
 }
@@ -998,22 +1001,25 @@ GpuDriver::ContextGetSharedMemConfig(GpuContext* context) {
 /* static */ bool GpuDriver::GetEventElapsedTime(GpuContext* context,
                                                  float* elapsed_milliseconds,
                                                  CUevent start, CUevent stop) {
-  ScopedActivateContext activated{context};
-  // The stop event must have completed in order for cuEventElapsedTime to
-  // work.
-  CUresult res = cuEventSynchronize(stop);
-  if (res != CUDA_SUCCESS) {
-    LOG(ERROR) << "failed to synchronize the stop event: " << ToString(res);
-    return false;
-  }
-  res = cuEventElapsedTime(elapsed_milliseconds, start, stop);
-  if (res != CUDA_SUCCESS) {
-    LOG(ERROR) << "failed to get elapsed time between events: "
-               << ToString(res);
-    return false;
-  }
-
-  return true;
+    if(! cuda_stream_capture_mode_){
+        ScopedActivateContext activated{context};
+        // The stop event must have completed in order for cuEventElapsedTime to
+        // work.
+        CUresult res = cuEventSynchronize(stop);
+        if (res != CUDA_SUCCESS) {
+            LOG(ERROR) << "failed to synchronize the stop event: " << ToString(res);
+            return false;
+        }
+        res = cuEventElapsedTime(elapsed_milliseconds, start, stop);
+        if (res != CUDA_SUCCESS) {
+            LOG(ERROR) << "failed to get elapsed time between events: "
+                       << ToString(res);
+            return false;
+        }
+    }else{
+        *elapsed_milliseconds = 999.f;
+    }
+    return true;
 }
 
 /* static */ bool GpuDriver::WaitStreamOnEvent(GpuContext* context,
@@ -1029,31 +1035,27 @@ GpuDriver::ContextGetSharedMemConfig(GpuContext* context) {
 }
 
 /* static */ bool GpuDriver::SynchronizeContext(GpuContext* context) {
-  ScopedActivateContext activation(context);
-  CUresult res = cuCtxSynchronize();
-  if (res != CUDA_SUCCESS) {
-    LOG(ERROR) << "could not synchronize on CUDA context: " << ToString(res)
-               << " :: " << port::CurrentStackTrace();
-    return false;
-  }
-
-  return true;
+    if (! cuda_stream_capture_mode_){
+        ScopedActivateContext activation(context);
+        CUresult res = cuCtxSynchronize();
+        if (res != CUDA_SUCCESS) {
+            LOG(ERROR) << "could not synchronize on CUDA context: " << ToString(res)
+                       << " :: " << port::CurrentStackTrace();
+            return false;
+        }
+    }
+    return true;
 }
 
 /* static */ port::Status GpuDriver::SynchronizeStream(GpuContext* context,
                                                        CUstream stream) {
-  ScopedActivateContext activated{context};
-  CHECK(stream != nullptr);
-  CUresult res = cuStreamSynchronize(stream);
-  if (res != CUDA_SUCCESS) {
-    port::Status status = port::InternalError(
-        absl::StrCat("could not synchronize on CUDA stream: ", ToString(res)));
-    LOG(ERROR) << status << " :: " << port::CurrentStackTrace();
-    return status;
-  }
-  VLOG(2) << "successfully synchronized stream " << stream << " on context "
-          << context;
-  return port::Status::OK();
+    if(! cuda_stream_capture_mode_){
+        ScopedActivateContext activated{context};
+        CHECK(stream != nullptr);
+        RETURN_IF_CUDA_RES_ERROR(cuStreamSynchronize(stream),
+                                 "Could not synchronize CUDA stream");
+    }
+    return port::Status::OK();
 }
 
 /* static */ bool GpuDriver::IsStreamIdle(GpuContext* context,
@@ -1168,11 +1170,13 @@ GpuDriver::ContextGetSharedMemConfig(GpuContext* context) {
     CheckPointerIsValid(gpu_dst, "dst");
   }
   CUresult res = cuMemcpyHtoDAsync(gpu_dst, host_src, size, stream);
+  // LOG(INFO) << "copy memory from host to devie, using stream: " << stream << " size =" << size << std::endl;
+  
   if (res != CUDA_SUCCESS) {
     LOG(ERROR) << absl::StrFormat(
         "failed to enqueue async memcpy from host to device: %s; GPU dst: %p; "
-        "host src: %p; size: %u=0x%x",
-        ToString(res), absl::bit_cast<void*>(gpu_dst), host_src, size, size);
+        "host src: %p; size: %u=0x%x,  Stream = 0x%x;",
+        ToString(res), absl::bit_cast<void*>(gpu_dst), host_src, size, size, stream);
     return false;
   }
   VLOG(2) << "successfully enqueued async memcpy h2d of " << size << " bytes"
