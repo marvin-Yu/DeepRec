@@ -376,35 +376,35 @@ BaseGPUDevice::~BaseGPUDevice() {
 void BaseGPUDevice::SetSingleStream(){
     if(stream_catpure_mode_) return;
 
-    stream_backup_ = *stream_;
+    stream_backup_ = *streams_[0];
 
-    stream_->device_to_host = stream_->host_to_device = stream_->compute;
+    streams_[0]->device_to_host = streams_[0]->host_to_device = streams_[0]->compute;
 
-    size_t d2d_size = stream_->device_to_device.size();
+    size_t d2d_size = streams_[0]->device_to_device.size();
     for(size_t i = 0; i < d2d_size; i ++){
-        stream_->device_to_device[i] = stream_->compute;
+        streams_[0]->device_to_device[i] = streams_[0]->compute;
     }
 
-    stream_->compute->SetStreamCaptureMode(true);
+    streams_[0]->compute->SetStreamCaptureMode(true);
 
-    device_context_->stream_ = stream_->compute;
-    device_context_->host_to_device_stream_ = stream_->host_to_device;
-    device_context_->device_to_device_stream_ = stream_->device_to_device;
-    device_context_->device_to_host_stream_ = stream_->device_to_host;
+    device_contexts_[0]->stream_ = streams_[0]->compute;
+    device_contexts_[0]->host_to_device_stream_ = streams_[0]->host_to_device;
+    device_contexts_[0]->device_to_device_stream_ = streams_[0]->device_to_device;
+    device_contexts_[0]->device_to_host_stream_ = streams_[0]->device_to_host;
 }
 
 void BaseGPUDevice::ResetStreams(){
     if(! stream_catpure_mode_) return;
 
-    stream_->compute->SetStreamCaptureMode(false);
+    streams_[0]->compute->SetStreamCaptureMode(false);
 
-    *stream_ = stream_backup_;
+    *streams_[0] = stream_backup_;
 
-    device_context_->stream_ = stream_->compute;
-    device_context_->host_to_device_stream_ = stream_->host_to_device;
-    device_context_->device_to_device_stream_ = stream_->device_to_device;
-    device_context_->device_to_host_stream_ = stream_->device_to_host;
-    gpu_device_info_->stream = stream_->compute;
+    device_contexts_[0]->stream_ = streams_[0]->compute;
+    device_contexts_[0]->host_to_device_stream_ = streams_[0]->host_to_device;
+    device_contexts_[0]->device_to_device_stream_ = streams_[0]->device_to_device;
+    device_contexts_[0]->device_to_host_stream_ = streams_[0]->device_to_host;
+    gpu_device_info_->stream = streams_[0]->compute;
 
 }
 #endif

@@ -138,8 +138,8 @@ class BaseGPUDevice : public LocalDevice {
   // get the underlying cuda stream
   cudaStream_t GetSingleStream(){
       if( ! stream_catpure_mode_) return nullptr;
-      
-      auto gpu_stream = stream_->compute->implementation();
+      // todo: make clear what if there are more than 1 streams? 
+      auto gpu_stream = streams_[0]->compute->implementation();
       return static_cast<cudaStream_t>(gpu_stream->GpuStreamHack());
   }
   
