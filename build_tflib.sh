@@ -11,4 +11,4 @@ set -e
 set -u
 ### compile debug version
 #bazel build --config monolithic --copt=-g --strip=never -c opt --copt=-mavx --copt=-mavx2 --copt=-mfma --copt "-DEIGEN_ENABLE_AVX2" --copt "-DNDEBUG" //tensorflow:tensorflow
-bazel build --config monolithic -c opt --copt=-mavx --copt=-mavx2 --copt=-mfma --copt "-DEIGEN_ENABLE_AVX2" --copt "-DNDEBUG" //tensorflow:tensorflow
+bazel build --config monolithic -c opt --copt=-mavx --copt=-mavx2 --copt=-mfma --copt "-DEIGEN_ENABLE_AVX2" --copt "-DNDEBUG" --verbose_failures //tensorflow:tensorflow 

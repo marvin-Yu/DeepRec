@@ -22,6 +22,7 @@ limitations under the License.
 
 namespace tensorflow {
 void OpsTestBase::SetDevice(const DeviceType& device_type) {
+  /*
   device_type_ = device_type;
 #ifdef GOOGLE_CUDA
   if (device_type == DEVICE_GPU) {
@@ -36,7 +37,7 @@ void OpsTestBase::SetDevice(const DeviceType& device_type) {
   CHECK_NE(device_type, DEVICE_GPU)
       << "Requesting GPU on binary compiled without GOOGLE_CUDA.";
 #endif
-
+*/
 }
 
 void OpsTestBase::SetDevice(const DeviceType& device_type,

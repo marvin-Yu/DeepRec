@@ -7454,6 +7454,80 @@ tf_kernel_library(
     ],
 )
 
+blaze_deps = [
+    "@com_google_absl//absl/memory",
+    "@com_google_absl//absl/strings",
+    "//tensorflow/core:core_cpu_lib_no_ops",
+    "//tensorflow/core:direct_session",
+    "//tensorflow/core:framework",
+    "//tensorflow/core:gpu_headers_lib",
+    "//tensorflow/core:proto_text",
+    "//tensorflow/core:lib",
+    "//tensorflow/core:lib_internal",
+    "//tensorflow/core:lib_proto_parsing",
+    "//tensorflow/core:stream_executor",
+    "//tensorflow/core:stream_executor_headers_lib",
+    "//tensorflow/core/grappler/costs:graph_properties",
+    "//tensorflow/core/kernels:gpu_utils",
+    "//tensorflow/stream_executor/lib",
+]
+
+cc_library(
+    name = "blaze_predictor",
+    srcs = [
+        "blaze_predictor.cc"
+    ],
+    hdrs = [
+        "blaze_predictor.h"
+    ],
+    deps = blaze_deps,
+    alwayslink = 1,
+)
+
+filegroup(
+    name = "blaze_predictor_test_data",
+    srcs = [
+        "blaze_test_data/aplusb.pbtxt",
+        "blaze_test_data/options",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+tf_cc_test(
+    name = "blaze_predictor_test",
+    size = "small",
+    srcs = [
+        "blaze_predictor_test.cc",
+    ],
+    data = [":blaze_predictor_test_data"],
+    deps = [
+        ":blaze_predictor",
+        "//tensorflow/cc:cc_ops",
+        "//tensorflow/cc:scope",
+        "//tensorflow/core:core_cpu",
+        "//tensorflow/core:direct_session",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:lib_internal",
+        "//tensorflow/core:ops",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core:remote_fused_graph_ops_op_lib",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core:testlib",
+    ],
+)
+
+tf_kernel_library(
+    name = "blaze_xla_op",
+    srcs = [
+        "blaze_xla_kernel.cc",
+    ],
+    deps = [
+        "//tensorflow/core/kernels:blaze_predictor",
+    ],
+)
+
 cc_library(
     name = "quantization_utils",
     srcs = ["quantization_utils.cc"],
