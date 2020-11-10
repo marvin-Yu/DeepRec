@@ -23,12 +23,30 @@
 
 namespace tensorflow {
 namespace {
-NodeDef MakeBlazeNodeDef(std::initializer_list<DataType> t1,
+class BlazePredictorTest {
+ public:
+  static NodeDef MakeBlazeNodeDef(std::initializer_list<DataType> t1,
                       std::initializer_list<DataType> t2,
                       std::vector<std::string> input_names,
                       std::vector<std::string> output_names,
                       const std::string &graph_def,
-                      const std::string &blaze_option_path) {
+                      const std::string &blaze_option_path);
+
+ private:
+  std::string graph_def_path_;
+  std::string blaze_options_path_;
+
+  OpkernelConstruction *constr_;
+  OpKernelContext *context_;
+}
+
+NodeDef BlazePredictorTest::MakeBlazeNodeDef(
+    std::initializer_list<DataType> t1,
+    std::initializer_list<DataType> t2,
+    std::vector<std::string> input_names,
+    std::vector<std::string> output_names,
+    const std::string &graph_def,
+    const std::string &blaze_option_path) {
   NodeDefBuilder builder("BlazeXlaOp", "BlazeXlaOp");
   NodeDef node_def;
   builder
@@ -51,12 +69,10 @@ TEST(BlazePredictorCPUTest, CPUTest) {
   string blaze_options = io::JoinPath(testing::TensorFlowSrcRoot(),
                                  "core/kernels/blaze_test_data/options");
 
-  std::cout << "caixukun\n";
-  std::cout << filename << std::endl;
   GraphDef gdef;
   TF_ASSERT_OK(ReadTextProto(Env::Default(), filename, &gdef));
   NodeDef node_def = MakeBlazeNodeDef({DT_INT32, DT_INT32}, {DT_INT32},
-                                      {"x", "y"}, {"z"}, gdef.DebugString(),
+                                      {"x", "y"}, {"result"}, gdef.DebugString(),
                                       blaze_options);
   // Look up the Op registered for this op name.
   const OpDef* op_def = nullptr;
@@ -114,6 +130,7 @@ TEST(BlazePredictorCPUTest, CPUTest) {
 
     Tensor input2(DT_INT32, shape1);
     test::FillIota<int>(&input2, 2);
+    inputs.push_back({nullptr, &input2});
     OpKernelContext::Params params;
     params.device = device.get();
     params.frame_iter = FrameAndIter(0, 0);
@@ -121,6 +138,14 @@ TEST(BlazePredictorCPUTest, CPUTest) {
     params.op_kernel = op.get();
     std::vector<AllocatorAttributes> attrs;
     test::SetOutputAttrs(&params, &attrs);
+
+    std::unique_ptr<OpKernelContext> predictor_context(
+        new OpKernelContext(&params));
+    predictor.Compute(predictor_context.get());
+    TF_ASSERT_OK(predictor_context->status());
+    ASSERT_EQ(predictor_context->num_outputs(), 1);
+    auto output = predictor_context->mutable_output(0);
+    ASSERT_NE(nullptr, output);
   }
 }
 }

@@ -25,7 +25,9 @@ Status BlazePredictor::InitSession(OpKernelConstruction* ctx) {
     return status;
   }
 
-  std::string device_name = ctx->def().device();
+  std::string request_device = ctx->def().device();
+  std::string device_name = "/job:localhost/replica:0/task:0" + request_device;
+
   SetDeviceInGraphDef(device_name, &graph_def_);
   status = session_->Create(graph_def_);
   if (!status.ok()) {
