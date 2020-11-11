@@ -7475,10 +7475,12 @@ blaze_deps = [
 cc_library(
     name = "blaze_predictor",
     srcs = [
-        "blaze_predictor.cc"
+        "blaze_predictor.cc",
+        "blaze_xla_predictor.cc",
     ],
     hdrs = [
-        "blaze_predictor.h"
+        "blaze_predictor.h",
+        "blaze_xla_predictor.h",
     ],
     deps = blaze_deps,
     alwayslink = 1,
@@ -7488,12 +7490,13 @@ filegroup(
     name = "blaze_predictor_test_data",
     srcs = [
         "blaze_test_data/aplusb.pbtxt",
+        "blaze_test_data/error.pbtxt",
         "blaze_test_data/options",
     ],
     visibility = ["//visibility:public"],
 )
 
-tf_cc_test(
+tf_cuda_cc_test(
     name = "blaze_predictor_test",
     size = "small",
     srcs = [

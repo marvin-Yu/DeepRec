@@ -7,49 +7,81 @@ BlazePredictor::BlazePredictor(OpKernelConstruction* ctx) {
   OP_REQUIRES_OK(ctx, ctx->GetAttr("output_names", &output_names_));
   OP_REQUIRES_OK(ctx, ctx->GetAttr("graph_def", &graph_def_str_));
   OP_REQUIRES_OK(ctx, ctx->GetAttr("blaze_option_path", &blaze_option_path_));
-  OP_REQUIRES_OK(ctx, InitSession(ctx));
+  OP_REQUIRES_OK(ctx, ParseAttr());
 }
 
-Status BlazePredictor::InitSession(OpKernelConstruction* ctx) {
-  TF_RETURN_IF_ERROR(ReadTextProto(Env::Default(), blaze_option_path_, &blaze_run_options_));
-
-  SessionOptions options;
-  options.config.MergeFrom(blaze_run_options_.config_proto());
+Status BlazePredictor::ParseAttr() {
+  if (!ReadTextProto(Env::Default(), blaze_option_path_,
+                     &blaze_run_options_).ok()) {
+    return errors::Internal("parse proto from ", blaze_option_path_,  " failed");
+  }
 
   if (!protobuf::TextFormat::ParseFromString(graph_def_str_, &graph_def_)) {
     return errors::InvalidArgument("parse ", graph_def_str_, " to protobuf failed");
   }
+  
+  return Status::OK();
+}
+
+Status BlazePredictor::GenSessionOptions(OpKernelConstruction* ctx,
+                                         SessionOptions& options) {
+  options.config.MergeFrom(blaze_run_options_.config_proto());
+  return Status::OK();
+}
+
+Status BlazePredictor::PrepareGraph(OpKernelConstruction* ctx, GraphDef& graph_def) {
+  if (ctx->def().device().size() == 0) {
+    return errors::Internal("ctx device not set");
+  }
+
+  const char* const kDevicePrefix = "/job:localhost/replica:0/task:0";
+  device_ = kDevicePrefix + ctx->def().device();
+
+  LOG(INFO) << "BlazePredictor will use device " << device_;
+  graph_def = graph_def_;
+  SetDeviceInGraphDef(device_, &graph_def);
+
+  return Status::OK();
+}
+
+Status BlazePredictor::MakeCallable() {
+  CallableOptions callable_options;
+  for (const auto& input : input_names_) {
+    callable_options.add_feed(input);
+    callable_options.mutable_feed_devices()->insert({input, device_});
+  }
+
+  for (const auto& output : output_names_) {
+    callable_options.add_fetch(output);
+    callable_options.mutable_fetch_devices()->insert({output, device_});
+  }
+  callable_options.set_fetch_skip_sync(true);
+  LOG(INFO) << "create session with callable options " <<
+      callable_options.DebugString();
+  return session_->MakeCallable(callable_options, &handle_);
+}
+
+Status BlazePredictor::InitSession(OpKernelConstruction* ctx) {
+  TF_RETURN_IF_ERROR(PrepareData(ctx));
+
+  SessionOptions options;
+  TF_RETURN_IF_ERROR(GenSessionOptions(ctx, options));
   auto status = NewSession(options, &session_);
   if (!status.ok()) {
     LOG(ERROR) << "create session failed";
     return status;
   }
 
-  std::string request_device = ctx->def().device();
-  std::string device_name = "/job:localhost/replica:0/task:0" + request_device;
+  GraphDef graph_def;
+  TF_RETURN_IF_ERROR(PrepareGraph(ctx, graph_def));
 
-  SetDeviceInGraphDef(device_name, &graph_def_);
-  status = session_->Create(graph_def_);
+  status = session_->Create(graph_def);
   if (!status.ok()) {
     LOG(ERROR) << "create session with GraphDef failed " << status.ToString();
     return status;
   }
 
-  CallableOptions callable_options;
-  for (const auto& input : input_names_) {
-    callable_options.add_feed(input);
-    callable_options.mutable_feed_devices()->insert({input, device_name});
-  }
-
-  for (const auto& output : output_names_) {
-    callable_options.add_fetch(output);
-    callable_options.mutable_fetch_devices()->insert({output, device_name});
-  }
-  callable_options.set_fetch_skip_sync(true);
-  LOG(INFO) << "create session with callable options " <<
-      callable_options.DebugString();
-  status = session_->MakeCallable(callable_options, &handle_);
-  return status;
+  return MakeCallable();
 }
 
 void BlazePredictor::Compute(OpKernelContext* ctx) {
@@ -60,7 +92,6 @@ void BlazePredictor::Compute(OpKernelContext* ctx) {
   OP_REQUIRES(ctx, ctx->num_outputs() == output_names_.size(),
               errors::Internal("ctx output size ", ctx->num_outputs(),
                                " != ", output_names_.size()));
-
   std::vector<Tensor> inputs;
   inputs.reserve(num_inputs);
   for (int i = 0; i < num_inputs; ++i) {

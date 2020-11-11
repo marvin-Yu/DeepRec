@@ -32,10 +32,6 @@
 #include "tensorflow/core/protobuf/blaze.pb.h"
 #include "tensorflow/stream_executor/lib/statusor.h"
 
-#if GOOGLE_CUDA
-#include "tensorflow/core/kernels/gpu_utils.h"
-#endif
-
 namespace tensorflow {
 
 //Base blaze predictor, for normal run/(mlir)
@@ -45,9 +41,16 @@ class BlazePredictor {
   virtual ~BlazePredictor() {}
 
   virtual void Compute(OpKernelContext* ctx);
+  //session must created in constructor function, otherwise in compute function
+  //it will cost lots of time the first time
+  virtual Status InitSession(OpKernelConstruction* ctx);
 
+  Session* GetSession() {
+    return session_;
+  }
  protected:
   // read from tensor proto
+  std::string device_;
   std::string graph_def_str_;
   std::string blaze_option_path_;
   std::vector<std::string> input_names_;
@@ -58,13 +61,17 @@ class BlazePredictor {
   Session* session_;
   BlazeRunOptions blaze_run_options_;
   Session::CallableHandle handle_;
-
  private:
-  //session must created in constructor function, otherwise in compute function
-  //it will cost lots of time the first time
-  Status InitSession(OpKernelConstruction* ctx);
+  Status ParseAttr();
+  virtual Status PrepareData(OpKernelConstruction* ctx) {
+    return Status::OK();
+  }
 
+  virtual Status PrepareGraph(OpKernelConstruction* ctx, GraphDef& graph_def);
+  virtual Status GenSessionOptions(OpKernelConstruction* ctx,
+                                   SessionOptions& options);
+  virtual Status MakeCallable();
   void SetDeviceInGraphDef(const std::string device_name, GraphDef* graph_def);
 };
 }
-#endif
+#endif //end TENSORFLOW_CORE_KERNELS_BLAZE_PREDICOTR_H_

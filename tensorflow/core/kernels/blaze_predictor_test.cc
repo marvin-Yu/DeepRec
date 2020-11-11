@@ -25,6 +25,16 @@ namespace tensorflow {
 namespace {
 class BlazePredictorTest {
  public:
+  BlazePredictorTest(std::string& graph_path, std::string& blaze_opt_path):
+      graph_def_path_(graph_path), blaze_options_path_(blaze_opt_path) {
+  }
+
+  ~BlazePredictorTest() {
+    if (constr_) {
+      delete constr_;
+    }
+  }
+
   static NodeDef MakeBlazeNodeDef(std::initializer_list<DataType> t1,
                       std::initializer_list<DataType> t2,
                       std::vector<std::string> input_names,
@@ -32,13 +42,17 @@ class BlazePredictorTest {
                       const std::string &graph_def,
                       const std::string &blaze_option_path);
 
+  Status GeneOpKernelConstruction(DeviceType device_type, NodeDef& node_def);
+
+  OpKernelConstruction* GetConstruction() {
+    return constr_;
+  }
  private:
   std::string graph_def_path_;
   std::string blaze_options_path_;
 
-  OpkernelConstruction *constr_;
-  OpKernelContext *context_;
-}
+  OpKernelConstruction *constr_;
+};
 
 NodeDef BlazePredictorTest::MakeBlazeNodeDef(
     std::initializer_list<DataType> t1,
@@ -62,53 +76,57 @@ NodeDef BlazePredictorTest::MakeBlazeNodeDef(
   return node_def;
 }
 
-TEST(BlazePredictorCPUTest, CPUTest) {
-  // Test constructor
-  string filename = io::JoinPath(testing::TensorFlowSrcRoot(),
-                                 "core/kernels/blaze_test_data/aplusb.pbtxt");
-  string blaze_options = io::JoinPath(testing::TensorFlowSrcRoot(),
-                                 "core/kernels/blaze_test_data/options");
-
-  GraphDef gdef;
-  TF_ASSERT_OK(ReadTextProto(Env::Default(), filename, &gdef));
-  NodeDef node_def = MakeBlazeNodeDef({DT_INT32, DT_INT32}, {DT_INT32},
-                                      {"x", "y"}, {"result"}, gdef.DebugString(),
-                                      blaze_options);
-  // Look up the Op registered for this op name.
+Status BlazePredictorTest::GeneOpKernelConstruction(DeviceType device_type,
+                                                    NodeDef& node_def) {
   const OpDef* op_def = nullptr;
-  Status s = OpRegistry::Global()->LookUpOpDef(node_def.op(), &op_def);
-  TF_ASSERT_OK(s);
-
+  TF_RETURN_IF_ERROR(OpRegistry::Global()->LookUpOpDef(node_def.op(), &op_def));
   // Validate node_def against OpDef.
-  s = ValidateNodeDef(node_def, *op_def);
-  TF_ASSERT_OK(s);
+  TF_RETURN_IF_ERROR(ValidateNodeDef(node_def, *op_def));
 
   DataTypeVector inputs;
   DataTypeVector outputs;
+  Status s;
   s.Update(InOutTypesForNode(node_def, *op_def, &inputs, &outputs));
-  TF_ASSERT_OK(s);
+  TF_RETURN_IF_ERROR(s);
 
   // We are creating a kernel for an op registered in
   // OpRegistry::Global(), we consult the kernel registry to decide
   // the kernel's input and output memory types.
   MemoryTypeVector input_memory_types;
   MemoryTypeVector output_memory_types;
-  TF_ASSERT_OK(MemoryTypesForNode(OpRegistry::Global(), DEVICE_CPU,
+  TF_RETURN_IF_ERROR(MemoryTypesForNode(OpRegistry::Global(), device_type,
                                         node_def, &input_memory_types,
                                         &output_memory_types));
 
   Status status;
   DeviceBase device(Env::Default());
-  OpKernelConstruction ctx(DEVICE_CPU, &device, cpu_allocator(),
+  constr_ = new OpKernelConstruction(device_type, &device, cpu_allocator(),
                            &node_def, op_def, nullptr, inputs, input_memory_types,
                            outputs, output_memory_types, TF_GRAPH_DEF_VERSION, &status);
-  TF_ASSERT_OK(status);
-  
-  BlazePredictor predictor(&ctx);
+  return status;
+}
 
+TEST(TestBlazePredictor, TestCPUSucc) {
+  {
+    std::string succ_pb = "core/kernels/blaze_test_data/aplusb.pbtxt";
+    std::string options = "core/kernels/blaze_test_data/options";
+    BlazePredictorTest test(succ_pb, options);
+
+    string filename = io::JoinPath(testing::TensorFlowSrcRoot(), succ_pb);
+    string blaze_options = io::JoinPath(testing::TensorFlowSrcRoot(), options);
+
+    GraphDef gdef;
+    TF_ASSERT_OK(ReadTextProto(Env::Default(), filename, &gdef));
+    NodeDef node_def = BlazePredictorTest::MakeBlazeNodeDef({DT_INT32, DT_INT32}, {DT_INT32},
+                                        {"x", "y"}, {"result"}, gdef.DebugString(),
+                                        blaze_options);
+    TF_ASSERT_OK(test.GeneOpKernelConstruction(DEVICE_CPU, node_def));
+
+    BlazePredictor predictor(test.GetConstruction());
+    TF_ASSERT_OK(predictor.InitSession(test.GetConstruction()));
   //computing test
   {
-    int num_threads = 2;
+    Status status;
     std::unique_ptr<Device> device(
         DeviceFactory::NewDevice("CPU", {}, "/job:a/replica:0/task:0"));
 
@@ -146,6 +164,10 @@ TEST(BlazePredictorCPUTest, CPUTest) {
     ASSERT_EQ(predictor_context->num_outputs(), 1);
     auto output = predictor_context->mutable_output(0);
     ASSERT_NE(nullptr, output);
+    Tensor expected(DT_INT32, TensorShape({10}));
+    test::FillValues<int32>(&expected, {3, 5, 7, 9, 11, 13, 15, 17, 19, 21});
+    test::ExpectTensorEqual<int32>(expected, *output);
+  }
   }
 }
 }
