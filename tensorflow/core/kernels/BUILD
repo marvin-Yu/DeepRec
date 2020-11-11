@@ -7492,6 +7492,8 @@ filegroup(
         "blaze_test_data/aplusb.pbtxt",
         "blaze_test_data/error.pbtxt",
         "blaze_test_data/options",
+        "blaze_test_data/negative_options",
+        "blaze_test_data/succ_options",
     ],
     visibility = ["//visibility:public"],
 )
@@ -7501,6 +7503,7 @@ tf_cuda_cc_test(
     size = "small",
     srcs = [
         "blaze_predictor_test.cc",
+        "blaze_xla_predictor_test.cc",
     ],
     linkstatic = tf_kernel_tests_linkstatic(),
     data = [":blaze_predictor_test_data"],

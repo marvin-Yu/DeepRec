@@ -2,6 +2,7 @@
 
 #if GOOGLE_CUDA
 #include "tensorflow/core/kernels/gpu_utils.h"
+#endif
 
 namespace tensorflow {
 InputNodeMap BlazeXlaPredictor::ToInputNodeMap() {
@@ -48,13 +49,13 @@ Status BlazeXlaPredictor::FindBlackPaddingInputs() {
   return Status::OK();
 }
 
-Status BlazeXlaPredictor::InitWarmup() {
+Status BlazeXlaPredictor::InitXlaWarmup() {
   if (blaze_run_options_.warmup_batchsize_size() == 0) {
     return errors::Internal("xla not setting warmup batchsize");
   }
 
   std::vector<int> warm(blaze_run_options_.warmup_batchsize().begin(),
-                        blaze_run_options_.warmup_batchsize.end());
+                        blaze_run_options_.warmup_batchsize().end());
 
   std::sort(warm.begin(), warm.end());
   for (auto val : warm) {
@@ -132,7 +133,6 @@ int BlazeXlaPredictor::InferBatchSize(const std::vector<Tensor>& tensors) {
   }
   return batchsize;
 }
-
 Status BlazeXlaPredictor::PadToStatic(const std::vector<Tensor>& inputs,
                                       std::vector<Tensor>* padded_inputs,
                                       int batchsize, int pad_to_batchsize,
@@ -172,6 +172,7 @@ Status BlazeXlaPredictor::PadToStatic(const std::vector<Tensor>& inputs,
           "Error when getting input address or size");
     }
     if (ctx->input_memory_type(i) != HOST_MEMORY) {
+#if GOOGLE_CUDA
       auto input_dev_ptr = AsDeviceMemory(input_ptr, input_size);
       auto padded_dev_ptr = AsDeviceMemory(padded_ptr, padded_size);
       bool copy_status =
@@ -179,6 +180,7 @@ Status BlazeXlaPredictor::PadToStatic(const std::vector<Tensor>& inputs,
       if (!copy_status) {
         return errors::Internal("MemcpyD2D for padding inputs failed.");
       }
+#endif
     } else {
       std::memset(padded_ptr, 0, padded_size);
       std::memcpy(padded_ptr, input_ptr, input_size);
@@ -222,6 +224,7 @@ Status BlazeXlaPredictor::SliceToDynamic(const std::vector<Tensor>& padded_outpu
           "Error when getting output address or size");
     }
     if (ctx->output_memory_type(i) != HOST_MEMORY) {
+#if GOOGLE_CUDA
       auto output_dev_ptr = AsDeviceMemory(output_ptr, output_size);
       auto padded_dev_ptr = AsDeviceMemory(padded_ptr, padded_size);
       bool copy_status =
@@ -229,6 +232,7 @@ Status BlazeXlaPredictor::SliceToDynamic(const std::vector<Tensor>& padded_outpu
       if (!copy_status) {
         return errors::Internal("MemcpyD2D for unpadding outputs failed.");
       }
+#endif
     } else {
       memcpy(output_ptr, padded_ptr, output_size);
     }
@@ -238,5 +242,69 @@ Status BlazeXlaPredictor::SliceToDynamic(const std::vector<Tensor>& padded_outpu
   return Status::OK();
 }
 
+void BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
+  // Infer inputs' batchsize
+  int num_inputs = ctx->num_inputs();
+  std::vector<Tensor> inputs;
+  inputs.reserve(num_inputs);
+  for (int i = 0; i < num_inputs; ++i) {
+    inputs.push_back(ctx->input(i));
+  }
+  int batchsize = InferBatchSize(inputs);
+  if (batchsize == -1) {
+    ctx->SetStatus(
+        errors::Internal("Cannot infer inputs' batchsize"));
+    return;
+  }
+
+  int pad_to_batchsize = batchsize;
+  for (int n : batch_sizes_) {
+    if (n >= batchsize) {
+      pad_to_batchsize = n;
+      break;
+    }
+  }
+
+  VLOG(1) << "batchsize = " << batchsize
+          << ", pad_to_batchsize = " << pad_to_batchsize;
+
+  if (pad_to_batchsize != batchsize) {
+    // Pad inputs
+    std::vector<Tensor> padded_inputs(num_inputs);
+    std::cout << "caixukun " << batchsize << " --- " <<pad_to_batchsize << std::endl;
+    Status status = PadToStatic(inputs, &padded_inputs,
+        batchsize, pad_to_batchsize, ctx);
+    if (!status.ok()) {
+      ctx->SetStatus(status);
+      return;
+    }
+
+    // Call SessionRun
+    RunMetadata metadata;
+    std::vector<Tensor> padded_outputs;
+    OP_REQUIRES_OK(ctx, session_->RunCallable(
+        handle_, padded_inputs, &padded_outputs, &metadata));
+
+    // Unpad outputs
+    std::vector<Tensor*> outputs(ctx->num_outputs());
+    status = SliceToDynamic(padded_outputs, &outputs,
+                            batchsize, pad_to_batchsize, ctx);
+    if (!status.ok()) {
+      ctx->SetStatus(status);
+      return;
+    }
+  } else {
+    // Call SessionRun
+    VLOG(1) << "Skip padding: input bathsize = " << batchsize
+            << ", input pad_to_batchsize = " << pad_to_batchsize;
+    RunMetadata metadata;
+    std::vector<Tensor> outputs;
+    OP_REQUIRES_OK(ctx, session_->RunCallable(
+        handle_, inputs, &outputs, &metadata));
+    for (int i = 0; i < outputs.size(); ++i) {
+      ctx->set_output(i, outputs[i]);
+    }
+  }
+  return;
 }
-#endif
+}

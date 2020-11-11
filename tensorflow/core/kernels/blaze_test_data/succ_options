@@ -1,0 +1,3 @@
+warmup_batchsize: 10
+warmup_batchsize: 20
+warmup_batchsize: 5

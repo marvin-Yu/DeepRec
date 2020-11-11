@@ -8,9 +8,10 @@ typedef std::map<std::string, std::vector<NodeDef>> InputNodeMap;
 
 class BlazeXlaPredictor : public BlazePredictor {
  public:
-  BlazeXlaPredictor(OpKernelConstruction* ctx) : BlazePredictor(ctx) {}
+  explicit BlazeXlaPredictor(OpKernelConstruction* ctx) : BlazePredictor(ctx) {}
   ~BlazeXlaPredictor() {}
 
+  void Compute(OpKernelContext* ctx) override;
  private:
   Status FindBlackPaddingInputs();
   InputNodeMap ToInputNodeMap();
@@ -29,6 +30,7 @@ class BlazeXlaPredictor : public BlazePredictor {
   int InferBatchSize(const std::vector<Tensor>& tensors);
   
   Status InitXlaWarmup();
+
   std::vector<int32> batch_sizes_;
   std::vector<bool> skip_padding_;
 };
