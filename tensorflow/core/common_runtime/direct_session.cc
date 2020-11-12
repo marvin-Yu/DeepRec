@@ -800,7 +800,7 @@ Status DirectSession::RunInternal(
   }
 
   //[PROF-STATS]
-  if (enable_prof_stats_) {
+  if (enable_prof_stats_ && run_metadata) {
     run_metadata->mutable_prof_stats()->set_flops(prof_stats.flops);
   }
 

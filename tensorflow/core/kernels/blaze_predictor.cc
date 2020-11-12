@@ -100,12 +100,16 @@ void BlazePredictor::Compute(OpKernelContext* ctx) {
   }
 
   std::vector<Tensor> outputs;
-  RunMetadata metadata;
-  OP_REQUIRES_OK(ctx, session_->RunCallable(handle_, inputs, &outputs, &metadata));
+  if (ctx->prof_stats()) {
+    RunMetadata metadata;
+    OP_REQUIRES_OK(ctx, session_->RunCallable(handle_, inputs, &outputs, &metadata));
+    ctx->prof_stats()->flops += metadata.prof_stats().flops();
+  } else {
+    OP_REQUIRES_OK(ctx, session_->RunCallable(handle_, inputs, &outputs, nullptr));
+  }
   for (int i = 0; i < outputs.size(); ++i) {
     ctx->set_output(i, outputs[i]);
   }
-
   return;
 }
 
