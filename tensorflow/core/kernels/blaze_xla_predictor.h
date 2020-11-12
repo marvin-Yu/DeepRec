@@ -8,7 +8,7 @@ typedef std::map<std::string, std::vector<NodeDef>> InputNodeMap;
 
 class BlazeXlaPredictor : public BlazePredictor {
  public:
-  explicit BlazeXlaPredictor(OpKernelConstruction* ctx) : BlazePredictor(ctx) {}
+  using BlazePredictor::BlazePredictor;
   ~BlazeXlaPredictor() {}
 
   void Compute(OpKernelContext* ctx) override;
@@ -16,7 +16,7 @@ class BlazeXlaPredictor : public BlazePredictor {
   Status FindBlackPaddingInputs();
   InputNodeMap ToInputNodeMap();
 
-  Status PrepareData(OpKernelConstruction* ctx) override;
+  Status PrepareData() override;
 
   Status PadToStatic(const std::vector<Tensor>& inputs,
                      std::vector<Tensor>* padded_inputs,

@@ -67,7 +67,7 @@ Status BlazeXlaPredictor::InitXlaWarmup() {
   batch_sizes_ = std::move(warm);
 }
 
-Status BlazeXlaPredictor::PrepareData(OpKernelConstruction* ctx) {
+Status BlazeXlaPredictor::PrepareData() {
   TF_RETURN_IF_ERROR(FindBlackPaddingInputs());
   TF_RETURN_IF_ERROR(InitXlaWarmup());
 

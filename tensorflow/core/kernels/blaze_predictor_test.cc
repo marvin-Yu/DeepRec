@@ -123,7 +123,14 @@ TEST(TestBlazePredictor, TestCPUSucc) {
     TF_ASSERT_OK(test.GeneOpKernelConstruction(DEVICE_CPU, node_def));
 
     BlazePredictor predictor(test.GetConstruction());
-    TF_ASSERT_OK(predictor.InitSession(test.GetConstruction()));
+    TF_ASSERT_OK(predictor.InitSession());
+
+    BlazeRunOptions opts;
+    std::vector<std::string> ipns({"x", "y"});
+    std::vector<std::string> opns({"result"});
+    BlazePredictor predictor1(ipns, opns, gdef,
+                              "/CPU:0", opts);
+    TF_ASSERT_OK(predictor1.InitSession());
   //computing test
   {
     Status status;
@@ -167,6 +174,17 @@ TEST(TestBlazePredictor, TestCPUSucc) {
     Tensor expected(DT_INT32, TensorShape({10}));
     test::FillValues<int32>(&expected, {3, 5, 7, 9, 11, 13, 15, 17, 19, 21});
     test::ExpectTensorEqual<int32>(expected, *output);
+    {
+      /*
+      predictor1.Compute(predictor_context.get());
+      TF_ASSERT_OK(predictor_context->status());
+      ASSERT_EQ(predictor_context->num_outputs(), 1);
+      auto output = predictor_context->mutable_output(0);
+      ASSERT_NE(nullptr, output);
+      Tensor expected(DT_INT32, TensorShape({10}));
+      test::FillValues<int32>(&expected, {3, 5, 7, 9, 11, 13, 15, 17, 19, 21});
+      test::ExpectTensorEqual<int32>(expected, *output); */
+    }
   }
   }
 }

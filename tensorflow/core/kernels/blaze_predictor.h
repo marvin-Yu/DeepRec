@@ -37,39 +37,46 @@ namespace tensorflow {
 //Base blaze predictor, for normal run/(mlir)
 class BlazePredictor {
  public:
-  explicit BlazePredictor(OpKernelConstruction* ctx);
+  BlazePredictor(OpKernelConstruction* ctx);
+  BlazePredictor(const std::vector<std::string>& input_names,
+                          const std::vector<std::string>& output_names,
+                          const GraphDef& graph_def, const std::string& device,
+                          const BlazeRunOptions& options) : input_names_(input_names),
+    output_names_(output_names), graph_def_(graph_def),
+    request_device_(device), blaze_run_options_(options) {}
+
   virtual ~BlazePredictor() {}
 
   virtual void Compute(OpKernelContext* ctx);
   //session must created in constructor function, otherwise in compute function
   //it will cost lots of time the first time
-  virtual Status InitSession(OpKernelConstruction* ctx);
+  virtual Status InitSession();
 
   Session* GetSession() {
     return session_;
   }
  protected:
   // read from tensor proto
-  std::string device_;
-  std::string graph_def_str_;
-  std::string blaze_option_path_;
   std::vector<std::string> input_names_;
   std::vector<std::string> output_names_;
-
-  //runtime options
   GraphDef graph_def_;
-  Session* session_;
+  std::string request_device_;
   BlazeRunOptions blaze_run_options_;
+
+  std::string blaze_option_path_;
+  std::string graph_def_str_;
+  std::string device_;
+  //runtime options
+  Session* session_;
   Session::CallableHandle handle_;
  private:
-  Status ParseAttr();
-  virtual Status PrepareData(OpKernelConstruction* ctx) {
+  Status ParseAttr(const std::string& device);
+  virtual Status PrepareData() {
     return Status::OK();
   }
 
-  virtual Status PrepareGraph(OpKernelConstruction* ctx, GraphDef& graph_def);
-  virtual Status GenSessionOptions(OpKernelConstruction* ctx,
-                                   SessionOptions& options);
+  virtual Status PrepareGraph(GraphDef& graph_def);
+  virtual Status GenSessionOptions(SessionOptions& options);
   virtual Status MakeCallable();
   void SetDeviceInGraphDef(const std::string device_name, GraphDef* graph_def);
 };

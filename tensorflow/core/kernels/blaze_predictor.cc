@@ -7,10 +7,10 @@ BlazePredictor::BlazePredictor(OpKernelConstruction* ctx) {
   OP_REQUIRES_OK(ctx, ctx->GetAttr("output_names", &output_names_));
   OP_REQUIRES_OK(ctx, ctx->GetAttr("graph_def", &graph_def_str_));
   OP_REQUIRES_OK(ctx, ctx->GetAttr("blaze_option_path", &blaze_option_path_));
-  OP_REQUIRES_OK(ctx, ParseAttr());
+  OP_REQUIRES_OK(ctx, ParseAttr(ctx->def().device()));
 }
 
-Status BlazePredictor::ParseAttr() {
+Status BlazePredictor::ParseAttr(const std::string& device) {
   if (!ReadTextProto(Env::Default(), blaze_option_path_,
                      &blaze_run_options_).ok()) {
     return errors::Internal("parse proto from ", blaze_option_path_,  " failed");
@@ -20,22 +20,23 @@ Status BlazePredictor::ParseAttr() {
     return errors::InvalidArgument("parse ", graph_def_str_, " to protobuf failed");
   }
   
+  if (device.size() == 0) {
+    return errors::Internal("ctx device not set");
+  }
+  request_device_ = device;
+
   return Status::OK();
 }
 
-Status BlazePredictor::GenSessionOptions(OpKernelConstruction* ctx,
-                                         SessionOptions& options) {
+Status BlazePredictor::GenSessionOptions(SessionOptions& options) {
   options.config.MergeFrom(blaze_run_options_.config_proto());
   return Status::OK();
 }
 
-Status BlazePredictor::PrepareGraph(OpKernelConstruction* ctx, GraphDef& graph_def) {
-  if (ctx->def().device().size() == 0) {
-    return errors::Internal("ctx device not set");
-  }
+Status BlazePredictor::PrepareGraph(GraphDef& graph_def) {
 
   const char* const kDevicePrefix = "/job:localhost/replica:0/task:0";
-  device_ = kDevicePrefix + ctx->def().device();
+  device_ = kDevicePrefix + request_device_;
 
   LOG(INFO) << "BlazePredictor will use device " << device_;
   graph_def = graph_def_;
@@ -61,11 +62,11 @@ Status BlazePredictor::MakeCallable() {
   return session_->MakeCallable(callable_options, &handle_);
 }
 
-Status BlazePredictor::InitSession(OpKernelConstruction* ctx) {
-  TF_RETURN_IF_ERROR(PrepareData(ctx));
+Status BlazePredictor::InitSession() {
+  TF_RETURN_IF_ERROR(PrepareData());
 
   SessionOptions options;
-  TF_RETURN_IF_ERROR(GenSessionOptions(ctx, options));
+  TF_RETURN_IF_ERROR(GenSessionOptions(options));
   auto status = NewSession(options, &session_);
   if (!status.ok()) {
     LOG(ERROR) << "create session failed";
@@ -73,7 +74,7 @@ Status BlazePredictor::InitSession(OpKernelConstruction* ctx) {
   }
 
   GraphDef graph_def;
-  TF_RETURN_IF_ERROR(PrepareGraph(ctx, graph_def));
+  TF_RETURN_IF_ERROR(PrepareGraph(graph_def));
 
   status = session_->Create(graph_def);
   if (!status.ok()) {
