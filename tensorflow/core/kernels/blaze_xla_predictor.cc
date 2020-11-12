@@ -137,7 +137,6 @@ Status BlazeXlaPredictor::PadToStatic(const std::vector<Tensor>& inputs,
                                       std::vector<Tensor>* padded_inputs,
                                       int batchsize, int pad_to_batchsize,
                                       OpKernelContext* ctx) {
-  auto* stream = ctx->op_device_context()->stream();
   for (int i = 0; i < inputs.size(); ++i) {
     VLOG(1) << "Shape of input " << i << ": "
             << inputs[i].shape().DebugString();
@@ -173,6 +172,7 @@ Status BlazeXlaPredictor::PadToStatic(const std::vector<Tensor>& inputs,
     }
     if (ctx->input_memory_type(i) != HOST_MEMORY) {
 #if GOOGLE_CUDA
+      auto* stream = ctx->op_device_context()->stream();
       auto input_dev_ptr = AsDeviceMemory(input_ptr, input_size);
       auto padded_dev_ptr = AsDeviceMemory(padded_ptr, padded_size);
       bool copy_status =
@@ -196,7 +196,6 @@ Status BlazeXlaPredictor::SliceToDynamic(const std::vector<Tensor>& padded_outpu
                                          std::vector<Tensor*>* outputs,
                                          int batchsize, int pad_to_batchsize,
                                          OpKernelContext* ctx) {
-  auto* stream = ctx->op_device_context()->stream();
   for (int i = 0; i < padded_outputs.size(); ++i) {
     VLOG(1) << "Shape of padded_output " << i << ": "
             << padded_outputs[i].shape().DebugString();
@@ -225,6 +224,7 @@ Status BlazeXlaPredictor::SliceToDynamic(const std::vector<Tensor>& padded_outpu
     }
     if (ctx->output_memory_type(i) != HOST_MEMORY) {
 #if GOOGLE_CUDA
+      auto* stream = ctx->op_device_context()->stream();
       auto output_dev_ptr = AsDeviceMemory(output_ptr, output_size);
       auto padded_dev_ptr = AsDeviceMemory(padded_ptr, padded_size);
       bool copy_status =
@@ -271,7 +271,6 @@ void BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
   if (pad_to_batchsize != batchsize) {
     // Pad inputs
     std::vector<Tensor> padded_inputs(num_inputs);
-    std::cout << "caixukun " << batchsize << " --- " <<pad_to_batchsize << std::endl;
     Status status = PadToStatic(inputs, &padded_inputs,
         batchsize, pad_to_batchsize, ctx);
     if (!status.ok()) {

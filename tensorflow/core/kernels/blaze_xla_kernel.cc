@@ -61,7 +61,7 @@ BlazeXlaOp::BlazeXlaOp(OpKernelConstruction* context)
   OP_REQUIRES_OK(context, context->GetAttr("blaze_option_path", &blaze_option_path_));
   OP_REQUIRES_OK(context, ParseAttr());
   device_ = context->def().device();
-  predictor_ = new BlazePredictor(context);
+  InitPredictor();
   OP_REQUIRES_OK(context, predictor_->InitSession());
 }
 

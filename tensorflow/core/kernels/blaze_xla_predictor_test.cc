@@ -196,28 +196,30 @@ TEST(TestBlazeXlaPredictor, TestRun) {
                                                 TF_GRAPH_DEF_VERSION, &status));
     TF_ASSERT_OK(status);
 
+    OpKernelContext::Params params;
+    params.op_kernel = op.get();
     gtl::InlinedVector<TensorValue, 4> inputs;
     int bs = 8;
     TensorShape shape1({bs});
     Tensor input1(DT_INT32, shape1);
     test::FillIota<int>(&input1, 1);
     inputs.push_back({nullptr, &input1});
+   // params.op_kernel->input_memory_types()[0] = HOST_MEMORY;
 
     Tensor input2(DT_INT32, shape1);
     test::FillIota<int>(&input2, 2);
     inputs.push_back({nullptr, &input2});
-    OpKernelContext::Params params;
+   // params.op_kernel->input_memory_types()[1] = HOST_MEMORY;
     params.device = device.get();
     params.frame_iter = FrameAndIter(0, 0);
     params.inputs = &inputs;
-    params.op_kernel = op.get();
     params.op_device_context = new DeviceContext;
+   // params->op_kernel->output_memory_types()[0] = HOST_MEMORY;
     std::vector<AllocatorAttributes> attrs;
     test::SetOutputAttrs(&params, &attrs);
 
     std::unique_ptr<OpKernelContext> predictor_context(
         new OpKernelContext(&params));
-    /*
     predictor.Compute(predictor_context.get());
     TF_ASSERT_OK(predictor_context->status());
     ASSERT_EQ(predictor_context->num_outputs(), 1);
@@ -225,7 +227,7 @@ TEST(TestBlazeXlaPredictor, TestRun) {
     ASSERT_NE(nullptr, output);
     Tensor expected(DT_INT32, TensorShape({}));
     test::FillValues<int32>(&expected, {3, 5, 7, 9, 11, 13, 15, 17});
-    test::ExpectTensorEqual<int32>(expected, *output); */
+    test::ExpectTensorEqual<int32>(expected, *output);
   } 
 }
 }
