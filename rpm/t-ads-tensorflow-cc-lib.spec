@@ -4,7 +4,7 @@
 ##############################################################
 Name: %(echo t-ads-tensorflow-cc-lib${SUFFIX})
 Packager:wenqi.gwq
-Version:1.15.8
+Version:1.15.9
 # if you want get version number from outside, use like this
 Release:%(echo $RELEASE)%{?dist}
 

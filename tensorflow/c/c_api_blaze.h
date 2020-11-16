@@ -220,7 +220,8 @@ TF_CAPI_EXPORT extern void TF_SetPaddingInfo(
 TF_CAPI_EXPORT extern void TF_SaveRunMetadata(const TF_Buffer* run_metadata,
                                               const char* save_path,
                                               const char* file_name);
-
+TF_CAPI_EXPORT extern bool TF_IsXlaFalseNode(TF_Graph* graph,
+                                             const char* node_name);
 #ifdef __cplusplus
 } /* end extern "C" */
 #endif
