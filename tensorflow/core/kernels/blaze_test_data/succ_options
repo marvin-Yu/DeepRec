@@ -8,4 +8,7 @@ config_proto {
       global_jit_level: ON_1
     }
   }
+  experimental {
+    executor_type: "SINGLE_THREADED_EXECUTOR"
+  }
 }

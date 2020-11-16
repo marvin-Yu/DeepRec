@@ -7471,6 +7471,7 @@ blaze_deps = [
     "//tensorflow/core/grappler/costs:graph_properties",
     "//tensorflow/core/kernels:gpu_utils",
     "//tensorflow/stream_executor/lib",
+    "//tensorflow/core/kernels/data:captured_function",
 ]
 
 cc_library(
