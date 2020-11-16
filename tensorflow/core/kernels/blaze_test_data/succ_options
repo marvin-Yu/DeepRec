@@ -2,3 +2,10 @@ warmup_batchsize: 10
 warmup_batchsize: 20
 warmup_batchsize: 5
 xla_compilation: true
+config_proto {
+  graph_options {
+    optimizer_options {
+      global_jit_level: ON_1
+    }
+  }
+}
