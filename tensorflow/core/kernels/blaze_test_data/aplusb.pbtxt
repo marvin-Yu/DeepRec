@@ -16,6 +16,18 @@ node {
       }
     }
   }
+  attr {
+    key: "_output_shapes"
+    value {
+      list {
+        shape {
+          dim {
+            size: -1
+          }
+        }
+      }
+    }
+  }
 }
 node {
   name: "y"
@@ -32,6 +44,18 @@ node {
     value {
       shape {
         unknown_rank: true
+      }
+    }
+  }
+  attr {
+    key: "_output_shapes"
+    value {
+      list {
+        shape {
+          dim {
+            size: -1
+          }
+        }
       }
     }
   }

@@ -41,10 +41,12 @@ class BlazePredictor {
   BlazePredictor(const std::vector<std::string>& input_names,
                           const std::vector<std::string>& output_names,
                           const GraphDef& graph_def, const std::string& device,
-                          const BlazeRunOptions& options, const string& device_string) :
+                          const BlazeRunOptions& options, const string& device_string,
+                          const std::vector<DataType>& input_types) :
     input_names_(input_names), output_names_(output_names),
     graph_def_(graph_def), request_device_(device),
-    blaze_run_options_(options), device_type_(device_string) {}
+    blaze_run_options_(options), device_type_(device_string),
+    input_types_(input_types) {}
 
   virtual ~BlazePredictor() {}
 
@@ -64,6 +66,7 @@ class BlazePredictor {
   std::string request_device_;
   BlazeRunOptions blaze_run_options_;
   DeviceType device_type_;
+  std::vector<DataType> input_types_;
 
   std::string blaze_option_path_;
   std::string graph_def_str_;
@@ -80,6 +83,7 @@ class BlazePredictor {
   virtual Status PrepareGraph(GraphDef& graph_def);
   virtual Status GenSessionOptions(SessionOptions& options);
   virtual Status MakeCallable();
+  virtual Status Warmup();
   void SetDeviceInGraphDef(const std::string device_name, GraphDef* graph_def);
 };
 }

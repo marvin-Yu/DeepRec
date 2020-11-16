@@ -16,6 +16,7 @@
 #include "tensorflow/core/lib/io/path.h"
 #include "tensorflow/core/lib/strings/strcat.h"
 #include "tensorflow/core/platform/test.h"
+#include "tensorflow/core/util/env_var.h"
 
 
 namespace tensorflow {
@@ -80,8 +81,17 @@ std::vector<std::string> output_names = {"result"};
     test::ExpectTensorEqual<T>(expected, *params_tensor);
   }
 
+const char* const kCacheKey = "TF_XLA_PTX_CACHE_DIR";
+const char* const kValue = "/tmp";
+
   template <typename T>
   void APLUSBXLA() {
+    ASSERT_EQ(0, setenv(kCacheKey, kValue, 0));
+
+    string ptx_cache_dir;
+    ReadStringFromEnvVar("TF_XLA_PTX_CACHE_DIR", "",
+                         &ptx_cache_dir);
+    ASSERT_FALSE(ptx_cache_dir.empty());
     std::string succ_pb = "core/kernels/blaze_test_data/aplusb.pbtxt";
     std::string options = "core/kernels/blaze_test_data/succ_options";
 

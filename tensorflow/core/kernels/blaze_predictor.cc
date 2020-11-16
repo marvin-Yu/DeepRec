@@ -7,6 +7,7 @@ BlazePredictor::BlazePredictor(OpKernelConstruction* ctx) : device_type_(ctx->de
   OP_REQUIRES_OK(ctx, ctx->GetAttr("output_names", &output_names_));
   OP_REQUIRES_OK(ctx, ctx->GetAttr("graph_def", &graph_def_str_));
   OP_REQUIRES_OK(ctx, ctx->GetAttr("blaze_option_path", &blaze_option_path_));
+  OP_REQUIRES_OK(ctx, ctx->GetAttr("InT", &input_types_));
   OP_REQUIRES_OK(ctx, ParseAttr(ctx->def().device()));
 }
 
@@ -62,6 +63,10 @@ Status BlazePredictor::MakeCallable() {
   return session_->MakeCallable(callable_options, &handle_);
 }
 
+Status BlazePredictor::Warmup() {
+  return Status::OK();
+}
+
 Status BlazePredictor::InitSession() {
   TF_RETURN_IF_ERROR(PrepareData());
 
@@ -82,7 +87,8 @@ Status BlazePredictor::InitSession() {
     return status;
   }
 
-  return MakeCallable();
+  TF_RETURN_IF_ERROR(MakeCallable());
+  return Warmup();
 }
 
 void BlazePredictor::Compute(OpKernelContext* ctx) {

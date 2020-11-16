@@ -1,14 +1,57 @@
 #include "tensorflow/core/kernels/blaze_xla_predictor.h"
+#include "tensorflow/core/util/env_var.h"
 
 #if GOOGLE_CUDA
 #include "tensorflow/core/kernels/gpu_utils.h"
 #endif
 
 namespace tensorflow {
+const char* const kOutputShape = "_output_shapes";
+
+#define TYPECASE_0(dt, X, Y)                                    \
+  case dt: {                                                  \
+    return (void*)X->flat<EnumToDataType<dt>::Type>().data(); \
+  }
+
+void* GetTensorAddress(const Tensor* tensor_ptr) {
+  auto tensor_type = tensor_ptr->dtype();
+  switch (tensor_type) {
+    TYPECASE_0(DT_FLOAT, tensor_ptr, dest_ptr);
+    TYPECASE_0(DT_HALF, tensor_ptr, dest_ptr);
+    TYPECASE_0(DT_INT8, tensor_ptr, dest_ptr);
+    TYPECASE_0(DT_INT32, tensor_ptr, dest_ptr);
+    TYPECASE_0(DT_INT64, tensor_ptr, dest_ptr);
+    default: {
+      LOG(ERROR) << "Unsupported Data type " << DataTypeString(tensor_type);
+      return nullptr;
+    }
+  }
+}
+
+#define TYPECASE_1(dt, X, Y)                                    \
+  case dt: {                                                  \
+    return X->flat<EnumToDataType<dt>::Type>().size() * sizeof(EnumToDataType<dt>::Type); \
+  }
+uint64 GetTensorSize(const Tensor* tensor_ptr) {
+  auto tensor_type = tensor_ptr->dtype();
+  switch (tensor_type) {
+    TYPECASE_1(DT_FLOAT, tensor_ptr, dest_ptr);
+    TYPECASE_1(DT_HALF, tensor_ptr, dest_ptr);
+    TYPECASE_1(DT_INT8, tensor_ptr, dest_ptr);
+    TYPECASE_1(DT_INT32, tensor_ptr, dest_ptr);
+    TYPECASE_1(DT_INT64, tensor_ptr, dest_ptr);
+    default: {
+      LOG(ERROR) << "Unsupported Data type " << DataTypeString(tensor_type);
+      return 0;
+    }
+  }
+}
+
 InputNodeMap BlazeXlaPredictor::ToInputNodeMap() {
   InputNodeMap node_map;
   for (int i = 0; i < graph_def_.node_size(); ++i) {
     auto& node = graph_def_.node(i);
+    node_map_[node.name()] = node;
     for (int j = 0; j < node.input_size(); ++j) {
       auto& input = node.input(j);
       auto iter = node_map.find(input);
@@ -67,50 +110,74 @@ Status BlazeXlaPredictor::InitXlaWarmup() {
   batch_sizes_ = std::move(warm);
 }
 
+Status BlazeXlaPredictor::Warmup() {
+  string ptx_cache_dir;
+  ReadStringFromEnvVar("TF_XLA_PTX_CACHE_DIR", "",
+                                   &ptx_cache_dir);
+  if (ptx_cache_dir.empty()) {
+    LOG(ERROR) << "BlazeXla warmup must set TF_XLA_PTX_CACHE_DIR in env";
+    return errors::Internal("env TF_XLA_PTX_CACHE_DIR not set");
+  }
+
+  LOG(INFO) << "Xla warmup using session run";
+  std::vector<std::pair<std::string, TensorShapeProto>> name_shapes;
+  for (const auto& name : input_names_) {
+    auto iter = node_map_.find(name);
+    if (iter == node_map_.end()) {
+      return errors::Internal("node ", name ," not found in graph");
+    }
+    std::vector<TensorShapeProto> output_shape;
+    TF_RETURN_IF_ERROR(GetNodeAttr(iter->second, kOutputShape, &output_shape));
+    if (output_shape.size() != 1) {
+      return errors::Internal(kOutputShape, " shape !=1");
+    }
+    name_shapes.push_back(std::make_pair(name, output_shape[0]));
+  }
+
+  std::vector<std::pair<std::string, Tensor>> inputs;
+  for (int batch : batch_sizes_) {
+    inputs.clear();
+    for (int i = 0; i < name_shapes.size(); ++i) {
+      const auto& name_shape = name_shapes[i];
+      auto shape = name_shape.second;
+      if (!skip_padding_[i] && shape.dim_size() > 0 && shape.dim(0).size() == -1) {
+        shape.mutable_dim(0)->set_size(batch);
+      }
+      auto st = CheckShape(shape);
+      if (!st.ok()) {
+        LOG(ERROR) << name_shape.first << " tensor shape invalid " <<
+            shape.DebugString();
+        return st;
+      }
+      Tensor input(input_types_[i], shape);
+      void* add = GetTensorAddress(&input);
+      if (!add) {
+        return errors::Internal("not supported input type ", name_shape.first);
+      }
+      std::memset(add, 0, GetTensorSize(&input));
+      inputs.push_back(std::make_pair(name_shape.first, input));
+    }
+    std::vector<Tensor> outputs;
+    TF_RETURN_IF_ERROR(session_->Run(inputs, output_names_, {}, &outputs));
+    LOG(INFO) << "Batchsize " << batch << " has warmuped";
+  } 
+  return Status::OK();
+}
+
+Status BlazeXlaPredictor::CheckShape(const TensorShapeProto& shape) {
+  for (int i = 0; i < shape.dim_size(); ++i) {
+    if (shape.dim(i).size() <= 0) {
+      return errors::Internal("shape size invalid ",  shape.DebugString());
+    }
+  }
+  return Status::OK();
+}
+
 Status BlazeXlaPredictor::PrepareData() {
   TF_RETURN_IF_ERROR(FindBlackPaddingInputs());
   TF_RETURN_IF_ERROR(InitXlaWarmup());
 
   return Status::OK();
-}
-
-#define TYPECASE_0(dt, X, Y)                                    \
-  case dt: {                                                  \
-    return (void*)X->flat<EnumToDataType<dt>::Type>().data(); \
-  }
-
-void* GetTensorAddress(const Tensor* tensor_ptr) {
-  auto tensor_type = tensor_ptr->dtype();
-  switch (tensor_type) {
-    TYPECASE_0(DT_FLOAT, tensor_ptr, dest_ptr);
-    TYPECASE_0(DT_HALF, tensor_ptr, dest_ptr);
-    TYPECASE_0(DT_INT8, tensor_ptr, dest_ptr);
-    TYPECASE_0(DT_INT32, tensor_ptr, dest_ptr);
-    TYPECASE_0(DT_INT64, tensor_ptr, dest_ptr);
-    default: {
-      LOG(ERROR) << "Unsupported Data type " << DataTypeString(tensor_type);
-      return nullptr;
-    }
-  }
-}
-
-#define TYPECASE_1(dt, X, Y)                                    \
-  case dt: {                                                  \
-    return X->flat<EnumToDataType<dt>::Type>().size() * sizeof(EnumToDataType<dt>::Type); \
-  }
-uint64 GetTensorSize(const Tensor* tensor_ptr) {
-  auto tensor_type = tensor_ptr->dtype();
-  switch (tensor_type) {
-    TYPECASE_1(DT_FLOAT, tensor_ptr, dest_ptr);
-    TYPECASE_1(DT_HALF, tensor_ptr, dest_ptr);
-    TYPECASE_1(DT_INT8, tensor_ptr, dest_ptr);
-    TYPECASE_1(DT_INT32, tensor_ptr, dest_ptr);
-    TYPECASE_1(DT_INT64, tensor_ptr, dest_ptr);
-    default: {
-      LOG(ERROR) << "Unsupported Data type " << DataTypeString(tensor_type);
-      return 0;
-    }
-  }
 }
 
 int BlazeXlaPredictor::InferBatchSize(const std::vector<Tensor>& tensors) {
@@ -133,6 +200,7 @@ int BlazeXlaPredictor::InferBatchSize(const std::vector<Tensor>& tensors) {
   }
   return batchsize;
 }
+
 Status BlazeXlaPredictor::PadToStatic(const std::vector<Tensor>& inputs,
                                       std::vector<Tensor>* padded_inputs,
                                       int batchsize, int pad_to_batchsize,

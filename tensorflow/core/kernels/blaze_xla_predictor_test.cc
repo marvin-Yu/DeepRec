@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -20,6 +21,7 @@
 #include "tensorflow/core/platform/prefetch.h"
 #include "tensorflow/core/platform/test.h"
 #include "tensorflow/core/platform/test_benchmark.h"
+#include "tensorflow/core/util/env_var.h"
 
 namespace tensorflow {
 namespace {
@@ -106,7 +108,21 @@ Status BlazeXlaPredictorTest::GeneOpKernelConstruction(DeviceType device_type,
   return status;
 }
 
+const char* const kCacheKey = "TF_XLA_PTX_CACHE_DIR";
+const char* const kValue = "/tmp";
 Status TestWithMutConf(std::string& pb, std::string& options) {
+  
+  if (setenv(kCacheKey, kValue, 0) == -1) {
+    return errors::Internal("set env failed");
+  }
+  
+  string ptx_cache_dir;
+  ReadStringFromEnvVar("TF_XLA_PTX_CACHE_DIR", "",
+                                   &ptx_cache_dir);
+
+  if (ptx_cache_dir.empty()) {
+    return errors::Internal("get env failed");
+  }
   BlazeXlaPredictorTest test(pb, options);
 
   string filename = io::JoinPath(testing::TensorFlowSrcRoot(), pb);
@@ -124,6 +140,12 @@ Status TestWithMutConf(std::string& pb, std::string& options) {
 }
 
 TEST(TestBlazeXlaPredictor, TestErrorInit) {
+  ASSERT_EQ(0, setenv(kCacheKey, kValue, 0));
+  
+  string ptx_cache_dir;
+  ReadStringFromEnvVar("TF_XLA_PTX_CACHE_DIR", "",
+                                   &ptx_cache_dir);
+  ASSERT_FALSE(ptx_cache_dir.empty());
   {
     // no warmup conf
     std::string succ_pb = "core/kernels/blaze_test_data/aplusb.pbtxt";
@@ -154,6 +176,12 @@ TEST(TestBlazeXlaPredictor, TestErrorInit) {
 }
 
 TEST(TestBlazeXlaPredictor, TestSuccInit) {
+  ASSERT_EQ(0, setenv(kCacheKey, kValue, 0));
+  
+  string ptx_cache_dir;
+  ReadStringFromEnvVar("TF_XLA_PTX_CACHE_DIR", "",
+                                   &ptx_cache_dir);
+  ASSERT_FALSE(ptx_cache_dir.empty());
   {
     // error input
     std::string succ_pb = "core/kernels/blaze_test_data/aplusb.pbtxt";
@@ -166,6 +194,12 @@ TEST(TestBlazeXlaPredictor, TestSuccInit) {
 }
 
 TEST(TestBlazeXlaPredictor, TestRun) {
+  ASSERT_EQ(0, setenv(kCacheKey, kValue, 0));
+  
+  string ptx_cache_dir;
+  ReadStringFromEnvVar("TF_XLA_PTX_CACHE_DIR", "",
+                                   &ptx_cache_dir);
+  ASSERT_FALSE(ptx_cache_dir.empty());
   std::string pb = "core/kernels/blaze_test_data/aplusb.pbtxt";
   std::string options = "core/kernels/blaze_test_data/succ_options";
   BlazeXlaPredictorTest test(pb, options);

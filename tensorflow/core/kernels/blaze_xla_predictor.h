@@ -5,6 +5,7 @@
 
 namespace tensorflow {
 typedef std::map<std::string, std::vector<NodeDef>> InputNodeMap;
+typedef std::map<std::string, NodeDef> NodeMap;
 
 class BlazeXlaPredictor : public BlazePredictor {
  public:
@@ -30,9 +31,12 @@ class BlazeXlaPredictor : public BlazePredictor {
   int InferBatchSize(const std::vector<Tensor>& tensors);
   
   Status InitXlaWarmup();
+  Status Warmup() override;
+  Status CheckShape(const TensorShapeProto& shape);
 
   std::vector<int32> batch_sizes_;
   std::vector<bool> skip_padding_;
+  NodeMap node_map_;
 };
 }
 #endif
