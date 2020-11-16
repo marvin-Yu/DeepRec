@@ -2,7 +2,7 @@
 #include "tensorflow/core/platform/protobuf.h"
 
 namespace tensorflow {
-BlazePredictor::BlazePredictor(OpKernelConstruction* ctx) {
+BlazePredictor::BlazePredictor(OpKernelConstruction* ctx) : device_type_(ctx->device_type().type()) {
   OP_REQUIRES_OK(ctx, ctx->GetAttr("input_names", &input_names_));
   OP_REQUIRES_OK(ctx, ctx->GetAttr("output_names", &output_names_));
   OP_REQUIRES_OK(ctx, ctx->GetAttr("graph_def", &graph_def_str_));

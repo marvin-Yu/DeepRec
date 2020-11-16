@@ -36,6 +36,7 @@ class BlazeXlaOp : public OpKernel {
   std::vector<std::string> output_names_;
   std::string blaze_option_path_;
   std::string graph_def_str_;
+  string device_string_;
   
   std::string device_;
   GraphDef graph_def_;
@@ -46,10 +47,10 @@ class BlazeXlaOp : public OpKernel {
 void BlazeXlaOp::InitPredictor() {
   if (blaze_run_options_.xla_compilation()) {
     predictor_ = new BlazeXlaPredictor(input_names_, output_names_,
-                                       graph_def_, device_, blaze_run_options_);
+                                       graph_def_, device_, blaze_run_options_, device_string_);
   } else {
     predictor_ = new BlazePredictor(input_names_, output_names_,
-                                    graph_def_, device_, blaze_run_options_);
+                                    graph_def_, device_, blaze_run_options_, device_string_);
   }
 }
 
@@ -60,6 +61,7 @@ BlazeXlaOp::BlazeXlaOp(OpKernelConstruction* context)
   OP_REQUIRES_OK(context, context->GetAttr("graph_def", &graph_def_str_));
   OP_REQUIRES_OK(context, context->GetAttr("blaze_option_path", &blaze_option_path_));
   OP_REQUIRES_OK(context, ParseAttr());
+  device_string_ = context->device_type().type_string();
   device_ = context->def().device();
   InitPredictor();
   OP_REQUIRES_OK(context, predictor_->InitSession());

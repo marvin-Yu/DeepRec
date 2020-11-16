@@ -96,7 +96,7 @@ std::vector<std::string> output_names = {"result"};
     AddInputFromArray<T>(TensorShape({2, 2}),
                          {1, 2, 3, 4});
     AddInputFromArray<T>(TensorShape({2, 2}), {5, 6, 7, 8});
-/*
+
     TF_ASSERT_OK(RunOpKernel());
 
     // Check the new state of the input
@@ -108,7 +108,7 @@ std::vector<std::string> output_names = {"result"};
     //  [[3, 2, 1, 0], [7, 6, 5, 4], [11, 10, 9, 8]]]
     test::FillValues<T>(&expected,
                         {6, 8, 10, 12});
-    test::ExpectTensorEqual<T>(expected, *params_tensor); */
+    test::ExpectTensorEqual<T>(expected, *params_tensor);
   }
 };
 

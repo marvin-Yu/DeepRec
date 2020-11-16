@@ -129,7 +129,7 @@ TEST(TestBlazePredictor, TestCPUSucc) {
     std::vector<std::string> ipns({"x", "y"});
     std::vector<std::string> opns({"result"});
     BlazePredictor predictor1(ipns, opns, gdef,
-                              "/CPU:0", opts);
+                              "/CPU:0", opts, DEVICE_CPU);
     TF_ASSERT_OK(predictor1.InitSession());
   //computing test
   {

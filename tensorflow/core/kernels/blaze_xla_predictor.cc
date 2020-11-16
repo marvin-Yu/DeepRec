@@ -170,7 +170,7 @@ Status BlazeXlaPredictor::PadToStatic(const std::vector<Tensor>& inputs,
       return errors::Internal(
           "Error when getting input address or size");
     }
-    if (ctx->input_memory_type(i) != HOST_MEMORY) {
+    if (device_type_ == DEVICE_GPU && ctx->input_memory_type(i) == DEVICE_MEMORY) {
 #if GOOGLE_CUDA
       auto* stream = ctx->op_device_context()->stream();
       auto input_dev_ptr = AsDeviceMemory(input_ptr, input_size);
@@ -222,7 +222,7 @@ Status BlazeXlaPredictor::SliceToDynamic(const std::vector<Tensor>& padded_outpu
       return errors::Internal(
           "Error when getting output address or size");
     }
-    if (ctx->output_memory_type(i) != HOST_MEMORY) {
+    if (device_type_ == DEVICE_GPU && ctx->input_memory_type(i) == DEVICE_MEMORY) {
 #if GOOGLE_CUDA
       auto* stream = ctx->op_device_context()->stream();
       auto output_dev_ptr = AsDeviceMemory(output_ptr, output_size);
