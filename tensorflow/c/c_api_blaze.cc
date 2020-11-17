@@ -216,8 +216,6 @@ void TF_GraphSetDevice(TF_Graph* graph, int cpu_id, int gpu_id) {
     device = cpu_device;
   }
   
-  /// for logging whether use cpu xla
-  bool ret_enable_cpu = false;
   for (Node* node : g->nodes()) {
     std::string requested_device = node->requested_device();
     if (requested_device.find("CPU") != std::string::npos ||
@@ -229,8 +227,7 @@ void TF_GraphSetDevice(TF_Graph* graph, int cpu_id, int gpu_id) {
       VLOG(1) << "Place node " << node->name() << " on " << device;
     }
   }
-  LOG(INFO) << "TF_GraphSetDevice: cpu_id, gpu_id, set_enable_cpu_xla, actual_use_cpu_xla,"
-            << cpu_id << ", " << gpu_id << "," << enable_cpu_xla << "," << ret_enable_cpu;
+  LOG(INFO) << "TF_GraphSetDevice: cpu_id=" << cpu_id << " gpu_id="<< gpu_id;
 }
 
 static void GraphImportGraphDefLocked(TF_Graph* graph, const GraphDef& def,
