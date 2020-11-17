@@ -108,8 +108,7 @@ TF_CAPI_EXPORT extern TF_Buffer* TF_ReadMetaGraphDefFromFile(
 
 // Sets the device attrs of nodes in graph to `device`.
 TF_CAPI_EXPORT extern void TF_GraphSetDevice(TF_Graph* graph,
-                                             int cpu_id, int gpu_id,
-                                             bool enable_cpu_xla=false);
+                                             int cpu_id, int gpu_id);
 // This function creates a new TF_Session (which is created on success) using
 // `session_options`, and then initializes state (restoring tensors and other
 // assets) using `run_options`.

@@ -39,7 +39,6 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_eliminate_hlo_implicit_broadcast(true);
   opts.set_xla_dump_hlo_as_html(false);
 #ifdef INTEL_MKL
-  VLOG(0) << "opts.set_xla_cpu_use_mkl_dnn";
   opts.set_xla_cpu_use_mkl_dnn(true);
 #endif  // INTEL_MKL
   opts.set_xla_gpu_max_kernel_unroll_factor(4);
