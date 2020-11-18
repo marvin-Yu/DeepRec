@@ -620,7 +620,7 @@ cc_library(
     name = "runtime_matmul_mkl",
     srcs = ["runtime_matmul_mkl.cc"],
     hdrs = ["runtime_matmul_mkl.h"],
-    copts = runtime_copts() +["-lrpm/.dep_create/var/home/a/mklml/include"],
+    copts = runtime_copts(),
     visibility = ["//visibility:public"],
     deps = [
         "//tensorflow/compiler/xla:executable_run_options",
