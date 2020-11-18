@@ -207,6 +207,8 @@ void TF_GraphSetDevice(TF_Graph* graph, int cpu_id, int gpu_id) {
   mutex_lock l(graph->mu);
   Graph* g = &(graph->graph);
 
+  LOG(INFO) << "TF_GraphSetDevice: cpu_id, gpu_id = "		
+            << cpu_id << ", " << gpu_id;
   std::string cpu_device = "/device:CPU:" + std::to_string(cpu_id);
   std::string gpu_device = "/device:GPU:" + std::to_string(gpu_id);
   std::string device;
@@ -227,7 +229,6 @@ void TF_GraphSetDevice(TF_Graph* graph, int cpu_id, int gpu_id) {
       VLOG(1) << "Place node " << node->name() << " on " << device;
     }
   }
-  LOG(INFO) << "TF_GraphSetDevice: cpu_id=" << cpu_id << " gpu_id="<< gpu_id;
 }
 
 static void GraphImportGraphDefLocked(TF_Graph* graph, const GraphDef& def,
