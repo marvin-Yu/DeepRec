@@ -125,7 +125,7 @@ TEST(TestBlazePredictor, TestCPUSucc) {
     BlazePredictor predictor(test.GetConstruction());
     TF_ASSERT_OK(predictor.InitSession());
 
-    BlazeRunOptions opts;
+    BlazeKernelOptions opts;
     std::vector<std::string> ipns({"x", "y"});
     std::vector<std::string> opns({"result"});
     BlazePredictor predictor1(ipns, opns, gdef,

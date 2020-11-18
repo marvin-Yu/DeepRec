@@ -27,7 +27,7 @@ class BlazeXlaOp : public OpKernel {
 
   void Compute(OpKernelContext* context) override;
 
-  Status ParseRunOptions(BlazeRunOptions& run_options);
+  Status ParseRunOptions(BlazeKernelOptions& run_options);
  private:
   Status ParseAttr();
   void InitPredictor();
@@ -41,7 +41,7 @@ class BlazeXlaOp : public OpKernel {
   
   std::string device_;
   GraphDef graph_def_;
-  BlazeRunOptions blaze_run_options_;
+  BlazeKernelOptions blaze_run_options_;
   BlazePredictor* predictor_;
 };
 

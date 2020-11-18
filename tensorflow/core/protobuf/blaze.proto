@@ -5,18 +5,12 @@ option cc_enable_arenas = true;
 import "tensorflow/core/protobuf/config.proto";
 import "tensorflow/core/protobuf/rewriter_config.proto";
 
-message CallableOption {
-  bool auto_adapt_device = 1;
-  repeated string feed_on_device = 2;
-  repeated string fetch_on_device = 3;
-}
-
-message WarmupValue {
+message BlazeWarmupValue {
   int32 start = 1;
   int32 end = 2;
 }
 
-message BlazeRunOptions {
+message BlazeKernelOptions {
   repeated int32 warmup_batchsize = 1;
   bool xla_compilation = 2;
   bool gemm_optimization = 3;
@@ -43,5 +37,5 @@ message BlazeRunOptions {
   bool debug_batchsize = 100;
   int64 dump_timeline_interval = 101;
   ConfigProto config_proto = 102;
-  map<string, WarmupValue> warmup_value = 103;
+  map<string, BlazeWarmupValue> warmup_value = 103;
 }
