@@ -10,7 +10,7 @@ typedef std::map<std::string, NodeDef> NodeMap;
 class BlazeXlaPredictor : public BlazePredictor {
  public:
   using BlazePredictor::BlazePredictor;
-  ~BlazeXlaPredictor() {}
+  ~BlazeXlaPredictor() override {}
 
   void Compute(OpKernelContext* ctx) override;
  private:
