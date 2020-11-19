@@ -30,11 +30,12 @@ class BlazeXlaOp : public OpKernel {
   Status ParseRunOptions(BlazeKernelOptions& run_options);
  private:
   Status ParseAttr();
-  void InitPredictor();
+  void InitPredictor(OpKernelConstruction* context);
 
   std::vector<std::string> input_names_;
   std::vector<std::string> output_names_;
   std::string blaze_option_path_;
+  std::string graph_def_path_;
   std::string graph_def_str_;
   string device_string_;
   std::vector<DataType> input_types_;
@@ -45,15 +46,15 @@ class BlazeXlaOp : public OpKernel {
   BlazePredictor* predictor_;
 };
 
-void BlazeXlaOp::InitPredictor() {
+void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
   if (blaze_run_options_.xla_compilation()) {
     predictor_ = new BlazeXlaPredictor(input_names_, output_names_,
                                        graph_def_, device_, blaze_run_options_,
-                                       device_string_, input_types_);
+                                       device_string_, input_types_, context);
   } else {
     predictor_ = new BlazePredictor(input_names_, output_names_,
                                     graph_def_, device_, blaze_run_options_,
-                                    device_string_, input_types_);
+                                    device_string_, input_types_, context);
   }
 }
 
@@ -61,13 +62,13 @@ BlazeXlaOp::BlazeXlaOp(OpKernelConstruction* context)
     : OpKernel(context) {
   OP_REQUIRES_OK(context, context->GetAttr("input_names", &input_names_));
   OP_REQUIRES_OK(context, context->GetAttr("output_names", &output_names_));
-  OP_REQUIRES_OK(context, context->GetAttr("graph_def", &graph_def_str_));
+  OP_REQUIRES_OK(context, context->GetAttr("graph_def", &graph_def_path_));
   OP_REQUIRES_OK(context, context->GetAttr("blaze_option_path", &blaze_option_path_));
   OP_REQUIRES_OK(context, context->GetAttr("InT", &input_types_));
   OP_REQUIRES_OK(context, ParseAttr());
   device_string_ = context->device_type().type_string();
   device_ = context->def().device();
-  InitPredictor();
+  InitPredictor(context);
   OP_REQUIRES_OK(context, predictor_->InitSession());
 }
 
@@ -77,9 +78,18 @@ Status BlazeXlaOp::ParseAttr() {
     return errors::Internal("parse proto from ", blaze_option_path_,  " failed");
   }
 
-  if (!protobuf::TextFormat::ParseFromString(graph_def_str_, &graph_def_)) {
-    return errors::InvalidArgument("parse ", graph_def_str_, " to protobuf failed");
+  if (!ReadTextProto(Env::Default(), graph_def_path_,
+                     &graph_def_).ok()) {
+    if (!ReadBinaryProto(Env::Default(), graph_def_path_,
+                       &graph_def_).ok()) {
+      return errors::Internal("parse proto from ", graph_def_path_,  " failed");
+    }
   }
+
+  graph_def_str_ = graph_def_.DebugString();
+// if (!protobuf::TextFormat::ParseFromString(graph_def_str_, &graph_def_)) {
+//    return errors::InvalidArgument("parse ", graph_def_str_, " to protobuf failed");
+//  }
   
   return Status::OK();
 }

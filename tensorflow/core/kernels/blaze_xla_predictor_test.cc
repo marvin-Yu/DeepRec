@@ -131,7 +131,7 @@ Status TestWithMutConf(std::string& pb, std::string& options) {
   GraphDef gdef;
   (ReadTextProto(Env::Default(), filename, &gdef));
   NodeDef node_def = BlazeXlaPredictorTest::MakeBlazeNodeDef({DT_INT32, DT_INT32}, {DT_INT32},
-                                                          {"x", "y"}, {"result"}, gdef.DebugString(),
+                                                          {"x", "y"}, {"result"}, filename,
                                                           blaze_options);
   TF_RETURN_IF_ERROR(test.GeneOpKernelConstruction(DEVICE_CPU, node_def));
 
@@ -210,7 +210,7 @@ TEST(TestBlazeXlaPredictor, TestRun) {
   GraphDef gdef;
   (ReadTextProto(Env::Default(), filename, &gdef));
   NodeDef node_def = BlazeXlaPredictorTest::MakeBlazeNodeDef({DT_INT32, DT_INT32}, {DT_INT32},
-                                                          {"x", "y"}, {"result"}, gdef.DebugString(),
+                                                          {"x", "y"}, {"result"}, filename,
                                                           blaze_options);
   TF_ASSERT_OK(test.GeneOpKernelConstruction(DEVICE_CPU, node_def));
 

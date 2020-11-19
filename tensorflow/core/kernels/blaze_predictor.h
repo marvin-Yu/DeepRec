@@ -42,11 +42,12 @@ class BlazePredictor {
                           const std::vector<std::string>& output_names,
                           const GraphDef& graph_def, const std::string& device,
                           const BlazeKernelOptions& options, const string& device_string,
-                          const std::vector<DataType>& input_types) :
+                          const std::vector<DataType>& input_types,
+                          OpKernelConstruction* ctx = nullptr) :
     input_names_(input_names), output_names_(output_names),
     graph_def_(graph_def), request_device_(device),
     blaze_run_options_(options), device_type_(device_string),
-    input_types_(input_types) {}
+    input_types_(input_types), ctx_(ctx) {}
 
   virtual ~BlazePredictor() {}
 
@@ -71,6 +72,7 @@ class BlazePredictor {
   std::string blaze_option_path_;
   std::string graph_def_str_;
   std::string device_;
+  OpKernelConstruction* ctx_;
   //runtime options
   Session* session_;
   Session::CallableHandle handle_;

@@ -7,6 +7,7 @@
 
 namespace tensorflow {
 const char* const kOutputShape = "_output_shapes";
+const char* const kShape = "shape";
 
 #define TYPECASE_0(dt, X, Y)                                    \
   case dt: {                                                  \
@@ -68,10 +69,19 @@ InputNodeMap BlazeXlaPredictor::ToInputNodeMap() {
 }
 
 Status BlazeXlaPredictor::FindBlackPaddingInputs() {
+  std::set<std::string> no_warmup;
+  for (const auto& black_input : blaze_run_options_.no_warmup_inputs()) {
+    no_warmup.insert(black_input);
+  }
   skip_padding_.resize(input_names_.size());
   auto node_map = ToInputNodeMap();
 
   for (int i = 0; i < input_names_.size(); ++i) {
+    skip_padding_[i] = false;
+    if (no_warmup.find(input_names_[i]) != no_warmup.end()) {
+      skip_padding_[i] = true;
+    }
+    /*
     skip_padding_[i] = false;
     auto& name = input_names_[i];
 
@@ -83,11 +93,11 @@ Status BlazeXlaPredictor::FindBlackPaddingInputs() {
     for (auto& node : iter->second) {
       bool xla_enable = true;
       if (TryGetNodeAttr(node, "_XlaCompile", &xla_enable) && xla_enable == false) {
-        LOG(INFO) << name << " will not padding in xla";
+        LOG(INFO) << name << " will not padding in xla " << node.DebugString();
         skip_padding_[i] = true;
         break;
       }
-    }
+    } */
   }
   return Status::OK();
 }
@@ -119,28 +129,36 @@ Status BlazeXlaPredictor::Warmup() {
     return errors::Internal("env TF_XLA_PTX_CACHE_DIR not set");
   }
 
-  LOG(INFO) << "Xla warmup using session run";
   std::vector<std::pair<std::string, TensorShapeProto>> name_shapes;
   for (const auto& name : input_names_) {
     auto iter = node_map_.find(name);
     if (iter == node_map_.end()) {
       return errors::Internal("node ", name ," not found in graph");
     }
-    std::vector<TensorShapeProto> output_shape;
-    TF_RETURN_IF_ERROR(GetNodeAttr(iter->second, kOutputShape, &output_shape));
-    if (output_shape.size() != 1) {
-      return errors::Internal(kOutputShape, " shape !=1");
+
+    TensorShapeProto shape;
+    auto st = GetNodeAttr(iter->second, kShape, &shape);
+    if (!st.ok()) {
+      std::vector<TensorShapeProto> output_shape;
+      TF_RETURN_IF_ERROR(GetNodeAttr(iter->second, kOutputShape, &output_shape));
+      if (output_shape.size() != 1) {
+        return errors::Internal(kOutputShape, " shape !=1");
+      }
+      shape = output_shape[0];
     }
-    name_shapes.push_back(std::make_pair(name, output_shape[0]));
+    name_shapes.push_back(std::make_pair(name, shape));
   }
 
   std::vector<std::pair<std::string, Tensor>> inputs;
+  std::vector<Tensor> callable_inputs;
   for (int batch : batch_sizes_) {
     inputs.clear();
+    callable_inputs.clear();
     for (int i = 0; i < name_shapes.size(); ++i) {
       const auto& name_shape = name_shapes[i];
       auto shape = name_shape.second;
-      if (!skip_padding_[i] && shape.dim_size() > 0 && shape.dim(0).size() == -1) {
+      //fix me : i donot know how to set -1 dim
+      if (shape.dim_size() > 0 && shape.dim(0).size() == -1) {
         shape.mutable_dim(0)->set_size(batch);
       }
       auto st = CheckShape(shape);
@@ -156,11 +174,23 @@ Status BlazeXlaPredictor::Warmup() {
       }
       std::memset(add, 0, GetTensorSize(&input));
       inputs.push_back(std::make_pair(name_shape.first, input));
+      if (ctx_) {
+        Tensor tensor;
+        ctx_->allocate_temp(input_types_[i], shape, &tensor);
+        callable_inputs.push_back(tensor);
+      }
     }
     std::vector<Tensor> outputs;
-    TF_RETURN_IF_ERROR(session_->Run(inputs, output_names_, {}, &outputs));
+    if (!ctx_) {
+      LOG(INFO) << "warmup using directsession run";
+      TF_RETURN_IF_ERROR(session_->Run(inputs, output_names_, {}, &outputs));
+    } else {
+      LOG(INFO) << "warmup using directsession runcallable";
+      TF_RETURN_IF_ERROR(session_->RunCallable(
+              handle_, callable_inputs, &outputs, nullptr));
+    }
     LOG(INFO) << "Batchsize " << batch << " has warmuped";
-  } 
+  }
   return Status::OK();
 }
 

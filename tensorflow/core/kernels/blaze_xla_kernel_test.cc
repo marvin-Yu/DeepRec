@@ -62,7 +62,7 @@ std::vector<std::string> output_names = {"result"};
     TF_ASSERT_OK(ReadTextProto(Env::Default(), filename, &gdef));
 
     MakeOp({DT_INT32, DT_INT32}, {DT_INT32}, input_names,
-           output_names, gdef.DebugString(), blaze_options);
+           output_names, filename, blaze_options);
     AddInputFromArray<T>(TensorShape({2, 2}),
                          {1, 2, 3, 4});
     AddInputFromArray<T>(TensorShape({2, 2}), {5, 6, 7, 8});
@@ -102,7 +102,7 @@ const char* const kValue = "/tmp";
     TF_ASSERT_OK(ReadTextProto(Env::Default(), filename, &gdef));
 
     MakeOp({DT_INT32, DT_INT32}, {DT_INT32}, input_names,
-           output_names, gdef.DebugString(), blaze_options);
+           output_names, filename, blaze_options);
     AddInputFromArray<T>(TensorShape({2, 2}),
                          {1, 2, 3, 4});
     AddInputFromArray<T>(TensorShape({2, 2}), {5, 6, 7, 8});

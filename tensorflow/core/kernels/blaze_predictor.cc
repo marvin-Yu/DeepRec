@@ -9,6 +9,7 @@ BlazePredictor::BlazePredictor(OpKernelConstruction* ctx) : device_type_(ctx->de
   OP_REQUIRES_OK(ctx, ctx->GetAttr("blaze_option_path", &blaze_option_path_));
   OP_REQUIRES_OK(ctx, ctx->GetAttr("InT", &input_types_));
   OP_REQUIRES_OK(ctx, ParseAttr(ctx->def().device()));
+  ctx_ = ctx;
 }
 
 Status BlazePredictor::ParseAttr(const std::string& device) {
@@ -17,8 +18,11 @@ Status BlazePredictor::ParseAttr(const std::string& device) {
     return errors::Internal("parse proto from ", blaze_option_path_,  " failed");
   }
 
-  if (!protobuf::TextFormat::ParseFromString(graph_def_str_, &graph_def_)) {
-    return errors::InvalidArgument("parse ", graph_def_str_, " to protobuf failed");
+  if (!ReadTextProto(Env::Default(), graph_def_str_, &graph_def_).ok()) {
+    if (!ReadBinaryProto(Env::Default(), graph_def_str_, &graph_def_).ok()) {
+      LOG(ERROR) << "Parse graph from " << graph_def_str_ << " failed";
+      return errors::Internal("Parse graph from ", graph_def_str_, " failed");
+    }
   }
   
   if (device.size() == 0) {

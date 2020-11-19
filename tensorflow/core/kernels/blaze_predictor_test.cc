@@ -118,7 +118,7 @@ TEST(TestBlazePredictor, TestCPUSucc) {
     GraphDef gdef;
     TF_ASSERT_OK(ReadTextProto(Env::Default(), filename, &gdef));
     NodeDef node_def = BlazePredictorTest::MakeBlazeNodeDef({DT_INT32, DT_INT32}, {DT_INT32},
-                                        {"x", "y"}, {"result"}, gdef.DebugString(),
+                                        {"x", "y"}, {"result"}, filename,
                                         blaze_options);
     TF_ASSERT_OK(test.GeneOpKernelConstruction(DEVICE_CPU, node_def));
 
@@ -174,8 +174,8 @@ TEST(TestBlazePredictor, TestCPUSucc) {
     Tensor expected(DT_INT32, TensorShape({10}));
     test::FillValues<int32>(&expected, {3, 5, 7, 9, 11, 13, 15, 17, 19, 21});
     test::ExpectTensorEqual<int32>(expected, *output);
+    /*
     {
-      /*
       predictor1.Compute(predictor_context.get());
       TF_ASSERT_OK(predictor_context->status());
       ASSERT_EQ(predictor_context->num_outputs(), 1);
@@ -183,8 +183,8 @@ TEST(TestBlazePredictor, TestCPUSucc) {
       ASSERT_NE(nullptr, output);
       Tensor expected(DT_INT32, TensorShape({10}));
       test::FillValues<int32>(&expected, {3, 5, 7, 9, 11, 13, 15, 17, 19, 21});
-      test::ExpectTensorEqual<int32>(expected, *output); */
-    }
+      test::ExpectTensorEqual<int32>(expected, *output);
+    } */
   }
   }
 }

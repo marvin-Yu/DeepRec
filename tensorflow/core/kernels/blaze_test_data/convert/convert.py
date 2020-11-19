@@ -11,7 +11,7 @@ from tensorflow.core.framework import graph_pb2
 from tensorflow.core.framework import node_def_pb2
 from tensorflow.core.protobuf import meta_graph_pb2
 from tensorflow.python.lib.io import file_io
-graph = './frozen_graph.pb'
+graph = './frozen_graph.pb.bak'
 meta = './0.meta'
 sig_key = 'predict'
 option_path = 'blaze_option_path'
@@ -33,10 +33,11 @@ def add_put(put_name, put_type, puts, blaze_node, node_map):
   # add inputs & input types
   for put in puts:
       name = put.split(':')[0]
-      print(node_map[name])
+     # print(node_map[name])
       blaze_node.attr[put_name].list.s.append(compat.as_bytes(name))
       blaze_node.attr[put_type].list.type.append(node_map[name].attr['dtype'].type)
 
+option_xla_path = '/home/jingshan.ljs/tensorflow/tensorflow/core/kernels/blaze_test_data/convert/succ_options'
 def convert():
     meta_graph_def = meta_graph_pb2.MetaGraphDef()
     pbstr = gfile.Open(meta).read()
@@ -63,6 +64,7 @@ def convert():
     with open(graph, 'rb') as fh:
         graph_str = fh.read()
         gdef.ParseFromString(graph_str)
+        #print(gdef)
 
     output_def = copy.deepcopy(gdef)
     output_def.ClearField('node')
@@ -70,14 +72,14 @@ def convert():
     for node in gdef.node:
         node_map[node.name] = node
     
-    blaze_node = create_node_def('BlazeXlaKernel', 'blaze_op', inputs)
+    blaze_node = create_node_def('BlazeXlaOp', 'blaze_op', inputs)
     blaze_node.attr[input_attr_name].list.s[:] = input_bytes
     blaze_node.attr[input_type].list.type[:] = input_types
 
     blaze_node.attr[output_attr_name].list.s[:] = output_bytes
     blaze_node.attr[output_type].list.type[:] = output_types
-    blaze_node.attr[graph_name].s = compat.as_bytes(str(gdef))
-    blaze_node.attr[option_path].s = compat.as_bytes("222")
+    blaze_node.attr[graph_name].s = compat.as_bytes(('/home/jingshan.ljs/tensorflow/tensorflow/core/kernels/blaze_test_data/convert/ss'))
+    blaze_node.attr[option_path].s = compat.as_bytes(option_xla_path)
 
     output_def.node.append(blaze_node)
 
