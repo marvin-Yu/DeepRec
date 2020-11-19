@@ -19,11 +19,7 @@ namespace tensorflow {
 class BlazeXlaOp : public OpKernel {
  public:
   explicit BlazeXlaOp(OpKernelConstruction* context);
-  ~BlazeXlaOp() {
-    if (predictor_) {
-      delete predictor_;
-    }
-  }
+  ~BlazeXlaOp() {}
 
   void Compute(OpKernelContext* context) override;
 
@@ -43,16 +39,16 @@ class BlazeXlaOp : public OpKernel {
   std::string device_;
   GraphDef graph_def_;
   BlazeKernelOptions blaze_run_options_;
-  BlazePredictor* predictor_;
+  std::unique_ptr<BlazePredictor> predictor_;
 };
 
 void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
   if (blaze_run_options_.xla_compilation()) {
-    predictor_ = new BlazeXlaPredictor(input_names_, output_names_,
+    predictor_ = absl::make_unique<BlazeXlaPredictor>(input_names_, output_names_,
                                        graph_def_, device_, blaze_run_options_,
                                        device_string_, input_types_, context);
   } else {
-    predictor_ = new BlazePredictor(input_names_, output_names_,
+    predictor_ = absl::make_unique<BlazePredictor>(input_names_, output_names_,
                                     graph_def_, device_, blaze_run_options_,
                                     device_string_, input_types_, context);
   }

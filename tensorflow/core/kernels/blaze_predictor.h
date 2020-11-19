@@ -49,7 +49,19 @@ class BlazePredictor {
     blaze_run_options_(options), device_type_(device_string),
     input_types_(input_types), ctx_(ctx) {}
 
-  virtual ~BlazePredictor() {}
+#define TF_CHECK_OK(...) { \
+  { \
+    const ::tensorflow::Status _status = (__VA_ARGS__);  \
+    if (!_status.ok()) { \
+      LOG(ERROR) << _status.ToString(); \
+    } \
+  } \
+}
+  virtual ~BlazePredictor() {
+    TF_CHECK_OK(session_->ReleaseCallable(handle_));
+    TF_CHECK_OK(session_->Close());
+    delete session_;
+  }
 
   virtual void Compute(OpKernelContext* ctx);
   //session must created in constructor function, otherwise in compute function
