@@ -1,5 +1,22 @@
 #export TEST_TMPDIR=
 #python ./configure.py
+export CUDA_TOOLKIT_PATH=/usr/local/cuda/
+export TF_CUDA_VERSION=10.1
+export TF_CUDALIB_VERSION=10
+EXTERNAL_DIR=$(dirname `readlink -f $0`)/../_external
+export LD_LIBRARY_PATH=$EXTERNAL_DIR/usr/local/cuda-10.1/lib64:$EXTERNAL_DIR/usr/local/cuda-10.1/lib64/stubs:$LD_LIBRARY_PATH
+
+export CUDNN_INSTALL_PATH=/usr/local/cuda/
+export TF_CUDNN_VERSION=7
+
+export NCCL_INSTALL_PATH=/usr/local/cuda/
+export TF_NCCL_VERSION=2.3.7
+
+export TF_CUDA_CLANG=0
+export TF_CUDA_COMPUTE_CAPABILITIES="6.0,6.1,7.0,7.5"
+export TF_NEED_CUDA=1
+export TF_ENABLE_XLA=1
+
 declare -a targets=("//tensorflow:libtensorflow_framework.so"
                     "//tensorflow:libtensorflow_cc.so")
 declare -a install_targets=("libtensorflow_framework.so"
