@@ -76,16 +76,16 @@ Status BlazePredictor::InitSession() {
 
   SessionOptions options;
   TF_RETURN_IF_ERROR(GenSessionOptions(options));
-  auto status = NewSession(options, &session_);
-  if (!status.ok()) {
+  session_ = std::move(std::unique_ptr<Session>(NewSession(options)));
+  if (session_ == nullptr) {
     LOG(ERROR) << "create session failed";
-    return status;
+    return errors::Internal("create session failed");
   }
 
   GraphDef graph_def;
   TF_RETURN_IF_ERROR(PrepareGraph(graph_def));
 
-  status = session_->Create(graph_def);
+  auto status = session_->Create(graph_def);
   if (!status.ok()) {
     LOG(ERROR) << "create session with GraphDef failed " << status.ToString();
     return status;

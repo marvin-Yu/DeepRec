@@ -57,11 +57,7 @@ class BlazePredictor {
     } \
   } \
 }
-  virtual ~BlazePredictor() {
-    TF_CHECK_OK(session_->ReleaseCallable(handle_));
-    TF_CHECK_OK(session_->Close());
-    delete session_;
-  }
+    virtual ~BlazePredictor() {}
 
   virtual void Compute(OpKernelContext* ctx);
   //session must created in constructor function, otherwise in compute function
@@ -69,7 +65,7 @@ class BlazePredictor {
   virtual Status InitSession();
 
   Session* GetSession() {
-    return session_;
+    return session_.get();
   }
  protected:
   // read from tensor proto
@@ -86,7 +82,7 @@ class BlazePredictor {
   std::string device_;
   OpKernelConstruction* ctx_;
   //runtime options
-  Session* session_;
+  std::unique_ptr<Session> session_;
   Session::CallableHandle handle_;
  private:
   Status ParseAttr(const std::string& device);
