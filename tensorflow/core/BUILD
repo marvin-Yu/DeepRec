@@ -1611,6 +1611,7 @@ cc_library(
         "//tensorflow/core/kernels:mkl_softmax_op",
         "//tensorflow/core/kernels:mkl_transpose_op",
         "//tensorflow/core/kernels:mkl_batch_matmul_op",
+        "//tensorflow/core/kernels:mkl_einsum_op",
         "//tensorflow/core/kernels:mkl_matmul_op",
         "//tensorflow/core/kernels:mkl_tfconv_op",
         "//tensorflow/core/kernels:mkl_tmp_bf16_ops",
