@@ -4167,11 +4167,22 @@ tf_mkl_kernel_library(
     srcs = ["mkl_batch_matmul_op.cc"],
     hdrs = [
         "matmul_op_impl.h",
+        "mkl_batch_matmul_helper.h",
         "mkl_kernel_util.h",
         "mkl_matmul_ops_common.h",
         "no_op.h"
     ],
     deps = MATH_DEPS + mkl_deps(),
+)
+
+tf_mkl_kernel_library(
+    name = "mkl_einsum_op",
+    srcs = ["mkl_einsum_op.cc"],
+    hdrs = [
+        "mkl_batch_matmul_helper.h",
+        "mkl_matmul_ops_common.h",
+    ],
+    deps = ["//tensorflow/core/kernels:einsum_op"] + mkl_deps(),
 )
 
 tf_cuda_cc_test(
