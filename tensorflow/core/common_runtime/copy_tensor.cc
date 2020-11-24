@@ -300,6 +300,15 @@ void CopyTensor::ViaDMA(StringPiece edge_name, DeviceContext* send_dev_context,
   done(Status::OK());
 }
 
+void CopyTensor::CopyToHost(const Tensor* input,
+                            Device* src, Tensor* output,
+                            DeviceContext* send_dev_context,
+                            StatusCallback done)
+{
+    CopyDeviceToHost(input, cpu_allocator(), cpu_allocator(), "",
+                     src, output, send_dev_context, done);
+}
+
 // static
 Status CopyTensor::Register(DeviceType sender_device_type,
                             DeviceType receiver_device_type,

@@ -48,6 +48,10 @@ class CopyTensor {
                      int dev_to_dev_stream_index, StatusCallback done,
                      bool sync_dst_compute = true);
 
+  static void CopyToHost(const Tensor* input,
+                         Device* src, Tensor* output,
+                         DeviceContext* send_dev_context,
+                         StatusCallback done);
   // Object used to call Register() at static-initialization time.
   // Note: This should only ever be used as a global-static object; no stack
   // or heap instances.

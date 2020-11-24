@@ -609,7 +609,6 @@ message RunOptions {
     uint64 after_padding = 2;
   }
   PaddingInfo padding_info = 600;
-  bool record_flop_count = 109;
 
   // for RTP
   // proto3 does not support set default value and no *has_* interface for POD
@@ -617,6 +616,14 @@ message RunOptions {
     int64 value = 1;
   }
   RunId run_id = 9;
+
+  // If true, then the float-pointing operations count of operations during
+  // session.run() call will be accumulated. The value can be access through
+  // RunMetadata.flop_count_sp
+  bool record_flop_count = 109;
+
+  bool trace_tensors = 127;
+  map<string, string> debug_spec = 128;
 
   reserved 4;
 }
