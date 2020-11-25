@@ -94,9 +94,11 @@ class UnaryVariantOpRegistry {
       AsyncVariantDeviceCopyFn;
 
   // Add a shape lookup function to the registry.
-  void RegisterShapeFn(const string& type_name, const VariantShapeFn& shape_fn);
+  void RegisterShapeFn(const TypeIndex& type_index,
+                       const VariantShapeFn& shape_fn);
 
-  VariantShapeFn* GetShapeFn(StringPiece type_name);
+  // Returns nullptr if no shape function was found for the given TypeIndex.
+  VariantShapeFn* GetShapeFn(const TypeIndex& type_index);
 
   // Add a decode function to the registry.
   void RegisterDecodeFn(const string& type_name,
@@ -152,7 +154,7 @@ class UnaryVariantOpRegistry {
     std::size_t operator()(const TypeIndex& x) const { return x.hash_code(); }
   };
 
-  gtl::FlatMap<StringPiece, VariantShapeFn, StringPieceHasher> shape_fns;
+  gtl::FlatMap<TypeIndex, VariantShapeFn, TypeIndexHash> shape_fns;
   gtl::FlatMap<StringPiece, VariantDecodeFn, StringPieceHasher> decode_fns;
 
   // Map std::pair<Direction, type_name> to function.
@@ -321,16 +323,18 @@ class UnaryVariantShapeRegistration {
  public:
   typedef std::function<Status(const T& t, TensorShape*)> LocalVariantShapeFn;
 
-  UnaryVariantShapeRegistration(const string& type_name,
+  UnaryVariantShapeRegistration(const TypeIndex& type_index,
                                 const LocalVariantShapeFn& shape_fn) {
+    const string type_index_name = port::MaybeAbiDemangle(type_index.name());
     UnaryVariantOpRegistry::Global()->RegisterShapeFn(
-        type_name,
-        [type_name, shape_fn](const Variant& v, TensorShape* s) -> Status {
+        type_index,
+        [type_index_name, shape_fn](const Variant& v,
+                                    TensorShape* s) -> Status {
           const T* t = v.get<T>();
           if (t == nullptr) {
             return errors::Internal(
-                "VariantShapeFn: Could not access object, type_name: ",
-                type_name);
+                "VariantShapeFn: Could not access object, type_index: ",
+                type_index_name);
           }
           return shape_fn(*t, s);
         });

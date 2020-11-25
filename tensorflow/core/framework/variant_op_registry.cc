@@ -40,21 +40,19 @@ UnaryVariantOpRegistry* UnaryVariantOpRegistry::Global() {
 }
 
 UnaryVariantOpRegistry::VariantShapeFn* UnaryVariantOpRegistry::GetShapeFn(
-    StringPiece type_name) {
-  auto found = shape_fns.find(type_name);
+    const TypeIndex& type_index) {
+  auto found = shape_fns.find(type_index);
   if (found == shape_fns.end()) return nullptr;
   return &found->second;
 }
 
-void UnaryVariantOpRegistry::RegisterShapeFn(const string& type_name,
+void UnaryVariantOpRegistry::RegisterShapeFn(const TypeIndex& type_index,
                                              const VariantShapeFn& shape_fn) {
-  CHECK(!type_name.empty()) << "Need a valid name for UnaryVariantShape";
-  VariantShapeFn* existing = GetShapeFn(type_name);
+  VariantShapeFn* existing = GetShapeFn(type_index);
   CHECK_EQ(existing, nullptr)
-      << "Unary VariantShapeFn for type_name: " << type_name
-      << " already registered";
-  shape_fns.insert(std::pair<StringPiece, VariantShapeFn>(
-      GetPersistentStringPiece(type_name), shape_fn));
+      << "Unary VariantShapeFn for type_index: "
+      << port::MaybeAbiDemangle(type_index.name()) << " already registered";
+  shape_fns.insert(std::pair<TypeIndex, VariantShapeFn>(type_index, shape_fn));
 }
 
 Status GetUnaryVariantShape(const Tensor& variant_tensor, TensorShape* shape) {
@@ -62,7 +60,7 @@ Status GetUnaryVariantShape(const Tensor& variant_tensor, TensorShape* shape) {
   CHECK_EQ(variant_tensor.dims(), 0);
   const Variant& v = variant_tensor.scalar<Variant>()();
   UnaryVariantOpRegistry::VariantShapeFn* shape_fn =
-      UnaryVariantOpRegistry::Global()->GetShapeFn(v.TypeName());
+      UnaryVariantOpRegistry::Global()->GetShapeFn(v.TypeId());
   if (shape_fn == nullptr) {
     return errors::Internal(
         "No unary variant shape function found for Variant type_name: ",
