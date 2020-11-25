@@ -94,11 +94,9 @@ class UnaryVariantOpRegistry {
       AsyncVariantDeviceCopyFn;
 
   // Add a shape lookup function to the registry.
-  void RegisterShapeFn(const TypeIndex& type_index,
-                       const VariantShapeFn& shape_fn);
+  void RegisterShapeFn(const string& type_name, const VariantShapeFn& shape_fn);
 
-  // Returns nullptr if no shape function was found for the given TypeIndex.
-  VariantShapeFn* GetShapeFn(const TypeIndex& type_index);
+  VariantShapeFn* GetShapeFn(StringPiece type_name);
 
   // Add a decode function to the registry.
   void RegisterDecodeFn(const string& type_name,
@@ -154,7 +152,7 @@ class UnaryVariantOpRegistry {
     std::size_t operator()(const TypeIndex& x) const { return x.hash_code(); }
   };
 
-  gtl::FlatMap<TypeIndex, VariantShapeFn, TypeIndexHash> shape_fns;
+  gtl::FlatMap<StringPiece, VariantShapeFn, StringPieceHasher> shape_fns;
   gtl::FlatMap<StringPiece, VariantDecodeFn, StringPieceHasher> decode_fns;
 
   // Map std::pair<Direction, type_name> to function.
@@ -323,18 +321,16 @@ class UnaryVariantShapeRegistration {
  public:
   typedef std::function<Status(const T& t, TensorShape*)> LocalVariantShapeFn;
 
-  UnaryVariantShapeRegistration(const TypeIndex& type_index,
+  UnaryVariantShapeRegistration(const string& type_name,
                                 const LocalVariantShapeFn& shape_fn) {
-    const string type_index_name = port::MaybeAbiDemangle(type_index.name());
     UnaryVariantOpRegistry::Global()->RegisterShapeFn(
-        type_index,
-        [type_index_name, shape_fn](const Variant& v,
-                                    TensorShape* s) -> Status {
+        type_name,
+        [type_name, shape_fn](const Variant& v, TensorShape* s) -> Status {
           const T* t = v.get<T>();
           if (t == nullptr) {
             return errors::Internal(
-                "VariantShapeFn: Could not access object, type_index: ",
-                type_index_name);
+                "VariantShapeFn: Could not access object, type_name: ",
+                type_name);
           }
           return shape_fn(*t, s);
         });
@@ -569,32 +565,20 @@ class UnaryVariantBinaryOpRegistration {
 
 // Register a unary shape variant function with the signature:
 //    Status ShapeFn(const T& t, TensorShape* s);
-// to Variants having TypeIndex type_index.
-#define REGISTER_UNARY_VARIANT_SHAPE_FUNCTION(T, shape_function) \
-  REGISTER_UNARY_VARIANT_SHAPE_FUNCTION_UNIQ_HELPER(             \
-      __COUNTER__, T, MakeTypeIndex<T>(), shape_function)
+// to Variants having TypeName type_name.
+#define REGISTER_UNARY_VARIANT_SHAPE_FUNCTION(T, type_name, shape_function)    \
+  REGISTER_UNARY_VARIANT_SHAPE_FUNCTION_UNIQ_HELPER(__COUNTER__, T, type_name, \
+                                                    shape_function)
 
-#define REGISTER_UNARY_VARIANT_SHAPE_FUNCTION_UNIQ_HELPER(ctr, T, type_index, \
-                                                          shape_function)     \
-  REGISTER_UNARY_VARIANT_SHAPE_FUNCTION_UNIQ(ctr, T, type_index, shape_function)
+#define REGISTER_UNARY_VARIANT_SHAPE_FUNCTION_UNIQ_HELPER(ctr, T, type_name, \
+                                                          shape_function)    \
+  REGISTER_UNARY_VARIANT_SHAPE_FUNCTION_UNIQ(ctr, T, type_name, shape_function)
 
-#define REGISTER_UNARY_VARIANT_SHAPE_FUNCTION_UNIQ(ctr, T, type_index,         \
+#define REGISTER_UNARY_VARIANT_SHAPE_FUNCTION_UNIQ(ctr, T, type_name,          \
                                                    shape_function)             \
   static variant_op_registry_fn_registration::UnaryVariantShapeRegistration<T> \
-      register_unary_variant_op_shape_registration_fn_##ctr(type_index,        \
+      register_unary_variant_op_shape_registration_fn_##ctr(type_name,         \
                                                             shape_function)
-
-// Register a unary decode variant function for the given type.
-#define REGISTER_UNARY_VARIANT_DECODE_FUNCTION(T, type_name) \
-  REGISTER_UNARY_VARIANT_DECODE_FUNCTION_UNIQ_HELPER(__COUNTER__, T, type_name)
-
-#define REGISTER_UNARY_VARIANT_DECODE_FUNCTION_UNIQ_HELPER(ctr, T, type_name) \
-  REGISTER_UNARY_VARIANT_DECODE_FUNCTION_UNIQ(ctr, T, type_name)
-
-#define REGISTER_UNARY_VARIANT_DECODE_FUNCTION_UNIQ(ctr, T, type_name)        \
-  static variant_op_registry_fn_registration::UnaryVariantDecodeRegistration< \
-      T>                                                                      \
-      register_unary_variant_op_decoder_fn_##ctr(type_name)
 }  // end namespace tensorflow
 
 #endif  // TENSORFLOW_CORE_FRAMEWORK_VARIANT_OP_REGISTRY_H_
