@@ -39,7 +39,11 @@ namespace tensorflow {
 //[PROF-STATS]
 struct ProfStats {
   std::atomic<uint64> flops;
-  ProfStats() {flops = 0;}
+  float blaze_latency_ms;
+  ProfStats() {
+    flops = 0;
+    blaze_latency_ms = 0;
+  }
 };
 
 // Alias tensorflow::string to std::string.

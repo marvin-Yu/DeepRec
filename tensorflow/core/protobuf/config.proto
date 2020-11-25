@@ -656,8 +656,10 @@ message RunMetadata {
   //[PROF-STATS]
   message ProfStats {
     uint64 flops = 1;
+    float blaze_latency_ms = 2;
   }
-  ProfStats prof_stats = 5;
+
+  ProfStats prof_stats = 500;
 }
 
 // Defines a connection between two tensors in a `GraphDef`.

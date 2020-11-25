@@ -114,6 +114,8 @@ class Executor {
     uint64 after_padding = 0;
     //[PROF-STATS]
     ProfStats* prof_stats = nullptr;
+    ProfStats real_prof_stats;
+    bool enable_prof_stats;
     typedef std::function<Status(const string& node_name, const int output_slot,
                                  const Tensor* tensor, const bool is_ref,
                                  OpKernelContext* ctx)>

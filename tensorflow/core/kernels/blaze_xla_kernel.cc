@@ -40,6 +40,7 @@ class BlazeXlaOp : public OpKernel {
   GraphDef graph_def_;
   BlazeKernelOptions blaze_run_options_;
   std::unique_ptr<BlazePredictor> predictor_;
+  Env* env_;
 };
 
 void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
@@ -66,6 +67,7 @@ BlazeXlaOp::BlazeXlaOp(OpKernelConstruction* context)
   device_ = context->def().device();
   InitPredictor(context);
   OP_REQUIRES_OK(context, predictor_->InitSession());
+  env_ = Env::Default();
 }
 
 Status BlazeXlaOp::ParseAttr() {
@@ -83,15 +85,19 @@ Status BlazeXlaOp::ParseAttr() {
   }
 
   graph_def_str_ = graph_def_.DebugString();
-// if (!protobuf::TextFormat::ParseFromString(graph_def_str_, &graph_def_)) {
-//    return errors::InvalidArgument("parse ", graph_def_str_, " to protobuf failed");
-//  }
   
   return Status::OK();
 }
 
 void BlazeXlaOp::Compute(OpKernelContext* ctx) {
-  predictor_->Compute(ctx);
+  if (ctx->prof_stats()) {
+    auto start_ms = env_->NowNanos();
+    predictor_->Compute(ctx);
+    auto end_ms = env_->NowNanos();
+    ctx->prof_stats()->blaze_latency_ms = ((end_ms - start_ms) / 1000.0f);
+  } else {
+    predictor_->Compute(ctx);
+  }
 }
 
 REGISTER_KERNEL_BUILDER(Name("BlazeXlaOp").Device(DEVICE_CPU), BlazeXlaOp);
