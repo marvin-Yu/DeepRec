@@ -19,7 +19,7 @@ limitations under the License.
 #include <iostream>
 #include "tensorflow/core/platform/types.h"
 #ifdef INTEL_MKL
-#include "third_party/intel_mkl_ml/include/mkl_cblas.h"
+#include "mkl_cblas.h"
 
 extern void __xla_cpu_runtime_MKLMatMulF32(
     const void* /* xla::ExecutableRunOptions* */ run_options_ptr, float* out,

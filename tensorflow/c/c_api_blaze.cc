@@ -207,7 +207,7 @@ void TF_GraphSetDevice(TF_Graph* graph, int cpu_id, int gpu_id) {
   mutex_lock l(graph->mu);
   Graph* g = &(graph->graph);
 
-  LOG(INFO) << "TF_GraphSetDevice: cpu_id, gpu_id = "
+  LOG(INFO) << "TF_GraphSetDevice: cpu_id, gpu_id = "		
             << cpu_id << ", " << gpu_id;
   std::string cpu_device = "/device:CPU:" + std::to_string(cpu_id);
   std::string gpu_device = "/device:GPU:" + std::to_string(gpu_id);
@@ -217,12 +217,12 @@ void TF_GraphSetDevice(TF_Graph* graph, int cpu_id, int gpu_id) {
   } else {
     device = cpu_device;
   }
+  
   for (Node* node : g->nodes()) {
     std::string requested_device = node->requested_device();
     if (requested_device.find("CPU") != std::string::npos ||
         requested_device.find("cpu") != std::string::npos) {
       node->set_requested_device(cpu_device);
-      node->AddAttr("_XlaCompile", false);
       VLOG(1) << "Place node " << node->name() << " on " << cpu_device;
     } else {
       node->set_requested_device(device);

@@ -205,7 +205,14 @@ Status CpuExecutable::ExecuteComputeFunction(
               *module().entry_computation()));
     }
   }
-
+  if (hlo_execution_profile != nullptr){
+    VLOG(1) << "*********************************************";
+    se::Stream* stream = run_options->stream();
+    const auto* device_description =
+        &stream->parent()->GetDeviceDescription();
+    VLOG(1) << "hlo_execution_profile "
+            << hlo_execution_profile->ToString(*device_description);
+  }
   return Status::OK();
 }
 
