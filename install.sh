@@ -10,7 +10,7 @@ export CUDNN_INSTALL_PATH=/usr/local/cuda/
 export TF_CUDNN_VERSION=7
 
 export NCCL_INSTALL_PATH=/usr/local/cuda/
-export TF_NCCL_VERSION=2.3.7
+#export TF_NCCL_VERSION=2.3.7
 
 export TF_CUDA_CLANG=0
 export TF_CUDA_COMPUTE_CAPABILITIES="6.0,6.1,7.0,7.5"
