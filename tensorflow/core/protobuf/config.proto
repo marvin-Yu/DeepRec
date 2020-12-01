@@ -670,8 +670,15 @@ message RunMetadata {
     float blaze_latency_ms = 2;
   }
 
+  message BlazeMetrics {
+    string key = 1;
+    float value = 2;
+  }
+
+// ToDO remove this, using key value pair
   ProfStats prof_stats = 500;
   TracedTensors traced_tensors = 501;
+  repeated BlazeMetrics blaze_metrics = 502;
 }
 
 // Defines a connection between two tensors in a `GraphDef`.

@@ -1909,6 +1909,9 @@ struct UserTracedInfos {
         //Todo done flops monitor
         run_metadata->mutable_prof_stats()->set_blaze_latency_ms(
             prof_stats->blaze_latency_ms);
+        auto metrics = run_metadata->mutable_blaze_metrics()->Add();
+        metrics->set_key("blaze_latency_ms");
+        metrics->set_value(prof_stats->blaze_latency_ms);
       }
       if (traced_tensors) {
         for (int i = 0; i < traced_tensors->name_tensors_size(); ++i) {
