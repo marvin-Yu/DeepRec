@@ -13,6 +13,7 @@ import "tensorflow/core/framework/graph.proto";
 import "tensorflow/core/framework/step_stats.proto";
 import "tensorflow/core/protobuf/cluster.proto";
 import "tensorflow/core/protobuf/debug.proto";
+import "tensorflow/core/protobuf/named_tensor.proto";
 import "tensorflow/core/protobuf/rewriter_config.proto";
 
 message GPUOptions {
@@ -628,6 +629,9 @@ message RunOptions {
   reserved 4;
 }
 
+message  TracedTensors {
+  repeated NamedTensorProto name_tensors = 1;
+}
 // Metadata output (i.e., non-Tensor) for a single Run() call.
 message RunMetadata {
   // Statistics traced for this step. Populated if tracing is turned on via the
@@ -667,6 +671,7 @@ message RunMetadata {
   }
 
   ProfStats prof_stats = 500;
+  TracedTensors traced_tensors = 501;
 }
 
 // Defines a connection between two tensors in a `GraphDef`.

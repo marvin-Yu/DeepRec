@@ -604,12 +604,14 @@ struct GraphCollector {
   }
 };
 
+class UserTracedInfos;
 class OpKernelContext {
  public:
   // The first element of a WrappedAllocator is a "base" Allocator and
   // the second element is that Allocator wrapped by a
   // TrackingAllocator
   typedef std::pair<Allocator*, TrackingAllocator*> WrappedAllocator;
+  typedef std::shared_ptr<UserTracedInfos> TracedInfosPtr;
 
   // TODO(zhifengc): Do some cleanup of Params.
   // The Params struct is passed in to initialize an OpKernelContext,
@@ -623,6 +625,7 @@ class OpKernelContext {
     //[PROF-STATS]
     ProfStats* prof_stats = nullptr;
 
+    TracedInfosPtr traced_infos;
     // The step being executed.
     int64 step_id = 0;
     int64 round_step_id = 0;
@@ -752,6 +755,7 @@ class OpKernelContext {
   uint64 after_padding() const { return params_->after_padding; }
   //[PROF-STATS]
   ProfStats* prof_stats() const { return params_->prof_stats; };
+  TracedInfosPtr traced_infos() const { return params_->traced_infos; }
 
   int64 round_step_id() const { return params_->round_step_id; }
   int64 step_id() const { return params_->step_id; }
@@ -1874,6 +1878,53 @@ void CheckNotInComputeAsync(OpKernelContext* ctx,
     }                                                       \
   } while (0)
 
+struct UserTracedInfos {
+  UserTracedInfos(bool enable_stats = false, bool enable_tensors = false) :
+      enable_prof_stats(enable_stats), enable_trace_tensors(enable_tensors) {
+        if (enable_prof_stats) {
+          prof_stats = std::move(absl::make_unique<ProfStats>());
+          traced_tensors = std::move(absl::make_unique<TracedTensors>());
+        }
+  }
+
+  void MergeFrom(RunMetadata* run_metadata) {
+    if (run_metadata) {
+      if (prof_stats) {
+        //ToDo done prof_stas
+        prof_stats->blaze_latency_ms = run_metadata->prof_stats().blaze_latency_ms();
+      }
+      if (traced_tensors) {
+        const auto& tcs = run_metadata->traced_tensors();
+        for (int i = 0; i < tcs.name_tensors_size(); ++i) {
+          auto ts = traced_tensors->mutable_name_tensors()->Add();
+          *ts = tcs.name_tensors(i);
+        }
+      }
+    }
+  }
+
+  void MergeTo(RunMetadata* run_metadata) {
+    if (run_metadata) {
+      if (prof_stats) {
+        //Todo done flops monitor
+        run_metadata->mutable_prof_stats()->set_blaze_latency_ms(
+            prof_stats->blaze_latency_ms);
+      }
+      if (traced_tensors) {
+        for (int i = 0; i < traced_tensors->name_tensors_size(); ++i) {
+          auto ts = run_metadata->mutable_traced_tensors()->
+              mutable_name_tensors()->Add();
+          *ts = traced_tensors->name_tensors(i);
+        }
+      }
+    }
+  }
+
+  std::unique_ptr<ProfStats> prof_stats;
+  std::unique_ptr<TracedTensors> traced_tensors;
+  bool enable_prof_stats;
+  bool enable_trace_tensors;
+};
 }  // namespace tensorflow
 
 #endif  // TENSORFLOW_CORE_FRAMEWORK_OP_KERNEL_H_

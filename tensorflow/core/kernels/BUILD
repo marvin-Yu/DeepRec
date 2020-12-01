@@ -7492,6 +7492,7 @@ filegroup(
     name = "blaze_predictor_test_data",
     srcs = [
         "blaze_test_data/aplusb.pbtxt",
+        "blaze_test_data/gpu_aplusb.pbtxt",
         "blaze_test_data/error.pbtxt",
         "blaze_test_data/options",
         "blaze_test_data/negative_options",

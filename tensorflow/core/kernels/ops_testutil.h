@@ -200,6 +200,36 @@ class OpsTestBase : public ::testing::Test {
     return context_->status();
   }
 
+  //for blazexla kernel test
+  Status RunOpKernel(std::shared_ptr<UserTracedInfos> ptr) {
+    // Make sure the old OpKernelContext is deleted before the Params
+    // it was using.
+    context_.reset(nullptr);
+
+    // Delete the output copies from previous runs.
+    gtl::STLDeleteElements(&managed_outputs_);
+    managed_outputs_.resize(0);
+
+    params_.reset(new OpKernelContext::Params);
+    params_->device = device_;
+    params_->frame_iter = FrameAndIter(0, 0);
+    params_->inputs = &inputs_;
+    params_->op_kernel = kernel_.get();
+    params_->traced_infos = ptr;
+    step_container_.reset(new ScopedStepContainer(0, [](const string&) {}));
+    params_->step_container = step_container_.get();
+    std::vector<AllocatorAttributes> attrs;
+    test::SetOutputAttrs(params_.get(), &attrs);
+    checkpoint::TensorSliceReaderCacheWrapper slice_reader_cache_wrapper;
+    params_->slice_reader_cache = &slice_reader_cache_wrapper;
+    params_->resource_manager = device_->resource_manager();
+    params_->function_library = pflr_->GetFLR(device_->name());
+
+    context_.reset(new OpKernelContext(params_.get()));
+    device_->Compute(kernel_.get(), context_.get());
+    return context_->status();
+  }
+
   // Returns the tensor input for 'input_index'.
   //
   // REQUIRES: 0 <= input_index < context_->num_inputs()

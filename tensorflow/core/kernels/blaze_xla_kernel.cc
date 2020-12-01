@@ -12,6 +12,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
+#include "tensorflow/core/common_runtime/copy_tensor.h"
 #include "tensorflow/core/kernels/blaze_predictor.h"
 #include "tensorflow/core/kernels/blaze_xla_predictor.h"
 
@@ -27,7 +28,11 @@ class BlazeXlaOp : public OpKernel {
  private:
   Status ParseAttr();
   void InitPredictor(OpKernelConstruction* context);
+  void TraceTensors(OpKernelContext* ctx);
+  void CopyTensor(MemoryType, OpKernelContext* ctx,
+                  const string& name, const Tensor& tensor);
 
+  DeviceType device_type_;
   std::vector<std::string> input_names_;
   std::vector<std::string> output_names_;
   std::string blaze_option_path_;
@@ -41,6 +46,7 @@ class BlazeXlaOp : public OpKernel {
   BlazeKernelOptions blaze_run_options_;
   std::unique_ptr<BlazePredictor> predictor_;
   Env* env_;
+  std::mutex tracing_mu_;
 };
 
 void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
@@ -56,7 +62,7 @@ void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
 }
 
 BlazeXlaOp::BlazeXlaOp(OpKernelConstruction* context)
-    : OpKernel(context) {
+    : OpKernel(context), device_type_(context->device_type().type()) {
   OP_REQUIRES_OK(context, context->GetAttr("input_names", &input_names_));
   OP_REQUIRES_OK(context, context->GetAttr("output_names", &output_names_));
   OP_REQUIRES_OK(context, context->GetAttr("graph_def", &graph_def_path_));
@@ -90,13 +96,72 @@ Status BlazeXlaOp::ParseAttr() {
 }
 
 void BlazeXlaOp::Compute(OpKernelContext* ctx) {
-  if (ctx->prof_stats()) {
+  if (!ctx->traced_infos()) {
+    predictor_->Compute(ctx);
+  } else {
     auto start_ms = env_->NowNanos();
     predictor_->Compute(ctx);
     auto end_ms = env_->NowNanos();
-    ctx->prof_stats()->blaze_latency_ms = ((end_ms - start_ms) / 1000.0f);
+    if (ctx->traced_infos()->enable_prof_stats) {
+      ctx->traced_infos()->prof_stats->blaze_latency_ms = ((end_ms - start_ms) / 1000.0f);
+    }
+
+    if (ctx->traced_infos()->enable_trace_tensors) {
+      TraceTensors(ctx);
+    }
+  }
+}
+
+void BlazeXlaOp::TraceTensors(OpKernelContext* ctx) {
+  if (ctx->status().ok()) {
+    int num_inputs = ctx->num_inputs();
+    for (int i = 0; i < num_inputs; ++i) {
+      const auto& tensor = ctx->input(i);
+      const auto& name = input_names_[i];
+      CopyTensor(ctx->input_memory_type(i), ctx, name, tensor);
+    }
+
+    for (int i = 0; i < ctx->num_outputs(); ++i) {
+      const auto tensor = ctx->mutable_output(i);
+      const auto& name = output_names_[i];
+      CopyTensor(ctx->output_memory_type(i), ctx, name, *tensor);
+    }
+  }
+}
+
+void BlazeXlaOp::CopyTensor(MemoryType mtype, OpKernelContext* ctx,
+                            const string& name, const Tensor& tensor) {
+  if (device_type_ == DEVICE_GPU && mtype == DEVICE_MEMORY) {
+    DeviceContext* device_ctxt = ctx->op_device_context();
+    Device* device = static_cast<Device*>(ctx->device());
+
+    AllocatorAttributes host_alloc_attrs;
+    host_alloc_attrs.set_gpu_compatible(true);
+    host_alloc_attrs.set_on_host(true);
+    Allocator* cpu_allocator = device->GetAllocator(host_alloc_attrs);
+    Tensor* cpu_tensor =
+        new Tensor(cpu_allocator, tensor.dtype(), tensor.shape());
+    device_ctxt->CopyDeviceTensorToCPU(
+        &tensor, "TensorTrace", device, cpu_tensor,
+        [this, cpu_tensor, ctx, &name](const Status& s) {
+          ctx->SetStatus(s);
+          if (s.ok()) {
+            std::lock_guard<std::mutex> l(tracing_mu_);
+            auto name_tensor = ctx->traced_infos()->traced_tensors->
+              mutable_name_tensors()->Add();
+            name_tensor->set_name(name);
+            cpu_tensor->AsProtoField(name_tensor->mutable_tensor()); 
+          }
+          if (ctx->status().ok()) {
+            ctx->set_output(0, *cpu_tensor);
+          }
+          delete cpu_tensor;
+        });
   } else {
-    predictor_->Compute(ctx);
+    auto name_tensor = ctx->traced_infos()->traced_tensors->
+      mutable_name_tensors()->Add();
+    name_tensor->set_name(name);
+    tensor.AsProtoField(name_tensor->mutable_tensor());
   }
 }
 

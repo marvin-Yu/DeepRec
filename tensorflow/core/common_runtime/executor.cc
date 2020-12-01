@@ -860,6 +860,8 @@ Status InferAllocAttr(const Node* n, const Node* dst,
 // track of how many predecessors of a node have not done (pending_).
 class ExecutorState {
  public:
+  typedef std::shared_ptr<UserTracedInfos> TracedInfosPtr;
+
   ExecutorState(const Executor::Args& args, ExecutorImpl* impl);
   ~ExecutorState();
 
@@ -1253,6 +1255,7 @@ class ExecutorState {
   uint64 after_padding_ = 0;
   //[PROF-STATS]
   ProfStats* prof_stats_ = nullptr;
+  TracedInfosPtr traced_infos_;
 
   const bool vlog_;  // true if VLOG_IS_ON(1). Used to check vlog cheaply.
 
@@ -1405,6 +1408,7 @@ ExecutorState::ExecutorState(const Executor::Args& args, ExecutorImpl* impl)
       after_padding_(args.after_padding),
       //[PROF-STATS]
       prof_stats_(args.prof_stats),
+      traced_infos_(args.traced_infos),
 
       log_memory_(LogMemory::IsEnabled()),
       step_id_(args.step_id),

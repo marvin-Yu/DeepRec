@@ -473,16 +473,10 @@ Status DirectSession::ExtendLocked(GraphDef graph) {
 
 struct CallbackFrame {
   CallbackFrame() {
-    call_frame = nullptr;
-    run_state = nullptr;
     executors_and_keys = nullptr;
   }
-  ~CallbackFrame() {
-    delete call_frame;
-    delete run_state;
-  }
-  FunctionCallFrame *call_frame;
-  DirectSession::RunState *run_state;
+  std::unique_ptr<FunctionCallFrame> call_frame;
+  std::unique_ptr<DirectSession::RunState> run_state;
   DirectSession::ExecutorsAndKeys* executors_and_keys;
   CancellationManager step_cancellation_manager;
   CancellationToken cancellation_token;
@@ -614,15 +608,18 @@ Status DirectSession::RunInternal(
     args.before_padding = run_options.padding_info().before_padding();
     args.after_padding = run_options.padding_info().after_padding();
   }
+  
+  const bool do_trace = (run_options.trace_level() > RunOptions::NO_TRACE);
+
   //[PROF-STATS]
   args.enable_prof_stats = enable_prof_stats_;
-  if (enable_prof_stats_) {
+  if (enable_prof_stats_ || do_trace) {
+    args.traced_infos = std::move(std::make_shared<UserTracedInfos>
+                                  (enable_prof_stats_, do_trace));
     args.prof_stats = &args.real_prof_stats;
   } else {
     args.prof_stats = nullptr;
   }
-  
-  const bool do_trace = (run_options.trace_level() > RunOptions::NO_TRACE);
 
   bool update_cost_model = false;
   if (options_.config.graph_options().build_cost_model() > 0) {
@@ -802,8 +799,10 @@ Status DirectSession::RunInternal(
   //[PROF-STATS]
   if (enable_prof_stats_ && run_metadata) {
     run_metadata->mutable_prof_stats()->set_flops(args.real_prof_stats.flops);
-    run_metadata->mutable_prof_stats()->set_blaze_latency_ms(
-        args.real_prof_stats.blaze_latency_ms);
+  }
+
+  if (args.traced_infos) {
+    args.traced_infos->MergeTo(run_metadata);
   }
 
   // If requested via RunOptions, output the partition graphs.
@@ -847,7 +846,7 @@ void DirectSession::RunInternalAsync(
     StatusCallback done) {
   const uint64 start_time_usecs = options_.env->NowMicros();
   const int64 executor_step_count = executors_and_keys->step_count.fetch_add(1);
-  frame->run_state = new RunState(step_id, &devices_);
+  frame->run_state = std::move(absl::make_unique<RunState>(step_id, &devices_));
   auto& run_state = *(frame->run_state);
 
   profiler::TraceMe activity(
@@ -911,10 +910,13 @@ void DirectSession::RunInternalAsync(
       auto s = this->AfterRunAsync(run_options, inputs, output_names, target_nodes,
                                    outputs, frame, run_metadata, start_time_usecs);
       done(s);
+
+      if (args.traced_infos) {
+        args.traced_infos->MergeTo(run_metadata);
+      }
+      //fixme: move above
       if (run_metadata && args.enable_prof_stats) {
         run_metadata->mutable_prof_stats()->set_flops(args.real_prof_stats.flops);
-        run_metadata->mutable_prof_stats()->set_blaze_latency_ms(
-            args.real_prof_stats.blaze_latency_ms);
       }
       });
 
@@ -933,13 +935,16 @@ void DirectSession::RunInternalAsync(
   args.user_intra_op_threadpool = threadpool_options.intra_op_threadpool;
 
   args.enable_prof_stats = enable_prof_stats_;
-  if (enable_prof_stats_) {
+
+  const bool do_trace = (run_options.trace_level() > RunOptions::NO_TRACE);
+  if (enable_prof_stats_ || do_trace) {
+    // ToDo move in to traced_infos
     args.prof_stats = &args.real_prof_stats;
+    args.traced_infos = std::move(std::make_shared<UserTracedInfos>
+                                  (enable_prof_stats_, do_trace));
   } else {
     args.prof_stats = nullptr;
   }
-
-  const bool do_trace = (run_options.trace_level() > RunOptions::NO_TRACE);
 
   bool update_cost_model = false;
   if (options_.config.graph_options().build_cost_model() > 0) {
@@ -1120,8 +1125,8 @@ void DirectSession::RunAsync(const RunOptions& run_options,
   frame->executors_and_keys = executors_and_keys;
   // Configure a call frame for the step, which we use to feed and
   // fetch values to and from the executors.
-  frame->call_frame = new FunctionCallFrame(executors_and_keys->input_types,
-                               executors_and_keys->output_types);
+  frame->call_frame = std::move(absl::make_unique<FunctionCallFrame>
+    (executors_and_keys->input_types, executors_and_keys->output_types));
   auto& call_frame = *(frame->call_frame);
   gtl::InlinedVector<Tensor, 4> feed_args(inputs.size());
   for (const auto& it : inputs) {

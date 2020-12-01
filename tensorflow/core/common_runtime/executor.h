@@ -28,6 +28,7 @@ limitations under the License.
 #include "tensorflow/core/lib/core/threadpool_interface.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/macros.h"
+#include  "tensorflow/core/protobuf/config.pb.h"
 
 namespace tensorflow {
 
@@ -86,6 +87,7 @@ class Executor {
   typedef std::function<Status(const int64, const DeviceMgr*, Rendezvous** r)>
       RendezvousFactory;
 
+
   struct Args {
     int64 step_id = 0;
     int64 round_step_id = 0;
@@ -116,6 +118,8 @@ class Executor {
     ProfStats* prof_stats = nullptr;
     ProfStats real_prof_stats;
     bool enable_prof_stats;
+
+    std::shared_ptr<UserTracedInfos> traced_infos;
     typedef std::function<Status(const string& node_name, const int output_slot,
                                  const Tensor* tensor, const bool is_ref,
                                  OpKernelContext* ctx)>

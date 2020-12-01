@@ -217,6 +217,7 @@ COMMON_PROTO_SRCS = [
     "framework/types.proto",
     "framework/variable.proto",
     "framework/versions.proto",
+    "protobuf/named_tensor.proto",
     "protobuf/config.proto",
     "protobuf/blaze.proto",
     "protobuf/cluster.proto",
@@ -254,7 +255,6 @@ ADDITIONAL_CORE_PROTO_SRCS = [
     # TODO(ebrevdo): Re-enable once CriticalSection is in core.
     # "protobuf/critical_section.proto",
     "protobuf/meta_graph.proto",
-    "protobuf/named_tensor.proto",
     "protobuf/saved_model.proto",
     "protobuf/saved_object_graph.proto",
     "protobuf/struct.proto",

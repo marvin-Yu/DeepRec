@@ -22,22 +22,23 @@ limitations under the License.
 
 namespace tensorflow {
 void OpsTestBase::SetDevice(const DeviceType& device_type) {
-  /*
   device_type_ = device_type;
 #ifdef GOOGLE_CUDA
+  /*
   if (device_type == DEVICE_GPU) {
-    device_.reset(DeviceFactory::NewDevice("GPU", {}, "/task:0"));
+    device_ = std::move(absl::make_unique<Device>(DeviceFactory::NewDevice("GPU", {}, "/task:0")));
     managed_allocator_.reset(new GpuManagedAllocator());
     allocator_ = managed_allocator_.get();
+
   } else {
     managed_allocator_.reset();
     allocator_ = device_->GetAllocator(AllocatorAttributes());
-  }
+
+  } */
 #else
   CHECK_NE(device_type, DEVICE_GPU)
       << "Requesting GPU on binary compiled without GOOGLE_CUDA.";
 #endif
-*/
 }
 
 void OpsTestBase::SetDevice(const DeviceType& device_type,
