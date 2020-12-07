@@ -43,6 +43,7 @@ limitations under the License.
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/thread_annotations.h"
 #include "tensorflow/core/platform/types.h"
+#include "tensorflow/core/protobuf/blaze.pb.h"
 #include "tensorflow/core/public/session.h"
 
 namespace tensorflow {
@@ -475,6 +476,50 @@ class DirectSession : public Session {
   friend class DebugGateway;
   friend class CallbackFrame;
 };
+
+namespace {
+
+struct BlazeConfSingleton {
+  mutex mu;
+  BlazeConfSingleton* conf_sineleton = nullptr;
+
+  bool setted = false;;
+  ConfigProto run_config;
+  BlazeKernelOptions blaze_options;
+
+  void Set(const ConfigProto& tf_options, const BlazeKernelOptions& b_options) {
+    mutex_lock l(mu);
+    if (!setted) {
+      run_config = tf_options;
+      blaze_options = b_options;
+      setted = true;
+      VLOG(0) << "Blaze will use globla_opts : " << run_config.DebugString()
+          << " self conf: " << blaze_options.DebugString();
+    } else {
+      VLOG(0) << "Options already setted, check your conf";
+    }
+  }
+
+  BlazeConfSingleton* Get() {
+    mutex_lock l(mu);
+    return conf_sineleton;
+  }
+};
+
+BlazeConfSingleton* GetBlazeConfSingleton() {
+  static BlazeConfSingleton* sig = new BlazeConfSingleton;
+  return sig;
+}
+
+}  // namespace
+
+const BlazeConfSingleton* GetBlazeConf() {
+  return GetBlazeConfSingleton()->Get();
+}
+
+void SetBlazeConf(const ConfigProto& tf_options, const BlazeKernelOptions& b_options) {
+  GetBlazeConfSingleton()->Set(tf_options, b_options);
+}
 
 }  // end namespace tensorflow
 
