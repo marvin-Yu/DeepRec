@@ -29,7 +29,6 @@
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/thread_annotations.h"
 #include "tensorflow/core/platform/types.h"
-#include "tensorflow/core/protobuf/blaze.pb.h"
 #include "tensorflow/stream_executor/lib/statusor.h"
 
 namespace tensorflow {

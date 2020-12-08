@@ -43,14 +43,20 @@ class BlazeXlaOp : public OpKernel {
   
   std::string device_;
   GraphDef graph_def_;
-  BlazeKernelOptions blaze_run_options_;
   std::unique_ptr<BlazePredictor> predictor_;
+  BlazeKernelOptions blaze_run_options_;
   Env* env_;
   std::mutex tracing_mu_;
 };
 
 void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
+  auto config = blaze_run_options_.mutable_config_proto();
+  config->set_allow_soft_placement(true);
+  config->mutable_gpu_options()->set_allow_growth(true);
+
   if (blaze_run_options_.xla_compilation()) {
+    auto jitLevel = OptimizerOptions::ON_1;
+    config->mutable_graph_options()->mutable_optimizer_options()->set_global_jit_level(jitLevel);
     predictor_ = absl::make_unique<BlazeXlaPredictor>(input_names_, output_names_,
                                        graph_def_, device_, blaze_run_options_,
                                        device_string_, input_types_, context);
@@ -79,7 +85,12 @@ BlazeXlaOp::BlazeXlaOp(OpKernelConstruction* context)
 Status BlazeXlaOp::ParseAttr() {
   if (!ReadTextProto(Env::Default(), blaze_option_path_,
                      &blaze_run_options_).ok()) {
-    return errors::Internal("parse proto from ", blaze_option_path_,  " failed");
+    VLOG(0) << "Parse blaze options from file failed, try as readable string";
+  } else {
+    if (!::tensorflow::protobuf::TextFormat::ParseFromString(
+            blaze_option_path_, &blaze_run_options_)) {
+      return errors::Internal("parse proto from ", blaze_option_path_,  " failed");
+    }
   }
 
   if (!ReadTextProto(Env::Default(), graph_def_path_,

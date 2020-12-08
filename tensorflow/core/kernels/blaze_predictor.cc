@@ -15,7 +15,12 @@ BlazePredictor::BlazePredictor(OpKernelConstruction* ctx) : device_type_(ctx->de
 Status BlazePredictor::ParseAttr(const std::string& device) {
   if (!ReadTextProto(Env::Default(), blaze_option_path_,
                      &blaze_run_options_).ok()) {
-    return errors::Internal("parse proto from ", blaze_option_path_,  " failed");
+    VLOG(0) << "Parse blaze options from file failed, try as readable string";
+  } else {
+    if (!::tensorflow::protobuf::TextFormat::ParseFromString(
+            blaze_option_path_, &blaze_run_options_)) {
+      return errors::Internal("parse proto from ", blaze_option_path_,  " failed");
+    }
   }
 
   if (!ReadTextProto(Env::Default(), graph_def_str_, &graph_def_).ok()) {

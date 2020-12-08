@@ -219,7 +219,6 @@ COMMON_PROTO_SRCS = [
     "framework/versions.proto",
     "protobuf/named_tensor.proto",
     "protobuf/config.proto",
-    "protobuf/blaze.proto",
     "protobuf/cluster.proto",
     "protobuf/debug.proto",
     "protobuf/device_properties.proto",
