@@ -476,14 +476,13 @@ class DirectSession : public Session {
   friend class CallbackFrame;
 };
 
-namespace {
-
-struct BlazeConfSingleton {
-  mutex mu;
-  BlazeConfSingleton* conf_sineleton = nullptr;
-
-  bool setted = false;;
-  ConfigProto run_config;
+class BlazeConfSingleton {
+ public:
+  static BlazeConfSingleton* GetInstance() {
+    mutex_lock l(mu);
+    static BlazeConfSingleton* sig = new BlazeConfSingleton;
+    return sig;
+  }
 
   void Set(const ConfigProto& tf_options) {
     mutex_lock l(mu);
@@ -494,27 +493,22 @@ struct BlazeConfSingleton {
     }
   }
 
-  BlazeConfSingleton* Get() {
-    mutex_lock l(mu);
-    return conf_sineleton;
+  const ConfigProto& GetConfig() {
+    return run_config;
   }
+
+  bool Setted() {
+    return setted;
+  }
+
+ private:
+  BlazeConfSingleton() {};
+
+ private:
+  static mutex mu;
+  bool setted = false;;
+  ConfigProto run_config;
 };
-
-BlazeConfSingleton* GetBlazeConfSingleton() {
-  static BlazeConfSingleton* sig = new BlazeConfSingleton;
-  return sig;
-}
-
-}  // namespace
-
-const BlazeConfSingleton* GetBlazeConf() {
-  return GetBlazeConfSingleton()->Get();
-}
-
-void SetBlazeConf(const ConfigProto& tf_options) {
-  GetBlazeConfSingleton()->Set(tf_options);
-}
-
 }  // end namespace tensorflow
 
 #endif  // TENSORFLOW_CORE_COMMON_RUNTIME_DIRECT_SESSION_H_
