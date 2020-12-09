@@ -69,31 +69,33 @@ struct CopyInfo{
 
 typedef std::map<std::pair<std::string, int>, std::vector<CopyInfo>> CopyMapping;
 
-int LaunchGraphs(Session * sess, cudaStream_t * streams, int num_infers_per_stream, int num_streams,
-                 CopyMapping & copy_mapping, int start_graph_idx = 0){ // launch from start_graph_idx
-    
-    // launch graphs interleave
+void CudaGraphRun(Session * sess, cudaStream_t stream, int num_infers_per_stream, int stream_idx,
+                  CopyMapping & copy_mapping, int start_graph_idx = 0) {
+    // launch graphs
     for (int i = 0; i < num_infers_per_stream; i++) {
-        for(int j = 0; j < num_streams; j ++){
-
-#ifdef REMOVE_H2D
-            // do h2d copies first
-            auto & copy_infos = copy_mapping[std::pair<std::string, int>("TestModel", j + start_graph_idx)];
-            
-            for(int k = 0; k < copy_infos.size(); k ++){
-                CheckCudaError(cudaMemcpyAsync(copy_infos[k].dst, copy_infos[k].src, copy_infos[k].num_bytes,
-                                               cudaMemcpyHostToDevice, streams[j]));
-            }
-#endif      
-            // specify model_name, graph_index, and stream
-            TF_CHECK_OK(sess->RunCudaGraph("TestModel", j + start_graph_idx, streams[j]));
+ #ifdef REMOVE_H2D
+        // do h2d copies first
+        auto & copy_infos = copy_mapping[std::pair<std::string, int>("TestModel", stream_idx + start_graph_idx)];
+        for(int k = 0; k < copy_infos.size(); k ++){
+            CheckCudaError(cudaMemcpyAsync(copy_infos[k].dst, copy_infos[k].src, copy_infos[k].num_bytes,
+                                           cudaMemcpyHostToDevice, stream));
         }
+#endif      
+        // specify model_name, graph_index, and stream
+        TF_CHECK_OK(sess->RunCudaGraph("TestModel", stream_idx + start_graph_idx, stream));
+        CheckCudaError(cudaStreamSynchronize(stream));
     }
-    
-    for (int j = 0; j < num_streams; j++){
-        CheckCudaError(cudaStreamSynchronize(streams[j]));
+}
+
+int LaunchGraphs(Session * sess, cudaStream_t * streams, int num_infers_per_stream, int num_streams,
+                 CopyMapping & copy_mapping, int start_graph_idx = 0){ 
+    std::vector<std::thread> threads;
+    for (int i = 0; i < num_streams; i++){
+        threads.push_back(std::thread(CudaGraphRun, sess, streams[i], num_infers_per_stream, i, copy_mapping, start_graph_idx));
     }
-    
+    for(auto & thread : threads){
+        thread.join();
+    }
     return 0;
 }
 
