@@ -39,7 +39,7 @@ using tensorflow::int32;
 #define NUM_STREAMS 2 // default total infer iterations num will be NUM_STREAMS * INFER_NUM
 #define MAX_NUM_STREAMS 1024
 #define MAX_NUM_THREADS 1024
-
+#define cudaEventBlockingSync 0x01
 
 // after the capturing, the H2D nodes corresponding to the input tensors will be removed
 // users should do the H2D copy mannually
@@ -76,7 +76,7 @@ void CudaGraphRun(Session * sess, cudaStream_t * streams, int num_infers_per_thr
     for (int i = 0; i < num_infers_per_thread; i++) {
         int stream_idx = i % num_streams;
         cudaEvent_t event;
-        CheckCudaError(cudaEventCreative(&event));
+        CheckCudaError(cudaEventCreateWithFlags(&event, cudaEventBlockingSync));
  #ifdef REMOVE_H2D
         // do h2d copies first
         auto & copy_infos = (*copy_mapping)[std::pair<std::string, int>("TestModel", stream_idx + start_graph_idx)];
@@ -89,7 +89,7 @@ void CudaGraphRun(Session * sess, cudaStream_t * streams, int num_infers_per_thr
         TF_CHECK_OK(sess->RunCudaGraph("TestModel", stream_idx + start_graph_idx, streams[stream_idx]));
         CheckCudaError(cudaEventRecord(event, streams[stream_idx]));
         CheckCudaError(cudaEventSynchronize(event));
-        CheckCudaError(cudaEventDestory(event));
+        CheckCudaError(cudaEventDestroy(event));
     }
 }
 
