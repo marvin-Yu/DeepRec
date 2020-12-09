@@ -2,7 +2,7 @@
 
 ## Compile
 
-`bazel build --config opt //tensorflow/cc:tutorials_example_cudagraph`
+`bazel build --config=cuda --config opt //tensorflow/cc:tutorials_example_cudagraph`
 
 The cuda graph sample source code: tensorflow/cc/tutorials/cuda_graph_inference.cc
 

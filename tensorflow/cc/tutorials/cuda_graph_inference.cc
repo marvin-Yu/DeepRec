@@ -38,6 +38,7 @@ using tensorflow::int32;
 #define INFER_NUM 1000 // default infer iterations for each stream
 #define NUM_STREAMS 2 // default total infer iterations num will be NUM_STREAMS * INFER_NUM
 #define MAX_NUM_STREAMS 1024
+#define MAX_NUM_THREADS 1024
 
 
 // after the capturing, the H2D nodes corresponding to the input tensors will be removed
@@ -69,29 +70,35 @@ struct CopyInfo{
 
 typedef std::map<std::pair<std::string, int>, std::vector<CopyInfo>> CopyMapping;
 
-void CudaGraphRun(Session * sess, cudaStream_t stream, int num_infers_per_stream, int stream_idx,
-                  CopyMapping & copy_mapping, int start_graph_idx = 0) {
+void CudaGraphRun(Session * sess, cudaStream_t * streams, int num_infers_per_thread, int num_streams,
+                  CopyMapping * copy_mapping, int start_graph_idx = 0) {
     // launch graphs
-    for (int i = 0; i < num_infers_per_stream; i++) {
+    for (int i = 0; i < num_infers_per_thread; i++) {
+        int stream_idx = i % num_streams;
+        cudaEvent_t event;
+        CheckCudaError(cudaEventCreative(&event));
  #ifdef REMOVE_H2D
         // do h2d copies first
-        auto & copy_infos = copy_mapping[std::pair<std::string, int>("TestModel", stream_idx + start_graph_idx)];
+        auto & copy_infos = (*copy_mapping)[std::pair<std::string, int>("TestModel", stream_idx + start_graph_idx)];
         for(int k = 0; k < copy_infos.size(); k ++){
             CheckCudaError(cudaMemcpyAsync(copy_infos[k].dst, copy_infos[k].src, copy_infos[k].num_bytes,
-                                           cudaMemcpyHostToDevice, stream));
+                                           cudaMemcpyHostToDevice, streams[stream_idx]));
         }
 #endif      
         // specify model_name, graph_index, and stream
-        TF_CHECK_OK(sess->RunCudaGraph("TestModel", stream_idx + start_graph_idx, stream));
-        CheckCudaError(cudaStreamSynchronize(stream));
+        TF_CHECK_OK(sess->RunCudaGraph("TestModel", stream_idx + start_graph_idx, streams[stream_idx]));
+        CheckCudaError(cudaEventRecord(event, streams[stream_idx]));
+        CheckCudaError(cudaEventSynchronize(event));
+        CheckCudaError(cudaEventDestory(event));
     }
 }
 
-int LaunchGraphs(Session * sess, cudaStream_t * streams, int num_infers_per_stream, int num_streams,
+int LaunchGraphs(Session * sess, cudaStream_t * streams, int num_infers_per_thread, int num_streams, int num_threads,
                  CopyMapping & copy_mapping, int start_graph_idx = 0){ 
     std::vector<std::thread> threads;
-    for (int i = 0; i < num_streams; i++){
-        threads.push_back(std::thread(CudaGraphRun, sess, streams[i], num_infers_per_stream, i, copy_mapping, start_graph_idx));
+    for (int i = 0; i < num_threads; i++){
+        threads.push_back(std::thread(CudaGraphRun, sess, streams, num_infers_per_thread, 
+                                      num_streams, &copy_mapping, start_graph_idx));
     }
     for(auto & thread : threads){
         thread.join();
@@ -318,8 +325,9 @@ Status Test(GraphDef & graph_def,
             std::vector<std::string> & input_names,
             std::vector<std::string> & output_names,
             int batch_size,
-            int num_infers_per_stream,
-            int num_streams){
+            int num_infers_per_thread,
+            int num_streams,
+            int num_threads){
     
     assert(num_streams <= MAX_NUM_STREAMS);
     
@@ -355,8 +363,6 @@ Status Test(GraphDef & graph_def,
     // TF Multiple threads runs
     // Run session.run in multiple threads
     // The number of threads are same with num_streams
-    const int num_infers_per_thread = num_infers_per_stream;
-    const int num_threads = num_streams;
     std::vector<Tensor> output_tensors_tf[MAX_NUM_STREAMS];
     std::vector<std::thread> threads;
 
@@ -503,7 +509,7 @@ Status Test(GraphDef & graph_def,
     std::cout << "start launching..." << std::endl;
     
     // launch multiple graphs in indepent streams
-    LaunchGraphs(session.get(), streams, num_infers_per_stream, num_streams, copy_mapping);
+    LaunchGraphs(session.get(), streams, num_infers_per_thread, num_streams, num_threads, copy_mapping);
                 
     end = std::chrono::system_clock::now();
     
@@ -515,7 +521,7 @@ Status Test(GraphDef & graph_def,
     duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
     duration_seconds = duration.count() * 1.0 / 1000;
     LOG(INFO) << "[Cuda Graph + Multiple Streams] Duration = " << duration_seconds << " seconds." << std::endl;
-    qps = num_infers_per_stream * num_streams * 1.0 / duration_seconds;
+    qps = num_infers_per_thread * num_threads * 1.0 / duration_seconds;
     LOG(INFO) << "[Cuda Graph + Multiple Streams] Average QPS = " << qps << std::endl;
     
     // Test the normal Cuda Graph runs again
@@ -558,7 +564,7 @@ using namespace tensorflow;
 
 
 int main(int argc, char* argv[]) {
-    // Example: ./application model_path in_num input_name [input_names] out_num output_name [output_names] \
+    // Example: ./application model_path in_num input_name [input_names] out_num output_name [output_names] 
     //                        batch_size infer_num_per_stream num_streams [custom_op_lib_path]
     // read command line arguments
     int arg_idx = 1;
@@ -594,12 +600,12 @@ int main(int argc, char* argv[]) {
     }
     std::cout << "batch size = " << batch_size << std::endl;
 
-    int num_infers_per_stream = INFER_NUM;
+    int num_infers_per_thread = INFER_NUM;
     if(argc > arg_idx){
-        num_infers_per_stream = std::stoi(argv[arg_idx++]);
-        assert(num_infers_per_stream >= 1);
+        num_infers_per_thread = std::stoi(argv[arg_idx++]);
+        assert(num_infers_per_thread >= 1);
     }
-    std::cout << "num_infers_per_stream = " << num_infers_per_stream << std::endl;
+    std::cout << "num_infers_per_thread = " << num_infers_per_thread << std::endl;
 
     int num_streams = NUM_STREAMS;
     if(argc > arg_idx){
@@ -608,6 +614,15 @@ int main(int argc, char* argv[]) {
         assert(num_streams <= MAX_NUM_STREAMS);
     }
     std::cout << "num_streams = " << num_streams << std::endl;
+
+    // default threads count is equal to stream, one stream per thread.
+    int num_threads = num_streams;
+    if (argc > arg_idx) {
+        num_threads = std::stoi(argv[arg_idx++]);
+        assert(num_threads >= 1);
+        assert(num_threads <= MAX_NUM_THREADS);
+    }
+    std::cout << "num_threads = " << num_threads << std::endl;
     
     if(argc > arg_idx){
         const char * custom_op_lib = argv[arg_idx++];
@@ -631,6 +646,6 @@ int main(int argc, char* argv[]) {
     }
     
     example::Test(graph_def, input_names, output_names,
-                  batch_size, num_infers_per_stream, num_streams);
+                  batch_size, num_infers_per_thread, num_streams, num_threads);
     return 0;
 }
