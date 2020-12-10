@@ -2458,5 +2458,5 @@ DirectSession::Callable::~Callable() {
   executors_and_keys.reset();
   function_info.reset();
 }
-
+mutex BlazeConfSingleton::mu_;
 }  // namespace tensorflow
