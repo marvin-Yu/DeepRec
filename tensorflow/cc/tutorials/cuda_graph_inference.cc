@@ -410,7 +410,6 @@ Status Test(GraphDef & graph_def,
     InputsMap inputs_cuda_graph[MAX_NUM_STREAMS];
     std::vector<Tensor> input_tensors_cuda_graph[MAX_NUM_STREAMS];
     std::vector<Tensor> output_tensors_cuda_graph[MAX_NUM_STREAMS];
-    std::vector<Tensor> output_tensors_cuda_graph_1[MAX_NUM_STREAMS];
 
     // prepare inputs
     for(int i = 0; i < num_streams; i ++){
@@ -426,6 +425,7 @@ Status Test(GraphDef & graph_def,
     }
     
     // capture multiple graphs
+    LOG(INFO) << "[Jieluo] output names size: " << output_names.size() << endl;
     for(int i = 0; i < num_streams; i ++){
         TF_CHECK_OK(session->Run(inputs_cuda_graph[i], output_names, {}, &output_tensors_cuda_graph[i]));
     }
@@ -590,6 +590,8 @@ int main(int argc, char* argv[]) {
     }
     std::cout << std::endl;
     
+    LOG(INFO) << "[Jieluo] output num = " << output_num << endl;
+    LOG(INFO) << "[Jieluo] names size: " << output_names.size() << endl;
     //std::string mode = argv[arg_idx++];
     //std::cout << "mode = " << mode << std::endl;
     

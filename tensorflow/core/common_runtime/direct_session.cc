@@ -428,11 +428,15 @@ Status DirectSession::ExtendLocked(GraphDef graph) {
   host_memory_inputs_.clear();
   host_memory_inputs_address_.clear();
   
+  LOG(INFO) << "[Jieluo] Check Graph in extend locked" << endl; 
+
   // check nodes with host_memory inputs
   for(auto &n : graph.node()){
       const KernelDef *kernel_def;
       const OpDef *op_def;
-      
+    
+      LOG(INFO) << "[Jieluo] Graph node name: " << n.name() << " type: " << n.type() << endl;
+
       int input_idx = 0;
       // find kernel def and op_def
       Status s = FindKernelDef(DEVICE_GPU, n, &kernel_def, nullptr);
@@ -533,6 +537,7 @@ Status DirectSession::Run(const NamedTensorList& inputs,
                           const std::vector<string>& target_nodes,
                           std::vector<Tensor>* outputs) {
   RunMetadata run_metadata;
+  LOG(INFO) << "[Jieluo] output names size: " << output_names.size() << endl;
   return Run(RunOptions(), inputs, output_names, target_nodes, outputs,
              &run_metadata);
 }
