@@ -425,7 +425,6 @@ Status Test(GraphDef & graph_def,
     }
     
     // capture multiple graphs
-    LOG(INFO) << "[Jieluo] output names size: " << output_names.size() << endl;
     for(int i = 0; i < num_streams; i ++){
         TF_CHECK_OK(session->Run(inputs_cuda_graph[i], output_names, {}, &output_tensors_cuda_graph[i]));
     }
@@ -589,10 +588,7 @@ int main(int argc, char* argv[]) {
         std::cout << argv[arg_idx - 1] << ",";
     }
     std::cout << std::endl;
-    
-    LOG(INFO) << "[Jieluo] output num = " << output_num << endl;
-    LOG(INFO) << "[Jieluo] names size: " << output_names.size() << endl;
-    //std::string mode = argv[arg_idx++];
+
     //std::cout << "mode = " << mode << std::endl;
     
     int batch_size = BATCH_SIZE;

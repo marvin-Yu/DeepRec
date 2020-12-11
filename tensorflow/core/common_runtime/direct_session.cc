@@ -427,15 +427,11 @@ Status DirectSession::ExtendLocked(GraphDef graph) {
 #ifdef GOOGLE_CUDA
   host_memory_inputs_.clear();
   host_memory_inputs_address_.clear();
-  
-  LOG(INFO) << "[Jieluo] Check Graph in extend locked" << endl; 
 
   // check nodes with host_memory inputs
   for(auto &n : graph.node()){
       const KernelDef *kernel_def;
       const OpDef *op_def;
-    
-      LOG(INFO) << "[Jieluo] Graph node name: " << n.name() << " type: " << n.type() << endl;
 
       int input_idx = 0;
       // find kernel def and op_def
@@ -537,7 +533,6 @@ Status DirectSession::Run(const NamedTensorList& inputs,
                           const std::vector<string>& target_nodes,
                           std::vector<Tensor>* outputs) {
   RunMetadata run_metadata;
-  LOG(INFO) << "[Jieluo] output names size: " << output_names.size() << endl;
   return Run(RunOptions(), inputs, output_names, target_nodes, outputs,
              &run_metadata);
 }
@@ -1429,21 +1424,6 @@ void DirectSession::RunAsync(const RunOptions& run_options,
   }
   metrics::RecordGraphInputTensors(input_size);
   
-#ifdef GOOGLE_CUDA
-  // save the host addresses for the inputs
-  if(cuda_graph_capture_mode_){
-      input_host_address_.clear();
-      for(const auto& it: inputs){          
-          input_host_address_.push_back(GetTensorBasePtr(it.second));
-          if(std::find(host_memory_inputs_.begin(), host_memory_inputs_.end(), it.first) != host_memory_inputs_.end()){
-              LOG(INFO) << "Record host memory place holder input address for " << it.first;
-              host_memory_inputs_address_.push_back(GetTensorBasePtr(it.second));
-          }
-      }  
-  }
-  num_output_tensors_ = output_names.size();  
-#endif
-  
   // Check if we already have an executor for these arguments.
   ExecutorsAndKeys* executors_and_keys;
   RunStateArgs run_state_args(run_options.debug_options());
@@ -1515,6 +1495,21 @@ Status DirectSession::Run(const RunOptions& run_options,
     input_size += it.second.AllocatedBytes();
   }
   metrics::RecordGraphInputTensors(input_size);
+
+#ifdef GOOGLE_CUDA
+  // save the host addresses for the inputs
+  if(cuda_graph_capture_mode_){
+      input_host_address_.clear();
+      for(const auto& it: inputs){          
+          input_host_address_.push_back(GetTensorBasePtr(it.second));
+          if(std::find(host_memory_inputs_.begin(), host_memory_inputs_.end(), it.first) != host_memory_inputs_.end()){
+              LOG(INFO) << "Record host memory place holder input address for " << it.first;
+              host_memory_inputs_address_.push_back(GetTensorBasePtr(it.second));
+          }
+      }  
+  }
+  num_output_tensors_ = output_names.size();  
+#endif
 
   // Check if we already have an executor for these arguments.
   ExecutorsAndKeys* executors_and_keys;
