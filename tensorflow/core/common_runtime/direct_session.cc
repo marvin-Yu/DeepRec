@@ -48,6 +48,7 @@ limitations under the License.
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/versions.pb.h"
 #include "tensorflow/core/graph/algorithm.h"
+#include "tensorflow/core/graph/default_device.h"
 #include "tensorflow/core/graph/graph.h"
 #include "tensorflow/core/graph/graph_constructor.h"
 #include "tensorflow/core/graph/graph_partition.h"
@@ -484,6 +485,9 @@ Status DirectSession::ExtendLocked(GraphDef graph) {
       }
   }
 #endif
+
+  LOG(INFO) << "[jieluo] Check node device during create session"
+  graph::CheckNodeDevice("/device:GPU:0", &graph);
   
   if (!(flib_def_ && execution_state_)) {
     // If this is the first call, we can initialize the execution state
@@ -976,6 +980,7 @@ bool DirectSession::RemoveH2DNodes(cudaGraph_t graph, std::vector<std::pair<void
         return false;
     }
 
+    LOG(INFO) << "[jieluo] in remove nodes, total node num is " << num_nodes << std::endl;
     for(int i = 0; i < num_nodes; i ++){
         cudaGraphNodeType node_type;
         ret = cudaGraphNodeGetType(nodes[i], &node_type);
@@ -1008,6 +1013,7 @@ bool DirectSession::RemoveH2DNodes(cudaGraph_t graph, std::vector<std::pair<void
         void * host_buffer = params.srcPtr.ptr;
         void * device_buffer = params.dstPtr.ptr;
 
+        LOG(INFO) << "[jieluo] H2D node host buffer is " << host_buffer << std::endl;
         if(std::find(input_host_address_.begin(), input_host_address_.end(),
                      host_buffer) == input_host_address_.end()){
             // h2d node should be kept,
@@ -1500,8 +1506,9 @@ Status DirectSession::Run(const RunOptions& run_options,
   // save the host addresses for the inputs
   if(cuda_graph_capture_mode_){
       input_host_address_.clear();
-      for(const auto& it: inputs){          
+      for(const auto& it: inputs){        
           input_host_address_.push_back(GetTensorBasePtr(it.second));
+          LOG(INFO) << "[jieluo] input tensor name: " << it.second.name() << ", address: " << GetTensorBasePtr(it.second) << std::endl;
           if(std::find(host_memory_inputs_.begin(), host_memory_inputs_.end(), it.first) != host_memory_inputs_.end()){
               LOG(INFO) << "Record host memory place holder input address for " << it.first;
               host_memory_inputs_address_.push_back(GetTensorBasePtr(it.second));

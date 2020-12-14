@@ -340,7 +340,8 @@ Status Test(GraphDef & graph_def,
     if (options.target.empty()) {
         graph::SetDefaultDevice("/device:GPU:0", &graph_def);
     }
-    
+    LOG(INFO) << "[jieluo] Check node device before create session"
+    graph::CheckNodeDevice("/device:GPU:0", &graph_def);
     TF_CHECK_OK(session->Create(graph_def));
         
     const DeviceMgr * device_manager;
