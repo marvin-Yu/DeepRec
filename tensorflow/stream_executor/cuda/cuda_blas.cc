@@ -398,6 +398,14 @@ cudaDataType_t CUDAComputationType(blas::ComputationType ty) {
 }
 }  // namespace
 
+inline void PrintArgs(std::stringstream& ss, int idx) {}
+
+template <typename T, typename... Args>
+inline void PrintArgs(std::stringstream& ss, int idx, T first, Args... rest) {
+  ss << "$" << idx << "=" << first << std::endl;
+  PrintArgs(ss, idx + 1, rest...);
+}
+
 template <typename FuncT, typename... Args>
 bool CUDABlas::DoBlasInternalImpl(FuncT cublas_func, Stream *stream,
                                   bool pointer_mode_host, bool err_on_failure,
@@ -426,6 +434,10 @@ bool CUDABlas::DoBlasInternalImpl(FuncT cublas_func, Stream *stream,
   cublasStatus_t ret = cublas_func(blas_, args...);
   if ((err_on_failure || VLOG_IS_ON(3)) && ret != CUBLAS_STATUS_SUCCESS) {
     LOG(ERROR) << "failed to run cuBLAS routine: " << ToString(ret);
+    std::stringstream ss;
+    PrintArgs(ss, 0, args...);
+    LOG(ERROR) << "cuBLAS args: ";
+    LOG(ERROR) << ss.str();
   }
   return ret == CUBLAS_STATUS_SUCCESS;
 }
