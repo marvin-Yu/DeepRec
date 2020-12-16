@@ -34,13 +34,13 @@ class TRTOptimizationPass : public grappler::CustomGraphOptimizer {
  public:
   TRTOptimizationPass(const string& name = "TRTOptimizationPass")
       : name_(name),
-        minimum_segment_size_(3),
-        precision_mode_(TrtPrecisionMode::FP32),
-        maximum_batch_size_(-1),
-        is_dynamic_op_(false),
-        max_cached_batches_(1),
-        max_workspace_size_bytes_(256LL << 20),
-        use_calibration_(true) {
+        minimum_segment_size_(5),
+        precision_mode_(TrtPrecisionMode::FP16),
+        maximum_batch_size_(300),
+        is_dynamic_op_(true),
+        max_cached_batches_(50),
+        max_workspace_size_bytes_(2LL << 30),
+        use_calibration_(false) {
     VLOG(1) << "Constructing " << name_;
   }
 

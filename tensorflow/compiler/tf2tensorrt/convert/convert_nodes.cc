@@ -1126,6 +1126,14 @@ Status TrtNodeValidator::ConvertToTensorOrWeights(
 }
 
 Status TrtNodeValidator::IsTensorRTCandidate(const Node* node) {
+  VLOG(3) << "[biaofang_test convert_nodes]: " << node->def().name() << ", " << node->def().op() << ", " << node->def().device() 
+      << ", "  << node->id() << ", " << node->name() << ", " << node->requested_device() << ", " << node->assigned_device_name();
+  // KGB model only support GPU
+  std::string tmp_device = node->requested_device().length() <= 5 ? "NOT_SUPPORT": (node->requested_device().substr(node->requested_device().length()-5, 3));
+  if (tmp_device != DEVICE_GPU) {
+    return errors::Unimplemented("Device type ", tmp_device, " is not supported.");
+  }
+
   const string& op = node->def().op();
   // In INT8 mode, we will always apply the quantization ranges provided by
   // these ops to the relevant tensors. This happens regardless of the value of
@@ -3827,7 +3835,7 @@ Status ConvertBinary(OpConverterParams* params) {
 
   nvinfer1::Dims broadcasted_dims_l, broadcasted_dims_r;
   TF_RETURN_IF_ERROR(
-      GetTrtBroadcastShape(operand_l, operand_r, /*check_feasibility=*/true,
+      GetTrtBroadcastShape(operand_l, operand_r, /*check_feasibility=*/false,
                            &broadcasted_dims_l, &broadcasted_dims_r));
   nvinfer1::ITensor* tensor_l = nullptr;
   nvinfer1::ITensor* tensor_r = nullptr;
