@@ -54,6 +54,7 @@ void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
   config->set_allow_soft_placement(true);
   config->mutable_gpu_options()->set_allow_growth(true);
 
+  VLOG(0) << "Blaze create with options " << blaze_run_options_.DebugString();
   if (blaze_run_options_.xla_compilation()) {
     auto jitLevel = OptimizerOptions::ON_1;
     config->mutable_graph_options()->mutable_optimizer_options()->set_global_jit_level(jitLevel);
