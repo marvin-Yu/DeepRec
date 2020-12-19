@@ -896,12 +896,12 @@ void DirectSession::RunInternalAsync(
   run_state.rendez = new IntraProcessRendezvous(device_mgr_.get());
   // Start parallel Executors.
   const size_t num_executors = executors_and_keys->items.size();
-  Executor::Args args;
+  auto args = std::make_shared<Executor::Args>();
 
   ExecutorBarrier* barrier = new ExecutorBarrier(
       num_executors, run_state.rendez, [this, &run_state, done, &run_options,
       &inputs, &output_names, &target_nodes, outputs, run_metadata,
-      frame, start_time_usecs, &args] (const Status& ret) {
+      frame, start_time_usecs, args] (const Status& ret) {
       {
         mutex_lock l(run_state.mu_);
         run_state.status.Update(ret);
@@ -911,39 +911,39 @@ void DirectSession::RunInternalAsync(
                                    outputs, frame, run_metadata, start_time_usecs);
       done(s);
 
-      if (args.traced_infos) {
-        args.traced_infos->MergeTo(run_metadata);
+      if (args->traced_infos) {
+        args->traced_infos->MergeTo(run_metadata);
       }
       //fixme: move above
-      if (run_metadata && args.enable_prof_stats) {
-        run_metadata->mutable_prof_stats()->set_flops(args.real_prof_stats.flops);
+      if (run_metadata && args->enable_prof_stats) {
+        run_metadata->mutable_prof_stats()->set_flops(args->real_prof_stats.flops);
       }
       });
 
-  args.step_id = step_id;
-  args.call_frame = call_frame;
-  args.rendezvous = run_state.rendez;
-  args.collective_executor =
+  args->step_id = step_id;
+  args->call_frame = call_frame;
+  args->rendezvous = run_state.rendez;
+  args->collective_executor =
       (run_state.collective_executor ? run_state.collective_executor->get()
                                      : nullptr);
-  args.cancellation_manager = &frame->step_cancellation_manager;
-  args.session_state = &session_state_;
-  args.session_handle = session_handle_;
-  args.tensor_store = &run_state.tensor_store;
-  args.step_container = &run_state.step_container;
-  args.sync_on_finish = sync_on_finish_;
-  args.user_intra_op_threadpool = threadpool_options.intra_op_threadpool;
+  args->cancellation_manager = &frame->step_cancellation_manager;
+  args->session_state = &session_state_;
+  args->session_handle = session_handle_;
+  args->tensor_store = &run_state.tensor_store;
+  args->step_container = &run_state.step_container;
+  args->sync_on_finish = sync_on_finish_;
+  args->user_intra_op_threadpool = threadpool_options.intra_op_threadpool;
 
-  args.enable_prof_stats = enable_prof_stats_;
+  args->enable_prof_stats = enable_prof_stats_;
 
   const bool do_trace = (run_options.trace_level() > RunOptions::NO_TRACE);
   if (enable_prof_stats_ || do_trace) {
     // ToDo move in to traced_infos
-    args.prof_stats = &args.real_prof_stats;
-    args.traced_infos = std::move(std::make_shared<UserTracedInfos>
+    args->prof_stats = &args->real_prof_stats;
+    args->traced_infos = std::move(std::make_shared<UserTracedInfos>
                                   (enable_prof_stats_, do_trace));
   } else {
-    args.prof_stats = nullptr;
+    args->prof_stats = nullptr;
   }
 
   bool update_cost_model = false;
@@ -962,7 +962,7 @@ void DirectSession::RunInternalAsync(
       run_options.report_tensor_allocations_upon_oom()) {
     run_state.collector.reset(
         new StepStatsCollector(run_metadata->mutable_step_stats()));
-    args.stats_collector = run_state.collector.get();
+    args->stats_collector = run_state.collector.get();
   }
 
   frame->update_cost_model = update_cost_model;
@@ -1055,17 +1055,17 @@ void DirectSession::RunInternalAsync(
     // TODO(crk): Investigate usage of RunHandlerPool when using device specific
     // thread pool(s).
     if (!device_thread_pool) {
-      args.runner = default_runner;
+      args->runner = default_runner;
     } else {
-      args.runner = [this, device_thread_pool](Executor::Args::Closure c) {
+      args->runner = [this, device_thread_pool](Executor::Args::Closure c) {
         device_thread_pool->Schedule(std::move(c));
       };
     }
     if (handler != nullptr) {
-      args.user_intra_op_threadpool = handler->AsIntraThreadPoolInterface();
+      args->user_intra_op_threadpool = handler->AsIntraThreadPoolInterface();
     }
 
-    item.executor->RunAsync(args, barrier->Get());
+    item.executor->RunAsync(*args, barrier->Get());
   }
 }
 
