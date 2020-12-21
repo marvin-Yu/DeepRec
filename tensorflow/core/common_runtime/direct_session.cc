@@ -900,7 +900,7 @@ void DirectSession::RunInternalAsync(
 
   ExecutorBarrier* barrier = new ExecutorBarrier(
       num_executors, run_state.rendez, [this, &run_state, done, &run_options,
-      &inputs, &output_names, &target_nodes, outputs, run_metadata,
+      &inputs, output_names, target_nodes, outputs, run_metadata,
       frame, start_time_usecs, &args] (const Status& ret) {
       {
         mutex_lock l(run_state.mu_);

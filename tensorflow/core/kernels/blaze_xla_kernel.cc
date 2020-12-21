@@ -54,7 +54,7 @@ void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
   config->set_allow_soft_placement(true);
   config->mutable_gpu_options()->set_allow_growth(true);
 
-  VLOG(0) << "Blaze create with options " << blaze_run_options_.DebugString();
+  LOG(INFO) << "Blaze create with options " << blaze_run_options_.DebugString();
   if (blaze_run_options_.xla_compilation()) {
     auto jitLevel = OptimizerOptions::ON_1;
     config->mutable_graph_options()->mutable_optimizer_options()->set_global_jit_level(jitLevel);
@@ -84,14 +84,16 @@ BlazeXlaOp::BlazeXlaOp(OpKernelConstruction* context)
 }
 
 Status BlazeXlaOp::ParseAttr() {
-  if (!ReadTextProto(Env::Default(), blaze_option_path_,
+  if (ReadTextProto(Env::Default(), blaze_option_path_,
                      &blaze_run_options_).ok()) {
-    VLOG(0) << "Parse blaze options from file failed, try as readable string";
+    VLOG(0) << "Parse blaze options from file succ";
   } else {
     if (!::tensorflow::protobuf::TextFormat::ParseFromString(
             blaze_option_path_, &blaze_run_options_)) {
+      LOG(ERROR) << "Parse proto from " << blaze_option_path_ << " failed";
       return errors::Internal("parse proto from ", blaze_option_path_,  " failed");
     }
+    LOG(INFO) << "Parse blaze options succ " << blaze_run_options_.DebugString();
   }
 
   if (!ReadTextProto(Env::Default(), graph_def_path_,

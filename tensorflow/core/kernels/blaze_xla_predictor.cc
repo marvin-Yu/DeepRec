@@ -107,17 +107,22 @@ Status BlazeXlaPredictor::InitXlaWarmup() {
     return errors::Internal("xla not setting warmup batchsize");
   }
 
-  std::vector<int> warm(blaze_run_options_.warmup_batchsize().begin(),
-                        blaze_run_options_.warmup_batchsize().end());
+  std::vector<int> warm;
+  warm.reserve(blaze_run_options_.warmup_batchsize_size());
+  for (int i = 0; i < blaze_run_options_.warmup_batchsize_size(); ++i) {
+    warm.push_back(blaze_run_options_.warmup_batchsize(i));
+  }
 
   std::sort(warm.begin(), warm.end());
   for (auto val : warm) {
     if (val <= 0) {
+      LOG(ERROR) << "exo warmup batchsize " << val << " invalid";
       return errors::Internal("warmuup batchsize ", val, " invalid");
     }
   }
 
   batch_sizes_ = std::move(warm);
+  return Status::OK();
 }
 
 Status BlazeXlaPredictor::Warmup() {

@@ -89,8 +89,9 @@ Status BlazePredictor::InitSession() {
   session_ = std::move(std::unique_ptr<Session>(NewSession(options)));
   if (session_ == nullptr) {
     LOG(ERROR) << "create session failed";
-    return errors::Internal("create session failed");
+    return errors::Internal("Create session failed");
   }
+  LOG(INFO) << "Creat session succ " << this;
 
   GraphDef graph_def;
   TF_RETURN_IF_ERROR(PrepareGraph(graph_def));
@@ -102,6 +103,7 @@ Status BlazePredictor::InitSession() {
   }
 
   TF_RETURN_IF_ERROR(MakeCallable());
+  LOG(INFO) << "MakeCallable succ " << this;
   return Warmup();
 }
 
