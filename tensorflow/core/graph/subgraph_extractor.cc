@@ -18,9 +18,9 @@ namespace tensorflow {
 bool GetNodesByName(Graph* g, const std::vector<std::string>& node_names, std::vector<Node*>& nodes) {
   nodes.reserve(node_names.size());
   for (int i = 0; i < node_names.size(); ++i) {
-    Node* node = graph->FindNodeByName(node_names[i]);
+    Node* node = g->FindNodeByName(node_names[i]);
     if (nullptr == node) {
-      VLOG(1) << "Failed to get node, node name " << input_node_names[i] << " not found in graph.";
+      VLOG(1) << "Failed to get node, node name " << node_names[i] << " not found in graph.";
       return false;
     }
     nodes.push_back(node);
@@ -28,9 +28,9 @@ bool GetNodesByName(Graph* g, const std::vector<std::string>& node_names, std::v
   return true;
 }
 
-bool ConstructPlaceholderByTensor(Graph* g, const InputTensor& input_tensor, Node** placeholder, const std::string& node_name) {
+bool ConstructPlaceholderByTensor(Graph* g, const OutputTensor& input_tensor, Node** placeholder, const std::string& node_name) {
   int idx = input_tensor.index;
-  Node* origin_node = input_tensor.node;
+  Node* node = input_tensor.node;
   if (node->def().attr().find("_output_shapes") != node->def().attr().end()) {
     auto shape = node->def().attr().at("_output_shapes").list().shape(idx);
     auto builder = NodeBuilder(node_name, "Placeholder")
@@ -78,24 +78,20 @@ bool ExtractSubgraph(Graph* g,
   }
 
   // step2. collect all input edges and replace input nodes with placeholders.
-  std::unordered_map<InputTensor, std::vector<Node*>> input_tensor_consumer_map;
+  std::vector<OutputTensor> input_tensors;
+  std::vector<Node*> replaced_ph_nodes;
   for (Node* node : input_nodes) {
     for (int i = 0; i < node->num_inputs(); ++i) {
-      InputTensor tensor;
-      node->input_tensor(&tensor);
-      if (input_tensor_consumer_map.find(tensor) == input_tensor_consumer_map.end()) {
-        input_tensor_consumer_map.emplace(tensor, std::vector<Node*>());
+      OutputTensor tensor;
+      node->input_tensor(i, &tensor);
+      
+      Node* ph_node = nullptr;
+      if (!ConstructPlaceholderByTensor(g, tensor, &ph_node, "Placeholder")) {
+        return false;
       }
-      input_tensor_consumer_map[tensor].push_back(node);
+      input_tensors.emplace_back(tensor);
+      replaced_ph_nodes.emplace_back(ph_node);
     }
-  }
-  std::unordered_map<InputTensor, Node*> input_tensor_placeholder_map;
-  for (auto iter = input_tensor_consumer_map.begin(); iter != input_tensor_consumer_map.end(); ++iter) {
-    InputTensor& tensor = iter->first;
-    // todo: 
-    Node* ph_node;
-    ConstructPlaceholderByTensor(g, tensor, &ph_node, "Placeholder");
-    input_tensor_placeholder_map.emplace(tensor, ph_node);
   }
 
   // step3. place origin input with placeholder output
