@@ -21,6 +21,11 @@ namespace tensorflow {
 extern bool ExtractSubgraph(Graph* g, 
                             const std::vector<std::string>& input_node_names, const std::vector<std::string>& output_node_names);
 
+extern bool ReplaceSubgraph(Graph* g,
+                            const std::vector<std::string>& input_node_names,
+                            const std::vector<std::string>& output_node_names,
+                            const std::string& replace_node_name);
+
 }
 
 
