@@ -42,7 +42,7 @@ inline void CheckNodeDevice(const string& device, GraphDef* graph_def) {
     auto node = graph_def->mutable_node(i);
     if (node->device().empty()) {
       LOG(INFO) << "Node device of " << node->name() << " is empty" << std::endl;
-    } else if (node.device() != device) {
+    } else if (node->device() != device) {
       LOG(INFO) << "Node device of " << node->name() << " is " << node->device() << " not match expected " << device << std::endl;
     }
   }
