@@ -45,7 +45,7 @@ bool ConstructPlaceholderByTensor(Graph* g, const OutputTensor& input_tensor, No
   }
 }
 
-bool GetInputTypesFromNodes(const vector<Node*> nodes, vector<DataType>& tensor_types) {
+bool GetInputTypesFromNodes(const std::vector<Node*> nodes, std::vector<DataType>& tensor_types) {
   for (auto node : nodes) {
     for (int i = 0; i < node->num_inputs(); ++i) {
       tensor_types.push_back(node->input_type(i));
@@ -54,7 +54,7 @@ bool GetInputTypesFromNodes(const vector<Node*> nodes, vector<DataType>& tensor_
   return true;
 }
 
-bool GetOutputTypesFromNodes(const vector<Node*> nodes, vector<DataType>& tensor_types) {
+bool GetOutputTypesFromNodes(const std::vector<Node*> nodes, std::vector<DataType>& tensor_types) {
   for (auto node : nodes) {
     for (int i = 0; i < node->num_outputs(); ++i) {
       tensor_types.push_back(node->output_type(i));
@@ -107,7 +107,7 @@ bool ExtractSubgraph(Graph* g,
 
   // step3. place origin input with placeholder output
   // addEdge and removeEdges
-  unordered_set<Node*> output_nodes_set(output_nodes.begin(), output_nodes.end());
+  std::unordered_set<const Node*> output_nodes_set(output_nodes.begin(), output_nodes.end());
   PruneForReverseReachability(g, output_nodes_set);
 
   return true;
@@ -145,9 +145,9 @@ bool ReplaceSubgraph(Graph* g,
   GetOutputTypesFromNodes(output_nodes, output_types);
   auto builder = NodeBuilder(replace_node_name, "CudaGraphOp")
                       .Attr("T1", input_types)
-                      .Attr("T2", output_types)
-                      .Attr("num_input", input_types.size())
-                      .Attr("num_output", output_types.size());
+                      .Attr("T2", output_types);
+                  //    .Attr("num_input", input_types.size())
+                  //    .Attr("num_output", output_types.size());
   Node** cuda_graph_node;
   builder.Finalize(g, cuda_graph_node);
 
@@ -158,7 +158,7 @@ bool ReplaceSubgraph(Graph* g,
       OutputTensor tensor;
       node->input_tensor(i, &tensor);
       node->input_edge(i, &input_edge);
-      g->AddEdge(tensor->node, tensor->index, *cuda_graph_node, input_idx);
+      g->AddEdge(tensor.node, tensor.index, *cuda_graph_node, input_idx);
       g->RemoveEdge(input_edge);
       ++input_idx;
     }
@@ -176,7 +176,7 @@ bool ReplaceSubgraph(Graph* g,
 
   // step3. place origin input with placeholder output
   // todo: get original output node name
-  unordered_set<Node*> output_nodes_set(output_nodes.begin(), output_nodes.end());
+  std::unordered_set<const Node*> output_nodes_set(output_nodes.begin(), output_nodes.end());
   PruneForReverseReachability(g, output_nodes_set);
   
   return true;

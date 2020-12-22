@@ -242,17 +242,17 @@ message OptimizerOptions {
 
   // If true, cut subgraph and remove other parts
   // for other optimize methods, e.g. cudagraph
-  bool cut_subgraph_for_other_optimize = 6;
+  bool cut_subgraph_for_other_optimize = 7;
 
   // If true, replace subgraph with a cudagraph node
   // with launch cudaGraph
-  bool replace_subgraph_with_cudagraph = 7;
+  bool replace_subgraph_with_cudagraph = 8;
 
   // subgraph input node and output node names
   // these boundary nodes are included in subgraph
-  repeated string subgraph_input_node_names = 8;
+  repeated string subgraph_input_node_names = 9;
 
-  repeated string subgraph_output_node_names = 9;
+  repeated string subgraph_output_node_names = 10;
 
 }
 
