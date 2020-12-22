@@ -76,7 +76,7 @@ class GraphOptimizer {
       const NodePredicate& cse_consider_fn = nullptr,
       const NodePredicate& cf_consider_fn = nullptr,
       bool inline_multi_device_functions = false,
-      bool inline_impl_selection_group_functions = false);
+      bool inline_impl_selection_group_functions = false;
 
   const OptimizerOptions& options() { return opts_; }
 

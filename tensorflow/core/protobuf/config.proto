@@ -239,6 +239,21 @@ message OptimizerOptions {
     ON_2 = 2;
   }
   GlobalJitLevel global_jit_level = 5;
+
+  // If true, cut subgraph and remove other parts
+  // for other optimize methods, e.g. cudagraph
+  bool cut_subgraph_for_other_optimize = 6;
+
+  // If true, replace subgraph with a cudagraph node
+  // with launch cudaGraph
+  bool replace_subgraph_with_cudagraph = 7;
+
+  // subgraph input node and output node names
+  // these boundary nodes are included in subgraph
+  repeated string subgraph_input_node_names = 8;
+
+  repeated string subgraph_output_node_names = 9;
+
 }
 
 message GraphOptions {

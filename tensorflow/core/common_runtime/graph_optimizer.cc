@@ -21,6 +21,7 @@ limitations under the License.
 #include "tensorflow/core/graph/graph_constructor.h"
 #include "tensorflow/core/graph/node_builder.h"
 #include "tensorflow/core/graph/optimizer_cse.h"
+#include "tensorflow/core/graph/subgraph_extractor.h"
 
 namespace tensorflow {
 
@@ -116,6 +117,13 @@ void GraphOptimizer::Optimize(
     if (!changed) break;
   }
 
+  if (opts_.subgraph_input_node_names_size() > 0 && opts_.subgraph_output_node_names() > 0) {
+    if (opts_.cut_subgraph_for_other_optimize()) {
+      // ExtractSubgraph(g, opts_.subgraph_input_node_names(), opts_.subgraph_output_node_names());
+    } else if (opts_.replace_subgraph_with_cudagraph()) {
+
+    }
+  } 
   // Note that we use the Graph constructor that copies the input
   // FunctionLibraryDefinition, since the original lib def will go out of scope.
   std::unique_ptr<Graph> copy(new Graph(g->flib_def()));
