@@ -4098,6 +4098,15 @@ tf_cc_test(
     ],
 )
 
+tf_cc_test(
+    name = "subgraph_extractor_test",
+    srcs = ["graph/subgraph_extractor_test.cc"],
+    deps = [
+        ":test",
+        ":test_lite_main",
+    ]
+)
+
 tf_cc_tests(
     name = "higher_level_tests",
     size = "small",
