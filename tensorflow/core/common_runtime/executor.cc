@@ -1671,6 +1671,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
   params.after_padding = after_padding_;
   //[PROF-STATS]
   params.prof_stats = prof_stats_;
+  params.traced_infos = traced_infos_;
 
   params.step_id = step_id_;
   params.round_step_id = round_step_id_;

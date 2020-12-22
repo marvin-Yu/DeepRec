@@ -113,11 +113,11 @@ void BlazeXlaOp::Compute(OpKernelContext* ctx) {
   if (!ctx->traced_infos()) {
     predictor_->Compute(ctx);
   } else {
-    auto start_ms = env_->NowNanos();
+    auto start_ns = env_->NowNanos();
     predictor_->Compute(ctx);
-    auto end_ms = env_->NowNanos();
+    auto end_ns = env_->NowNanos();
     if (ctx->traced_infos()->enable_prof_stats) {
-      ctx->traced_infos()->prof_stats->blaze_latency_ms = ((end_ms - start_ms) / 1000.0f);
+      ctx->traced_infos()->prof_stats->blaze_latency_ms = ((end_ns - start_ns) / 1000000.0f);
     }
 
     if (ctx->traced_infos()->enable_trace_tensors) {

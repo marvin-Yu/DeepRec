@@ -288,7 +288,6 @@ class DirectSession : public Session {
       StatusCallback done);
 
   ::tensorflow::Status AfterRunAsync(const ::tensorflow::RunOptions& run_options,
-       const NamedTensorList& inputs,
        const std::vector<string>& output_names,
        const std::vector<string>& target_nodes,
        std::vector<Tensor> *outputs,

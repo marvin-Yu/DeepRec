@@ -476,7 +476,7 @@ struct CallbackFrame {
     executors_and_keys = nullptr;
   }
   std::unique_ptr<FunctionCallFrame> call_frame;
-  std::unique_ptr<DirectSession::RunState> run_state;
+  std::shared_ptr<DirectSession::RunState> run_state;
   DirectSession::ExecutorsAndKeys* executors_and_keys;
   CancellationManager step_cancellation_manager;
   CancellationToken cancellation_token;
@@ -614,8 +614,8 @@ Status DirectSession::RunInternal(
   //[PROF-STATS]
   args.enable_prof_stats = enable_prof_stats_;
   if (enable_prof_stats_ || do_trace) {
-    args.traced_infos = std::move(std::make_shared<UserTracedInfos>
-                                  (enable_prof_stats_, do_trace));
+    args.traced_infos = std::make_shared<UserTracedInfos>
+        (enable_prof_stats_, do_trace);
     args.prof_stats = &args.real_prof_stats;
   } else {
     args.prof_stats = nullptr;
@@ -846,8 +846,8 @@ void DirectSession::RunInternalAsync(
     StatusCallback done) {
   const uint64 start_time_usecs = options_.env->NowMicros();
   const int64 executor_step_count = executors_and_keys->step_count.fetch_add(1);
-  frame->run_state = std::move(absl::make_unique<RunState>(step_id, &devices_));
-  auto& run_state = *(frame->run_state);
+  frame->run_state = std::make_shared<RunState>(step_id, &devices_);
+  auto run_state = frame->run_state;
 
   profiler::TraceMe activity(
       [&] { return strings::StrCat("SessionRun #id=", step_id, "#"); },
@@ -888,29 +888,27 @@ void DirectSession::RunInternalAsync(
       collective_executor_mgr_.reset(new CollectiveExecutorMgr(
           options_.config, device_mgr_.get(), std::move(drl), std::move(cprl)));
     }
-    run_state.collective_executor.reset(new CollectiveExecutor::Handle(
+    run_state->collective_executor.reset(new CollectiveExecutor::Handle(
         collective_executor_mgr_->FindOrCreate(step_id), true /*inherit_ref*/));
   }
 #endif
 
-  run_state.rendez = new IntraProcessRendezvous(device_mgr_.get());
+  run_state->rendez = new IntraProcessRendezvous(device_mgr_.get());
   // Start parallel Executors.
   const size_t num_executors = executors_and_keys->items.size();
   auto args = std::make_shared<Executor::Args>();
 
   ExecutorBarrier* barrier = new ExecutorBarrier(
-      num_executors, run_state.rendez, [this, &run_state, done, &run_options,
-      &inputs, output_names, target_nodes, outputs, run_metadata,
-      frame, start_time_usecs, &args] (const Status& ret) {
+      num_executors, run_state->rendez, [this, run_state, done, run_options,
+      output_names, target_nodes, outputs, run_metadata,
+      frame, start_time_usecs, args] (const Status& ret) {
       {
-        mutex_lock l(run_state.mu_);
-        run_state.status.Update(ret);
+        mutex_lock l(run_state->mu_);
+        run_state->status.Update(ret);
       }
-      run_state.executors_done.Notify();
-      auto s = this->AfterRunAsync(run_options, inputs, output_names, target_nodes,
+      run_state->executors_done.Notify();
+      auto s = this->AfterRunAsync(run_options, output_names, target_nodes,
                                    outputs, frame, run_metadata, start_time_usecs);
-      done(s);
-
       if (args->traced_infos) {
         args->traced_infos->MergeTo(run_metadata);
       }
@@ -918,19 +916,21 @@ void DirectSession::RunInternalAsync(
       if (run_metadata && args->enable_prof_stats) {
         run_metadata->mutable_prof_stats()->set_flops(args->real_prof_stats.flops);
       }
+      done(s);
+
       });
 
   args->step_id = step_id;
   args->call_frame = call_frame;
-  args->rendezvous = run_state.rendez;
+  args->rendezvous = run_state->rendez;
   args->collective_executor =
-      (run_state.collective_executor ? run_state.collective_executor->get()
+      (run_state->collective_executor ? run_state->collective_executor->get()
                                      : nullptr);
   args->cancellation_manager = &frame->step_cancellation_manager;
   args->session_state = &session_state_;
   args->session_handle = session_handle_;
-  args->tensor_store = &run_state.tensor_store;
-  args->step_container = &run_state.step_container;
+  args->tensor_store = &(run_state->tensor_store);
+  args->step_container = &(run_state->step_container);
   args->sync_on_finish = sync_on_finish_;
   args->user_intra_op_threadpool = threadpool_options.intra_op_threadpool;
 
@@ -940,8 +940,8 @@ void DirectSession::RunInternalAsync(
   if (enable_prof_stats_ || do_trace) {
     // ToDo move in to traced_infos
     args->prof_stats = &args->real_prof_stats;
-    args->traced_infos = std::move(std::make_shared<UserTracedInfos>
-                                  (enable_prof_stats_, do_trace));
+    args->traced_infos = std::make_shared<UserTracedInfos>
+        (enable_prof_stats_, do_trace);
   } else {
     args->prof_stats = nullptr;
   }
@@ -960,9 +960,9 @@ void DirectSession::RunInternalAsync(
   }
   if (do_trace || update_cost_model ||
       run_options.report_tensor_allocations_upon_oom()) {
-    run_state.collector.reset(
+    run_state->collector.reset(
         new StepStatsCollector(run_metadata->mutable_step_stats()));
-    args->stats_collector = run_state.collector.get();
+    args->stats_collector = run_state->collector.get();
   }
 
   frame->update_cost_model = update_cost_model;
@@ -974,7 +974,7 @@ void DirectSession::RunInternalAsync(
   if (run_options.inter_op_thread_pool() < -1 ||
       run_options.inter_op_thread_pool() >=
           static_cast<int32>(thread_pools_.size())) {
-    run_state.executors_done.Notify();
+    run_state->executors_done.Notify();
     delete barrier;
 	DONE_WITH_STATUS(errors::InvalidArgument("Invalid inter_op_thread_pool"));
   }
@@ -993,7 +993,7 @@ void DirectSession::RunInternalAsync(
     // NOTE(mrry): If we don't explicitly notify
     // `run_state.executors_done`, the RunState destructor would
     // block on this notification.
-    run_state.executors_done.Notify();
+    run_state->executors_done.Notify();
     delete barrier;
 	DONE_WITH_STATUS(errors::Cancelled("Run call was cancelled"));
   }
@@ -1276,7 +1276,6 @@ Status DirectSession::Run(const RunOptions& run_options,
 }
 
 Status DirectSession::AfterRunAsync(const ::tensorflow::RunOptions& run_options,
-                                    const NamedTensorList& inputs,
                                     const std::vector<string>& output_names,
                                     const std::vector<string>& target_nodes,
                                     std::vector<Tensor> *outputs,
