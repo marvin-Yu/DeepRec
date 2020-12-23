@@ -25,7 +25,7 @@ void OpsTestBase::SetDevice(const DeviceType& device_type) {
   device_type_ = device_type;
 #ifdef GOOGLE_CUDA
   if (device_type == DEVICE_GPU) {
-    device_.reset(DeviceFactory::NewDevice("GPU", {}, "/task:0"));
+    device_ = DeviceFactory::NewDevice("GPU", {}, "/task:0").get();
     managed_allocator_.reset(new GpuManagedAllocator());
     allocator_ = managed_allocator_.get();
   } else {
