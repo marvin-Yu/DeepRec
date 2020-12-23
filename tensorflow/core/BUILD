@@ -4105,6 +4105,8 @@ tf_cc_test(
     srcs = ["graph/subgraph_extractor_test.cc"],
     deps = [
         ":graph",
+	":framework",
+        ":lib",
         ":test",
         ":test_main",
     ]
