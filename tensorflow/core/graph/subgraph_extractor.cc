@@ -67,6 +67,7 @@ bool ExtractSubgraph(Graph* g,
                      const std::vector<std::string>& input_node_names, 
                      const std::vector<std::string>& output_node_names) {
   // step1. find all input nodes and output node
+  VLOG(2) << "Extract subgraph step1";
   if (input_node_names.size() == 0) {
     VLOG(1) << "Failed to extract subgraph, subgraph input node names size is 0.";
     return false;
@@ -89,6 +90,7 @@ bool ExtractSubgraph(Graph* g,
   }
 
   // step2. collect all input edges and replace input nodes with placeholders.
+  VLOG(2) << "Extract subgraph step2";
   for (Node* node : input_nodes) {
     for (int i = 0; i < node->num_inputs(); ++i) {
       OutputTensor tensor;
@@ -107,6 +109,7 @@ bool ExtractSubgraph(Graph* g,
 
   // step3. place origin input with placeholder output
   // addEdge and removeEdges
+  VLOG(2) << "Extract subgraph step3";
   std::unordered_set<const Node*> output_nodes_set(output_nodes.begin(), output_nodes.end());
   PruneForReverseReachability(g, output_nodes_set);
 

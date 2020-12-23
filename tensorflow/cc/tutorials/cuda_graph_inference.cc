@@ -335,6 +335,10 @@ Status Test(GraphDef & graph_def,
     SessionOptions options;
     options.config.mutable_gpu_options()->set_force_gpu_compatible(true);
     options.config.mutable_gpu_options()->set_allow_growth(false);
+    // for cudagraph config
+    options.config.mutable_graph_options()->mutable_optimizer_options()->set_cut_subgraph_for_other_optimize(true);
+    options.config.mutable_graph_options()->mutable_optimizer_options()->add_subgraph_input_node_names("MatMul_1");
+    options.config.mutable_graph_options()->mutable_optimizer_options()->add_subgraph_output_node_names("MatMul_3");
     std::unique_ptr<Session> session(NewSession(options));
     
     if (options.target.empty()) {
@@ -342,7 +346,10 @@ Status Test(GraphDef & graph_def,
     }
     graph::CheckNodeDevice("/device:GPU:0", &graph_def);
     TF_CHECK_OK(session->Create(graph_def));
-        
+
+    // todo: terminate
+    return Status();
+
     const DeviceMgr * device_manager;
     TF_CHECK_OK(session->LocalDeviceManager(&device_manager));
     std::vector<Device*> devices=device_manager->ListDevices();
