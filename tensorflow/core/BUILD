@@ -4101,6 +4101,7 @@ tf_cc_test(
 tf_cc_test(
     name = "subgraph_extractor_test",
     size = "small",
+    data = glob(["graph/testdata/*.pbtxt"]),
     srcs = ["graph/subgraph_extractor_test.cc"],
     deps = [
         ":graph",
