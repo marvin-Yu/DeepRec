@@ -347,9 +347,6 @@ Status Test(GraphDef & graph_def,
     graph::CheckNodeDevice("/device:GPU:0", &graph_def);
     TF_CHECK_OK(session->Create(graph_def));
 
-    // todo: terminate
-    return Status();
-
     const DeviceMgr * device_manager;
     TF_CHECK_OK(session->LocalDeviceManager(&device_manager));
     std::vector<Device*> devices=device_manager->ListDevices();
@@ -384,6 +381,8 @@ Status Test(GraphDef & graph_def,
     }
     auto end = std::chrono::system_clock::now();
     
+    return Status();
+  
     for(int i = 0; i < num_threads; i ++){
         LOG(INFO) << "TF results: ";
         PrintTensorData(output_tensors_tf[i][0]); // print first output tensor

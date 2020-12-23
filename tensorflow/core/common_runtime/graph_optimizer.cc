@@ -45,6 +45,26 @@ void GraphOptimizer::Optimize(
   Graph* g = graph->get();
   DumpGraph("Initial", g);
 
+  if (opts_.subgraph_input_node_names_size() > 0 && opts_.subgraph_output_node_names_size() > 0) {
+    std::vector<std::string> input_node_names, output_node_names;
+    input_node_names.reserve(opts_.subgraph_input_node_names_size());
+    for (int i = 0; i < opts_.subgraph_input_node_names_size(); ++i) {
+      LOG(INFO) << "Subgraph input node "  << i << " is " << opts_.subgraph_input_node_names(i);
+      input_node_names.emplace_back(opts_.subgraph_input_node_names(i));
+    }
+    output_node_names.reserve(opts_.subgraph_output_node_names_size());
+    for (int i = 0; i < opts_.subgraph_output_node_names_size(); ++i) {
+      LOG(INFO) << "Subgraph output node "  << i << " is " << opts_.subgraph_output_node_names(i);
+      output_node_names.emplace_back(opts_.subgraph_output_node_names(i));
+    }
+    if (opts_.cut_subgraph_for_other_optimize()) {
+      LOG(INFO) << "Before extract subgraph";
+      ExtractSubgraph(g, input_node_names, output_node_names);
+    } else if (opts_.replace_subgraph_with_cudagraph()) {
+
+    }
+  }
+
   bool changed = true;
   const int kMaxRounds = 10;
   for (int rounds = 0; rounds < kMaxRounds; ++rounds) {
@@ -64,7 +84,7 @@ void GraphOptimizer::Optimize(
 
     if (opts_.do_constant_folding()) {
       ConstantFoldingOptions cf_opts;
-      cf_pts.shape_map = shape_map;
+      cf_opts.shape_map = shape_map;
       cf_opts.consider = cf_consider_fn;
       if (opts_.max_folded_constant_in_bytes() > 0) {
         cf_opts.max_constant_size_in_bytes =
@@ -116,7 +136,7 @@ void GraphOptimizer::Optimize(
     }
     if (!changed) break;
   }
-
+/*
   if (opts_.subgraph_input_node_names_size() > 0 && opts_.subgraph_output_node_names_size() > 0) {
     std::vector<std::string> input_node_names, output_node_names;
     input_node_names.reserve(opts_.subgraph_input_node_names_size());
@@ -135,7 +155,8 @@ void GraphOptimizer::Optimize(
     } else if (opts_.replace_subgraph_with_cudagraph()) {
 
     }
-  } 
+  }
+*/ 
   // Note that we use the Graph constructor that copies the input
   // FunctionLibraryDefinition, since the original lib def will go out of scope.
   std::unique_ptr<Graph> copy(new Graph(g->flib_def()));

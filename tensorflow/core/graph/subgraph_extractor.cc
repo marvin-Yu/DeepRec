@@ -21,7 +21,7 @@ bool GetNodesByName(Graph* g, const std::vector<std::string>& node_names, std::v
   for (int i = 0; i < node_names.size(); ++i) {
     Node* node = g->FindNodeByName(node_names[i]);
     if (nullptr == node) {
-      VLOG(1) << "Failed to get node, node name " << node_names[i] << " not found in graph.";
+      LOG(INFO) << "Failed to get node, node name " << node_names[i] << " not found in graph.";
       return false;
     }
     nodes.push_back(node);
@@ -40,7 +40,7 @@ bool ConstructPlaceholderByTensor(Graph* g, const OutputTensor& input_tensor, No
     builder.Finalize(g, placeholder);
     return true;
   } else {
-    VLOG(1) << "Cannot find tensor attr _output_shapes";
+    LOG(INFO) << "Cannot find tensor attr _output_shapes";
     return false;
   }
 }
@@ -67,30 +67,30 @@ bool ExtractSubgraph(Graph* g,
                      const std::vector<std::string>& input_node_names, 
                      const std::vector<std::string>& output_node_names) {
   // step1. find all input nodes and output node
-  VLOG(2) << "Extract subgraph step1";
+  LOG(INFO) << "Extract subgraph step1";
   if (input_node_names.size() == 0) {
-    VLOG(1) << "Failed to extract subgraph, subgraph input node names size is 0.";
+    LOG(INFO) << "Failed to extract subgraph, subgraph input node names size is 0.";
     return false;
   }
   if (output_node_names.size() == 0) {
-    VLOG(1) << "Failed to extract subgraph, subgraph output node names size is 0.";
+    LOG(INFO) << "Failed to extract subgraph, subgraph output node names size is 0.";
     return false;
   } 
     
   std::vector<Node*> input_nodes, output_nodes;
   bool succ = GetNodesByName(g, input_node_names, input_nodes);
   if (!succ) {
-    VLOG(1) << "Get input nodes failed, please check graph and node name config.";
+    LOG(INFO) << "Get input nodes failed, please check graph and node name config.";
     return false;
   }
   succ = GetNodesByName(g, output_node_names, output_nodes);
   if (!succ) {
-    VLOG(1) << "Get output nodes failed, please check graph and node name config.";
+    LOG(INFO) << "Get output nodes failed, please check graph and node name config.";
     return false;
   }
 
   // step2. collect all input edges and replace input nodes with placeholders.
-  VLOG(2) << "Extract subgraph step2";
+  LOG(INFO) << "Extract subgraph step2";
   for (Node* node : input_nodes) {
     for (int i = 0; i < node->num_inputs(); ++i) {
       OutputTensor tensor;
@@ -109,7 +109,7 @@ bool ExtractSubgraph(Graph* g,
 
   // step3. place origin input with placeholder output
   // addEdge and removeEdges
-  VLOG(2) << "Extract subgraph step3";
+  LOG(INFO) << "Extract subgraph step3";
   std::unordered_set<const Node*> output_nodes_set(output_nodes.begin(), output_nodes.end());
   PruneForReverseReachability(g, output_nodes_set);
 
@@ -122,23 +122,23 @@ bool ReplaceSubgraph(Graph* g,
                      const std::string& replace_node_name) {
   // step1. find all input nodes and output node
   if (input_node_names.size() == 0) {
-    VLOG(1) << "Failed to extract subgraph, subgraph input node names size is 0.";
+    LOG(INFO) << "Failed to extract subgraph, subgraph input node names size is 0.";
     return false;
   }
   if (output_node_names.size() == 0) {
-    VLOG(1) << "Failed to extract subgraph, subgraph output node names size is 0.";
+    LOG(INFO) << "Failed to extract subgraph, subgraph output node names size is 0.";
     return false;
   } 
     
   std::vector<Node*> input_nodes, output_nodes;
   bool succ = GetNodesByName(g, input_node_names, input_nodes);
   if (!succ) {
-    VLOG(1) << "Get input nodes failed, please check graph and node name config.";
+    LOG(INFO) << "Get input nodes failed, please check graph and node name config.";
     return false;
   }
   succ = GetNodesByName(g, output_node_names, output_nodes);
   if (!succ) {
-    VLOG(1) << "Get output nodes failed, please check graph and node name config.";
+    LOG(INFO) << "Get output nodes failed, please check graph and node name config.";
     return false;
   }
 
