@@ -41,14 +41,13 @@ protected:
 TEST_F(GraphDefRewriterTest, InitSimple) {
   Setup(SIMPLE_MODE_PATH);
   GraphDefRewriter rewriter(graph_def_);
-  
+  std::unordered_set<std::string> empty_set;
   PartialTensorShape shape({-1, 512});
   rewriter.AddPlaceholder("new_ph", DataType::DT_FLOAT, shape);
-  rewriter.ReplaceEdgesForGivenConsumer("MatMul_1", 0, "new_ph", 0);
+  rewriter.ReplaceEdgesForGivenConsumer("MatMul_1", 0, "new_ph", 0, empty_set);
   std::vector<std::string> top_node = {"MatMul_3"};
-  std::unordered_set<std::string> term_op;
   GraphDef new_def;
-  rewriter.GenerateGraphDefFromTop(new_def, top_node, term_op);
+  rewriter.GenerateGraphDefFromTop(new_def, top_node, empty_set);
 }
 
 }

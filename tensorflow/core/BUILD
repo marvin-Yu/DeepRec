@@ -4121,6 +4121,7 @@ tf_cc_test(
     deps = [
         ":framework",
         ":framework_internal",
+        ":array_ops_op_lib",
         ":lib",
         ":test",
         ":test_main",

@@ -11,6 +11,7 @@ option go_package = "github.com/tensorflow/tensorflow/tensorflow/go/core/protobu
 import "tensorflow/core/framework/cost_graph.proto";
 import "tensorflow/core/framework/graph.proto";
 import "tensorflow/core/framework/step_stats.proto";
+import "tensorflow/core/framework/types.proto";
 import "tensorflow/core/protobuf/cluster.proto";
 import "tensorflow/core/protobuf/debug.proto";
 import "tensorflow/core/protobuf/rewriter_config.proto";
@@ -198,14 +199,14 @@ message SubgraphInputTensor {
   // node which output this tensor in origin graph and output slot idx
   string tensor_provider_name = 1;
 
-  int tensor_provider_slot = 2;
+  int32 tensor_provider_slot = 2;
 
   // ph info which replace input tensor
   string ph_name = 3;
 
   DataType type = 4;
   
-  repeated int shape = 5;
+  repeated int32 shape = 5;
 }
 
 // A detail description for a subgraph

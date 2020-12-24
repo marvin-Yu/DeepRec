@@ -16,6 +16,7 @@
 #include <unordered_set>
 #include "tensorflow/core/framework/graph.pb.h"
 #include "tensorflow/core/framework/node_def.pb.h"
+#include "tensorflow/core/framework/tensor_shape.h"
 
 namespace tensorflow {
 
