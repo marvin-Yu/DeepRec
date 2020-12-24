@@ -869,6 +869,7 @@ tf_cuda_library(
         "framework/device_base.h",
         "framework/function.h",
         "framework/function_handle_cache.h",
+        "framework/graph_def_rewriter.h",
         "framework/graph_def_util.h",
         "framework/graph_to_functiondef.h",
         "framework/kernel_def_builder.h",
@@ -4105,7 +4106,20 @@ tf_cc_test(
     srcs = ["graph/subgraph_extractor_test.cc"],
     deps = [
         ":graph",
-	":framework",
+	    ":framework",
+        ":lib",
+        ":test",
+        ":test_main",
+    ]
+)
+
+tf_cc_test(
+    name = "graph_def_rewriter_test",
+    size = "small",
+    data = glob(["framework/testdata/*.pbtxt"]),
+    srcs = ["framework/graph_def_rewriter_test.cc"],
+    deps = [
+        ":framework",
         ":lib",
         ":test",
         ":test_main",
