@@ -11,6 +11,7 @@
 
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_split.h"
+#include "tensorflow/core/framework/node_def_builder.h"
 #include "tensorflow/core/lib/strings/strcat.h"
 #include "tensorflow/core/platform/logging.h"
 
@@ -49,6 +50,25 @@ void GraphDefRewriter::InitNodeMap(const GraphDef& origin_graph_def) {
       node_map_.emplace(node_name, node);
     }
   }
+}
+
+bool GraphDefRewriter::AddPlaceholder(const std::string& ph_name, const DataType& dtype, const PartialTensorShape& shape) {
+  // step0. check if name is duplicated
+  if (node_map_.find(ph_name) != node_map_.end()) {
+    LOG(ERROR) << "Node name " << ph_name << " for new placeholder is found in graph.";
+    return false;
+  }
+  
+  // step1. build an node def
+  NodeDef ph_node;
+  NodeDefBuilder builder(ph_name, "Placeholder");
+  TF_CHECK_OK(builder.Attr("dtype", dtype)
+         .Attr("shape", shape)
+         .Attr("_output_shape", shape)
+         .Finalize(&ph_node));
+  
+  // step2. put new ph_node into node map
+  node_map_.emplace(ph_name, ph_node);
 }
 
 bool GraphDefRewriter::ReplaceEdgesForGivenConsumer(const std::string& origin_provider_name,
@@ -135,21 +155,6 @@ bool GraphDefRewriter::GenerateGraphDefFromTop(GraphDef& output_graph_def,
   return true;
 }
 
-bool GraphDefRewriter::ReplaceProviderByAPlaceholder(const std::string& origin_provider_name,
-                                     const int origin_provider_slot,
-                                     const std::unordered_set<std::string>& consumers_for_replace) {
-  // step1. get provider tensor shape and type
-  if (provider_consumer_info_map_.find(origin_provider_name) == provider_consumer_info_map_.end()) {
-    LOG(WARNING) << "No node's input is " << origin_provider_name;
-    return false;
-  }
-  const ConsumerInfo& info = provider_consumer_info_map_[origin_provider_name][0];
-  if (node_map_.find(info.consumer_name_) == node_map_.end()) {
-    LOG(ERROR) << "Graph error";
-    return false;
-  }
 
-  return true;
-}
 
 } // tensorflow

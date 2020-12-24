@@ -39,6 +39,7 @@ public:
   GraphDefRewriter(const GraphDef& origin_graph_def);
   void InitNodeMap(const GraphDef& origin_graph_def);
   bool AppendNode(NodeDef new_node);
+  bool AddPlaceholder(const std::string& ph_name, const DataType& dtype, const PartialTensorShape& shape);
   bool ReplaceEdgesForGivenConsumer(const std::string& origin_provider_name,
                                     const int origin_provider_slot,
                                     const std::string& replacer_provider_name,
@@ -47,10 +48,6 @@ public:
   bool GenerateGraphDefFromTop(GraphDef& output_graph_def,
                                const std::vector<std::string> top_nodes,
                                const std::unordered_set<std::string> terminal_ops);
-  // a specialized replace edge api
-  bool ReplaceProviderByAPlaceholder(const std::string& origin_provider_name,
-                                     const int origin_provider_slot,
-                                     const std::unordered_set<std::string>& consumers_for_replace);
   
 };
 
