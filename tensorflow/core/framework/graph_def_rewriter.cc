@@ -9,7 +9,9 @@
 
 #include "tensorflow/core/framework/graph_def_rewriter.h"
 
+#include "absl/strings/numbers.h"
 #include "absl/strings/str_split.h"
+#include "tensorflow/core/lib/strings/strcat.h"
 #include "tensorflow/core/platform/logging.h"
 
 namespace tensorflow {
@@ -22,12 +24,13 @@ void GraphDefRewriter::InitNodeMap(const GraphDef& origin_graph_def) {
       LOG(ERROR) << "Node in original graph whose name is " << node_name << " has been in node map, ignore it.";
     } else {
       // init consumer info
+      LOG(INFO) << "[jieluo] Node name is " << node_name;
       for (int j = 0; j < node.input_size(); ++j) {
         std::vector<std::string> provider_parts = absl::StrSplit(node.input(j), ':');
         int slot = 0;
-        if (input_parts.size() == 2) {
-          absl::SimpleAtoi(input_parts[1], &slot);
-        } else if (input_parts.size() == 1) {
+        if (provider_parts.size() == 2) {
+          absl::SimpleAtoi(provider_parts[1], &slot);
+        } else if (provider_parts.size() == 1) {
           // do nothing
         } else {
           LOG(ERROR) << "Node " << node_name << "'s input " << node.input(j) << " is invalid.";
@@ -40,6 +43,7 @@ void GraphDefRewriter::InitNodeMap(const GraphDef& origin_graph_def) {
         info.consumer_name_ = node_name;
         info.consumer_slot_ = j;
         info.provider_slot_ = slot;
+        LOG(INFO) << "[jieluo] Provider name " << provider_parts[0] << " index " << info.provider_slot_ << " consumer name " << node_name << " consumer index " << info.consumer_slot_ << " origin input str " << node.input(j);
         provider_consumer_info_map_[provider_parts[0]].emplace_back(info);
       }
       node_map_.emplace(node_name, node);
@@ -64,7 +68,7 @@ bool GraphDefRewriter::ReplaceEdgesForGivenConsumer(const std::string& origin_pr
 
   // step2. Get all origin consumer
   auto consumer_iter = provider_consumer_info_map_.find(origin_provider_name);
-  if (consumer_iter == provider_consumer_info_map_.end) {
+  if (consumer_iter == provider_consumer_info_map_.end()) {
 
     return false;
   }
@@ -93,7 +97,7 @@ bool GraphDefRewriter::ReplaceEdgesForGivenConsumer(const std::string& origin_pr
 
 bool GraphDefRewriter::GenerateGraphDefFromTop(GraphDef& output_graph_def,
                                const std::vector<std::string> top_nodes,
-                               const std::unordered_map<std::string> terminal_ops) {
+                               const std::unordered_set<std::string> terminal_ops) {
   // BFS gen graph from top
   // step1. clear output_graph_def nodes
   output_graph_def.clear_node();
@@ -103,13 +107,15 @@ bool GraphDefRewriter::GenerateGraphDefFromTop(GraphDef& output_graph_def,
     } else {
       NodeDef* new_node = output_graph_def.add_node();
       *new_node = node_map_[top_nodes[i]];
+      LOG(INFO) << "[jieluo] Add top node " << new_node->name();
     }
   }
 
   // step2. bfs graph, add input node into new graph
   int travel_idx = 0;
-  while (traval_idx < output_graph_def.node_size()) {
+  while (travel_idx < output_graph_def.node_size()) {
     const NodeDef& curr_node = output_graph_def.node(travel_idx);
+    LOG(INFO) << "[jieluo] visit node " << curr_node.name() << " index is " << travel_idx;
     for (int i = 0; i < curr_node.input_size(); ++i) {
       int separator_pos = curr_node.input(i).find(':');
       if (separator_pos == std::string::npos) {
@@ -123,6 +129,7 @@ bool GraphDefRewriter::GenerateGraphDefFromTop(GraphDef& output_graph_def,
         *new_node = node_map_[input_node_name];
       }
     }
+    ++travel_idx;
   }
 
   return true;
@@ -133,7 +140,7 @@ bool GraphDefRewriter::ReplaceProviderByAPlaceholder(const std::string& origin_p
                                      const std::unordered_set<std::string>& consumers_for_replace) {
   // step1. get provider tensor shape and type
   if (provider_consumer_info_map_.find(origin_provider_name) == provider_consumer_info_map_.end()) {
-    LOG(WARN) << "No node's input is " << origin_provider_name;
+    LOG(WARNING) << "No node's input is " << origin_provider_name;
     return false;
   }
   const ConsumerInfo& info = provider_consumer_info_map_[origin_provider_name][0];

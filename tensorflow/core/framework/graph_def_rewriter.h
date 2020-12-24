@@ -11,9 +11,11 @@
 #define TENSORFLOW_CORE_FRAMEWORK_GRAPH_DEF_REWRITER_H_
 
 #include <string>
-#include <pair>
+#include <vector>
 #include <unordered_map>
 #include <unordered_set>
+#include "tensorflow/core/framework/graph.pb.h"
+#include "tensorflow/core/framework/node_def.pb.h"
 
 namespace tensorflow {
 
@@ -27,15 +29,14 @@ private:
     std::string consumer_name_;
     int consumer_slot_;
     int provider_slot_;
-  } 
+  }; 
 
 private:
   std::unordered_map<std::string, NodeDef> node_map_;
   std::unordered_map<std::string, std::vector<ConsumerInfo>> provider_consumer_info_map_;
 
 public:
-  GraphDefRewriter();
-  bool Init();
+  GraphDefRewriter(const GraphDef& origin_graph_def);
   void InitNodeMap(const GraphDef& origin_graph_def);
   bool AppendNode(NodeDef new_node);
   bool ReplaceEdgesForGivenConsumer(const std::string& origin_provider_name,
@@ -45,7 +46,7 @@ public:
                                     const std::unordered_set<std::string>& consumers_for_replace);
   bool GenerateGraphDefFromTop(GraphDef& output_graph_def,
                                const std::vector<std::string> top_nodes,
-                               const std::unordered_map<std::string> terminal_ops);
+                               const std::unordered_set<std::string> terminal_ops);
   // a specialized replace edge api
   bool ReplaceProviderByAPlaceholder(const std::string& origin_provider_name,
                                      const int origin_provider_slot,

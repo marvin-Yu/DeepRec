@@ -4106,7 +4106,7 @@ tf_cc_test(
     srcs = ["graph/subgraph_extractor_test.cc"],
     deps = [
         ":graph",
-	    ":framework",
+	":framework",
         ":lib",
         ":test",
         ":test_main",
@@ -4120,6 +4120,7 @@ tf_cc_test(
     srcs = ["framework/graph_def_rewriter_test.cc"],
     deps = [
         ":framework",
+        ":framework_internal",
         ":lib",
         ":test",
         ":test_main",

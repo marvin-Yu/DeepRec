@@ -10,6 +10,7 @@
 
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/lib/io/path.h"
+#include "tensorflow/core/platform/env.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/test.h"
 #include "tensorflow/core/platform/protobuf.h"
@@ -23,7 +24,7 @@ void ReadFileToStringOrDie(Env* env, const string& filename, string* output) {
   TF_CHECK_OK(ReadFileToString(env, filename, output));
 }
 
-class GraphDefRewriterTest : public ::testing:Test {
+class GraphDefRewriterTest : public ::testing::Test {
 protected:
   GraphDefRewriterTest() {};
   void Setup(const std::string& graph_path) {
@@ -40,6 +41,10 @@ protected:
 TEST_F(GraphDefRewriterTest, InitSimple) {
   Setup(SIMPLE_MODE_PATH);
   GraphDefRewriter rewriter(graph_def_);
+  std::vector<std::string> top_node = {"MatMul_3"};
+  std::unordered_set<std::string> term_op;
+  GraphDef new_def;
+  rewriter.GenerateGraphDefFromTop(new_def, top_node, term_op);
 }
 
 }
