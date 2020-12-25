@@ -120,10 +120,17 @@ class Executor {
     bool enable_prof_stats;
 
     std::shared_ptr<UserTracedInfos> traced_infos;
+    // for benchmarking in blaze, trace tensor shaope, if interger, tensor
+    // values together
+    bool trace_tensor_infos;
     typedef std::function<Status(const string& node_name, const int output_slot,
                                  const Tensor* tensor, const bool is_ref,
                                  OpKernelContext* ctx)>
         NodeOutputsCallback;
+
+    void AddSettings(const RunOptions& run_options) {
+      trace_tensor_infos = run_options.trace_tensor_infos();
+    }
   };
 
   typedef std::function<void(const Status&)> DoneCallback;

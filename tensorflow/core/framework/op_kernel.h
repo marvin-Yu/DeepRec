@@ -1879,11 +1879,18 @@ void CheckNotInComputeAsync(OpKernelContext* ctx,
   } while (0)
 
 struct UserTracedInfos {
-  UserTracedInfos(bool enable_stats = false, bool enable_tensors = false) :
-      enable_prof_stats(enable_stats), enable_trace_tensors(enable_tensors) {
+  UserTracedInfos(bool enable_stats = false, bool enable_tensors = false, 
+                  bool enable_trace_infos = false) :
+      enable_prof_stats(enable_stats), enable_trace_tensors(enable_tensors),
+      enable_trace_tensor_infos(enable_trace_infos) {
         if (enable_prof_stats) {
           prof_stats = std::move(absl::make_unique<ProfStats>());
+        }
+        if (enable_trace_tensors) {
           traced_tensors = std::move(absl::make_unique<TracedTensors>());
+        }
+        if (enable_trace_infos) {
+          traced_tensor_infos = std::move(absl::make_unique<TracedTensors>());
         }
   }
 
@@ -1897,6 +1904,13 @@ struct UserTracedInfos {
         const auto& tcs = run_metadata->traced_tensors();
         for (int i = 0; i < tcs.name_tensors_size(); ++i) {
           auto ts = traced_tensors->mutable_name_tensors()->Add();
+          *ts = tcs.name_tensors(i);
+        }
+      }
+      if (enable_trace_tensor_infos) {
+        const auto& tcs = run_metadata->tensor_infos();
+        for (int i = 0; i < tcs.name_tensors_size(); ++i) {
+          auto ts = traced_tensor_infos->mutable_name_tensors()->Add();
           *ts = tcs.name_tensors(i);
         }
       }
@@ -1918,13 +1932,24 @@ struct UserTracedInfos {
           *ts = traced_tensors->name_tensors(i);
         }
       }
+      if (enable_trace_tensor_infos) {
+        for (int i = 0; i < traced_tensor_infos->name_tensors_size(); ++i) {
+          auto ts = run_metadata->mutable_tensor_infos()->
+              mutable_name_tensors()->Add();
+          *ts = traced_tensor_infos->name_tensors(i);
+        }
+      }
     }
   }
 
   std::unique_ptr<ProfStats> prof_stats;
+  //blaze input & output tensors
   std::unique_ptr<TracedTensors> traced_tensors;
+  //all tensor shapes
+  std::unique_ptr<TracedTensors> traced_tensor_infos;
   bool enable_prof_stats;
   bool enable_trace_tensors;
+  bool enable_trace_tensor_infos;
 };
 }  // namespace tensorflow
 

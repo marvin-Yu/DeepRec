@@ -626,6 +626,7 @@ message RunOptions {
 
   bool trace_tensors = 127;
   map<string, string> debug_spec = 128;
+  bool trace_tensor_infos = 129;
 
   reserved 4;
 }
@@ -680,6 +681,7 @@ message RunMetadata {
   ProfStats prof_stats = 500;
   TracedTensors traced_tensors = 501;
   repeated BlazeMetrics blaze_metrics = 502;
+  TracedTensors tensor_infos = 503;
 }
 
 // Defines a connection between two tensors in a `GraphDef`.

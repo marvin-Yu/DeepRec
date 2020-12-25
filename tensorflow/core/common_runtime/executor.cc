@@ -25,6 +25,7 @@ limitations under the License.
 
 #include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
+#include "tensorflow/core/common_runtime/copy_tensor.h"
 #include "tensorflow/core/common_runtime/costmodel_manager.h"
 #include "tensorflow/core/common_runtime/executor_factory.h"
 #include "tensorflow/core/common_runtime/pending_counts.h"
@@ -1256,6 +1257,7 @@ class ExecutorState {
   //[PROF-STATS]
   ProfStats* prof_stats_ = nullptr;
   TracedInfosPtr traced_infos_;
+  bool trace_tensor_infos_;
 
   const bool vlog_;  // true if VLOG_IS_ON(1). Used to check vlog cheaply.
 
@@ -1409,6 +1411,7 @@ ExecutorState::ExecutorState(const Executor::Args& args, ExecutorImpl* impl)
       //[PROF-STATS]
       prof_stats_(args.prof_stats),
       traced_infos_(args.traced_infos),
+      trace_tensor_infos_(args.trace_tensor_infos),
 
       log_memory_(LogMemory::IsEnabled()),
       step_id_(args.step_id),
@@ -2073,6 +2076,47 @@ Status ExecutorState::ProcessOutputs(const NodeItem& item, OpKernelContext* ctx,
         dtype = val->dtype();
       }
       if (dtype == item.output_type(i)) {
+        {
+          //trace tenosr info for blaze benchmark
+          if (trace_tensor_infos_ && val.tensor->IsInitialized()) {
+            auto tensor_name = strings::StrCat(item.node->name(), ":", i);
+            auto device = impl_->params_.device;
+            const auto &alloc_attrs = item.output_attrs()[i];
+            string name = device->name();
+            if (DataTypeIsInteger(dtype)) {
+              if (name.find("GPU:") != string::npos &&
+                  !alloc_attrs.on_host())
+              {
+                auto device_info = device->tensorflow_gpu_device_info();
+                if (!device_context) {
+                  device_context = device_info->default_context;
+                }
+                auto ptr = item.node;
+                auto dst_ptr = new Tensor(val.tensor->dtype(), val.tensor->shape());
+                CopyTensor::CopyToHost(val.tensor,
+                  device, dst_ptr, device_context,
+                  [this, dst_ptr, tensor_name, ptr](Status s) {
+                    if (!s.ok()) {
+                      LOG(WARNING) << s.ToString();
+                    } else {
+                      auto info = traced_infos_->traced_tensor_infos->mutable_name_tensors()->Add();
+                      info->set_name(tensor_name);
+                      dst_ptr->AsProtoField(info->mutable_tensor());
+                    }
+                    delete dst_ptr;
+                  });
+              } else {
+                auto info = traced_infos_->traced_tensor_infos->mutable_name_tensors()->Add();
+                info->set_name(tensor_name);
+                val.tensor->AsProtoField(info->mutable_tensor());
+              }
+            } else {
+              TensorProto proto;
+              proto.set_dtype(dtype);
+              val.tensor->shape().AsProto(proto.mutable_tensor_shape());
+            }
+          }
+        } 
         if (stats && val.tensor->IsInitialized()) {
           nodestats::SetOutput(stats, i, val.tensor);
         }

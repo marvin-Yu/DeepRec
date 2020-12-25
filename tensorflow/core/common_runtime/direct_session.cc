@@ -588,6 +588,7 @@ Status DirectSession::RunInternal(
       });
 
   Executor::Args args;
+  args.AddSettings(run_options);
   args.step_id = step_id;
   args.call_frame = call_frame;
   args.rendezvous = run_state.rendez;
@@ -920,6 +921,7 @@ void DirectSession::RunInternalAsync(
 
       });
 
+  args->AddSettings(run_options);
   args->step_id = step_id;
   args->call_frame = call_frame;
   args->rendezvous = run_state->rendez;
