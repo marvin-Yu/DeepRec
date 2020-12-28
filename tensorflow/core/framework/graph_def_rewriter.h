@@ -63,7 +63,7 @@ public:
   bool static ReplaceSubgraph(const GraphDef&  origin_graph, GraphDef& output_graph, const SubgraphDescription& subgraph_desc);
 private:
   const GraphDef origin_graph_def_;
-}
+};
 
 } // tensorflow
 

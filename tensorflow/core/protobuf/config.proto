@@ -206,7 +206,7 @@ message SubgraphInputTensor {
 
   DataType type = 4;
   
-  repeated int32 shape = 5;
+  repeated int64 shape = 5;
 }
 
 // A detail description for a subgraph
@@ -270,7 +270,7 @@ message OptimizerOptions {
 
   // If true, will enable cudagraph, cut subgraph for capturing when create session
   // and replace subgraph with cudagraphOp when serving.
-  bool cudagraph_enable = 7 [default = false];
+  bool cudagraph_enable = 7;
 
   repeated SubgraphDescription subgraph_descriptions = 8;
 }

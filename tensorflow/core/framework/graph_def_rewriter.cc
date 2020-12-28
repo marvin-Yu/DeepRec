@@ -163,10 +163,13 @@ bool SubgraphGenerator::GenerateSubgraph(const GraphDef& origin_graph,
   std::unordered_set<std::string> empty_set;
   // step1. gen new placeholder and replace edge
   for (int i = 0; i < subgraph_desc.input_tensors_size(); ++i) {
-    PartialTensorShape shape(subgraph_desc.input_tensors(i).shape()); // todo: gen shape
+    PartialTensorShape shape;
+    for (int j = 0; j < subgraph_desc.input_tensors(i).shape_size(); ++j) {
+      shape.AddDim(subgraph_desc.input_tensors(i).shape(j));
+    }
     std::string ph_name = subgraph_desc.input_tensors(i).ph_name();
     if (rewriter.AddPlaceholder(ph_name, 
-                                subgraph_desc.input_tensors(i).type(), &shape)) {
+                                subgraph_desc.input_tensors(i).type(), shape)) {
       bool succ = rewriter.ReplaceEdgesForGivenConsumer(subgraph_desc.input_tensors(i).tensor_provider_name(),
                                                         subgraph_desc.input_tensors(i).tensor_provider_slot(),
                                                         ph_name, 0, empty_set);
