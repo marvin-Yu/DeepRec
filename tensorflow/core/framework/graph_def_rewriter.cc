@@ -155,10 +155,19 @@ bool GraphDefRewriter::GenerateGraphDefFromTop(GraphDef& output_graph_def,
   return true;
 }
 
+void static CopyCommonField(const GraphDef& origin_graph, GraphDef& output_graph) {
+  output_graph->mutable_versions->CopyFrom(origin_graph.versions());
+  output_graph.set_version(origin_graph.version());
+  output_graph->mutable_library->CopyFrom(origin_graph.library());
+  return;
+}
 
 bool SubgraphGenerator::GenerateSubgraph(const GraphDef& origin_graph, 
                                          GraphDef& output_graph, 
                                          const SubgraphDescription& subgraph_desc) {
+  // step0. copy other fields in graph
+  CopyCommonField(origin_graph, output_graph);
+  
   GraphDefRewriter rewriter(origin_graph);
   std::unordered_set<std::string> empty_set;
   // step1. gen new placeholder and replace edge

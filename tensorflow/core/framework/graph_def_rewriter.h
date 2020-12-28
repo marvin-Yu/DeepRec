@@ -62,7 +62,7 @@ public:
   bool static GenerateSubgraph(const GraphDef& origin_graph, GraphDef& output_graph, const SubgraphDescription& subgraph_desc);
   bool static ReplaceSubgraph(const GraphDef&  origin_graph, GraphDef& output_graph, const SubgraphDescription& subgraph_desc);
 private:
-  const GraphDef origin_graph_def_;
+  void static CopyCommonField(const GraphDef& origin_graph, GraphDef& output_graph);
 };
 
 } // tensorflow

@@ -24,6 +24,10 @@ void ReadFileToStringOrDie(Env* env, const string& filename, string* output) {
   TF_CHECK_OK(ReadFileToString(env, filename, output));
 }
 
+void DumpGraph(const GraphDef& graph_def) {
+  return;
+}
+
 class GraphDefRewriterTest : public ::testing::Test {
 protected:
   GraphDefRewriterTest() {};
@@ -48,6 +52,22 @@ TEST_F(GraphDefRewriterTest, InitSimple) {
   std::vector<std::string> top_node = {"MatMul_3"};
   GraphDef new_def;
   rewriter.GenerateGraphDefFromTop(new_def, top_node, empty_set);
+}
+
+TEST_F(GraphDefRewriterTest, GenSubSimple) {
+  Setup(SIMPLE_MODE_PATH);
+  GraphDef output_graph;
+
+  SubgraphDescription desc;
+  desc.set_subgraph_name("simple");
+  desc.add_output_node_names("MatMul_3");
+  SubgraphInputTensor* input = desc.add_input_tensors();
+  input->set_tensor_provider_name("MatMul_1");
+  input->set_tensor_provider_slot(0);
+  input->set_type(DataType::DT_FLOAT);
+  input->add_shape(-1);
+  input->add_shape(512);
+  SubgraphGenerator::GenerateSubgraph(graph_def_, output_graph, desc);
 }
 
 }

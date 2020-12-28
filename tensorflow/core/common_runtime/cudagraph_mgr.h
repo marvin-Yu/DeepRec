@@ -22,12 +22,20 @@ class CudagraphMgr {
 public:
   static CudagraphMgr& Singleton();
 
-  Status CaptureCudagraph(const GraphDef& graph_def, const int batch_size, const int num_instance);
+  Status CaptureCudagraph(const GraphDef& graph_def, const std::string& graph_name, 
+                          const int batch_size, const int num_instance);
   Status GetCudagraphExecInstance(const std::string& cudagrpah_name);
 
 private:
   CudagraphMgr(/* args */);
   ~CudagraphMgr();
+
+  // assistant functions for capturing
+  void GenerateInputs(GraphDef& graph_def, const std::vector<string>& input_names,
+                    std::vector<Tensor>& input_tensors, int batch_size);
+  void FillInputsMap(InputsMap& inputs_map, std::vector<std::string>& input_names,
+                   std::vector<Tensor>& input_tensors);
+  void LogCudaGraphStatus(Session* sess);
 
   TF_DISALLOW_COPY_AND_ASSIGN(CudagraphMgr);
 
