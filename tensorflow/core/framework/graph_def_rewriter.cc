@@ -156,5 +156,44 @@ bool GraphDefRewriter::GenerateGraphDefFromTop(GraphDef& output_graph_def,
 }
 
 
+bool SubgraphGenerator::GenerateSubgraph(const GraphDef& origin_graph, 
+                                         GraphDef& output_graph, 
+                                         const SubgraphDescription& subgraph_desc) {
+  GraphDefRewriter rewriter(origin_graph);
+  std::unordered_set<std::string> empty_set;
+  // step1. gen new placeholder and replace edge
+  for (int i = 0; i < subgraph_desc.input_tensors_size(); ++i) {
+    PartialTensorShape shape(subgraph_desc.input_tensors(i).shape()); // todo: gen shape
+    std::string ph_name = subgraph_desc.input_tensors(i).ph_name();
+    if (rewriter.AddPlaceholder(ph_name, 
+                                subgraph_desc.input_tensors(i).type(), &shape)) {
+      bool succ = rewriter.ReplaceEdgesForGivenConsumer(subgraph_desc.input_tensors(i).tensor_provider_name(),
+                                                        subgraph_desc.input_tensors(i).tensor_provider_slot(),
+                                                        ph_name, 0, empty_set);
+      if (!succ) {
+        LOG(ERROR) << "error";
+        return false;
+      }
+    } else {
+      LOG(ERROR) << "error";
+      return false;
+    }
+  }
+
+  // step2. output
+  std::vector<std::string> top_nodes;
+  top_nodes.reserve(subgraph_desc.output_node_names_size());
+  for (int i = 0; i < subgraph_desc.output_node_names_size(); ++i) {
+    top_nodes.emplace_back(subgraph_desc.output_node_names(i));
+  }
+  rewriter.GenerateGraphDefFromTop(output_graph, top_nodes, empty_set);
+  return true;
+}
+
+bool SubgraphGenerator::ReplaceSubgraph(const GraphDef& origin_graph, 
+                                        GraphDef& output_graph, 
+                                        const SubgraphDescription& subgraph_desc) {
+  return true;
+}
 
 } // tensorflow

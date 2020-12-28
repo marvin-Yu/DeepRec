@@ -41,6 +41,7 @@ limitations under the License.
 #include "tensorflow/core/framework/function.h"
 #include "tensorflow/core/framework/graph.pb_text.h"
 #include "tensorflow/core/framework/graph.pb.h"
+#include "tensorflow/core/framework/graph_def_rewriter.h"
 #include "tensorflow/core/framework/graph_def_util.h"
 #include "tensorflow/core/framework/log_memory.h"
 #include "tensorflow/core/framework/node_def.pb.h"
@@ -408,6 +409,32 @@ Status DirectSession::Create(GraphDef&& graph) {
       return errors::AlreadyExists(
           "A Graph has already been created for this session.");
     }
+
+    if (cuda_graph_enable_) {
+      // generate two graph, graph which replace subgraph is used for serving
+      // subgraph register to cudagraphmgr, for capturing cudagraph instance
+      // if capture failed, do not use cudagraph, set cuda_graph_enable as false
+      GraphDef4CudaGraphProcessor processor;
+      GraphDef cudagraph_subgraph;
+      GraphDef cudagraph_serving;
+      bool succ1 = processor.GenerateSubgraphForCapturing(&cudagraph_subgraph);
+      if (succ1) {
+        // todo: get graph fingerprint, capturing
+        
+        bool succ2 = processor.GenerateFullGraphForServing(&cudagraph_serving);
+        if (succ2) {
+          graph = cudagraph_serving;
+        } else {
+          LOG(ERROR) << "Generate full graph for cudagraph failed."; 
+          cuda_graph_enable_ = false;
+        }
+      } else {
+        LOG(ERROR) << "Generate subgraph for cudagraph failed.";
+        cuda_graph_enable_ = false;
+      }
+
+    }
+
     return ExtendLocked(std::move(graph));
   }
   return Status::OK();

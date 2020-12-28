@@ -167,6 +167,7 @@ class DirectSession : public Session {
  private:
 
 #ifdef GOOGLE_CUDA
+  bool cuda_graph_enable_ = false;
   bool cuda_graph_capture_mode_ = false;
   cudaStream_t capturing_stream_ = nullptr;
   std::string captured_model_name_ = "";

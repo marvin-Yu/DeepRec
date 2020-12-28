@@ -17,6 +17,7 @@
 #include "tensorflow/core/framework/graph.pb.h"
 #include "tensorflow/core/framework/node_def.pb.h"
 #include "tensorflow/core/framework/tensor_shape.h"
+#include "tensorflow/core/protobuf/config.pb.h"
 
 namespace tensorflow {
 
@@ -54,6 +55,14 @@ public:
 
 GraphDefRewriter::GraphDefRewriter(const GraphDef& origin_graph_def) {
   InitNodeMap(origin_graph_def);
+}
+
+class SubgraphGenerator {
+public:
+  bool static GenerateSubgraph(const GraphDef& origin_graph, GraphDef& output_graph, const SubgraphDescription& subgraph_desc);
+  bool static ReplaceSubgraph(const GraphDef&  origin_graph, GraphDef& output_graph, const SubgraphDescription& subgraph_desc);
+private:
+  const GraphDef origin_graph_def_;
 }
 
 } // tensorflow

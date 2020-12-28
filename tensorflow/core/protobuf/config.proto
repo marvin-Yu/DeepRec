@@ -268,17 +268,11 @@ message OptimizerOptions {
   }
   GlobalJitLevel global_jit_level = 5;
 
-  // If true, cut subgraph and remove other parts
-  // for other optimize methods, e.g. cudagraph
-  bool cut_subgraph_for_other_optimize = 7;
+  // If true, will enable cudagraph, cut subgraph for capturing when create session
+  // and replace subgraph with cudagraphOp when serving.
+  bool cudagraph_enable = 7 [default = false];
 
-  // If true, replace subgraph with a cudagraph node
-  // with launch cudaGraph
-  bool replace_subgraph_with_cudagraph = 8;
-
-  // subgraph input node and output node names
-  // these boundary nodes are included in subgraph
-  repeated SubgraphDescription subgraph_descriptions = 9;
+  repeated SubgraphDescription subgraph_descriptions = 8;
 }
 
 message GraphOptions {
