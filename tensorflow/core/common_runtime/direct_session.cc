@@ -621,7 +621,7 @@ Status DirectSession::RunInternal(
   }
 
   args.traced_infos = std::make_shared<UserTracedInfos>
-      (enable_prof_stats_, do_trace, run_options.trace_tensor_infos());
+      (enable_prof_stats_, run_options.trace_tensors(), run_options.trace_tensor_infos());
   bool update_cost_model = false;
   if (options_.config.graph_options().build_cost_model() > 0) {
     const int64 build_cost_model_every =
@@ -947,7 +947,7 @@ void DirectSession::RunInternalAsync(
   }
 
   args->traced_infos = std::make_shared<UserTracedInfos>
-      (enable_prof_stats_, do_trace, run_options.trace_tensor_infos());
+      (enable_prof_stats_, run_options.trace_tensors(), run_options.trace_tensor_infos());
 
   bool update_cost_model = false;
   if (options_.config.graph_options().build_cost_model() > 0) {

@@ -2108,7 +2108,10 @@ Status ExecutorState::ProcessOutputs(const NodeItem& item, OpKernelContext* ctx,
               } else {
                 auto info = traced_infos_->traced_tensor_infos->mutable_name_tensors()->Add();
                 info->set_name(tensor_name);
-                val.tensor->AsProtoField(info->mutable_tensor());
+                TensorProto tp;
+                val.tensor->AsProtoField(&tp);
+                *(info->mutable_tensor()) = tp;
+ //               val.tensor->AsProtoField(info->mutable_tensor());
               }
             } else {
               TensorProto proto;
