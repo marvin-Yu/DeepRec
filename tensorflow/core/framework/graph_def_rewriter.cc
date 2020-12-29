@@ -15,6 +15,8 @@
 #include "tensorflow/core/lib/strings/strcat.h"
 #include "tensorflow/core/platform/logging.h"
 
+static const std::string PLACEHOLDER = "Placeholder";
+
 namespace tensorflow {
 
 void GraphDefRewriter::InitNodeMap(const GraphDef& origin_graph_def) {
@@ -25,7 +27,6 @@ void GraphDefRewriter::InitNodeMap(const GraphDef& origin_graph_def) {
       LOG(ERROR) << "Node in original graph whose name is " << node_name << " has been in node map, ignore it.";
     } else {
       // init consumer info
-      LOG(INFO) << "[jieluo] Node name is " << node_name;
       for (int j = 0; j < node.input_size(); ++j) {
         std::vector<std::string> provider_parts = absl::StrSplit(node.input(j), ':');
         int slot = 0;
@@ -61,7 +62,7 @@ bool GraphDefRewriter::AddPlaceholder(const std::string& ph_name, const DataType
   
   // step1. build an node def
   NodeDef ph_node;
-  NodeDefBuilder builder(ph_name, "Placeholder");
+  NodeDefBuilder builder(ph_name, PLACEHOLDER);
   TF_CHECK_OK(builder.Attr("dtype", dtype)
          .Attr("shape", shape)
          .Attr("_output_shape", shape)
@@ -118,17 +119,17 @@ bool GraphDefRewriter::ReplaceEdgesForGivenConsumer(const std::string& origin_pr
 
 bool GraphDefRewriter::GenerateGraphDefFromTop(GraphDef& output_graph_def,
                                const std::vector<std::string> top_nodes,
-                               const std::unordered_set<std::string> terminal_ops) {
+                               std::vector<std::string>& input_names) {
   // BFS gen graph from top
   // step1. clear output_graph_def nodes
   output_graph_def.clear_node();
   for (int i = 0; i < top_nodes.size(); ++i) {
     if (node_map_.find(top_nodes[i]) == node_map_.end()) {
-      LOG(ERROR) << "Top node not found in graph";
+      LOG(ERROR) << "Top node "<< top_nodes[i] << " not found in graph";
+      return false;
     } else {
       NodeDef* new_node = output_graph_def.add_node();
       *new_node = node_map_[top_nodes[i]];
-      LOG(INFO) << "[jieluo] Add top node " << new_node->name();
     }
   }
 
@@ -137,6 +138,10 @@ bool GraphDefRewriter::GenerateGraphDefFromTop(GraphDef& output_graph_def,
   while (travel_idx < output_graph_def.node_size()) {
     const NodeDef& curr_node = output_graph_def.node(travel_idx);
     LOG(INFO) << "[jieluo] visit node " << curr_node.name() << " index is " << travel_idx;
+    // check node type
+    if (curr_node.op() == PLACEHOLDER) {
+      input_names.push_back(curr_op.name());
+    } 
     for (int i = 0; i < curr_node.input_size(); ++i) {
       int separator_pos = curr_node.input(i).find(':');
       if (separator_pos == std::string::npos) {
@@ -144,7 +149,7 @@ bool GraphDefRewriter::GenerateGraphDefFromTop(GraphDef& output_graph_def,
       }
       std::string input_node_name = curr_node.input(i).substr(0, separator_pos);
       if (node_map_.find(input_node_name) == node_map_.end()) {
-        LOG(ERROR) << "Node not found in graph.";
+        LOG(ERROR) << "Node " << input_node_name << " not found in graph.";
       } else {
         NodeDef* new_node = output_graph_def.add_node();
         *new_node = node_map_[input_node_name];
@@ -165,7 +170,9 @@ void SubgraphGenerator::CopyCommonField(const GraphDef& origin_graph, GraphDef& 
 
 bool SubgraphGenerator::GenerateSubgraph(const GraphDef& origin_graph, 
                                          GraphDef& output_graph, 
-                                         const SubgraphDescription& subgraph_desc) {
+                                         const SubgraphDescription& subgraph_desc,
+                                         std::vector<std::string>& subgraph_final_inputs,
+                                         std::vector<std::string>& subgraph_final_outputs) {
   // step0. copy other fields in graph
   CopyCommonField(origin_graph, output_graph);
   
@@ -184,22 +191,26 @@ bool SubgraphGenerator::GenerateSubgraph(const GraphDef& origin_graph,
                                                         subgraph_desc.input_tensors(i).tensor_provider_slot(),
                                                         ph_name, 0, empty_set);
       if (!succ) {
-        LOG(ERROR) << "error";
+        LOG(ERROR) << "Replace edge in origin graph with new placehold failed.";
         return false;
       }
     } else {
-      LOG(ERROR) << "error";
+      LOG(ERROR) << "Generate subgraph new placeholder failed.";
       return false;
     }
   }
 
   // step2. output
-  std::vector<std::string> top_nodes;
-  top_nodes.reserve(subgraph_desc.output_node_names_size());
+  subgraph_final_outputs.clear();
+  subgraph_final_outputs.reserve(subgraph_desc.output_node_names_size());
   for (int i = 0; i < subgraph_desc.output_node_names_size(); ++i) {
-    top_nodes.emplace_back(subgraph_desc.output_node_names(i));
+    subgraph_final_outputs.emplace_back(subgraph_desc.output_node_names(i));
   }
-  rewriter.GenerateGraphDefFromTop(output_graph, top_nodes, empty_set);
+  subgraph_final_inputs.clear();
+  bool succ = rewriter.GenerateGraphDefFromTop(output_graph, subgraph_final_outputs, subgraph_final_inputs);
+  if (!succ) {
+    LOG(ERROR) << "Generate subgraph failed.";
+  }
   return true;
 }
 

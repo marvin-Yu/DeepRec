@@ -454,8 +454,10 @@ Status DirectSession::CreateForCapture(GraphDef& graph, int graph_idx) {
     options_.config.mutable_gpu_options()->set_force_gpu_compatible(true);
     options_.config.mutable_gpu_options()->set_allow_growth(false);
 */
+    std::vector<std::string> inputs, outputs;
     bool succ = SubgraphGenerator::GenerateSubgraph(graph, cudagraph_subgraph, 
-                      options_.config.graph_options().optimizer_options().subgraph_descriptions(graph_idx));
+                      options_.config.graph_options().optimizer_options().subgraph_descriptions(graph_idx),
+                      inputs, outputs);
     graph::SetDefaultDevice("/device:GPU:0", &cudagraph_subgraph);
     graph::CheckNodeDevice("/device:GPU:0", &cudagraph_subgraph);
     return ExtendLocked(std::move(cudagraph_subgraph));
@@ -808,7 +810,7 @@ Status DirectSession::RunInternal(
       return errors::Internal("Failed to begin capture CUDA Graph.");
     }
   }
-  
+  blaze/dev/rtp-executor-cudagraph
   // create tensor holder before the scheduling
   TensorHolder * tensor_holder = nullptr;
   if(cuda_graph_capture_mode_){

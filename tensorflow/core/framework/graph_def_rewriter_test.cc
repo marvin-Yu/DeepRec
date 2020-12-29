@@ -45,13 +45,14 @@ protected:
 TEST_F(GraphDefRewriterTest, InitSimple) {
   Setup(SIMPLE_MODE_PATH);
   GraphDefRewriter rewriter(graph_def_);
-  std::unordered_set<std::string> empty_set;
+  std::string<std::string> output;
+  std::string<std::string> empty_set;
   PartialTensorShape shape({-1, 512});
   rewriter.AddPlaceholder("new_ph", DataType::DT_FLOAT, shape);
   rewriter.ReplaceEdgesForGivenConsumer("MatMul_1", 0, "new_ph", 0, empty_set);
   std::vector<std::string> top_node = {"MatMul_3"};
   GraphDef new_def;
-  rewriter.GenerateGraphDefFromTop(new_def, top_node, empty_set);
+  rewriter.GenerateGraphDefFromTop(new_def, top_node, output);
 }
 
 TEST_F(GraphDefRewriterTest, GenSubSimple) {
@@ -67,7 +68,9 @@ TEST_F(GraphDefRewriterTest, GenSubSimple) {
   input->set_type(DataType::DT_FLOAT);
   input->add_shape(-1);
   input->add_shape(512);
-  SubgraphGenerator::GenerateSubgraph(graph_def_, output_graph, desc);
+  std::string<std::string> inputs;
+  std::string<std::string> outputs;
+  SubgraphGenerator::GenerateSubgraph(graph_def_, output_graph, desc, inputs, outputs);
 }
 
 }

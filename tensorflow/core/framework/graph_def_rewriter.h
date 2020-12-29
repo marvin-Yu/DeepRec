@@ -47,9 +47,10 @@ public:
                                     const std::string& replacer_provider_name,
                                     const int replacer_provider_slot,
                                     const std::unordered_set<std::string>& consumers_for_replace);
+  // during bfs to get all reachable nodes, recording all ph node name. 
   bool GenerateGraphDefFromTop(GraphDef& output_graph_def,
                                const std::vector<std::string> top_nodes,
-                               const std::unordered_set<std::string> terminal_ops);
+                               std::vector<std::string>& input_names);
   
 };
 
@@ -59,7 +60,14 @@ GraphDefRewriter::GraphDefRewriter(const GraphDef& origin_graph_def) {
 
 class SubgraphGenerator {
 public:
-  bool static GenerateSubgraph(const GraphDef& origin_graph, GraphDef& output_graph, const SubgraphDescription& subgraph_desc);
+  // cut subgraph from origin graph, subgraph's boundary info is recorded in subgraph_desc
+  // subgraph final input and output nodes' name is collected as result
+  // which are used during capturing cuda graph. 
+  bool static GenerateSubgraph(const GraphDef& origin_graph, 
+                               GraphDef& output_graph, 
+                               const SubgraphDescription& subgraph_desc,
+                               std::vector<std::string>& subgraph_final_inputs,
+                               std::vector<std::string>& subgraph_final_outputs);
   bool static ReplaceSubgraph(const GraphDef&  origin_graph, GraphDef& output_graph, const SubgraphDescription& subgraph_desc);
 private:
   void static CopyCommonField(const GraphDef& origin_graph, GraphDef& output_graph);
