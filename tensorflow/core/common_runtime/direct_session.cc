@@ -414,15 +414,16 @@ Status DirectSession::Create(GraphDef&& graph) {
     }
 #ifdef GOOGLE_CUDA
     cuda_graph_enable_ = options_.config.graph_options().
-                             optimization_options().
+                             optimizer_options().
                              cuda_graph_enable();
-    if (cuda_graph_enable) {
-      size_t graph_id = std::hash<GraphDef>()(graph);
-      CudaGraphMgr& mgr = CudaGraphMgr::Instance();
-      if (!mgr.CheckGraphCaptured(graph_id)) {
+    bool cuda_graph_capture = false; // todo: get this config from options
+    if (cuda_graph_enable_) {
+      if (cuda_graph_capture) {
+        CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
         mgr.CaptureCudagraph(graph, options_, 0, 1);
       }
-      // todo:
+      // todo: support replace multiple subgraph once
+      int graph_idx = 0;
       GraphDef cudagraph_serving;
       bool succ = SubgraphGenerator::ReplaceSubgraph(graph, cudagraph_serving, 
                       options_.config.graph_options().optimizer_options().subgraph_descriptions(graph_idx));
@@ -435,11 +436,11 @@ Status DirectSession::Create(GraphDef&& graph) {
 }
 
 #ifdef GOOGLE_CUDA
-Status DirectSession::CreateForCapture(const GraphDef&& graph, const int graph_idx) {
+Status DirectSession::CreateForCapture(const GraphDef& graph, int graph_idx) {
   return CreateForCapture(GraphDef(graph), graph_idx);
 }
 
-Status DirectSession::CreateForCapture(GraphDef& graph, const int graph_idx) {
+Status DirectSession::CreateForCapture(GraphDef& graph, int graph_idx) {
   TF_RETURN_IF_ERROR(init_error_);
   if (graph.node_size() > 0) {
     mutex_lock l(graph_state_lock_);
@@ -449,13 +450,14 @@ Status DirectSession::CreateForCapture(GraphDef& graph, const int graph_idx) {
     }
     GraphDef cudagraph_subgraph;
     // rewrite config
+/*
     options_.config.mutable_gpu_options()->set_force_gpu_compatible(true);
     options_.config.mutable_gpu_options()->set_allow_growth(false);
-
+*/
     bool succ = SubgraphGenerator::GenerateSubgraph(graph, cudagraph_subgraph, 
                       options_.config.graph_options().optimizer_options().subgraph_descriptions(graph_idx));
-    graph::SetDefaultDevice("/device:GPU:0", &graph_def);
-    graph::CheckNodeDevice("/device:GPU:0", &graph_def);
+    graph::SetDefaultDevice("/device:GPU:0", &cudagraph_subgraph);
+    graph::CheckNodeDevice("/device:GPU:0", &cudagraph_subgraph);
     return ExtendLocked(std::move(cudagraph_subgraph));
   }
   return Status::OK();
@@ -1884,6 +1886,7 @@ std::string DirectSession::CapturedModelName(int idx){
             kid++;
         }
     }
+    return "";
 }
 
 int DirectSession::NumCapturedGraphs(const std::string & model_name){

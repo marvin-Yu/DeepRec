@@ -3394,9 +3394,10 @@ cc_library(
 
 tf_cuda_library(
     name = "direct_session_internal",
-    srcs = ["common_runtime/direct_session.cc"],
+    srcs = ["common_runtime/direct_session.cc", "common_runtime/cuda_graph_mgr.cc"],
     hdrs = [
         "common_runtime/direct_session.h",
+        "common_runtime/cuda_graph_mgr.h",
         "util/env_var.h",
         "common_runtime/gpu/gpu_device.h",
         "common_runtime/gpu/gpu_id_utils.h",

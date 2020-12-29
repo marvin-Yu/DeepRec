@@ -15,7 +15,10 @@
 #include <unordered_set>
 #include <vector>
 
+#include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/platform/macros.h"
+#include "tensorflow/core/public/session.h"
+#include "tensorflow/core/public/session_options.h"
 
 namespace tensorflow {
 
@@ -25,12 +28,14 @@ typedef struct CudaGraphMeta {
   std::string subgraph_name;
 } CudaGraphMeta;
 
+typedef std::vector<std::pair<std::string, Tensor>> InputsMap;
+
 class CudaGraphMgr {
 public:
   static CudaGraphMgr& Singleton();
 
-  Status CaptureCudagraph(const GraphDef& graph_def, const std::string& graph_name, 
-                          const int batch_size, const int num_instance);
+  Status CaptureCudagraph(const GraphDef& graph_def, const SessionOptions& graph_name, 
+                          int batch_size, int num_instance);
   Status GetCudagraphExecInstance(const std::string& cudagrpah_name);
 
 private:
@@ -38,12 +43,12 @@ private:
   ~CudaGraphMgr();
 
   // assistant functions for capturing
-  void GenerateInputs(GraphDef& graph_def, const std::vector<string>& input_names,
-                    std::vector<Tensor>& input_tensors, int batch_size);
+  void GenerateInputs(const GraphDef& graph_def, const std::vector<string>& input_names,
+                    std::vector<Tensor>& input_tensors, int batch_size, Allocator* host_allocator);
   void FillInputsMap(InputsMap& inputs_map, std::vector<std::string>& input_names,
                    std::vector<Tensor>& input_tensors);
   void LogCudaGraphStatus(Session* sess);
-  bool CheckGraphCaptured(const size_t graph_id) {
+  bool CheckGraphCaptured(size_t graph_id) {
     return captured_graph_ids_.find(graph_id) == captured_graph_ids_.end();
   };
 
