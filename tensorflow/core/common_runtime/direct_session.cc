@@ -615,13 +615,13 @@ Status DirectSession::RunInternal(
   //[PROF-STATS]
   args.enable_prof_stats = enable_prof_stats_;
   if (enable_prof_stats_ || do_trace) {
-    args.traced_infos = std::make_shared<UserTracedInfos>
-        (enable_prof_stats_, do_trace);
     args.prof_stats = &args.real_prof_stats;
   } else {
     args.prof_stats = nullptr;
   }
 
+  args.traced_infos = std::make_shared<UserTracedInfos>
+      (enable_prof_stats_, do_trace, run_options.trace_tensor_infos());
   bool update_cost_model = false;
   if (options_.config.graph_options().build_cost_model() > 0) {
     const int64 build_cost_model_every =
@@ -942,11 +942,12 @@ void DirectSession::RunInternalAsync(
   if (enable_prof_stats_ || do_trace) {
     // ToDo move in to traced_infos
     args->prof_stats = &args->real_prof_stats;
-    args->traced_infos = std::make_shared<UserTracedInfos>
-        (enable_prof_stats_, do_trace);
   } else {
     args->prof_stats = nullptr;
   }
+
+  args->traced_infos = std::make_shared<UserTracedInfos>
+      (enable_prof_stats_, do_trace, run_options.trace_tensor_infos());
 
   bool update_cost_model = false;
   if (options_.config.graph_options().build_cost_model() > 0) {
