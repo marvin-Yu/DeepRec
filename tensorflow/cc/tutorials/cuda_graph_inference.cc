@@ -336,9 +336,6 @@ Status Test(GraphDef & graph_def,
     options.config.mutable_gpu_options()->set_force_gpu_compatible(true);
     options.config.mutable_gpu_options()->set_allow_growth(false);
     // for cudagraph config
-    options.config.mutable_graph_options()->mutable_optimizer_options()->set_cut_subgraph_for_other_optimize(true);
-    options.config.mutable_graph_options()->mutable_optimizer_options()->add_subgraph_input_node_names("MatMul_1");
-    options.config.mutable_graph_options()->mutable_optimizer_options()->add_subgraph_output_node_names("MatMul_3");
     std::unique_ptr<Session> session(NewSession(options));
     
     if (options.target.empty()) {

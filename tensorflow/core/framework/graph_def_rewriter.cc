@@ -69,6 +69,7 @@ bool GraphDefRewriter::AddPlaceholder(const std::string& ph_name, const DataType
   
   // step2. put new ph_node into node map
   node_map_.emplace(ph_name, ph_node);
+  return true;
 }
 
 bool GraphDefRewriter::ReplaceEdgesForGivenConsumer(const std::string& origin_provider_name,
@@ -155,10 +156,10 @@ bool GraphDefRewriter::GenerateGraphDefFromTop(GraphDef& output_graph_def,
   return true;
 }
 
-void static CopyCommonField(const GraphDef& origin_graph, GraphDef& output_graph) {
-  output_graph->mutable_versions->CopyFrom(origin_graph.versions());
+void SubgraphGenerator::CopyCommonField(const GraphDef& origin_graph, GraphDef& output_graph) {
+  output_graph.mutable_versions()->CopyFrom(origin_graph.versions());
   output_graph.set_version(origin_graph.version());
-  output_graph->mutable_library->CopyFrom(origin_graph.library());
+  output_graph.mutable_library()->CopyFrom(origin_graph.library());
   return;
 }
 

@@ -401,6 +401,7 @@ Status DirectSession::Create(const GraphDef& graph) {
   return Create(GraphDef(graph));
 }
 
+// todo: add a new function for cudagraph capture Create
 Status DirectSession::Create(GraphDef&& graph) {
   TF_RETURN_IF_ERROR(init_error_);
   if (graph.node_size() > 0) {
@@ -415,12 +416,13 @@ Status DirectSession::Create(GraphDef&& graph) {
       // generate two graph, graph which replace subgraph is used for serving
       // subgraph register to cudagraphmgr, for capturing cudagraph instance
       // if capture failed, do not use cudagraph, set cuda_graph_enable as false
+      int graph_idx = 0; // in new create function, this is an arg
       GraphDef cudagraph_subgraph;
       GraphDef cudagraph_serving;
       bool succ1 = SubgraphGenerator::GenerateSubgraph(graph, cudagraph_subgraph, 
-                      options_.config.graph_options().optimizer_options().subgraph_descriptions());
+                      options_.config.graph_options().optimizer_options().subgraph_descriptions(graph_idx));
       bool succ2 = SubgraphGenerator::ReplaceSubgraph(graph, cudagraph_serving, 
-                      options_.config.graph_options().optimizer_options().subgraph_descriptions());
+                      options_.config.graph_options().optimizer_options().subgraph_descriptions(graph_idx));
 
     }
 
