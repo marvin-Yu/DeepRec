@@ -16,6 +16,7 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/direct_session.h"
 
 #include <atomic>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -23,6 +24,7 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/collective_executor_mgr.h"
 #include "tensorflow/core/common_runtime/collective_param_resolver_local.h"
 #include "tensorflow/core/common_runtime/constant_folding.h"
+#include "tensorflow/core/common_runtime/cuda_graph_mgr.h"
 #include "tensorflow/core/common_runtime/debugger_state_interface.h"
 #include "tensorflow/core/common_runtime/device_factory.h"
 #include "tensorflow/core/common_runtime/device_resolver_local.h"
@@ -410,26 +412,55 @@ Status DirectSession::Create(GraphDef&& graph) {
       return errors::AlreadyExists(
           "A Graph has already been created for this session.");
     }
-
-    // capture mode
-    if (cuda_graph_enable_) {
-      // generate two graph, graph which replace subgraph is used for serving
-      // subgraph register to cudagraphmgr, for capturing cudagraph instance
-      // if capture failed, do not use cudagraph, set cuda_graph_enable as false
-      int graph_idx = 0; // in new create function, this is an arg
-      GraphDef cudagraph_subgraph;
+#ifdef GOOGLE_CUDA
+    cuda_graph_enable_ = options_.config.graph_options().
+                             optimization_options().
+                             cuda_graph_enable();
+    if (cuda_graph_enable) {
+      size_t graph_id = std::hash<GraphDef>()(graph);
+      CudaGraphMgr& mgr = CudaGraphMgr::Instance();
+      if (!mgr.CheckGraphCaptured(graph_id)) {
+        mgr.CaptureCudagraph(graph, options_, 0, 1);
+      }
+      // todo:
       GraphDef cudagraph_serving;
-      bool succ1 = SubgraphGenerator::GenerateSubgraph(graph, cudagraph_subgraph, 
+      bool succ = SubgraphGenerator::ReplaceSubgraph(graph, cudagraph_serving, 
                       options_.config.graph_options().optimizer_options().subgraph_descriptions(graph_idx));
-      bool succ2 = SubgraphGenerator::ReplaceSubgraph(graph, cudagraph_serving, 
-                      options_.config.graph_options().optimizer_options().subgraph_descriptions(graph_idx));
-
+      return ExtendLocked(std::move(cudagraph_serving));
     }
-
+#endif
     return ExtendLocked(std::move(graph));
   }
   return Status::OK();
 }
+
+#ifdef GOOGLE_CUDA
+Status DirectSession::CreateForCapture(const GraphDef&& graph, const int graph_idx) {
+  return CreateForCapture(GraphDef(graph), graph_idx);
+}
+
+Status DirectSession::CreateForCapture(GraphDef& graph, const int graph_idx) {
+  TF_RETURN_IF_ERROR(init_error_);
+  if (graph.node_size() > 0) {
+    mutex_lock l(graph_state_lock_);
+    if (graph_created_) {
+      return errors::AlreadyExists(
+          "A Graph has already been created for this session.");
+    }
+    GraphDef cudagraph_subgraph;
+    // rewrite config
+    options_.config.mutable_gpu_options()->set_force_gpu_compatible(true);
+    options_.config.mutable_gpu_options()->set_allow_growth(false);
+
+    bool succ = SubgraphGenerator::GenerateSubgraph(graph, cudagraph_subgraph, 
+                      options_.config.graph_options().optimizer_options().subgraph_descriptions(graph_idx));
+    graph::SetDefaultDevice("/device:GPU:0", &graph_def);
+    graph::CheckNodeDevice("/device:GPU:0", &graph_def);
+    return ExtendLocked(std::move(cudagraph_subgraph));
+  }
+  return Status::OK();
+}
+#endif 
 
 Status DirectSession::Extend(const GraphDef& graph) {
   return Extend(GraphDef(graph));

@@ -134,6 +134,8 @@ class DirectSession : public Session {
   const SessionOptions& options() const { return options_; }
 
 #ifdef GOOGLE_CUDA
+  ::tensorflow::Status CreateForCapture(const GraphDef& graph, const int graph_idx) override;
+  ::tensorflow::Status CreateForCapture(GraphDef&& graph, const int graph_idx) override;
   bool SupportsCudaGraph() override { return true; };
   cudaStream_t EnableGraphCapture(std::string model_name) override;
   void DisableGraphCapture() override;

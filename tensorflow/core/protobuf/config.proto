@@ -270,7 +270,7 @@ message OptimizerOptions {
 
   // If true, will enable cudagraph, cut subgraph for capturing when create session
   // and replace subgraph with cudagraphOp when serving.
-  bool cudagraph_enable = 7;
+  bool cuda_graph_enable = 7;
 
   repeated SubgraphDescription subgraph_descriptions = 8;
 }

@@ -119,6 +119,10 @@ class Session {
 
 
 #ifdef GOOGLE_CUDA
+  virtual Status CreateForCapture(const GraphDef& graph, const int graph_idx) = 0;
+#ifndef SWIG
+  virtual Status CreateForCapture(GraphDef&& graph, const int graph_idx) { return CreateForCapture(graph, graph_idx); }
+#endif
   virtual bool SupportsCudaGraph() { return false; }
   virtual cudaStream_t  EnableGraphCapture(std::string model_name) {return nullptr;} 
   virtual void DisableGraphCapture() { }
