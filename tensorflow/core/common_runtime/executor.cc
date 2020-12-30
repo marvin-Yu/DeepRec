@@ -2078,7 +2078,7 @@ Status ExecutorState::ProcessOutputs(const NodeItem& item, OpKernelContext* ctx,
       if (dtype == item.output_type(i)) {
         {
           //trace tenosr info for blaze benchmark
-          if (trace_tensor_infos_ && val.tensor->IsInitialized()) {
+          if (trace_tensor_infos_ && val.tensor->IsInitialized() && traced_infos_) {
             auto tensor_name = strings::StrCat(item.node->name(), ":", i);
             auto device = impl_->params_.device;
             const auto &alloc_attrs = item.output_attrs()[i];
