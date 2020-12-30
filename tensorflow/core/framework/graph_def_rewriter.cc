@@ -140,7 +140,7 @@ bool GraphDefRewriter::GenerateGraphDefFromTop(GraphDef& output_graph_def,
     LOG(INFO) << "[jieluo] visit node " << curr_node.name() << " index is " << travel_idx;
     // check node type
     if (curr_node.op() == PLACEHOLDER) {
-      input_names.push_back(curr_op.name());
+      input_names.push_back(curr_node.name());
     } 
     for (int i = 0; i < curr_node.input_size(); ++i) {
       int separator_pos = curr_node.input(i).find(':');

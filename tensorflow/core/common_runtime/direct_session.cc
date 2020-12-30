@@ -810,7 +810,6 @@ Status DirectSession::RunInternal(
       return errors::Internal("Failed to begin capture CUDA Graph.");
     }
   }
-  blaze/dev/rtp-executor-cudagraph
   // create tensor holder before the scheduling
   TensorHolder * tensor_holder = nullptr;
   if(cuda_graph_capture_mode_){
