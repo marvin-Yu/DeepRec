@@ -162,10 +162,12 @@ void BlazeXlaOp::CopyTensor(MemoryType mtype, OpKernelContext* ctx,
           if (s.ok()) {
             std::lock_guard<std::mutex> l(tracing_mu_);
             if (ctx->traced_infos() && ctx->traced_infos()->traced_tensors) {
-            auto name_tensor = ctx->traced_infos()->traced_tensors->
-              mutable_name_tensors()->Add();
+            auto name_tensor = ctx->traced_infos()->traced_tensors->add_name_tensors();
             name_tensor->set_name(name);
-            cpu_tensor->AsProtoField(name_tensor->mutable_tensor()); 
+            auto tensor = name_tensor->mutable_tensor();
+            TensorProto proto;
+            cpu_tensor->AsProtoField(&proto);
+            *tensor = proto;
             } else {
             LOG(ERROR) << "blaze xla kernel trace error, something wrong";
             }
