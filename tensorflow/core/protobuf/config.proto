@@ -272,7 +272,11 @@ message OptimizerOptions {
   // and replace subgraph with cudagraphOp when serving.
   bool cuda_graph_enable = 7;
 
-  repeated SubgraphDescription subgraph_descriptions = 8;
+  // If true, will check if cuda graph captured in cuda graph mgr, if not, capture 
+  // subgraphs as cuda graphs which described in below.
+  bool try_capture_cuda_graph = 8;
+
+  repeated SubgraphDescription subgraph_descriptions = 9;
 }
 
 message GraphOptions {

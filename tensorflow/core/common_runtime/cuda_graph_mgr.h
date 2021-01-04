@@ -12,9 +12,9 @@
 
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
+#include "tensorflow/core/common_runtime/cuda_graph_meta.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/platform/macros.h"
 #include "tensorflow/core/public/session.h"
@@ -22,35 +22,40 @@
 
 namespace tensorflow {
 
-typedef struct CudaGraphMeta {
-  size_t graph_hash_;
-  int batch_bucket_;
-  std::string subgraph_name;
-} CudaGraphMeta;
-
 typedef std::vector<std::pair<std::string, Tensor>> InputsMap;
+typedef std::unordered_map<int, std::vector<CudaGraphMeta>> BatchGraphMetaMap;
 
 class CudaGraphMgr {
 public:
   static CudaGraphMgr& Singleton();
 
-  Status CaptureCudagraph(const GraphDef& graph_def, const SessionOptions& graph_name, 
-                          int batch_size, int num_instance);
-  Status GetCudagraphExecInstance(const std::string& cudagrpah_name);
+  Status CaptureCudagraph(const GraphDef& graph_def, 
+                          const std::string& graph_name, 
+                          const std::vector<std::string>& input_node_names,
+                          const std::vector<std::string>& output_node_names,
+                          const std::vector<int>& batch_size);
+  Status GetCudagraphMeta(const std::string& cudagrpah_name, 
+                          int bucket, int req_id, 
+                          CudaGraphMeta*& meta);
+  Status GetCudaStream(int req_id, cudaStream_t& stream);
 
 private:
-  CudaGraphMgr(/* args */);
+  CudaGraphMgr(/* args */) { Init(); };
   ~CudaGraphMgr();
+
+  void Init();
 
   // assistant functions for capturing
   void GenerateInputs(const GraphDef& graph_def, const std::vector<string>& input_names,
-                    std::vector<Tensor>& input_tensors, int batch_size, Allocator* host_allocator);
+                    std::vector<Tensor>& input_tensors, int batch_size);
   void FillInputsMap(InputsMap& inputs_map, std::vector<std::string>& input_names,
                    std::vector<Tensor>& input_tensors);
   void LogCudaGraphStatus(Session* sess);
-  bool CheckGraphCaptured(size_t graph_id) {
-    return captured_graph_ids_.find(graph_id) == captured_graph_ids_.end();
-  };
+
+  // Check given graph names are captured already
+  // If all captured return true, else reture false and record all uncaptured name index in graph_names 
+  // to uncaptured_index.
+  bool CheckGraphAllCaptured(const std::vector<std::string>& graph_names, std::vector<int>& uncaptured_index);
 
   TF_DISALLOW_COPY_AND_ASSIGN(CudaGraphMgr);
 
@@ -60,12 +65,11 @@ private:
   // for each model, multiple graphs can be captured,
   // so we can run multiple graph instances in parallel
   // (to separate their memory, mutiple graphs are needed).
-  std::map<std::string, std::vector<TensorHolder>> cuda_graph_gpu_tensors_;
-  std::map<std::string, std::vector<cudaGraph_t>> cuda_graphs_;
-  std::map<std::string, std::vector<cudaGraphExec_t>> cuda_graph_instances_;
-  std::map<std::pair<string, int>, std::vector<std::pair<void*, void*>>> src_dst_mapping_;
-
-  std::unordered_set<size_t> captured_graph_ids_;
+  std::unordered_map<std::string, BatchGraphMetaMap> graphname_batch_metas_map_;
+  std::vector<cudaStream_t> streams_;
+  // stream and cuda graph instance count, each instance corresponds to one stream
+  int num_instance_; 
+  Allocator* host_allocator_;
 };
 
 /* static */ CudaGraphMgr& CudaGraphMgr::Singleton() {

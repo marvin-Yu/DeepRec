@@ -19,6 +19,7 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#include "tensorflow/core/common_runtime/cuda_graph_meta.h"
 #include "tensorflow/core/framework/device_attributes.pb.h"
 #include "tensorflow/core/framework/graph.pb.h"
 #include "tensorflow/core/framework/tensor.h"
@@ -119,10 +120,24 @@ class Session {
 
 
 #ifdef GOOGLE_CUDA
-  virtual Status CreateForCapture(const GraphDef& graph, int graph_idx) = 0;
+  virtual Status CreateForCapture(const GraphDef& graph, int graph_idx) { return Create(graph); };
 #ifndef SWIG
   virtual Status CreateForCapture(GraphDef& graph, int graph_idx) { return CreateForCapture(graph, graph_idx); }
 #endif
+  virtual Status RunForCapture(const std::vector<std::pair<string, Tensor> >& inputs,
+                     const std::vector<string>& output_tensor_names,
+                     const std::vector<string>& target_node_names,
+                     CudaGraphMeta* cuda_graph_meta) {
+    return Run(inputs, output_tensor_names, target_node_names, &(cuda_graph_meta->output_tensors_)); 
+  };
+  virtual Status RunForCapture(const RunOptions& run_options,
+                     const std::vector<std::pair<string, Tensor> >& inputs,
+                     const std::vector<string>& output_tensor_names,
+                     const std::vector<string>& target_node_names,
+                     RunMetadata* run_metadata,
+                     CudaGraphMeta* cuda_graph_meta) {
+    return Run(run_options, inputs, output_tensor_names, target_node_names, &(cuda_graph_meta->output_tensors_), run_metadata);
+  };
   virtual bool SupportsCudaGraph() { return false; }
   virtual cudaStream_t  EnableGraphCapture(std::string model_name) {return nullptr;} 
   virtual void DisableGraphCapture() { }

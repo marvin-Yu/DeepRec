@@ -136,6 +136,17 @@ class DirectSession : public Session {
 #ifdef GOOGLE_CUDA
   ::tensorflow::Status CreateForCapture(const GraphDef& graph, int graph_idx) override;
   ::tensorflow::Status CreateForCapture(GraphDef& graph, int graph_idx) override;
+  ::tensorflow::Status RunForCapture(const std::vector<std::pair<string, Tensor> >& inputs,
+                     const std::vector<string>& output_tensor_names,
+                     const std::vector<string>& target_node_names,
+ 					           std::vector<Tensor>* outputs,
+                     CudaGraphMeta* cuda_graph_meta) override;
+  ::tensorflow::Status RunForCapture(const RunOptions& run_options,
+                     const std::vector<std::pair<string, Tensor> >& inputs,
+                     const std::vector<string>& output_tensor_names,
+                     const std::vector<string>& target_node_names,
+                     std::vector<Tensor>* outputs, RunMetadata* run_metadata,
+                     CudaGraphMeta* cuda_graph_meta) override;
   bool SupportsCudaGraph() override { return true; };
   cudaStream_t EnableGraphCapture(std::string model_name) override;
   void DisableGraphCapture() override;
@@ -193,7 +204,6 @@ class DirectSession : public Session {
   const TensorHolder * GetCurrentTensorHolder();
   cudaGraphExec_t GetGraphExecInstance(const std::string & model_name, int graph_idx);
   bool RemoveH2DNodes(cudaGraph_t graph, std::vector<std::pair<void*, void*>> &mappings);
-  std::vector<const void*> input_host_address_;
   size_t num_output_tensors_;
 
   // Names of place holders which will be the host_memory_inputs of GPU ops
@@ -201,7 +211,9 @@ class DirectSession : public Session {
   // Only const values (given specific input shape) are allowed.
   // these values will be sent to the CUDA Graph in the form of launch parameters
   // like block/grid sizes.
-  std::vector<std::string> host_memory_inputs_;
+  // todo: may move to method arguments
+  std::vector<std::string> host_memory_inputs_; 
+  std::vector<const void*> input_host_address_;
   std::vector<const void*> host_memory_inputs_address_;
 #endif
 
@@ -328,7 +340,8 @@ class DirectSession : public Session {
       int64 step_id, const RunOptions& run_options,
       CallFrameInterface* call_frame, ExecutorsAndKeys* executors_and_keys,
       RunMetadata* run_metadata,
-      const thread::ThreadPoolOptions& threadpool_options);
+      const thread::ThreadPoolOptions& threadpool_options,
+      CudaGraphMeta* cuda_graph_meta = nullptr);
 
   void RunInternalAsync(
       int64 step_id, const RunOptions& run_options,
