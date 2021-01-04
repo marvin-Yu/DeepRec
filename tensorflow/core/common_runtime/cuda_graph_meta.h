@@ -15,7 +15,7 @@
 
 #include "tensorflow/core/framework/tensor.h"
 #ifdef GOOGLE_CUDA
-#include "third_party/gpus/cuda/include/cuda.h"
+#include "third_party/gpus/cuda/include/cuda_runtime.h"
 #endif
 
 namespace tensorflow {

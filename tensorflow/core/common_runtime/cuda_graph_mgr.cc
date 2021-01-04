@@ -120,7 +120,7 @@ void CudaGraphMgr::Init() {
 
   // create launching streams
   streams_.resize(num_instance_);
-  for (int i = 0; i < num_instance; i++) {
+  for (int i = 0; i < num_instance_; i++) {
     CheckCudaError(cudaStreamCreate(&streams_[i]));
   }
 }
@@ -166,7 +166,7 @@ void CudaGraphMgr::LogCudaGraphStatus(Session* sess) {
 bool CudaGraphMgr::CheckGraphAllCaptured(const std::vector<std::string>& graph_names, std::vector<int>& uncaptured_index) {
   uncaptured_index.clear();
   for (int i = 0; i < graph_names.size(); ++i) {
-    if (cuda_graphs_.find(graph_names[i]) == cuda_graphs_.end()) {
+    if (cuda_graphs_.find(graph_names[i]) == graphname_batch_metas_map_.end()) {
       uncaptured_index.push_back(i);
     }
   }

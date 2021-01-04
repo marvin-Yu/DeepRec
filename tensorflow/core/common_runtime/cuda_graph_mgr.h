@@ -77,10 +77,7 @@ private:
   return *a;
 }
 
-CudaGraphMgr::CudaGraphMgr() = default;
 CudaGraphMgr::~CudaGraphMgr() = default;
-
-
 }
 
 #endif // TENSORFLOW_CORE_COMMON_RUNTIME_CUDAGRAPH_MGR_H_
