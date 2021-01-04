@@ -468,11 +468,11 @@ Status DirectSession::Create(GraphDef&& graph) {
 }
 
 #ifdef GOOGLE_CUDA
-Status DirectSession::CreateForCapture(const GraphDef& graph, int graph_idx) {
-  return CreateForCapture(GraphDef(graph), graph_idx);
+Status DirectSession::CreateForCapture(const GraphDef& graph) {
+  return CreateForCapture(GraphDef(graph));
 }
 
-Status DirectSession::CreateForCapture(GraphDef& graph, int graph_idx) {
+Status DirectSession::CreateForCapture(GraphDef& graph) {
   TF_RETURN_IF_ERROR(init_error_);
   if (graph.node_size() > 0) {
     mutex_lock l(graph_state_lock_);
@@ -841,7 +841,7 @@ Status DirectSession::RunInternal(
   }
 
 #ifdef GOOGLE_CUDA
-  if(cuda_graph_capture_mode_){ 
+  if(cuda_graph_capture_mode_ && cuda_graph_meta != nullptr){ 
     cudaError_t ret = cudaStreamBeginCapture(capturing_stream_, cudaStreamCaptureModeGlobal);
     if (ret != cudaSuccess){
       LOG(ERROR) << "cuda being capture faild: " << ret;
@@ -850,8 +850,8 @@ Status DirectSession::RunInternal(
   }
   // create tensor holder before the scheduling
   TensorHolder * tensor_holder = nullptr;
-  if(cuda_graph_capture_mode_){
-      TF_RETURN_IF_ERROR(GetTensorHolder(&tensor_holder));
+  if(cuda_graph_capture_mode_ && cuda_graph_meta != nullptr){
+    tensor_holder = &(cuda_graph_meta->tensor_holder_);
   }
 #endif
 
@@ -877,7 +877,7 @@ Status DirectSession::RunInternal(
     }
 
 #ifdef GOOGLE_CUDA
-    if(cuda_graph_capture_mode_){
+    if(cuda_graph_capture_mode_ && cuda_graph_meta != nullptr){
       // Nodes will be scheduled in the current thread
       // except for the async nodes (like recv nodes)
       // e.g. after the recv node received the tensor (h2d memcpy complete),
@@ -969,26 +969,22 @@ Status DirectSession::RunInternal(
   metrics::UpdateGraphExecTime(options_.env->NowMicros() - start_time_usecs);
 
 #ifdef GOOGLE_CUDA
-  if(cuda_graph_capture_mode_){
-    auto graph = cuda_graphs_.find(captured_model_name_);
-    cudaError_t ret = cudaStreamEndCapture(capturing_stream_, &graph->second[graph->second.size() - 1]);
+  if(cuda_graph_capture_mode_ && cuda_graph_meta != nullptr){
+    cudaError_t ret = cudaStreamEndCapture(capturing_stream_, &(cuda_graph_meta->cuda_graph_));
     if (ret != cudaSuccess){
       LOG(ERROR) << "cudagraph end capture faild: " << ret;
       return errors::Internal("cuda graph end capture failed.");
     }
 
     //remove the begining H2D nodes, and get the src-dst mapping
-    std::pair<std::string, int> mapping_key(captured_model_name_,  graph->second.size() - 1);
-    src_dst_mapping_[mapping_key] = std::vector<std::pair<void*, void*>>();
-    bool capture_valid = RemoveH2DNodes(graph->second[graph->second.size() - 1], src_dst_mapping_[mapping_key]);
+    bool capture_valid = RemoveH2DNodes(cuda_graph_meta->cuda_graph_, cuda_graph_meta->src_dst_mapping_, cuda_graph_meta);
 
     if(! capture_valid){
         LOG(ERROR) << "the captured CUDA graph is not valid, please check the network.";
         return errors::Internal("the captured CUDA graph is not valid, please check the network.");
     }
 
-    auto graph_ins = cuda_graph_instances_.find(captured_model_name_);
-    ret = cudaGraphInstantiate(&graph_ins->second[graph_ins->second.size() - 1], graph->second[graph->second.size() - 1], NULL, NULL, 0);
+    ret = cudaGraphInstantiate(&(cuda_graph_meta->cuda_graph_instance_), &(cuda_graph_meta->cuda_graph_), NULL, NULL, 0);
     if (ret != cudaSuccess){
       LOG(ERROR) << "cudagraph create execute instance faild: " << ret;
       return errors::Internal("cudagraph create execute instance faild.");
@@ -1001,51 +997,8 @@ Status DirectSession::RunInternal(
 
 #ifdef GOOGLE_CUDA
 
-cudaGraphExec_t DirectSession::GetGraphExecInstance(const std::string &model_name, int graph_idx){
-    std::lock_guard<std::mutex> graph_instance_guard(cuda_graph_instance_mutex_);
-    auto graph_ins = cuda_graph_instances_.find(model_name);
-
-    if(graph_ins == cuda_graph_instances_.end()){
-        return nullptr;
-    }
-
-    if(graph_ins->second.size() <= graph_idx){
-        return nullptr;
-    }
-
-    return graph_ins->second[graph_idx];
-}
-
-
-
-::tensorflow::Status DirectSession::RunCudaGraph(const std::string & model_name, int graph_idx, cudaStream_t stream){
-
-    auto graph_ins = GetGraphExecInstance(model_name, graph_idx);
-    if(graph_ins == nullptr){
-        LOG(ERROR) << "Graph exec instance not found.";
-        return errors::Internal("Graph exec instance not found");
-    }
-
-    cudaError_t ret = cudaGraphLaunch(graph_ins, stream);
-    if (ret != cudaSuccess){
-        LOG(ERROR) << "cudagraph launch faild: " << ret;
-        return errors::Internal("cudagraph launch faild");
-    }
-
-    return Status::OK();
-}
-
-std::vector<std::pair<void*, void*>> DirectSession::GetSrcDstMapping(const std::string & model_name, int graph_idx){
-    std::pair<std::string, int> mapping_key(model_name, graph_idx);
-    if(src_dst_mapping_.find(mapping_key) == src_dst_mapping_.end()){
-        return std::vector<std::pair<void*, void*>>();
-    }
-    return src_dst_mapping_[mapping_key];
-}
-
-
-bool DirectSession::RemoveH2DNodes(cudaGraph_t graph, std::vector<std::pair<void*, void*>> &mappings){
-
+bool DirectSession::RemoveH2DNodes(cudaGraph_t graph, std::vector<std::pair<void*, void*>> &mappings, 
+                                   CudaGraphMeta* cuda_graph_meta){
     mappings.clear();
 
     size_t num_nodes;
@@ -1063,7 +1016,7 @@ bool DirectSession::RemoveH2DNodes(cudaGraph_t graph, std::vector<std::pair<void
     }
 
     size_t num_d2h_nodes = 0;
-    const TensorHolder * tensor_holder = GetCurrentTensorHolder();
+    const TensorHolder * tensor_holder = &(cuda_graph_meta->tensor_holder_);
     if(tensor_holder == nullptr){
         LOG(ERROR) << "Get current tensor holder failed" << ret;
         return false;
@@ -1692,6 +1645,9 @@ Status DirectSession::RunForCapture(const RunOptions& run_options,
                                     CudaGraphMeta* cuda_graph_meta) {
   TF_RETURN_IF_ERROR(CheckNotClosed());
   TF_RETURN_IF_ERROR(CheckGraphCreated("Run()"));
+  if (cuda_graph_meta == nullptr) {
+    //todo: return error;
+  }
   direct_session_runs->GetCell()->IncrementBy(1);
 
   // Extract the inputs names for this run of the session.
@@ -1989,134 +1945,6 @@ void DirectSession::DisableGraphCapture(){
     cuda_graph_capture_mode_ = false;
     EventMgr::SetStreamCaptureMode(false);
     captured_model_name_ = "";
-}
-
-::tensorflow::Status DirectSession::DestroyCudaGraphs(){
-    
-    if(cuda_graph_capture_mode_){
-        return errors::Internal("Call DestoryCudaGraphs in capture mode is not permitted.");
-    }
-    
-    if(captured_model_name_.size() != 0){
-        return errors::Internal("captured_model_name_ not empty after existing capture mode.");
-    }
-    
-    // destroy cuda graphs and cuda graph execute instances
-    for(auto & item: cuda_graph_instances_){
-        for(auto graph_ins: item.second){
-            cudaError_t ret = cudaGraphExecDestroy(graph_ins);
-            if(ret != cudaSuccess){
-                return errors::Internal("Failed to destroy CUDA Graph execute instances.");
-            }
-        }       
-    }
-    for(auto & item: cuda_graphs_){
-        for(auto graph: item.second){
-            cudaError_t ret = cudaGraphDestroy(graph);
-            if(ret != cudaSuccess){
-                return errors::Internal("Failed to destroy CUDA Graph.");
-            }
-        }
-    }
-    
-    cuda_graph_instances_.clear();
-    cuda_graphs_.clear();
-    src_dst_mapping_.clear();
-    // free the tensors hold for cuda graph runs
-    cuda_graph_gpu_tensors_.clear();
-    return Status::OK();
-}
-
-
-int DirectSession::NumCapturedModels(){
-    return cuda_graph_gpu_tensors_.size();
-}
-
-std::string DirectSession::CapturedModelName(int idx){
-    if(idx >= cuda_graph_gpu_tensors_.size()) return "";
-    int kid = 0;
-    for(auto & item : cuda_graph_gpu_tensors_){
-        if(kid == idx){
-            return item.first;
-        }else{
-            kid++;
-        }
-    }
-    return "";
-}
-
-int DirectSession::NumCapturedGraphs(const std::string & model_name){
-    auto item = cuda_graph_gpu_tensors_.find(model_name);
-    if(item == cuda_graph_gpu_tensors_.end()) return 0;
-    return item->second.size();
-}
-
-int DirectSession::AllocatedBytesCudaGraph(const std::string & model_name){
-    auto item = cuda_graph_gpu_tensors_.find(model_name);
-    if(item == cuda_graph_gpu_tensors_.end()) return 0;
-    int total_bytes = 0;
-    for(auto & tensor_holder: item->second){
-        total_bytes += tensor_holder.AllocatedBytes();
-    }
-    return total_bytes;
-}
-
-
-::tensorflow::Status DirectSession::GetTensorHolder(TensorHolder **tensor_holder){
-    if(captured_model_name_.size() == 0){
-        return errors::Internal("Not in capture mode, cannot get tensor holder");
-    }
-    
-    auto holder_list = cuda_graph_gpu_tensors_.find(captured_model_name_);
-
-    if(holder_list == cuda_graph_gpu_tensors_.end()){
-        if(cuda_graphs_.find(captured_model_name_) != cuda_graphs_.end()){
-            return errors::Internal("Inconsistent status -- Found exisiting CUDA Graph without tensor holder.");
-        }
-        
-        if(cuda_graph_instances_.find(captured_model_name_) != cuda_graph_instances_.end()){
-            return errors::Internal("Inconsistent status -- Found existing CUDA Graph instance without tensor holder.");
-        }
-        
-        cuda_graph_gpu_tensors_.insert(tensor_holder_pair(captured_model_name_, std::vector<TensorHolder>()));
-        cuda_graphs_.insert(cuda_graph_pair(captured_model_name_, std::vector<cudaGraph_t>()));
-        cuda_graph_instances_.insert(cuda_graph_instance_pair(captured_model_name_, std::vector<cudaGraphExec_t>()));
-          
-    }
-    
-    holder_list = cuda_graph_gpu_tensors_.find(captured_model_name_);
-    auto graph_list = cuda_graphs_.find(captured_model_name_);
-    auto graph_ins_list = cuda_graph_instances_.find(captured_model_name_);
-    
-    // push a new holder
-    // Todo:
-    // Add functions to update a graph, instead of capture a new graph
-    holder_list->second.push_back(TensorHolder());
-    graph_list->second.push_back(nullptr);
-    
-    std::lock_guard<std::mutex> graph_instance_guard(cuda_graph_instance_mutex_);
-    graph_ins_list->second.push_back(nullptr);
-    
-    *tensor_holder = &holder_list->second[holder_list->second.size() - 1];
-    return Status::OK();    
-}
-
-
-const TensorHolder* DirectSession::GetCurrentTensorHolder(){
-    
-    if(captured_model_name_.size() == 0) return nullptr;
-    
-    auto holder_list = cuda_graph_gpu_tensors_.find(captured_model_name_);
-
-    if(holder_list == cuda_graph_gpu_tensors_.end()){
-        return nullptr;
-    }
-
-    if(holder_list->second.size() == 0){
-        return nullptr;
-    }
-    
-    return & holder_list->second[holder_list->second.size() - 1];
 }
 
 #endif

@@ -134,8 +134,8 @@ class DirectSession : public Session {
   const SessionOptions& options() const { return options_; }
 
 #ifdef GOOGLE_CUDA
-  ::tensorflow::Status CreateForCapture(const GraphDef& graph, int graph_idx) override;
-  ::tensorflow::Status CreateForCapture(GraphDef& graph, int graph_idx) override;
+  ::tensorflow::Status CreateForCapture(const GraphDef& graph) override;
+  ::tensorflow::Status CreateForCapture(GraphDef& graph) override;
   ::tensorflow::Status RunForCapture(const std::vector<std::pair<string, Tensor> >& inputs,
                      const std::vector<string>& output_tensor_names,
                      const std::vector<string>& target_node_names,
@@ -150,13 +150,6 @@ class DirectSession : public Session {
   bool SupportsCudaGraph() override { return true; };
   cudaStream_t EnableGraphCapture(std::string model_name) override;
   void DisableGraphCapture() override;
-  ::tensorflow::Status RunCudaGraph(const std::string & model_name, int graph_idx, cudaStream_t stream) override;
-  ::tensorflow::Status DestroyCudaGraphs() override;
-  int NumCapturedModels() override;
-  std::string CapturedModelName(int idx) override;
-  int NumCapturedGraphs(const std::string & model_name) override;
-  int AllocatedBytesCudaGraph(const std::string & model_name) override;
-  std::vector<std::pair<void*, void*>> GetSrcDstMapping(const std::string& model_name, int graph_idx) override;
 #endif
 
   void RunAsync(const RunOptions& run_options,
@@ -189,10 +182,6 @@ class DirectSession : public Session {
   // for each model, multiple graphs can be captured,
   // so we can run multiple graph instances in parallel
   // (to separate their memory, mutiple graphs are needed).
-  std::map<std::string, std::vector<TensorHolder>> cuda_graph_gpu_tensors_;
-  std::map<std::string, std::vector<cudaGraph_t>> cuda_graphs_;
-  std::map<std::string, std::vector<cudaGraphExec_t>> cuda_graph_instances_;
-  std::map<std::pair<string, int>, std::vector<std::pair<void*, void*>>> src_dst_mapping_;
 
   using tensor_holder_pair = std::pair<std::string, std::vector<TensorHolder>>;
   using cuda_graph_pair = std::pair<std::string, std::vector<cudaGraph_t>>;
@@ -200,10 +189,8 @@ class DirectSession : public Session {
 
   std::mutex cuda_graph_instance_mutex_;
 
-  ::tensorflow::Status GetTensorHolder(TensorHolder ** tensor_holder);
-  const TensorHolder * GetCurrentTensorHolder();
-  cudaGraphExec_t GetGraphExecInstance(const std::string & model_name, int graph_idx);
-  bool RemoveH2DNodes(cudaGraph_t graph, std::vector<std::pair<void*, void*>> &mappings);
+  bool RemoveH2DNodes(cudaGraph_t graph, std::vector<std::pair<void*, void*>> &mappings,
+                      CudaGraphMeta* cuda_graph_meta);
   size_t num_output_tensors_;
 
   // Names of place holders which will be the host_memory_inputs of GPU ops

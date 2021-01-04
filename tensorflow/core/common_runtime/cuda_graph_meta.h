@@ -24,10 +24,18 @@ typedef struct CudaGraphMeta {
 #ifdef GOOGLE_CUDA
   cudaGraph_t cuda_graph_;
   cudaGraphExec_t cuda_graph_instance_;
-  std::vector<TensorHolder> cuda_graph_gpu_tensors_;
+  TensorHolder tensor_holder_;
   std::vector<std::pair<void*, void*>> src_dst_mapping_;
   std::vector<Tensor> output_tensors_;
 #endif
+
+CudaGraphMeta::~CudaGraphMeta() {
+  cudaGraphExecDestroy(cuda_graph_instance_);
+  cudaGraphDestroy(cuda_graph_);
+  output_tensors_.clear();
+  src_dst_mapping_.clear();
+}
+
 } CudaGraphMeta;
 
 } // tensorflow

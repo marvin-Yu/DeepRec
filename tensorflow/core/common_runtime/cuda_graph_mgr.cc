@@ -151,16 +151,11 @@ void CudaGraphMgr::FillInputsMap(InputsMap& inputs_map, std::vector<std::string>
 }
 
 void CudaGraphMgr::LogCudaGraphStatus(Session* sess) {
-  int num_models = sess->NumCapturedModels();
-  LOG(INFO) << "Captured " << num_models << " models";
-  for (int i = 0; i < num_models; i++) {
-    std::string model_name = sess->CapturedModelName(i);
-    int num_graphs = sess->NumCapturedGraphs(model_name);
-    int total_bytes = sess->AllocatedBytesCudaGraph(model_name);
-    LOG(INFO) << "model: " << model_name;
-    LOG(INFO) << "num graphs: " << num_graphs;
-    LOG(INFO) << "allocated bytes: " << total_bytes;
-  }
+  // todo
+}
+
+void CudaGraphMgr::DestoryCudagraphMeta() {
+  graphname_batch_metas_map_.clear();
 }
 
 bool CudaGraphMgr::CheckGraphAllCaptured(const std::vector<std::string>& graph_names, std::vector<int>& uncaptured_index) {
@@ -174,6 +169,16 @@ bool CudaGraphMgr::CheckGraphAllCaptured(const std::vector<std::string>& graph_n
 }
 
 // todo: move batch size, num instance into options.
+/**
+ * @brief Capture cuda graph by given graph def
+ * 
+ * @param graph_def graph def which is cutted, all nodes should be placed on GPU
+ * @param graph_name name for indenty
+ * @param input_node_names input nodde name for feeding input
+ * @param output_node_names 
+ * @param batch_size 
+ * @return Status 
+ */
 Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def, 
                                       const std::string& graph_name, 
                                       const std::vector<std::string>& input_node_names,
@@ -183,7 +188,7 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
   options.config.mutable_gpu_options()->set_force_gpu_compatible(true);
   options.config.mutable_gpu_options()->set_allow_growth(false);
   std::unique_ptr<Session> session(NewSession(options));
-  TF_CHECK_OK(session->CreateForCapture(graph_def, i));
+  TF_CHECK_OK(session->CreateForCapture(graph_def));
 
   // init host_allocator
   if (host_allocator_ == nullptr) {
@@ -202,32 +207,30 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
   // capture the cuda graph
   assert(session->SupportsCudaGraph());
   cudaStream_t stream = session->EnableGraphCapture(graph_name);
-  LOG(INFO) << "capturing on stream -- " << stream;
   if (stream == NULL) {
     return Status(error::Code::INTERNAL,
                   "Get stream for graph capturing failed.");
   }
-  // For multiple-stream runs,
-  // We need to capture multiple independent cuda graphs
-  // with seperated inputs/output buffers, and buffers for intermedidate
-  // layers
-  std::vector<InputsMap> inputs_cuda_graph(num_instance);
-  std::vector<std::vector<Tensor>> input_tensors_cuda_graph(num_instance);
-  std::vector<std::vector<Tensor>> output_tensors_cuda_graph(num_instance);
 
-  // prepare inputs
   for (int i = 0; i < num_instance; i++) {
-    GenerateInputs(graph_def, input_node_names, input_tensors_cuda_graph[i],
-                   batch_size);
-    FillInputsMap(inputs_cuda_graph[i], input_node_names,
-                  input_tensors_cuda_graph[i]);
+    if (graphname_batch_metas_map_.find(graph_name) == graphname_batch_metas_map_.end()) {
+      graphname_batch_metas_map_.put(graph_name, BatchGraphMetaMap());
+    }
+    auto& batch_meta_map = graphname_batch_metas_map_[graph_name];
+    if (batch_meta_map.find(batch_size) == batch_meta_map.end()) {
+      batch_meta_map.put(batch_size, std::vector<CudaGraphMeta>);
+    }
+    batch_meta_map[batch_size].push_back(CudaGraphMeta());
+    int meta_size = batch_meta_map[batch_size].size();
+    CudaGraphMeta* meta = &(batch_meta_map[batch_size][meta_size - 1]);
+
+    std::vector<Tensor> input_tensors_cuda_graph;
+    InputsMap inputs_cuda_graph;
+    GenerateInputs(graph_def, input_node_names, input_tensors_cuda_graph, batch_size);
+    FillInputsMap(inputs_cuda_graph, input_node_names, input_tensors_cuda_graph);
+    TF_CHECK_OK(session->RunForCapture(inputs_cuda_graph, output_names, {}, meta));
   }
-  // capture multiple graphs
-  std::vector<std::string> output_names;  // todo: gen output_name
-  for (int i = 0; i < num_instance; i++) {
-    TF_CHECK_OK(session->Run(inputs_cuda_graph[i], output_names, {},
-                             &output_tensors_cuda_graph[i]));
-  }
+
   // turn off graph capture mode
   session->DisableGraphCapture();
   LogCudaGraphStatus(session.get());

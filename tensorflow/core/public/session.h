@@ -120,9 +120,9 @@ class Session {
 
 
 #ifdef GOOGLE_CUDA
-  virtual Status CreateForCapture(const GraphDef& graph, int graph_idx) { return Create(graph); };
+  virtual Status CreateForCapture(const GraphDef& graph) { return Create(graph); };
 #ifndef SWIG
-  virtual Status CreateForCapture(GraphDef& graph, int graph_idx) { return CreateForCapture(graph, graph_idx); }
+  virtual Status CreateForCapture(GraphDef& graph) { return CreateForCapture(graph); }
 #endif
   virtual Status RunForCapture(const std::vector<std::pair<string, Tensor> >& inputs,
                      const std::vector<string>& output_tensor_names,
@@ -141,15 +141,6 @@ class Session {
   virtual bool SupportsCudaGraph() { return false; }
   virtual cudaStream_t  EnableGraphCapture(std::string model_name) {return nullptr;} 
   virtual void DisableGraphCapture() { }
-  virtual Status RunCudaGraph(const std::string & model_name, int graph_idx, cudaStream_t stream) { return Status::OK(); }
-  virtual Status DestroyCudaGraphs() { return Status::OK(); }
-  virtual int NumCapturedModels() { return 0;}
-  virtual std::string CapturedModelName(int idx) { return "";}
-  virtual int NumCapturedGraphs(const std::string & model_name) { return 0; }
-  virtual int AllocatedBytesCudaGraph(const std::string & model_name) { return 0; }
-  virtual std::vector<std::pair<void*, void*>> GetSrcDstMapping(const std::string & model_name, int graph_idx){
-      return std::vector<std::pair<void*, void*>>();
-  }
 #endif
   
   /// \brief Runs the graph with the provided input tensors and fills

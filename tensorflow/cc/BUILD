@@ -234,7 +234,7 @@ cc_library_with_android_deps(
         "//tensorflow/core:core_cpu",
         "//tensorflow/core:lib",
         "//tensorflow/core:protos_all_cc",
-        "//tensorflow/core:direct_session_internal",
+        "//tensorflow/core:cuda_graph_mgr",
     ],
 )
 

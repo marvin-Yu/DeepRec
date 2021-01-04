@@ -307,19 +307,6 @@ void CopyTensorContents(Tensor &dst_tensor, Tensor &src_tensor){
         dst[i] = src[i];
     }
 }
-
-void LogCudaGraphStatus(Session * sess){
-    int num_models = sess->NumCapturedModels();
-    LOG(INFO) << "Captured " << num_models << " models";
-    for(int i = 0; i < num_models; i ++){
-        std::string model_name = sess->CapturedModelName(i);
-        int num_graphs = sess->NumCapturedGraphs(model_name);
-        int total_bytes = sess->AllocatedBytesCudaGraph(model_name);
-        LOG(INFO) << "model: " << model_name;
-        LOG(INFO) << "num graphs: " << num_graphs;
-        LOG(INFO) << "allocated bytes: " << total_bytes;
-    }
-}
     
 Status Test(GraphDef & graph_def, 
             std::vector<std::string> & input_names,
@@ -435,7 +422,7 @@ Status Test(GraphDef & graph_def,
     // turn off graph capture mode
     session->DisableGraphCapture();
     
-    LogCudaGraphStatus(session.get());
+  //  LogCudaGraphStatus(session.get());
     
     LOG(INFO) << "Run the cuda graphs in multiple streams";
     

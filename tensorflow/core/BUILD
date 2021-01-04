@@ -3276,7 +3276,7 @@ tf_cuda_library(
     copts = tf_copts() + ["-g"],
     deps = [
         ":bfc_allocator",
-        ":direct_session_internal",
+        ":cuda_graph_mgr",
         ":graph",
         ":framework",
         ":framework_internal",
@@ -3395,11 +3395,9 @@ cc_library(
 
 tf_cuda_library(
     name = "direct_session_internal",
-    srcs = ["common_runtime/direct_session.cc", "common_runtime/cuda_graph_mgr.cc"],
+    srcs = ["common_runtime/direct_session.cc"],
     hdrs = [
         "common_runtime/direct_session.h",
-        "common_runtime/cuda_graph_mgr.h",
-        "common_runtime/cuda_graph_meta.h",
         "util/env_var.h",
         "common_runtime/gpu/gpu_device.h",
         "common_runtime/gpu/gpu_id_utils.h",
@@ -3408,6 +3406,7 @@ tf_cuda_library(
     copts = tf_copts() + ["-g"],
     deps = [
         ":core_cpu_internal",
+        "cuda_graph_mgr",
         ":framework",
         ":framework_internal",
         ":graph",
@@ -3424,6 +3423,21 @@ tf_cuda_library(
         "@com_google_absl//absl/container:flat_hash_set",
     ] + if_cuda([":gpu_runtime"]),
     alwayslink = 1,
+)
+
+tf_cuda_library(
+    name = "cuda_graph_mgr",
+    srcs = [ "common_runtime/cuda_graph_mgr.cc"],
+    hdrs = [        
+        "common_runtime/cuda_graph_mgr.h",
+        "common_runtime/cuda_graph_meta.h",
+    ],
+    deps = [
+        "framework",
+        "framework_internal",
+        "lib",
+    ]
+
 )
 
 tf_cuda_library(

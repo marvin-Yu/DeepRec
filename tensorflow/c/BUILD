@@ -420,7 +420,7 @@ tf_cuda_library(
             ":tf_tensor",
             "//tensorflow/core:framework",
             "//tensorflow/core:framework_lite",
-            "//tensorflow/core:direct_session_internal",
+            "//tensorflow/core:cuda_graph_mgr",
         ],
     }),
 )
