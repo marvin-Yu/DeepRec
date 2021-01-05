@@ -457,10 +457,12 @@ Status DirectSession::Create(GraphDef&& graph) {
         LOG(ERROR) << "Not all subgraph are captured as cudagraphs";
       }
       GraphDef cudagraph_serving;
+      /* 
       int graph_idx = 0;
       bool succ = SubgraphGenerator::ReplaceSubgraph(graph, cudagraph_serving, 
                       options_.config.graph_options().optimizer_options().subgraph_descriptions(graph_idx));
-      return ExtendLocked(std::move(cudagraph_serving));
+      */
+      return ExtendLocked(std::move(graph));
     }
 #endif
     return ExtendLocked(std::move(graph));

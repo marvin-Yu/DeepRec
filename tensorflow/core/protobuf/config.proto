@@ -277,6 +277,9 @@ message OptimizerOptions {
   bool try_capture_cuda_graph = 8;
 
   repeated SubgraphDescription subgraph_descriptions = 9;
+
+  // if capture cuda graph, capture fixed batch size graph instance
+  repeated int32 cuda_graph_batch_sizes = 10;
 }
 
 message GraphOptions {

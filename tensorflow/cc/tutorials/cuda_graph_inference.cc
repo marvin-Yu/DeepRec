@@ -309,6 +309,24 @@ void CopyTensorContents(Tensor &dst_tensor, Tensor &src_tensor){
         dst[i] = src[i];
     }
 }
+
+void PrepareSessionOption(SessionOptions& options) {
+  options.config.mutable_gpu_options()->set_force_gpu_compatible(true);
+  options.config.mutable_gpu_options()->set_allow_growth(false);
+  options.config.mutable_graph_options()->mutable_optimizer_options()->set_cuda_graph_enable(true);
+  options.config.mutable_graph_options()->mutable_optimizer_options()->set_try_capture_cuda_graph(true);
+  options.config.mutable_graph_options()->mutable_optimizer_options()->add_cuda_graph_batch_sizes(64);
+  SubgraphDescription* subgraph = options.config.mutable_graph_options()->mutable_optimizer_options()->add_subgraph_descriptions();
+  subgraph->set_subgraph_name("test");
+  subgraph->add_output_node_names("MatMul_3");
+  SubgraphInputTensor* input = subgraph->add_input_tensors();
+  input->set_tensor_provider_name("MatMul_1");
+  input->set_tensor_provider_slot(0);
+  input->set_ph_name("ph");
+  input->set_type(DataType::DT_FLOAT);
+  input->add_shape(-1);
+  input->add_shape(512); 
+}
     
 Status Test(GraphDef & graph_def, 
             std::vector<std::string> & input_names,
@@ -319,20 +337,23 @@ Status Test(GraphDef & graph_def,
             int num_threads){
     /*
     assert(num_streams <= MAX_NUM_STREAMS);
-    
+    */
+
+
     // Creates a session.
     SessionOptions options;
-    options.config.mutable_gpu_options()->set_force_gpu_compatible(true);
-    options.config.mutable_gpu_options()->set_allow_growth(false);
+    PrepareSessionOption(options);
     // for cudagraph config
     std::unique_ptr<Session> session(NewSession(options));
-    
+
+    // todo: move set device to somewhere, graph rewriter or direct session
     if (options.target.empty()) {
         graph::SetDefaultDevice("/device:GPU:0", &graph_def);
     }
     graph::CheckNodeDevice("/device:GPU:0", &graph_def);
+    
     TF_CHECK_OK(session->Create(graph_def));
-
+    /* 
     const DeviceMgr * device_manager;
     TF_CHECK_OK(session->LocalDeviceManager(&device_manager));
     std::vector<Device*> devices=device_manager->ListDevices();
