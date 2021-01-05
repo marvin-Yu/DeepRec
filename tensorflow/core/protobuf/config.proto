@@ -548,6 +548,7 @@ message ConfigProto {
   bool force_run_in_caller_thread = 110;
   bool enable_graph_opt_place = 111;
   BlazeKernelOptions blaze_options = 112;
+  bool is_blaze = 113;
   // Next: 17
 }
 

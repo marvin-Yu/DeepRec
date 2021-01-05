@@ -126,6 +126,8 @@ Status BlazeXlaPredictor::InitXlaWarmup() {
 }
 
 Status BlazeXlaPredictor::Warmup() {
+  // not safe
+  /*
   string ptx_cache_dir;
   ReadStringFromEnvVar("TF_XLA_PTX_CACHE_DIR", "",
                                    &ptx_cache_dir);
@@ -195,7 +197,7 @@ Status BlazeXlaPredictor::Warmup() {
               handle_, callable_inputs, &outputs, nullptr));
     }
     LOG(INFO) << "Batchsize " << batch << " has warmuped";
-  }
+  } */
   return Status::OK();
 }
 

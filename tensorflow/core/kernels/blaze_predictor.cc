@@ -2,6 +2,8 @@
 #include "tensorflow/core/platform/protobuf.h"
 
 namespace tensorflow {
+const int kBlazeStartStepId = 1024;
+
 BlazePredictor::BlazePredictor(OpKernelConstruction* ctx) : device_type_(ctx->device_type().type()) {
   OP_REQUIRES_OK(ctx, ctx->GetAttr("input_names", &input_names_));
   OP_REQUIRES_OK(ctx, ctx->GetAttr("output_names", &output_names_));
@@ -40,6 +42,9 @@ Status BlazePredictor::ParseAttr(const std::string& device) {
 
 Status BlazePredictor::GenSessionOptions(SessionOptions& options) {
   options.config.MergeFrom(blaze_run_options_.config_proto());
+  //disable caller thread
+  options.config.set_force_run_in_caller_thread(false);
+  options.config.set_is_blaze(true);
   return Status::OK();
 }
 
@@ -84,13 +89,17 @@ Status BlazePredictor::InitSession() {
       ->GetConfig().gpu_options();
 
   options.config.MergeFrom(blaze_run_options_.config_proto());
-  VLOG(0) << "create session with config " << options.config.DebugString();
   TF_RETURN_IF_ERROR(GenSessionOptions(options));
+  VLOG(0) << "create session with config " << options.config.DebugString();
   session_ = std::move(std::unique_ptr<Session>(NewSession(options)));
   if (session_ == nullptr) {
     LOG(ERROR) << "create session failed";
     return errors::Internal("Create session failed");
   }
+
+  auto dir_session = reinterpret_cast<DirectSession*>(session_.get());
+  dir_session->SetStepInitId(kBlazeStartStepId);
+  LOG(INFO) << "Blaze start with step id " << kBlazeStartStepId;
   LOG(INFO) << "Creat session succ " << this;
 
   GraphDef graph_def;

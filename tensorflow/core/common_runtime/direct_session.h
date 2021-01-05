@@ -149,6 +149,9 @@ class DirectSession : public Session {
       StatusCallback done);
 
 
+  void SetStepInitId(int step_id) {
+    step_id_counter_ = step_id;
+  }
  private:
   // For access to collective_graph_key_.
   friend class DirectSessionCollectiveTest;
@@ -445,6 +448,7 @@ class DirectSession : public Session {
 
   // Global timeout for all blocking operations in this session.
   const int64 operation_timeout_in_ms_ = 0;
+  bool is_blaze_ = false;
 
   // Manages all the cost models for the graphs executed in this session.
   CostModelManager cost_model_manager_;

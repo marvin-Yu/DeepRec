@@ -134,10 +134,16 @@ Status NewThreadPoolFromThreadPoolOptions(
   return Status::OK();
 }
 
-thread::ThreadPool* GlobalThreadPool(const SessionOptions& options) {
-  static thread::ThreadPool* const thread_pool =
-      NewThreadPoolFromSessionOptions(options);
-  return thread_pool;
+thread::ThreadPool* GlobalThreadPool(const SessionOptions& options, bool is_blaze = false) {
+  if (!is_blaze) {
+    static thread::ThreadPool* const thread_pool =
+        NewThreadPoolFromSessionOptions(options);
+    return thread_pool;
+  } else {
+    static thread::ThreadPool* const thread_pool =
+        NewThreadPoolFromSessionOptions(options);
+    return thread_pool;
+  }
 }
 
 // TODO(vrv): Figure out how to unify the many different functions
@@ -311,7 +317,8 @@ DirectSession::DirectSession(const SessionOptions& options,
       device_mgr_(device_mgr),
       factory_(factory),
       cancellation_manager_(new CancellationManager()),
-      operation_timeout_in_ms_(options_.config.operation_timeout_in_ms()) {
+      operation_timeout_in_ms_(options_.config.operation_timeout_in_ms()),
+      is_blaze_(options.config.is_blaze()) {
 
   const bool force_run_in_caller_thread = 
     options_.config.force_run_in_caller_thread();
@@ -332,7 +339,7 @@ DirectSession::DirectSession(const SessionOptions& options,
     thread_pools_.emplace_back(NewThreadPoolFromSessionOptions(options_),
                                true /* owned */);
   } else {
-    thread_pools_.emplace_back(GlobalThreadPool(options), false /* owned */);
+    thread_pools_.emplace_back(GlobalThreadPool(options, is_blaze_), false /* owned */);
     if (force_run_in_caller_thread) {
       VLOG(0) << "force running in caller thread";
       force_run_in_caller_thread_ = force_run_in_caller_thread;
@@ -728,7 +735,9 @@ Status DirectSession::RunInternal(
         item.device->tensorflow_device_thread_pool();
     // TODO(crk): Investigate usage of RunHandlerPool when using device specific
     // thread pool(s).
-    if (!device_thread_pool) {
+    if (is_blaze_) {
+      args.runner = default_runner;
+    } else if (!device_thread_pool) {
       args.runner = default_runner;
     } else {
       args.runner = [this, device_thread_pool](Executor::Args::Closure c) {
@@ -1057,7 +1066,9 @@ void DirectSession::RunInternalAsync(
         item.device->tensorflow_device_thread_pool();
     // TODO(crk): Investigate usage of RunHandlerPool when using device specific
     // thread pool(s).
-    if (!device_thread_pool) {
+    if (is_blaze_) {
+      args->runner = default_runner;
+    } else if (!device_thread_pool) {
       args->runner = default_runner;
     } else {
       args->runner = [this, device_thread_pool](Executor::Args::Closure c) {
