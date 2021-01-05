@@ -49,10 +49,11 @@ private:
   // assistant functions for capturing
   void GenerateInputs(const GraphDef& graph_def, const std::vector<string>& input_names,
                     std::vector<Tensor>& input_tensors, int batch_size);
-  void FillInputsMap(InputsMap& inputs_map, std::vector<std::string>& input_names,
+  void FillInputsMap(InputsMap& inputs_map, const std::vector<std::string>& input_names,
                    std::vector<Tensor>& input_tensors);
   void LogCudaGraphStatus(Session* sess);
 
+public:
   // Check given graph names are captured already
   // If all captured return true, else reture false and record all uncaptured name index in graph_names 
   // to uncaptured_index.

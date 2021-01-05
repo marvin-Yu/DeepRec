@@ -139,13 +139,12 @@ class DirectSession : public Session {
   ::tensorflow::Status RunForCapture(const std::vector<std::pair<string, Tensor> >& inputs,
                      const std::vector<string>& output_tensor_names,
                      const std::vector<string>& target_node_names,
- 					           std::vector<Tensor>* outputs,
                      CudaGraphMeta* cuda_graph_meta) override;
   ::tensorflow::Status RunForCapture(const RunOptions& run_options,
                      const std::vector<std::pair<string, Tensor> >& inputs,
                      const std::vector<string>& output_tensor_names,
                      const std::vector<string>& target_node_names,
-                     std::vector<Tensor>* outputs, RunMetadata* run_metadata,
+                     RunMetadata* run_metadata,
                      CudaGraphMeta* cuda_graph_meta) override;
   bool SupportsCudaGraph() override { return true; };
   cudaStream_t EnableGraphCapture(std::string model_name) override;

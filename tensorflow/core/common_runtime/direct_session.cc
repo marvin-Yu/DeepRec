@@ -415,7 +415,7 @@ Status DirectSession::Create(GraphDef&& graph) {
     cuda_graph_enable_ = options_.config.graph_options().
                              optimizer_options().
                              cuda_graph_enable();
-    bool try_capture_cuda_graph = options_config.graph_options().
+    bool try_capture_cuda_graph = options_.config.graph_options().
                                       optimizer_options().
                                       try_capture_cuda_graph();
     
@@ -457,6 +457,7 @@ Status DirectSession::Create(GraphDef&& graph) {
         LOG(ERROR) << "Not all subgraph are captured as cudagraphs";
       }
       GraphDef cudagraph_serving;
+      int graph_idx = 0;
       bool succ = SubgraphGenerator::ReplaceSubgraph(graph, cudagraph_serving, 
                       options_.config.graph_options().optimizer_options().subgraph_descriptions(graph_idx));
       return ExtendLocked(std::move(cudagraph_serving));
@@ -626,7 +627,7 @@ Status DirectSession::RunForCapture(const std::vector<std::pair<string, Tensor> 
                                     const std::vector<string>& target_node_names,
                                     CudaGraphMeta* cuda_graph_meta) {
   RunMetadata run_metadata;
-  return RunForCapture(RunOptions(), inputs, output_names, target_nodes,
+  return RunForCapture(RunOptions(), inputs, output_tensor_names, target_node_names,
              &run_metadata, cuda_graph_meta);
 }
 
@@ -984,7 +985,7 @@ Status DirectSession::RunInternal(
         return errors::Internal("the captured CUDA graph is not valid, please check the network.");
     }
 
-    ret = cudaGraphInstantiate(&(cuda_graph_meta->cuda_graph_instance_), &(cuda_graph_meta->cuda_graph_), NULL, NULL, 0);
+    ret = cudaGraphInstantiate(&(cuda_graph_meta->cuda_graph_instance_), cuda_graph_meta->cuda_graph_, NULL, NULL, 0);
     if (ret != cudaSuccess){
       LOG(ERROR) << "cudagraph create execute instance faild: " << ret;
       return errors::Internal("cudagraph create execute instance faild.");
@@ -1671,7 +1672,7 @@ Status DirectSession::RunForCapture(const RunOptions& run_options,
           }
       }  
   }
-  num_output_tensors_ = output_names.size();  
+  num_output_tensors_ = output_tensor_names.size();  
 #endif
 
   // Check if we already have an executor for these arguments.
@@ -1680,8 +1681,8 @@ Status DirectSession::RunForCapture(const RunOptions& run_options,
   run_state_args.collective_graph_key =
       run_options.experimental().collective_graph_key();
 
-  TF_RETURN_IF_ERROR(GetOrCreateExecutors(input_tensor_names, output_names,
-                                          target_nodes, &executors_and_keys,
+  TF_RETURN_IF_ERROR(GetOrCreateExecutors(input_tensor_names, output_tensor_names,
+                                          target_node_names, &executors_and_keys,
                                           &run_state_args));
   {
     mutex_lock l(collective_graph_key_lock_);
@@ -1736,15 +1737,15 @@ Status DirectSession::RunForCapture(const RunOptions& run_options,
       return s;
     }
     const bool unique_outputs =
-        output_names.size() == executors_and_keys->output_name_to_index.size();
+        output_tensor_names.size() == executors_and_keys->output_name_to_index.size();
     // first_indices[i] = j implies that j is the smallest value for which
     // output_names[i] == output_names[j].
     std::vector<int> first_indices;
     if (!unique_outputs) {
-      first_indices.resize(output_names.size());
-      for (int i = 0; i < output_names.size(); ++i) {
+      first_indices.resize(output_tensor_names.size());
+      for (int i = 0; i < output_tensor_names.size(); ++i) {
         for (int j = 0; j <= i; ++j) {
-          if (output_names[i] == output_names[j]) {
+          if (output_tensor_names[i] == output_tensor_names[j]) {
             first_indices[i] = j;
             break;
           }
@@ -1754,8 +1755,8 @@ Status DirectSession::RunForCapture(const RunOptions& run_options,
     outputs->clear();
     size_t output_size = 0;
     outputs->reserve(sorted_outputs.size());
-    for (int i = 0; i < output_names.size(); ++i) {
-      const string& output_name = output_names[i];
+    for (int i = 0; i < output_tensor_names.size(); ++i) {
+      const string& output_name = output_tensor_names[i];
       if (first_indices.empty() || first_indices[i] == i) {
         outputs->emplace_back(
             std::move(sorted_outputs[executors_and_keys

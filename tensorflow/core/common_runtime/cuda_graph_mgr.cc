@@ -140,7 +140,7 @@ void CudaGraphMgr::GenerateInputs(const GraphDef& graph_def, const std::vector<s
   }
 }
 
-void CudaGraphMgr::FillInputsMap(InputsMap& inputs_map, std::vector<std::string>& input_names,
+void CudaGraphMgr::FillInputsMap(InputsMap& inputs_map, const std::vector<std::string>& input_names,
                    std::vector<Tensor>& input_tensors) {
   assert(input_names.size() == input_tensors.size());
 
@@ -161,7 +161,7 @@ void CudaGraphMgr::DestoryCudagraphMeta() {
 bool CudaGraphMgr::CheckGraphAllCaptured(const std::vector<std::string>& graph_names, std::vector<int>& uncaptured_index) {
   uncaptured_index.clear();
   for (int i = 0; i < graph_names.size(); ++i) {
-    if (cuda_graphs_.find(graph_names[i]) == graphname_batch_metas_map_.end()) {
+    if (graphname_batch_metas_map_.find(graph_names[i]) == graphname_batch_metas_map_.end()) {
       uncaptured_index.push_back(i);
     }
   }
@@ -212,23 +212,23 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
                   "Get stream for graph capturing failed.");
   }
 
-  for (int i = 0; i < num_instance; i++) {
+  for (int i = 0; i < num_instance_; i++) {
     if (graphname_batch_metas_map_.find(graph_name) == graphname_batch_metas_map_.end()) {
-      graphname_batch_metas_map_.put(graph_name, BatchGraphMetaMap());
+      graphname_batch_metas_map_.emplace(graph_name, BatchGraphMetaMap());
     }
     auto& batch_meta_map = graphname_batch_metas_map_[graph_name];
-    if (batch_meta_map.find(batch_size) == batch_meta_map.end()) {
-      batch_meta_map.put(batch_size, std::vector<CudaGraphMeta>);
+    if (batch_meta_map.find(batch_size[i]) == batch_meta_map.end()) {
+      batch_meta_map.emplace(batch_size[i], std::vector<CudaGraphMeta>());
     }
-    batch_meta_map[batch_size].push_back(CudaGraphMeta());
-    int meta_size = batch_meta_map[batch_size].size();
-    CudaGraphMeta* meta = &(batch_meta_map[batch_size][meta_size - 1]);
+    batch_meta_map[batch_size[i]].push_back(CudaGraphMeta());
+    int meta_size = batch_meta_map[batch_size[i]].size();
+    CudaGraphMeta* meta = &(batch_meta_map[batch_size[i]][meta_size - 1]);
 
     std::vector<Tensor> input_tensors_cuda_graph;
     InputsMap inputs_cuda_graph;
-    GenerateInputs(graph_def, input_node_names, input_tensors_cuda_graph, batch_size);
+    GenerateInputs(graph_def, input_node_names, input_tensors_cuda_graph, batch_size[i]);
     FillInputsMap(inputs_cuda_graph, input_node_names, input_tensors_cuda_graph);
-    TF_CHECK_OK(session->RunForCapture(inputs_cuda_graph, output_names, {}, meta));
+    TF_CHECK_OK(session->RunForCapture(inputs_cuda_graph, output_node_names, {}, meta));
   }
 
   // turn off graph capture mode

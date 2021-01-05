@@ -72,6 +72,7 @@ typedef std::map<std::pair<std::string, int>, std::vector<CopyInfo>> CopyMapping
 
 void CudaGraphRun(Session * sess, cudaStream_t * streams, int num_infers_per_thread, int num_streams,
                   CopyMapping * copy_mapping, int start_graph_idx = 0) {
+    /*
     // launch graphs
     for (int i = 0; i < num_infers_per_thread; i++) {
         int stream_idx = i % num_streams;
@@ -91,6 +92,7 @@ void CudaGraphRun(Session * sess, cudaStream_t * streams, int num_infers_per_thr
         CheckCudaError(cudaEventSynchronize(event));
         CheckCudaError(cudaEventDestroy(event));
     }
+    */
 }
 
 int LaunchGraphs(Session * sess, cudaStream_t * streams, int num_infers_per_thread, int num_streams, int num_threads,
@@ -315,7 +317,7 @@ Status Test(GraphDef & graph_def,
             int num_infers_per_thread,
             int num_streams,
             int num_threads){
-    
+    /*
     assert(num_streams <= MAX_NUM_STREAMS);
     
     // Creates a session.
@@ -542,6 +544,7 @@ Status Test(GraphDef & graph_def,
     
     TF_CHECK_OK(session->DestroyCudaGraphs());
     TF_CHECK_OK(session->Close());
+    */
     return Status();
 }
         

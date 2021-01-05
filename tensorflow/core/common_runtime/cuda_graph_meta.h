@@ -27,14 +27,14 @@ typedef struct CudaGraphMeta {
   TensorHolder tensor_holder_;
   std::vector<std::pair<void*, void*>> src_dst_mapping_;
   std::vector<Tensor> output_tensors_;
-#endif
 
-CudaGraphMeta::~CudaGraphMeta() {
+~CudaGraphMeta() {
   cudaGraphExecDestroy(cuda_graph_instance_);
   cudaGraphDestroy(cuda_graph_);
   output_tensors_.clear();
   src_dst_mapping_.clear();
 }
+#endif
 
 } CudaGraphMeta;
 

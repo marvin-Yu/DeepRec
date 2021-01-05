@@ -3116,6 +3116,7 @@ tf_cuda_library(
         "common_runtime/scoped_allocator.cc",
         "common_runtime/scoped_allocator_mgr.cc",
         "common_runtime/shape_refiner.cc",
+        "common_runtime/cuda_graph_meta.h",
         "common_runtime/graph_optimizer.h",
         "graph/graph_constructor.cc",  # Depends on common_runtime.
         "graph/dist_graph_partition.cc",
@@ -3155,6 +3156,7 @@ CORE_CPU_LIB_HEADERS = CORE_CPU_BASE_HDRS + [
     "common_runtime/colocation_graph.h",
     "common_runtime/constant_folding.h",
     "common_runtime/copy_tensor.h",
+    "common_runtime/cuda_graph_meta.h",
     "common_runtime/costmodel_manager.h",
     "common_runtime/placer_inspection_required_ops_utils.h",
     "common_runtime/debugger_state_interface.h",
@@ -3276,7 +3278,6 @@ tf_cuda_library(
     copts = tf_copts() + ["-g"],
     deps = [
         ":bfc_allocator",
-        ":cuda_graph_mgr",
         ":graph",
         ":framework",
         ":framework_internal",
@@ -3406,7 +3407,7 @@ tf_cuda_library(
     copts = tf_copts() + ["-g"],
     deps = [
         ":core_cpu_internal",
-        "cuda_graph_mgr",
+        ":cuda_graph_mgr",
         ":framework",
         ":framework_internal",
         ":graph",
@@ -3433,9 +3434,13 @@ tf_cuda_library(
         "common_runtime/cuda_graph_meta.h",
     ],
     deps = [
-        "framework",
-        "framework_internal",
-        "lib",
+        ":core_cpu_internal",
+        ":framework",
+        ":framework_internal",
+        ":graph",
+        ":lib",
+        ":lib_internal",
+        ":proto_text",
     ]
 
 )
