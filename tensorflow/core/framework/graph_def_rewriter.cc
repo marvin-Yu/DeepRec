@@ -9,6 +9,8 @@
 
 #include "tensorflow/core/framework/graph_def_rewriter.h"
 
+#include <set>
+
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_split.h"
 #include "tensorflow/core/framework/node_def_builder.h"
@@ -16,6 +18,7 @@
 #include "tensorflow/core/platform/logging.h"
 
 static const std::string PLACEHOLDER = "Placeholder";
+static const std::string CUDA_GRAPH = "CudaGraph";
 
 namespace tensorflow {
 
@@ -51,6 +54,60 @@ void GraphDefRewriter::InitNodeMap(const GraphDef& origin_graph_def) {
       node_map_.emplace(node_name, node);
     }
   }
+}
+
+bool GraphDefRewriter::GetNodeConsumedTensorInfo(const std::string& provider_node_name, 
+                                 std::vector<std::string>& consumed_tensor,
+                                 std::vector<DataType>& consumed_tensor_type) {
+  // step1. check node existance
+  auto iter = provider_consumer_info_map_.find(provider_node_name);
+  if (iter == provider_consumer_info_map_.end()) {
+    return false;
+  }
+  
+  // step2. collect all consumed index
+  std::set<int> slot_set;
+  auto& consumers = iter->second;
+  for (ConsumerInfo& info : consumers) {
+    slot_set.emplace(info.provider_slot_);
+  }
+
+  // step3. extract info needed
+  NodeDef& provider = node_map_[provider_node_name];
+  for (auto it = slot_set.begin(); it != slot_set.end(); ++iter) {
+    consumed_tensor_index.emplace_back(*it);
+    // todo: fetch type
+  }
+  return true;
+}
+
+bool GraphDefRewriter::GetNodeProviderTensorInfo(const std::string& consumer_node_name,
+                                 std::vector<std::string>& provider_tensor,
+                                 std::vector<std::string>& provider_node,
+                                 std::vector<int>& provider_slot) {
+  // step1. check node existance
+  auto iter = node_map_.find(consumer_node_name);
+  if (iter == node_map_.end()) {
+    return false;
+  }
+
+  // step2. get input infos
+  NodeDef& node = iter->second;
+  for (int i = 0; i < node.input_size(); ++i) {
+    provider_tensor.emplace_back(node.input(i));
+    std::vector<std::string> provider_parts = absl::StrSplit(node.input(i), ':');
+    int slot = 0;
+    if (provider_parts.size() == 2) {
+      absl::SimpleAtoi(provider_parts[1], &slot);
+    } else if (provider_parts.size() == 1) {
+      // do nothing
+    } else {
+      LOG(ERROR) << "Node " << node_name << "'s input " << node.input(j) << " is invalid.";
+    }
+    provider_node.emplace_back(provider_parts[0]);
+    provider_slot.emplace_back(slot);
+  }
+  return true;
 }
 
 bool GraphDefRewriter::AddPlaceholder(const std::string& ph_name, const DataType& dtype, const PartialTensorShape& shape) {
@@ -216,7 +273,44 @@ bool SubgraphGenerator::GenerateSubgraph(const GraphDef& origin_graph,
 
 bool SubgraphGenerator::ReplaceSubgraph(const GraphDef& origin_graph, 
                                         GraphDef& output_graph, 
-                                        const SubgraphDescription& subgraph_desc) {
+                                        const std::vector<SubgraphDescription*>& subgraph_descriptions,
+                                        const std::vector<int> buckets) {
+  CopyCommonField(origin_graph, output_graph);
+
+  GraphDefRewriter rewriter(origin_graph);
+
+  // step1. fetch attr for cuda graph 
+  std::vector<std::string> origin_feed_nodes;
+  std::vector<int> origin_feed_index;
+  std::vector<std::string> feed_names;
+  std::vector<std::string> fetch_names;
+  std::vector<DataType> T1;
+  std::vector<DataType> T2;
+  for (auto subgraph_desc : subgraph_descriptions) {
+    for (int i = 0; i < subgraph_desc->input_tensors_size(); ++i) {
+      feed_names.emplace_back(subgraph_desc->input_tensors(i).ph_name());
+      T1.push_back(subgraph_desc->input_tensor(i).type());
+      origin_feed_nodes.emplace_back(subgraph_desc->input_tensors(i).tensor_provider_name());
+      origin_feed_index.emplace_back(subgraph_desc->input_tensors(i).tensor_provider_slot());
+    }
+    for (int i = 0; i < subgraph_desc->output_node_names_size(); ++i) {
+      rewriter.GetNodeConsumedTensorInfo(subgraph_desc->output_node_names(i),
+                                         fetch_names, T2);
+    }
+
+    // step2. build cudagraph node 
+    NodeDef cudagraph_node;
+    NodeDefBuilder builder(subgraph_desc->subgraph_name(), CUDA_GRAPH);
+    TF_CHECK_OK(builder.Attr("feed_names", feed_names)
+          .Attr("fetch_names", fetch_names)
+          .Attr("T1", T1)
+          .Attr("T2", T2)
+          .Attr("buckets", buckets)
+          .Attr("graph_name", subgraph_desc->subgraph_name())
+          .Finalize(&ph_node));
+
+  }
+
   return true;
 }
 

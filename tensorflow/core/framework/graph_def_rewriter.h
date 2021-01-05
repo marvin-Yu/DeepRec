@@ -42,6 +42,13 @@ public:
   void InitNodeMap(const GraphDef& origin_graph_def);
   bool AppendNode(NodeDef new_node);
   bool AddPlaceholder(const std::string& ph_name, const DataType& dtype, const PartialTensorShape& shape);
+  bool GetNodeConsumedTensorInfo(const std::string& provider_node_name, 
+                                 std::vector<std::string>& consumed_tensor,
+                                 std::vector<DataType>& consumed_tensor_type);
+  bool GetNodeProviderTensorInfo(const std::string& consumer_node_name,
+                                 std::vector<std::string>& provider_tensor,
+                                 std::vector<std::string>& provider_node,
+                                 std::vector<int>& provider_slot);
   bool ReplaceEdgesForGivenConsumer(const std::string& origin_provider_name,
                                     const int origin_provider_slot,
                                     const std::string& replacer_provider_name,
@@ -68,7 +75,10 @@ public:
                                const SubgraphDescription& subgraph_desc,
                                std::vector<std::string>& subgraph_final_inputs,
                                std::vector<std::string>& subgraph_final_outputs);
-  bool static ReplaceSubgraph(const GraphDef&  origin_graph, GraphDef& output_graph, const SubgraphDescription& subgraph_desc);
+  bool static ReplaceSubgraph(const GraphDef&  origin_graph, 
+                              GraphDef& output_graph, 
+                              const SubgraphDescription& subgraph_desc,
+                              const std::vector<int> buckets);
 private:
   void static CopyCommonField(const GraphDef& origin_graph, GraphDef& output_graph);
 };
