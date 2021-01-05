@@ -75,7 +75,7 @@ bool GraphDefRewriter::GetNodeConsumedTensorInfo(const std::string& provider_nod
   // step3. extract info needed
   NodeDef& provider = node_map_[provider_node_name];
   for (auto it = slot_set.begin(); it != slot_set.end(); ++iter) {
-    consumed_tensor_index.emplace_back(*it);
+ //   consumed_tensor_index.emplace_back(*it);
     // todo: fetch type
   }
   return true;
@@ -102,7 +102,7 @@ bool GraphDefRewriter::GetNodeProviderTensorInfo(const std::string& consumer_nod
     } else if (provider_parts.size() == 1) {
       // do nothing
     } else {
-      LOG(ERROR) << "Node " << node_name << "'s input " << node.input(j) << " is invalid.";
+      LOG(ERROR) << "Node " << consumer_node_name << "'s input " << node.input(i) << " is invalid.";
     }
     provider_node.emplace_back(provider_parts[0]);
     provider_slot.emplace_back(slot);
@@ -289,7 +289,7 @@ bool SubgraphGenerator::ReplaceSubgraph(const GraphDef& origin_graph,
   for (auto subgraph_desc : subgraph_descriptions) {
     for (int i = 0; i < subgraph_desc->input_tensors_size(); ++i) {
       feed_names.emplace_back(subgraph_desc->input_tensors(i).ph_name());
-      T1.push_back(subgraph_desc->input_tensor(i).type());
+      T1.push_back(subgraph_desc->input_tensors(i).type());
       origin_feed_nodes.emplace_back(subgraph_desc->input_tensors(i).tensor_provider_name());
       origin_feed_index.emplace_back(subgraph_desc->input_tensors(i).tensor_provider_slot());
     }
@@ -307,7 +307,7 @@ bool SubgraphGenerator::ReplaceSubgraph(const GraphDef& origin_graph,
           .Attr("T2", T2)
           .Attr("buckets", buckets)
           .Attr("graph_name", subgraph_desc->subgraph_name())
-          .Finalize(&ph_node));
+          .Finalize(&cudagraph_node));
 
   }
 

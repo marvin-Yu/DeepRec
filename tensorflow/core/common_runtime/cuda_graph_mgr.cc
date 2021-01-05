@@ -162,6 +162,7 @@ bool CudaGraphMgr::CheckGraphAllCaptured(const std::vector<std::string>& graph_n
   uncaptured_index.clear();
   for (int i = 0; i < graph_names.size(); ++i) {
     if (graphname_batch_metas_map_.find(graph_names[i]) == graphname_batch_metas_map_.end()) {
+      LOG(INFO) << "[Jieluo] graph name index " << i << ", " << graph_names[i] << " has not captured";
       uncaptured_index.push_back(i);
     }
   }

@@ -77,7 +77,7 @@ public:
                                std::vector<std::string>& subgraph_final_outputs);
   bool static ReplaceSubgraph(const GraphDef&  origin_graph, 
                               GraphDef& output_graph, 
-                              const SubgraphDescription& subgraph_desc,
+                              const std::vector<SubgraphDescription*>& subgraph_descriptions,
                               const std::vector<int> buckets);
 private:
   void static CopyCommonField(const GraphDef& origin_graph, GraphDef& output_graph);

@@ -425,8 +425,11 @@ Status DirectSession::Create(GraphDef&& graph) {
       int num_cuda_graph = options_.config.graph_options().
                                optimizer_options().
                                subgraph_descriptions_size();
-      std::vector<std::string> cuda_graph_names(num_cuda_graph);
+      LOG(INFO) << "[Jieluo] subgraph size is " << num_cuda_graph;
+      std::vector<std::string> cuda_graph_names;
       std::vector<int> uncaptured_index;
+      cuda_graph_names.reserve(num_cuda_graph);
+      uncaptured_index.reserve(num_cuda_graph);
       for (int i = 0; i < num_cuda_graph; ++i) {
         cuda_graph_names.emplace_back(options_.config.graph_options().
                                           optimizer_options().
@@ -434,13 +437,17 @@ Status DirectSession::Create(GraphDef&& graph) {
                                           subgraph_name());
       }
       // check and capture uncaptured graph
+      LOG(INFO) << "[Jieluo] options debug string: " << options_.config.graph_options().
+                                          optimizer_options().DebugString();
       if (try_capture_cuda_graph) {
         if (!mgr.CheckGraphAllCaptured(cuda_graph_names, uncaptured_index)) {
+          LOG(INFO) << "[Jieluo] Not all graph captured, uncaptured size is " << uncaptured_index.size();
           // capture uncaptured graph
           for (int i = 0; i < uncaptured_index.size(); ++i) {
             GraphDef cudagraph_capture;
             std::vector<std::string> input_node_names;
             std::vector<std::string> output_node_names;
+            LOG(INFO) << "[Jieluo] Begin to gen subgraph index " << uncaptured_index[i];
             bool gen_succ = SubgraphGenerator::GenerateSubgraph(graph, cudagraph_capture, 
                                 options_.config.graph_options().optimizer_options().subgraph_descriptions(uncaptured_index[i]),
                                 input_node_names, output_node_names);
