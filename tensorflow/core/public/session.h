@@ -122,7 +122,7 @@ class Session {
 #ifdef GOOGLE_CUDA
   virtual Status CreateForCapture(const GraphDef& graph) { return Create(graph); };
 #ifndef SWIG
-  virtual Status CreateForCapture(GraphDef& graph) { return CreateForCapture(graph); }
+  virtual Status CreateForCapture(GraphDef&& graph) { return CreateForCapture(graph); }
 #endif
   virtual Status RunForCapture(const std::vector<std::pair<string, Tensor> >& inputs,
                      const std::vector<string>& output_tensor_names,

@@ -437,11 +437,8 @@ Status DirectSession::Create(GraphDef&& graph) {
                                           subgraph_name());
       }
       // check and capture uncaptured graph
-      LOG(INFO) << "[Jieluo] options debug string: " << options_.config.graph_options().
-                                          optimizer_options().DebugString();
       if (try_capture_cuda_graph) {
         if (!mgr.CheckGraphAllCaptured(cuda_graph_names, uncaptured_index)) {
-          LOG(INFO) << "[Jieluo] Not all graph captured, uncaptured size is " << uncaptured_index.size();
           // capture uncaptured graph
           for (int i = 0; i < uncaptured_index.size(); ++i) {
             GraphDef cudagraph_capture;
@@ -455,7 +452,12 @@ Status DirectSession::Create(GraphDef&& graph) {
               LOG(ERROR) << "Generate subgraph for cudagraph capturing failed, please check GraphDef and session options";
               // todo: return not ok
             }
-
+           // LOG(INFO) << "[Jieluo] cudagraph debug string: " << cudagraph_capture.DebugString();
+            mgr.CaptureCudagraph(cudagraph_capture, 
+                                 options_.config.graph_options().optimizer_options().subgraph_descriptions(uncaptured_index[i]).subgraph_name(),
+                                 input_node_names,
+                                 output_node_names,
+                                 {64});
           }
         }
       }
@@ -482,7 +484,7 @@ Status DirectSession::CreateForCapture(const GraphDef& graph) {
   return CreateForCapture(GraphDef(graph));
 }
 
-Status DirectSession::CreateForCapture(GraphDef& graph) {
+Status DirectSession::CreateForCapture(GraphDef&& graph) {
   TF_RETURN_IF_ERROR(init_error_);
   if (graph.node_size() > 0) {
     mutex_lock l(graph_state_lock_);
@@ -490,15 +492,9 @@ Status DirectSession::CreateForCapture(GraphDef& graph) {
       return errors::AlreadyExists(
           "A Graph has already been created for this session.");
     }
-    GraphDef cudagraph_subgraph;
-    // rewrite config
-/*
-    options_.config.mutable_gpu_options()->set_force_gpu_compatible(true);
-    options_.config.mutable_gpu_options()->set_allow_growth(false);
-*/
-    graph::SetDefaultDevice("/device:GPU:0", &cudagraph_subgraph);
-    graph::CheckNodeDevice("/device:GPU:0", &cudagraph_subgraph);
-    return ExtendLocked(std::move(cudagraph_subgraph));
+    graph::SetDefaultDevice("/device:GPU:0", &graph);
+    LOG(INFO) << "[Jieluo] cudagraph debug string: " << graph.DebugString();
+    return ExtendLocked(std::move(graph));
   }
   return Status::OK();
 }

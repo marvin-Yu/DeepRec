@@ -135,7 +135,7 @@ class DirectSession : public Session {
 
 #ifdef GOOGLE_CUDA
   ::tensorflow::Status CreateForCapture(const GraphDef& graph) override;
-  ::tensorflow::Status CreateForCapture(GraphDef& graph) override;
+  ::tensorflow::Status CreateForCapture(GraphDef&& graph) override;
   ::tensorflow::Status RunForCapture(const std::vector<std::pair<string, Tensor> >& inputs,
                      const std::vector<string>& output_tensor_names,
                      const std::vector<string>& target_node_names,
