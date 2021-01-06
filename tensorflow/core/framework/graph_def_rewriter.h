@@ -46,7 +46,7 @@ public:
                                  std::vector<std::string>& consumed_tensor,
                                  std::vector<DataType>& consumed_tensor_type,
                                  std::vector<std::string>& consumed_nodes,
-                                 std::vector<int> consumed_inddex);
+                                 std::vector<int> consumed_index);
   bool GetNodeProviderTensorInfo(const std::string& consumer_node_name,
                                  std::vector<std::string>& provider_tensor,
                                  std::vector<std::string>& provider_node,

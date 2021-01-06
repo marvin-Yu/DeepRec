@@ -23,12 +23,11 @@ static const std::string CUDA_GRAPH = "CudaGraph";
 namespace tensorflow {
 
 bool GraphDefRewriter::ExtractInputNodeAndSlot(const std::string& input, std::string& node, int& slot) {
-  std::vector<std::string> provider_parts = absl::StrSplit(node.input(j), ':');
+  std::vector<std::string> provider_parts = absl::StrSplit(input, ':');
   if (provider_parts.size() == 2) {
     absl::SimpleAtoi(provider_parts[1], &slot);
   } else if (provider_parts.size() != 1) {
-    LOG(ERROR) << "Node " << node_name << "'s input " << node.input(j)
-               << " is invalid.";
+    LOG(ERROR) << "input " << input << " is invalid.";
     return false;
   }
   node = provider_parts[0];
@@ -41,7 +40,7 @@ bool GraphDefRewriter::ExtractConsumerInfo(const NodeDef& node) {
   for (int j = 0; j < node.input_size(); ++j) {
     int slot = 0;
     std::string input_node;
-    if (!ExtractInputNodeAndSlot(node.input(i), input_node, slot)) {
+    if (!ExtractInputNodeAndSlot(node.input(j), input_node, slot)) {
       return false;
     }
 
@@ -77,7 +76,7 @@ bool GraphDefRewriter::GetNodeConsumedTensorInfo(const std::string& provider_nod
                                  std::vector<std::string>& consumed_tensor,
                                  std::vector<DataType>& consumed_tensor_type,
                                  std::vector<std::string>& consumed_nodes,
-                                 std::vector<int> consumed_inddex)) {
+                                 std::vector<int> consumed_index) {
   // step1. check node existance
   auto iter = provider_consumer_info_map_.find(provider_node_name);
   if (iter == provider_consumer_info_map_.end()) {
@@ -204,8 +203,9 @@ bool GraphDefRewriter::ReplaceEdgesForGivenConsumer(const std::string& origin_pr
       remove_idx.push_back(i);
     }
   }
+  // todo: optimize, switch to tail and remove once
   for (int i = remove_idx.size() - 1; i >= 0; --i) {
-    consumer_iter->second.remove(remove_idx[i]);
+    consumer_iter->second.erase(consumer_iter->second.begin() + remove_idx[i]);
   }
   return true;                      
 }
@@ -306,7 +306,13 @@ bool SubgraphGenerator::GenerateSubgraph(const GraphDef& origin_graph,
   }
 
   // step3. set default device gpu
-  graph::SetDefaultDevice("/device:GPU:0", &graph_def);
+  std::string device = "/device:GPU:0";
+  for (int i = 0; i < output_graph.node_size(); ++i) {
+    auto node = output_graph.mutable_node(i);
+    if (node->device().empty()) {
+      node->set_device(device);
+    }
+  }
   return true;
 }
 
@@ -339,7 +345,7 @@ bool SubgraphGenerator::ReplaceSubgraph(const GraphDef& origin_graph,
       rewriter.GetNodeConsumedTensorInfo(subgraph_desc->output_node_names(i),
                                          fetch_names, 
                                          T2,
-                                         fetch_node,
+                                         fetch_nodes,
                                          fetch_index);
     }
 
@@ -357,7 +363,7 @@ bool SubgraphGenerator::ReplaceSubgraph(const GraphDef& origin_graph,
     // step3. reroute cuda graph op output edge
     const std::unordered_set<std::string> empty;
     for (int i = 0; i < fetch_names.size(); ++i) {
-      rewriter.ReplaceEdgesForGivenConsumer(fetch_nodes[i], feed_index[i], subgraph_desc->subgraph_name(), i, empty);
+      rewriter.ReplaceEdgesForGivenConsumer(fetch_nodes[i], fetch_index[i], subgraph_desc->subgraph_name(), i, empty);
     }
   }
   // step4. 
