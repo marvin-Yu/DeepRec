@@ -40,11 +40,13 @@ private:
 public:
   GraphDefRewriter(const GraphDef& origin_graph_def);
   void InitNodeMap(const GraphDef& origin_graph_def);
-  bool AppendNode(NodeDef new_node);
+  bool AddNode(NodeDef&& new_node);
   bool AddPlaceholder(const std::string& ph_name, const DataType& dtype, const PartialTensorShape& shape);
   bool GetNodeConsumedTensorInfo(const std::string& provider_node_name, 
                                  std::vector<std::string>& consumed_tensor,
-                                 std::vector<DataType>& consumed_tensor_type);
+                                 std::vector<DataType>& consumed_tensor_type,
+                                 std::vector<std::string>& consumed_nodes,
+                                 std::vector<int> consumed_inddex);
   bool GetNodeProviderTensorInfo(const std::string& consumer_node_name,
                                  std::vector<std::string>& provider_tensor,
                                  std::vector<std::string>& provider_node,
@@ -58,6 +60,10 @@ public:
   bool GenerateGraphDefFromTop(GraphDef& output_graph_def,
                                const std::vector<std::string> top_nodes,
                                std::vector<std::string>& input_names);
+
+private:
+  bool ExtractConsumerInfo(const NodeDef& node); 
+  bool ExtractInputNodeAndSlot(const std::string& input, std::string& node, int& slot);
   
 };
 

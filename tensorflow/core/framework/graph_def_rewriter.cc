@@ -22,6 +22,43 @@ static const std::string CUDA_GRAPH = "CudaGraph";
 
 namespace tensorflow {
 
+bool GraphDefRewriter::ExtractInputNodeAndSlot(const std::string& input, std::string& node, int& slot) {
+  std::vector<std::string> provider_parts = absl::StrSplit(node.input(j), ':');
+  if (provider_parts.size() == 2) {
+    absl::SimpleAtoi(provider_parts[1], &slot);
+  } else if (provider_parts.size() != 1) {
+    LOG(ERROR) << "Node " << node_name << "'s input " << node.input(j)
+               << " is invalid.";
+    return false;
+  }
+  node = provider_parts[0];
+  return true;
+}
+
+
+bool GraphDefRewriter::ExtractConsumerInfo(const NodeDef& node) {
+  const std::string& node_name = node.name();
+  for (int j = 0; j < node.input_size(); ++j) {
+    int slot = 0;
+    std::string input_node;
+    if (!ExtractInputNodeAndSlot(node.input(i), input_node, slot)) {
+      return false;
+    }
+
+    if (provider_consumer_info_map_.find(input_node) ==
+        provider_consumer_info_map_.end()) {
+      provider_consumer_info_map_.emplace(input_node,
+                                          std::vector<ConsumerInfo>());
+    }
+    ConsumerInfo info;
+    info.consumer_name_ = node_name;
+    info.consumer_slot_ = j;
+    info.provider_slot_ = slot;
+    provider_consumer_info_map_[input_node].emplace_back(info);
+  }
+  return true;
+}
+
 void GraphDefRewriter::InitNodeMap(const GraphDef& origin_graph_def) {
   for (int i = 0; i < origin_graph_def.node_size(); ++i) {
     const NodeDef& node = origin_graph_def.node(i);
@@ -30,27 +67,7 @@ void GraphDefRewriter::InitNodeMap(const GraphDef& origin_graph_def) {
       LOG(ERROR) << "Node in original graph whose name is " << node_name << " has been in node map, ignore it.";
     } else {
       // init consumer info
-      for (int j = 0; j < node.input_size(); ++j) {
-        std::vector<std::string> provider_parts = absl::StrSplit(node.input(j), ':');
-        int slot = 0;
-        if (provider_parts.size() == 2) {
-          absl::SimpleAtoi(provider_parts[1], &slot);
-        } else if (provider_parts.size() == 1) {
-          // do nothing
-        } else {
-          LOG(ERROR) << "Node " << node_name << "'s input " << node.input(j) << " is invalid.";
-        }
-        
-        if (provider_consumer_info_map_.find(provider_parts[0]) == provider_consumer_info_map_.end()) {
-          provider_consumer_info_map_.emplace(provider_parts[0], std::vector<ConsumerInfo>());
-        }
-        ConsumerInfo info;
-        info.consumer_name_ = node_name;
-        info.consumer_slot_ = j;
-        info.provider_slot_ = slot;
-        LOG(INFO) << "[jieluo] Provider name " << provider_parts[0] << " index " << info.provider_slot_ << " consumer name " << node_name << " consumer index " << info.consumer_slot_ << " origin input str " << node.input(j);
-        provider_consumer_info_map_[provider_parts[0]].emplace_back(info);
-      }
+      ExtractConsumerInfo(node);
       node_map_.emplace(node_name, node);
     }
   }
@@ -58,7 +75,9 @@ void GraphDefRewriter::InitNodeMap(const GraphDef& origin_graph_def) {
 
 bool GraphDefRewriter::GetNodeConsumedTensorInfo(const std::string& provider_node_name, 
                                  std::vector<std::string>& consumed_tensor,
-                                 std::vector<DataType>& consumed_tensor_type) {
+                                 std::vector<DataType>& consumed_tensor_type,
+                                 std::vector<std::string>& consumed_nodes,
+                                 std::vector<int> consumed_inddex)) {
   // step1. check node existance
   auto iter = provider_consumer_info_map_.find(provider_node_name);
   if (iter == provider_consumer_info_map_.end()) {
@@ -77,7 +96,17 @@ bool GraphDefRewriter::GetNodeConsumedTensorInfo(const std::string& provider_nod
   for (auto it = slot_set.begin(); it != slot_set.end(); ++iter) {
  //   consumed_tensor_index.emplace_back(*it);
     // todo: fetch type
+    consumed_nodes.emplace_back(provider_node_name);
+    consumed_index.emplace_back(*it);
+    consumed_tensor.emplace_back(strings::StrCat(provider_node_name, ":", *it));
   }
+  return true;
+}
+
+bool GraphDefRewriter::AddNode(NodeDef&& node) {
+  const std::string& node_name = node.name();
+  ExtractConsumerInfo(node);
+  node_map_.emplace(node_name, node);
   return true;
 }
 
@@ -151,25 +180,32 @@ bool GraphDefRewriter::ReplaceEdgesForGivenConsumer(const std::string& origin_pr
 
     return false;
   }
+  std::vector<int> remove_idx;
   for (int i = 0; i < consumer_iter->second.size(); ++i) {
     ConsumerInfo info = consumer_iter->second[i];
     // if matched
     if (info.provider_slot_ == origin_provider_slot) {
       // step3. modify consumer node def
       if (node_map_.find(info.consumer_name_) == node_map_.end()) {
-      
+        LOG(ERROR) << "Consumer node " << info.consumer_name_ << " not found in graph";
         continue;
       }
       std::string replaced_input_name = strings::StrCat(replacer_provider_name, ":", replacer_provider_slot);
       node_map_[info.consumer_name_].set_input(info.consumer_slot_, replaced_input_name);
 
-      // step4. modify map info
+      // step4. add new edge to map info
       info.provider_slot_ = replacer_provider_slot;
       if (provider_consumer_info_map_.find(replacer_provider_name) == provider_consumer_info_map_.end()) {
         provider_consumer_info_map_.emplace(replacer_provider_name, std::vector<ConsumerInfo>());
       }
       provider_consumer_info_map_[replacer_provider_name].emplace_back(info);
+
+      // step5. remove old edge
+      remove_idx.push_back(i);
     }
+  }
+  for (int i = remove_idx.size() - 1; i >= 0; --i) {
+    consumer_iter->second.remove(remove_idx[i]);
   }
   return true;                      
 }
@@ -268,6 +304,9 @@ bool SubgraphGenerator::GenerateSubgraph(const GraphDef& origin_graph,
   if (!succ) {
     LOG(ERROR) << "Generate subgraph failed.";
   }
+
+  // step3. set default device gpu
+  graph::SetDefaultDevice("/device:GPU:0", &graph_def);
   return true;
 }
 
@@ -280,27 +319,32 @@ bool SubgraphGenerator::ReplaceSubgraph(const GraphDef& origin_graph,
   GraphDefRewriter rewriter(origin_graph);
 
   // step1. fetch attr for cuda graph 
-  std::vector<std::string> origin_feed_nodes;
-  std::vector<int> origin_feed_index;
   std::vector<std::string> feed_names;
   std::vector<std::string> fetch_names;
   std::vector<DataType> T1;
   std::vector<DataType> T2;
+
+  std::vector<std::string> fetch_nodes;
+  std::vector<int> fetch_index;
   for (auto subgraph_desc : subgraph_descriptions) {
+    NodeDefBuilder builder(subgraph_desc->subgraph_name(), CUDA_GRAPH);
     for (int i = 0; i < subgraph_desc->input_tensors_size(); ++i) {
       feed_names.emplace_back(subgraph_desc->input_tensors(i).ph_name());
       T1.push_back(subgraph_desc->input_tensors(i).type());
-      origin_feed_nodes.emplace_back(subgraph_desc->input_tensors(i).tensor_provider_name());
-      origin_feed_index.emplace_back(subgraph_desc->input_tensors(i).tensor_provider_slot());
+      builder.Input(subgraph_desc->input_tensors(i).tensor_provider_name(),
+                    subgraph_desc->input_tensors(i).tensor_provider_slot(),
+                    subgraph_desc->input_tensors(i).type());
     }
     for (int i = 0; i < subgraph_desc->output_node_names_size(); ++i) {
       rewriter.GetNodeConsumedTensorInfo(subgraph_desc->output_node_names(i),
-                                         fetch_names, T2);
+                                         fetch_names, 
+                                         T2,
+                                         fetch_node,
+                                         fetch_index);
     }
 
     // step2. build cudagraph node 
     NodeDef cudagraph_node;
-    NodeDefBuilder builder(subgraph_desc->subgraph_name(), CUDA_GRAPH);
     TF_CHECK_OK(builder.Attr("feed_names", feed_names)
           .Attr("fetch_names", fetch_names)
           .Attr("T1", T1)
@@ -308,9 +352,20 @@ bool SubgraphGenerator::ReplaceSubgraph(const GraphDef& origin_graph,
           .Attr("buckets", buckets)
           .Attr("graph_name", subgraph_desc->subgraph_name())
           .Finalize(&cudagraph_node));
+    rewriter.AddNode(std::move(cudagraph_node));
 
+    // step3. reroute cuda graph op output edge
+    const std::unordered_set<std::string> empty;
+    for (int i = 0; i < fetch_names.size(); ++i) {
+      rewriter.ReplaceEdgesForGivenConsumer(fetch_nodes[i], feed_index[i], subgraph_desc->subgraph_name(), i, empty);
+    }
   }
-
+  // step4. 
+ // bool succ = rewriter.GenerateGraphDefFromTop(output_graph, subgraph_final_outputs, subgraph_final_inputs);
+  bool succ = true;
+  if (!succ) {
+    LOG(ERROR) << "Generate subgraph failed.";
+  }
   return true;
 }
 
