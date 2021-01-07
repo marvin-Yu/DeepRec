@@ -819,4 +819,11 @@ message BlazeKernelOptions {
   int64 dump_timeline_interval = 101;
   ConfigProto config_proto = 102;
   map<string, BlazeWarmupValue> warmup_value = 103;
+  enum RunMode {
+    DEFAULT = 0;
+    BENCHMARK = 1;
+    SKIP = 2; // skip for dense test, but i do not know shape
+  }
+
+  RunMode run_mode = 104;
 }
