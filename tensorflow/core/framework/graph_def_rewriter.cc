@@ -74,10 +74,11 @@ void GraphDefRewriter::InitNodeMap(const GraphDef& origin_graph_def) {
 }
 
 bool GraphDefRewriter::GetNodeConsumedTensorInfo(const std::string& provider_node_name, 
-                                 std::vector<int> consumed_index) {
+                                 std::vector<int>& consumed_index) {
   // step1. check node existance
   auto iter = provider_consumer_info_map_.find(provider_node_name);
   if (iter == provider_consumer_info_map_.end()) {
+    LOG(ERROR) << "Node with name " << provider_node_name << " not found in graph";
     return false;
   }
   
@@ -90,7 +91,7 @@ bool GraphDefRewriter::GetNodeConsumedTensorInfo(const std::string& provider_nod
 
   // step3. extract info needed
   NodeDef& provider = node_map_[provider_node_name];
-  for (auto it = slot_set.begin(); it != slot_set.end(); ++iter) {
+  for (auto it = slot_set.begin(); it != slot_set.end(); ++it) {
     consumed_index.emplace_back(*it);
   }
   return true;
@@ -165,10 +166,12 @@ bool GraphDefRewriter::AddIdentityNode(const std::string& origin_node_name,
 
   // step2. gen identity node
   NodeDef id_node;
-  identity_node_name = strings:StrCat(origin_node_name, OUTPUT_IDENTITY_SUFFIX, origin_slot);
+  identity_node_name = strings::StrCat(origin_node_name, OUTPUT_IDENTITY_SUFFIX, origin_slot);
   NodeDefBuilder builder(identity_node_name, IDENTITY);
+  LOG(INFO) << "[Jieluo] Before get identity input";
   TF_CHECK_OK(builder.Input(node, origin_slot).Finalize(&id_node));
-
+  LOG(INFO) << "[Jieluo] After get identity input";
+   
   // step3. put ot node map
   node_map_.emplace(id_node.name(), id_node);
   if (provider_consumer_info_map_.find(origin_node_name) ==
@@ -294,7 +297,8 @@ bool SubgraphGenerator::GenerateSubgraph(const GraphDef& origin_graph,
                                          std::vector<std::string>& subgraph_final_outputs) {
   // step0. copy other fields in graph
   CopyCommonField(origin_graph, output_graph);
-  
+ 
+  LOG(INFO) << "[Jieluo] generate subgraph config " << subgraph_desc.DebugString(); 
   GraphDefRewriter rewriter(origin_graph);
   std::unordered_set<std::string> empty_set;
   // step1. gen new placeholder and replace edge
@@ -326,8 +330,10 @@ bool SubgraphGenerator::GenerateSubgraph(const GraphDef& origin_graph,
     consumed_idx.clear();
     const std::string& output_name = subgraph_desc.output_node_names(i);
     bool succ = rewriter.GetNodeConsumedTensorInfo(output_name, consumed_idx);
-    for (int j = 0; j < consumed_idx.size(); ++i) {
+    LOG(INFO) << "[Jieluo] consumed idx size " << consumed_idx.size();
+    for (int j = 0; j < consumed_idx.size(); ++j) {
       std::string identity_name;
+      LOG(INFO) << "[Jieluo] add identtity node for " << output_name << " idx " << consumed_idx[j];
       if (!rewriter.AddIdentityNode(output_name, consumed_idx[j], identity_name)) {
         LOG(ERROR) << "Add Identity node failed, identity input " << output_name << " slot " << consumed_idx[j];
         return false;

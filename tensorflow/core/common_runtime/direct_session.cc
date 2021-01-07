@@ -847,7 +847,8 @@ Status DirectSession::RunInternal(
   }
 
 #ifdef GOOGLE_CUDA
-  if(cuda_graph_capture_mode_ && cuda_graph_meta != nullptr){ 
+  if(cuda_graph_capture_mode_ && cuda_graph_meta != nullptr){
+    LOG(INFO) << "capturing on stream -- " << capturing_stream_;
     cudaError_t ret = cudaStreamBeginCapture(capturing_stream_, cudaStreamCaptureModeGlobal);
     if (ret != cudaSuccess){
       LOG(ERROR) << "cuda being capture faild: " << ret;

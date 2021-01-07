@@ -189,6 +189,8 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
   options.config.mutable_gpu_options()->set_force_gpu_compatible(true);
   options.config.mutable_gpu_options()->set_allow_growth(false);
   std::unique_ptr<Session> session(NewSession(options));
+  
+ // LOG(INFO) << "[Jieluo] graph for capture: " << graph_def.DebugString();
   TF_CHECK_OK(session->CreateForCapture(graph_def));
 
   // init host_allocator
@@ -208,6 +210,7 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
   // capture the cuda graph
   assert(session->SupportsCudaGraph());
   cudaStream_t stream = session->EnableGraphCapture(graph_name);
+  LOG(INFO) << "capturing on stream -- " << stream;
   if (stream == NULL) {
     return Status(error::Code::INTERNAL,
                   "Get stream for graph capturing failed.");

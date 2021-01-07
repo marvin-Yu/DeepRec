@@ -44,7 +44,7 @@ public:
   bool AddPlaceholder(const std::string& ph_name, const DataType& dtype, const PartialTensorShape& shape);
   bool AddIdentityNode(const std::string& origin_node_name, const int origin_slot, std::string& identity_node_name);
   bool GetNodeConsumedTensorInfo(const std::string& provider_node_name, 
-                                 std::vector<int> consumed_index);
+                                 std::vector<int>& consumed_index);
   bool GetNodeProviderTensorInfo(const std::string& consumer_node_name,
                                  std::vector<std::string>& provider_tensor,
                                  std::vector<std::string>& provider_node,

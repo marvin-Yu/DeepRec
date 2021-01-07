@@ -731,6 +731,9 @@ void BaseGPUDevice::ComputeAsync(AsyncOpKernel* op_kernel,
   VLOG(1) << "GpuDevice::ComputeAsync " << op_kernel->name() << " op "
           << op_kernel->type_string() << " on GPU" << tf_gpu_id_ << " stream["
           << stream_id << "]";
+  LOG(INFO) << "[Jieluo] GpuDevice::ComputeAsync " << op_kernel->name() << " op "
+          << op_kernel->type_string() << " on GPU" << tf_gpu_id_ << " stream["
+          << stream_id << "]";
 
   ScopedActivateExecutorContext scoped_activation{stream->parent()};
   op_kernel->ComputeAsync(context, done);
