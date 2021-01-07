@@ -105,6 +105,24 @@ NodeDefBuilder& NodeDefBuilder::Input(const NodeOut& src) {
   return *this;
 }
 
+NodeDefBuilder& NodeDefBuilder::Input(const NodeDef& src_node, int src_index) {
+  OpDef src_op_def;
+  const Status status = op_registry->LookUpOpDef(string(src_node.op()), &src_op_def);
+  if (!status.ok()) {
+    errors_.push_back(status.error_message());
+    return *this;
+  }
+  DataType type;
+  AttrSlice slice(src_node);
+  const Status status_type = slice.OutputTypeForNode(src_node, src_op_def, src_index, &type);
+  if (!status_type.ok() {
+    errors_.push_back(status_type.error_message());
+    return *this;
+  }
+  Input(src_node.name(), src_index, type);
+  return *this;
+ }
+
 // For inputs that take a list of tensors.
 NodeDefBuilder& NodeDefBuilder::Input(gtl::ArraySlice<NodeOut> src_list) {
   const OpDef::ArgDef* arg = NextArgDef();

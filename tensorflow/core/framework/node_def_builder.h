@@ -77,6 +77,7 @@ class NodeDefBuilder {
   // For inputs that take a single tensor.
   NodeDefBuilder& Input(StringPiece src_node, int src_index, DataType dt);
   NodeDefBuilder& Input(const NodeOut& src);
+  NodeDefBuilder& Input(const NodeDef& src_node, int src_index);
 
   // For inputs that take a list of tensors.
   NodeDefBuilder& Input(gtl::ArraySlice<NodeOut> src_list);
