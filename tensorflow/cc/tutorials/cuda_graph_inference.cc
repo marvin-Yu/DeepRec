@@ -336,18 +336,70 @@ Status Test(GraphDef & graph_def,
             int num_infers_per_thread,
             int num_streams,
             int num_threads){
-    /*
-    assert(num_streams <= MAX_NUM_STREAMS);
-    */
-
-
     // Creates a session.
     SessionOptions options;
     PrepareSessionOption(options);
     // for cudagraph config
     std::unique_ptr<Session> session(NewSession(options));
+
+    if (options.target.empty()) {
+        graph::SetDefaultDevice("/device:GPU:0", &graph_def);
+    }
+    LOG(INFO) << "[jieluo] Check node device before create session"
+    graph::CheckNodeDevice("/device:GPU:0", &graph_def);
     TF_CHECK_OK(session->Create(graph_def));
+
+    cudaStream_t stream = session->EnableGraphCapture("TestModel");
+    LOG(INFO) << "capturing on stream -- " << stream;
+    if (stream == NULL){
+        return Status(error::Code::INTERNAL, "Get stream for graph capturing failed.");
+    }
+    TF_CHECK_OK(session->CreateForCapture(graph_def));
+    
+    // For multiple-stream runs, 
+    // We need to capture multiple independent cuda graphs
+    // with seperated inputs/output buffers, and buffers for intermedidate layers
+    InputsMap inputs_cuda_graph[MAX_NUM_STREAMS];
+    std::vector<Tensor> input_tensors_cuda_graph[MAX_NUM_STREAMS];
+    std::vector<Tensor> output_tensors_cuda_graph[MAX_NUM_STREAMS];
+
+    // prepare inputs
+    for(int i = 0; i < num_streams; i ++){
+        GenerateInputs(graph_def, input_names, input_tensors_cuda_graph[i], batch_size);
+        
+        // copy from the input tensors for normal TF runs,
+        // so we can compare the results
+        for(int ii = 0; ii < input_names.size(); ii ++){
+            CopyTensorContents(input_tensors_cuda_graph[i][ii], input_tensors_tf[ii]);
+        }
+        
+        FillInputsMap(inputs_cuda_graph[i], input_names, input_tensors_cuda_graph[i]);
+    }
+    
+    // capture multiple graphs
+    for(int i = 0; i < num_streams; i ++){
+        CudaGraphMeta meta;
+        TF_CHECK_OK(session->RunForCapture(inputs_cuda_graph[i], output_names, {}, &meta));
+    }
+
+    session->DisableGraphCapture();
     /* 
+    
+    assert(num_streams <= MAX_NUM_STREAMS);
+    
+    // Creates a session.
+    SessionOptions options;
+    options.config.mutable_gpu_options()->set_force_gpu_compatible(true);
+    options.config.mutable_gpu_options()->set_allow_growth(false);
+    std::unique_ptr<Session> session(NewSession(options));
+    
+    if (options.target.empty()) {
+        graph::SetDefaultDevice("/device:GPU:0", &graph_def);
+    }
+    LOG(INFO) << "[jieluo] Check node device before create session"
+    graph::CheckNodeDevice("/device:GPU:0", &graph_def);
+    TF_CHECK_OK(session->Create(graph_def));
+        
     const DeviceMgr * device_manager;
     TF_CHECK_OK(session->LocalDeviceManager(&device_manager));
     std::vector<Device*> devices=device_manager->ListDevices();
@@ -382,8 +434,6 @@ Status Test(GraphDef & graph_def,
     }
     auto end = std::chrono::system_clock::now();
     
-    return Status();
-  
     for(int i = 0; i < num_threads; i ++){
         LOG(INFO) << "TF results: ";
         PrintTensorData(output_tensors_tf[i][0]); // print first output tensor
@@ -439,7 +489,7 @@ Status Test(GraphDef & graph_def,
     // turn off graph capture mode
     session->DisableGraphCapture();
     
-  //  LogCudaGraphStatus(session.get());
+    LogCudaGraphStatus(session.get());
     
     LOG(INFO) << "Run the cuda graphs in multiple streams";
     
@@ -559,6 +609,7 @@ Status Test(GraphDef & graph_def,
     
     TF_CHECK_OK(session->DestroyCudaGraphs());
     TF_CHECK_OK(session->Close());
+    return Status();
     */
     return Status();
 }
