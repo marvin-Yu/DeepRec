@@ -63,7 +63,8 @@ void CUDART_CB CudaGraphCallback(cudaStream_t stream,
     OP_REQUIRES_OK(ctx, ctx->allocate_output(i, meta->output_tensors_[i].shape(), &output));
     output->CopyFrom(meta->output_tensors_[i]);
   }
-
+  CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
+  mgr.ReturnCudagraphMeta(graph_name_, bucket, meta);
   args->done_();
   delete args;
 }
@@ -83,7 +84,7 @@ Status CudaGraphOp::FetchCudaGraphMetaAndStream(int batch_size, int req_id,
   }
 
   CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
-  mgr.GetCudagraphMeta(graph_name_, bucket, req_id, meta);
+  mgr.GetCudagraphMeta(graph_name_, bucket, meta);
   mgr.GetCudaStream(req_id, stream);
   return Stutas::OK();
 }

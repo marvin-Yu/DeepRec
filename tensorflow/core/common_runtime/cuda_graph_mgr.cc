@@ -224,9 +224,9 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
     if (batch_meta_map.find(batch_size[i]) == batch_meta_map.end()) {
       batch_meta_map.emplace(batch_size[i], std::vector<CudaGraphMeta>());
     }
-    batch_meta_map[batch_size[i]].push_back(CudaGraphMeta());
+    CudaGraphMeta* meta = new CudaGraphMeta();
+    batch_meta_map[batch_size[i]].push_back(meta);
     int meta_size = batch_meta_map[batch_size[i]].size();
-    CudaGraphMeta* meta = &(batch_meta_map[batch_size[i]][meta_size - 1]);
 
     std::vector<Tensor> input_tensors_cuda_graph;
     InputsMap inputs_cuda_graph;
@@ -235,9 +235,64 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
     TF_CHECK_OK(session->RunForCapture(inputs_cuda_graph, output_node_names, {}, meta));
   }
 
+  // add pool lock
+  if (meta_pool_lock_.find(graph_name) == meta_pool_lock_.end()) {
+    meta_pool_lock_.emplace(graph_name, std::unordered_map<int, std::mutex>());
+  }
+  if (meta_pool_lock_[graph_name]find(batch_size) == meta_pool_lock_[graph_name].end()) {
+    meta_pool_lock_[graph_name].emplace(batch_size, {std::mutex(), std::condition_variable()});
+  }  
+  
   // turn off graph capture mode
   session->DisableGraphCapture();
   LogCudaGraphStatus(session.get());
+  return Status::OK();
+}
+
+Status CudaGraphMgr::GetCudagraphMeta(const std::string& cudagrpah_name, 
+                                      const int bucket,
+                                      CudaGraphMeta*& meta) {
+  if (meta_pool_lock_.find(cudagraph_name) == meta_pool_lock_.end()) {
+    // return
+  } else if (meta_pool_lock_[cudagrpah_name].find(bucket) == meta_pool_lock_[cudagraph_name].end()) {
+    // return
+  }
+
+  std::mutex& mutex = meta_pool_lock_[cudagraph_name][bucket].first;
+  std::condition_variable& cv = meta_pool_lock_[cudagraph_name][bucket].second;
+  std::vector<CudaGraphMeta>& metas = graphname_batch_metas_map_[cudagraph_name][bucket];
+
+  std::unique_lock<std::mutex> lock(mutex);
+  if (metas.size() > 0) {
+    meta = metas.pop_back();
+    return Status::OK();
+  } else {
+    while(metas.size() == 0) {
+      cv.wait(lock);
+    }
+    meta = metas.pop_back();
+    return Status::OK();
+  }
+}
+
+Status CudaGraphMgr::ReturnCudaGraphMeta(const std::string& cudagrpah_name, 
+                                      const int bucket,
+                                      CudaGraphMeta* meta) {
+  if (meta_pool_lock_.find(cudagraph_name) == meta_pool_lock_.end()) {
+    // return
+  } else if (meta_pool_lock_[cudagrpah_name].find(bucket) == meta_pool_lock_[cudagraph_name].end()) {
+    // return
+  }
+
+  std::mutex& mutex = meta_pool_lock_[cudagraph_name][bucket].first;
+  std::condition_variable& cv = meta_pool_lock_[cudagraph_name][bucket].second;
+  std::vector<CudaGraphMeta>& metas = graphname_batch_metas_map_[cudagraph_name][bucket];
+
+  std::unique_lock<std::mutex> lock(mutex);
+  metas.push_back(meta);
+  if (metas.size() == 1) {
+    cv.notify_one(lock);
+  }
   return Status::OK();
 }
 

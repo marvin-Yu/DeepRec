@@ -24,6 +24,7 @@ namespace tensorflow {
 
 typedef std::vector<std::pair<std::string, Tensor>> InputsMap;
 typedef std::unordered_map<int, std::vector<CudaGraphMeta>> BatchGraphMetaMap;
+typedef std::unordered_map<int, std::pair<std::mutex, std::condition_variable>> BatchMetaLockMap;
 
 class CudaGraphMgr {
 public:
@@ -35,8 +36,11 @@ public:
                           const std::vector<std::string>& output_node_names,
                           const std::vector<int>& batch_size);
   Status GetCudagraphMeta(const std::string& cudagrpah_name, 
-                          int bucket, int req_id, 
+                          const int bucket,
                           CudaGraphMeta*& meta);
+  Status ReturnCudaGraphMeta(const std::string& cudagraph_name,
+                             const int bucket,
+                             CudaGraphMeta* meta);
   void DestoryCudagraphMeta();
   Status GetCudaStream(int req_id, cudaStream_t& stream);
 
@@ -68,6 +72,7 @@ private:
   // so we can run multiple graph instances in parallel
   // (to separate their memory, mutiple graphs are needed).
   std::unordered_map<std::string, BatchGraphMetaMap> graphname_batch_metas_map_;
+  std::unordered_map<std::string, BatchMetaLockMap> meta_pool_lock_;
   std::vector<cudaStream_t> streams_;
   // stream and cuda graph instance count, each instance corresponds to one stream
   int num_instance_; 
