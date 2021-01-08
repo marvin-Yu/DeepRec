@@ -23,8 +23,8 @@
 namespace tensorflow {
 
 typedef std::vector<std::pair<std::string, Tensor>> InputsMap;
-typedef std::unordered_map<int, std::vector<CudaGraphMeta>> BatchGraphMetaMap;
-typedef std::unordered_map<int, std::pair<std::mutex, std::condition_variable>> BatchMetaLockMap;
+typedef std::unordered_map<int, std::vector<CudaGraphMeta*>> BatchGraphMetaMap;
+typedef std::unordered_map<int, std::pair<std::mutex*, std::condition_variable*>> BatchMetaLockMap;
 
 class CudaGraphMgr {
 public:
