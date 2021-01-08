@@ -52,6 +52,7 @@ class BlazeXlaOp : public OpKernel {
   Env* env_;
   std::mutex tracing_mu_;
   std::mutex benchmark_mu_;
+  std::atomic<int> benchmark_counter_;
 };
 
 void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
@@ -132,11 +133,16 @@ void BlazeXlaOp::ComputeNormal(OpKernelContext* ctx) {
 }
 
 void BlazeXlaOp::ComputeBenchmark(OpKernelContext* ctx) {
-  auto& helper = BenchmarkHelper::GetInstance();
-  helper.Start();
-  while(1) {
-    predictor_->Compute(ctx);
-    helper.Add();
+  if (benchmark_counter_ < 200) {
+    ComputeNormal(ctx);
+    ++benchmark_counter_;
+  } else {
+    auto& helper = BenchmarkHelper::GetInstance();
+    helper.Start();
+    while(1) {
+      predictor_->Compute(ctx);
+      helper.Add();
+    }
   }
 }
 

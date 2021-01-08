@@ -16,6 +16,14 @@ export TF_CUDA_CLANG=0
 export TF_CUDA_COMPUTE_CAPABILITIES="6.0,6.1,7.0,7.5"
 export TF_NEED_CUDA=1
 export TF_ENABLE_XLA=1
+export TF_NEED_OPENCL=0
+export TF_NEED_OPENCL_SYCL=0
+export TF_NEED_ROCM=0
+export TF_NEED_TENSORRT=0
+export GCC_HOST_COMPILER_PATH=/usr/bin/gcc
+export TF_NEED_MPI=0
+export CC_OPT_FLAGS="-march=native"
+export TF_SET_ANDROID_WORKSPACE=0
 
 declare -a targets=("//tensorflow:libtensorflow_framework.so"
                     "//tensorflow:libtensorflow_cc.so")
@@ -23,6 +31,9 @@ declare -a install_targets=("libtensorflow_framework.so"
                             "libtensorflow_framework.so.1"
                             "libtensorflow_cc.so.1"
                             "libtensorflow_cc.so")
+if [ ! -f ".tf_configure.bazelrc" ]; then
+    python ./configure.py
+fi
 ## now loop through the above array
 for target in "${targets[@]}"
 do
