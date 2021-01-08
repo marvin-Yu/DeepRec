@@ -7479,10 +7479,12 @@ cc_library(
     srcs = [
         "blaze_predictor.cc",
         "blaze_xla_predictor.cc",
+        "benchmark_helper.cc",
     ],
     hdrs = [
         "blaze_predictor.h",
         "blaze_xla_predictor.h",
+        "benchmark_helper.h",
     ],
     deps = blaze_deps,
     alwayslink = 1,

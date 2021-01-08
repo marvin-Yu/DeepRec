@@ -13,6 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 #include "tensorflow/core/common_runtime/copy_tensor.h"
+#include "tensorflow/core/kernels/benchmark_helper.h"
 #include "tensorflow/core/kernels/blaze_predictor.h"
 #include "tensorflow/core/kernels/blaze_xla_predictor.h"
 
@@ -32,6 +33,9 @@ class BlazeXlaOp : public OpKernel {
   void CopyTensor(MemoryType, OpKernelContext* ctx,
                   const string& name, const Tensor& tensor);
 
+  void ComputeNormal(OpKernelContext* context);
+  void ComputeBenchmark(OpKernelContext* context);
+
   DeviceType device_type_;
   std::vector<std::string> input_names_;
   std::vector<std::string> output_names_;
@@ -47,6 +51,7 @@ class BlazeXlaOp : public OpKernel {
   BlazeKernelOptions blaze_run_options_;
   Env* env_;
   std::mutex tracing_mu_;
+  std::mutex benchmark_mu_;
 };
 
 void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
@@ -109,7 +114,7 @@ Status BlazeXlaOp::ParseAttr() {
   return Status::OK();
 }
 
-void BlazeXlaOp::Compute(OpKernelContext* ctx) {
+void BlazeXlaOp::ComputeNormal(OpKernelContext* ctx) {
   if (!ctx->traced_infos()) {
     predictor_->Compute(ctx);
   } else {
@@ -122,6 +127,32 @@ void BlazeXlaOp::Compute(OpKernelContext* ctx) {
 
     if (ctx->traced_infos()->enable_trace_tensors) {
       TraceTensors(ctx);
+    }
+  }
+}
+
+void BlazeXlaOp::ComputeBenchmark(OpKernelContext* ctx) {
+  auto& helper = BenchmarkHelper::GetInstance();
+  helper.Start();
+  while(1) {
+    predictor_->Compute(ctx);
+    helper.Add();
+  }
+}
+
+void BlazeXlaOp::Compute(OpKernelContext* ctx) {
+  switch(blaze_run_options_.run_mode()) {
+    case BlazeKernelOptions::DEFAULT: {
+      ComputeNormal(ctx);
+      break;
+    }
+    case BlazeKernelOptions::BENCHMARK: {
+      std::lock_guard<std::mutex> l(benchmark_mu_);
+      ComputeBenchmark(ctx);
+      break;
+    }
+    default: {
+      ComputeNormal(ctx);
     }
   }
 }
