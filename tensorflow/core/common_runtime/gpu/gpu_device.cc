@@ -374,6 +374,7 @@ BaseGPUDevice::~BaseGPUDevice() {
 #ifdef GOOGLE_CUDA
 // For enabling cuda-graph
 void BaseGPUDevice::SetSingleStream(){
+    LOG(INFO) << "[Jieluo] begin set single stream";
     if(stream_catpure_mode_) return;
 
     stream_backup_ = *streams_[0];

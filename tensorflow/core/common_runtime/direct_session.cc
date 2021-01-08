@@ -1549,6 +1549,21 @@ Status DirectSession::Run(const RunOptions& run_options,
   }
   metrics::RecordGraphInputTensors(input_size);
 
+#ifdef GOOGLE_CUDA
+  // save the host addresses for the inputs
+  if(cuda_graph_capture_mode_){
+      input_host_address_.clear();
+      for(const auto& it: inputs){        
+          input_host_address_.push_back(GetTensorBasePtr(it.second));
+          if(std::find(host_memory_inputs_.begin(), host_memory_inputs_.end(), it.first) != host_memory_inputs_.end()){
+              LOG(INFO) << "Record host memory place holder input address for " << it.first;
+              host_memory_inputs_address_.push_back(GetTensorBasePtr(it.second));
+          }
+      }  
+  }
+  num_output_tensors_ = output_names.size();  
+#endif
+
   // Check if we already have an executor for these arguments.
   ExecutorsAndKeys* executors_and_keys;
   RunStateArgs run_state_args(run_options.debug_options());
@@ -1594,9 +1609,10 @@ Status DirectSession::Run(const RunOptions& run_options,
     LogMemory::RecordStep(step_id, run_state_args.handle);
   }
 
+  CudaGraphMeta meta;
   TF_RETURN_IF_ERROR(RunInternal(step_id, run_options, &call_frame,
                                  executors_and_keys, run_metadata,
-                                 thread::ThreadPoolOptions()));
+                                 thread::ThreadPoolOptions(), &meta));
 
   // Receive outputs.
   if (outputs) {
