@@ -139,6 +139,7 @@ void BlazeXlaOp::ComputeBenchmark(OpKernelContext* ctx) {
   } else {
     auto& helper = BenchmarkHelper::GetInstance();
     helper.Start();
+    std::lock_guard<std::mutex> l(benchmark_mu_);
     while(1) {
       predictor_->Compute(ctx);
       helper.Add();
@@ -153,7 +154,6 @@ void BlazeXlaOp::Compute(OpKernelContext* ctx) {
       break;
     }
     case BlazeKernelOptions::BENCHMARK: {
-      std::lock_guard<std::mutex> l(benchmark_mu_);
       ComputeBenchmark(ctx);
       break;
     }
