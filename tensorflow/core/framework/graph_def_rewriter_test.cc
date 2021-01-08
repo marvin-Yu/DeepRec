@@ -74,5 +74,23 @@ TEST_F(GraphDefRewriterTest, GenSubSimple) {
   SubgraphGenerator::GenerateSubgraph(graph_def_, output_graph, desc, inputs, outputs);
 }
 
+
+TEST_F(GraphDefRewriterTest, RepSubSimple) {
+  Setup(SIMPLE_MODE_PATH);
+  GraphDef output_graph;
+
+  SubgraphDescription desc;
+  desc.set_subgraph_name("simple");
+  desc.add_output_node_names("MatMul_3");
+  SubgraphInputTensor* input = desc.add_input_tensors();
+  input->set_tensor_provider_name("MatMul_1");
+  input->set_tensor_provider_slot(0);
+  input->set_ph_name("ph");
+  input->set_type(DataType::DT_FLOAT);
+  input->add_shape(-1);
+  input->add_shape(512);
+  SubgraphGenerator::ReplaceSubgraph(graph_def_, output_graph, desc, {64}, {"output"}});
+}
+
 }
 } // tensorflow
