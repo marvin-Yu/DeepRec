@@ -37,7 +37,7 @@ private:
 private:
   std::unordered_map<std::string, NodeDef> node_map_;
   std::unordered_map<std::string, std::vector<ConsumerInfo>> provider_consumer_info_map_;
-  OpRegistryInterface* globla_op_registry_;
+  OpRegistryInterface* global_op_registry_;
 
 public:
   GraphDefRewriter(const GraphDef& origin_graph_def);
@@ -70,7 +70,7 @@ private:
 };
 
 GraphDefRewriter::GraphDefRewriter(const GraphDef& origin_graph_def) {
-  globla_op_registry_ = OpRegistry::Global();
+  global_op_registry_ = OpRegistry::Global();
   InitNodeMap(origin_graph_def);
 }
 
