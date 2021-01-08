@@ -219,7 +219,7 @@ Status BlazeXlaPredictor::PrepareData() {
 
 int BlazeXlaPredictor::InferBatchSize(const std::vector<Tensor>& tensors) {
   int batchsize = -1;
-  for (int i = 0; i < tensors.size(); ++i) {
+  for (size_t i = 0; i < tensors.size(); ++i) {
     VLOG(1) << "Shape of input " << i << ": "
             << tensors[i].shape().DebugString();
     if (skip_padding_[i]) continue;
@@ -297,14 +297,18 @@ Status BlazeXlaPredictor::PadToStatic(const std::vector<Tensor>& inputs,
   return Status::OK();
 }
 
+const int kUnPadding = 1;
 Status BlazeXlaPredictor::SliceToDynamic(const std::vector<Tensor>& padded_outputs,
-                                         std::vector<Tensor*>* outputs,
                                          int batchsize, int pad_to_batchsize,
-                                         OpKernelContext* ctx) {
+                                         std::vector<Tensor>& outputs, OpKernelContext* ctx) {
   for (int i = 0; i < padded_outputs.size(); ++i) {
     VLOG(1) << "Shape of padded_output " << i << ": "
             << padded_outputs[i].shape().DebugString();
     TensorShape slice_to_shape = padded_outputs[i].shape();
+    if (slice_to_shape.dim_size(0) == kUnPadding) {
+      outputs.push_back(padded_outputs[i]);
+      continue;
+    }
     if (slice_to_shape.dim_size(0) != pad_to_batchsize) {
       return errors::Internal(
           "Shape error, cannot slice output: padded_output shape = " +
@@ -312,37 +316,7 @@ Status BlazeXlaPredictor::SliceToDynamic(const std::vector<Tensor>& padded_outpu
           ", pad_to_batchsize = " +
           std::to_string(pad_to_batchsize));
     }
-    slice_to_shape.set_dim(0, batchsize);
-    Status allocate_status =
-        ctx->allocate_output(i, slice_to_shape, &(*outputs)[i]);
-    if (!allocate_status.ok()) {
-      return allocate_status;
-    }
-    uint8* output_ptr = (uint8*)GetTensorAddress((*outputs)[i]);
-    const uint8* padded_ptr = (uint8*)GetTensorAddress(&padded_outputs[i]);
-    uint64 output_size = GetTensorSize((*outputs)[i]);
-    uint64 padded_size = GetTensorSize(&padded_outputs[i]);
-    if (output_ptr == nullptr || padded_ptr == nullptr ||
-        output_size == 0 || padded_size == 0) {
-      return errors::Internal(
-          "Error when getting output address or size");
-    }
-    if (device_type_ == DEVICE_GPU && ctx->input_memory_type(i) == DEVICE_MEMORY) {
-#if GOOGLE_CUDA
-      auto* stream = ctx->op_device_context()->stream();
-      auto output_dev_ptr = AsDeviceMemory(output_ptr, output_size);
-      auto padded_dev_ptr = AsDeviceMemory(padded_ptr, padded_size);
-      bool copy_status =
-          stream->ThenMemcpyD2D(&output_dev_ptr, padded_dev_ptr, output_size).ok();
-      if (!copy_status) {
-        return errors::Internal("MemcpyD2D for unpadding outputs failed.");
-      }
-#endif
-    } else {
-      memcpy(output_ptr, padded_ptr, output_size);
-    }
-    VLOG(1) << "Shape of output " << i << ": "
-            << (*outputs)[i]->shape().DebugString();
+    outputs.push_back(padded_outputs[i].Slice(0, batchsize));
   }
   return Status::OK();
 }
@@ -396,12 +370,15 @@ void BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
     }
 
     // Unpad outputs
-    std::vector<Tensor*> outputs(ctx->num_outputs());
-    status = SliceToDynamic(padded_outputs, &outputs,
-                            batchsize, pad_to_batchsize, ctx);
+    std::vector<Tensor> outputs;
+    outputs.reserve(padded_outputs.size());
+    status = SliceToDynamic(padded_outputs, batchsize, pad_to_batchsize, outputs, ctx);
     if (!status.ok()) {
       ctx->SetStatus(status);
       return;
+    }
+    for (int i = 0; i < outputs.size(); ++i) {
+      ctx->set_output(i, outputs[i]);
     }
   } else {
     // Call SessionRun

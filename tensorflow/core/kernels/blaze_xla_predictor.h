@@ -25,9 +25,8 @@ class BlazeXlaPredictor : public BlazePredictor {
                      OpKernelContext* ctx);
 
   Status SliceToDynamic(const std::vector<Tensor>& padded_outputs,
-                        std::vector<Tensor*>* outputs,
                         int batchsize, int pad_to_batchsize,
-                        OpKernelContext* ctx);
+                        std::vector<Tensor>& outputs, OpKernelContext* ctx);
   int InferBatchSize(const std::vector<Tensor>& tensors);
   
   Status InitXlaWarmup();
