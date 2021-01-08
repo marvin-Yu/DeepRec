@@ -16,6 +16,7 @@
 #include <unordered_set>
 #include "tensorflow/core/framework/graph.pb.h"
 #include "tensorflow/core/framework/node_def.pb.h"
+#include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/tensor_shape.h"
 #include "tensorflow/core/protobuf/config.pb.h"
 
@@ -36,6 +37,7 @@ private:
 private:
   std::unordered_map<std::string, NodeDef> node_map_;
   std::unordered_map<std::string, std::vector<ConsumerInfo>> provider_consumer_info_map_;
+  OpRegistryInterface* globla_op_registry_;
 
 public:
   GraphDefRewriter(const GraphDef& origin_graph_def);
@@ -44,7 +46,8 @@ public:
   bool AddPlaceholder(const std::string& ph_name, const DataType& dtype, const PartialTensorShape& shape);
   bool AddIdentityNode(const std::string& origin_node_name, const int origin_slot, std::string& identity_node_name);
   bool GetNodeConsumedTensorInfo(const std::string& provider_node_name, 
-                                 std::vector<int>& consumed_index);
+                                 std::vector<int>& consumed_index,
+                                 std::vector<DataType>& data_types);
   bool GetNodeProviderTensorInfo(const std::string& consumer_node_name,
                                  std::vector<std::string>& provider_tensor,
                                  std::vector<std::string>& provider_node,
@@ -62,10 +65,12 @@ public:
 private:
   bool ExtractConsumerInfo(const NodeDef& node); 
   bool ExtractInputNodeAndSlot(const std::string& input, std::string& node, int& slot);
+  bool CollectOutputNodeNames(std::vector<std::string>& output_nodes);
   
 };
 
 GraphDefRewriter::GraphDefRewriter(const GraphDef& origin_graph_def) {
+  globla_op_registry_ = OpRegistry::Global();
   InitNodeMap(origin_graph_def);
 }
 
@@ -82,7 +87,8 @@ public:
   bool static ReplaceSubgraph(const GraphDef&  origin_graph, 
                               GraphDef& output_graph, 
                               const std::vector<SubgraphDescription*>& subgraph_descriptions,
-                              const std::vector<int> buckets);
+                              const std::vector<int> buckets,
+                              const std::vector<std::string>& output_nodes);
 private:
   void static CopyCommonField(const GraphDef& origin_graph, GraphDef& output_graph);
 };

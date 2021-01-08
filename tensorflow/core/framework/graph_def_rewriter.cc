@@ -14,6 +14,7 @@
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_split.h"
 #include "tensorflow/core/framework/node_def_builder.h"
+#include "tensorflow/core/framework/node_def_util.h"
 #include "tensorflow/core/lib/strings/strcat.h"
 #include "tensorflow/core/platform/logging.h"
 
@@ -23,6 +24,15 @@ static const std::string IDENTITY = "Identity";
 static const std::string OUTPUT_IDENTITY_SUFFIX = "/output_";
 
 namespace tensorflow {
+
+bool GraphDefRewriter::CollectOutputNodeNames(std::vector<std::string>& output_nodes) {
+  for (auto& name : node_map_.keys()) {
+    if (provider_consumer_info_map_.find(name) == provider_consumer_info_map_.end()) {
+      output_nodes.emplace_back(name);
+    }
+  }
+  return output_nodes.size() == 0;
+}
 
 bool GraphDefRewriter::ExtractInputNodeAndSlot(const std::string& input, std::string& node, int& slot) {
   std::vector<std::string> provider_parts = absl::StrSplit(input, ':');
@@ -74,7 +84,8 @@ void GraphDefRewriter::InitNodeMap(const GraphDef& origin_graph_def) {
 }
 
 bool GraphDefRewriter::GetNodeConsumedTensorInfo(const std::string& provider_node_name, 
-                                 std::vector<int>& consumed_index) {
+                                 std::vector<int>& consumed_index,
+                                 std::vector<DataType>& data_types) {
   // step1. check node existance
   auto iter = provider_consumer_info_map_.find(provider_node_name);
   if (iter == provider_consumer_info_map_.end()) {
@@ -91,8 +102,13 @@ bool GraphDefRewriter::GetNodeConsumedTensorInfo(const std::string& provider_nod
 
   // step3. extract info needed
   NodeDef& provider = node_map_[provider_node_name];
+  const OpDef* provider_op_def;
+  TF_CHECK_OK(global_op_registry_->LookUpOpDef(string(provider.op()), &provider_op_def));
   for (auto it = slot_set.begin(); it != slot_set.end(); ++it) {
+    DataType type;
     consumed_index.emplace_back(*it);
+    TF_CHECK_OK(OutputTypeForNode(node, *provider_op_def, *it, &type));
+    data_type.emplace_back(type);
   }
   return true;
 }
@@ -165,12 +181,15 @@ bool GraphDefRewriter::AddIdentityNode(const std::string& origin_node_name,
   NodeDef& node = iter->second;
 
   // step2. gen identity node
-  NodeDef id_node;
+  const OpDef* origin_op_def;
+  DataType identity_type;
+  TF_CHECK_OK(global_op_registry_->LookUpOpDef(string(node.op()), &origin_op_def));
+  TF_CHECK_OK(OutputTypeForNode(node, *origin_op_def, origin_slot, &identity_type));
   identity_node_name = strings::StrCat(origin_node_name, OUTPUT_IDENTITY_SUFFIX, origin_slot);
+
+  NodeDef id_node;
   NodeDefBuilder builder(identity_node_name, IDENTITY);
-  LOG(INFO) << "[Jieluo] Before get identity input";
-  TF_CHECK_OK(builder.Input(node, origin_slot).Finalize(&id_node));
-  LOG(INFO) << "[Jieluo] After get identity input";
+  TF_CHECK_OK(builder.Input(node, origin_slot, identity_type).Finalize(&id_node));
    
   // step3. put ot node map
   node_map_.emplace(id_node.name(), id_node);
@@ -362,7 +381,8 @@ bool SubgraphGenerator::GenerateSubgraph(const GraphDef& origin_graph,
 bool SubgraphGenerator::ReplaceSubgraph(const GraphDef& origin_graph, 
                                         GraphDef& output_graph, 
                                         const std::vector<SubgraphDescription*>& subgraph_descriptions,
-                                        const std::vector<int> buckets) {
+                                        const std::vector<int> buckets,
+                                        const std::vector<std::string>& output_nodes) {
   CopyCommonField(origin_graph, output_graph);
 
   GraphDefRewriter rewriter(origin_graph);
@@ -374,7 +394,6 @@ bool SubgraphGenerator::ReplaceSubgraph(const GraphDef& origin_graph,
     std::vector<DataType> T1;
     std::vector<DataType> T2;
 
-    std::vector<std::string> fetch_nodes;
     std::vector<int> fetch_index;
     NodeDefBuilder builder(subgraph_desc->subgraph_name(), CUDA_GRAPH);
     for (int i = 0; i < subgraph_desc->input_tensors_size(); ++i) {
@@ -385,11 +404,12 @@ bool SubgraphGenerator::ReplaceSubgraph(const GraphDef& origin_graph,
                     subgraph_desc->input_tensors(i).type());
     }
     for (int i = 0; i < subgraph_desc->output_node_names_size(); ++i) {
-     /* rewriter.GetNodeConsumedTensorInfo(subgraph_desc->output_node_names(i),
-                                         fetch_names, 
-                                         T2,
-                                         fetch_nodes,
-                                         fetch_index); */
+      rewriter.GetNodeConsumedTensorInfo(subgraph_desc->output_node_names(i),
+                                         fetch_index,
+                                         T2);
+      for (int j = fetch_names.size(); j < fetch_index.size(); ++j) {
+        fetch_names.emplace_back(strings::StrCat(subgraph_desc->output_node_names(i), ":", fetch_index[j]));
+      }
     }
 
     // step2. build cudagraph node 
@@ -410,9 +430,8 @@ bool SubgraphGenerator::ReplaceSubgraph(const GraphDef& origin_graph,
     }
   }
   // step4. 
- // bool succ = rewriter.GenerateGraphDefFromTop(output_graph, subgraph_final_outputs, subgraph_final_inputs);
-  bool succ = true;
-  if (!succ) {
+  std::vector<std::string> input_nodes;
+  if (!rewriter.GenerateGraphDefFromTop(output_graph, output_nodes, input_nodes)) {
     LOG(ERROR) << "Generate subgraph failed.";
   }
   return true;
