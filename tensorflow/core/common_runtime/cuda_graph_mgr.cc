@@ -207,6 +207,17 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
     }
   }
 
+  // First session run, init needed resources
+  int warm_batch = 1;
+  std::vector<Tensor> input_tensors_tf;
+  GenerateInputs(graph_def, input_node_names, input_tensors_tf, &rapoutput_tensors_tf);
+
+  InputsMap inputs_tf; // input map for Normal TF run
+  FillInputsMap(inputs_tf, input_names, input_tensors_tf);
+    
+  std::vector<Tensor> output_tensors_tf;
+  TF_CHECK_OK(sess->Run(inputs, output_node_names, {}, output_tensors));
+
   // capture the cuda graph
   assert(session->SupportsCudaGraph());
   cudaStream_t stream = session->EnableGraphCapture(graph_name);

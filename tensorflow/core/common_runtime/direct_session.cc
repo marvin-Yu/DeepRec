@@ -80,6 +80,7 @@ limitations under the License.
 #include "tensorflow/core/profiler/lib/traceme.h"
 #include "tensorflow/core/protobuf/config.pb.h"
 #include "tensorflow/core/util/device_name_utils.h"
+#include "tensorflow/core/util/dump_graph.h"
 #include "tensorflow/core/util/env_var.h"
 
 namespace tensorflow {
@@ -466,12 +467,19 @@ Status DirectSession::Create(GraphDef&& graph) {
         LOG(ERROR) << "Not all subgraph are captured as cudagraphs";
       }
       GraphDef cudagraph_serving;
-      /* 
       int graph_idx = 0;
+      std::vector<SubgraphDescription*> descs;
+      int descs_size = options_.config.graph_options().optimizer_options().subgraph_descriptions_size();
+      descs.reserve(descs_size);
+      for (int i = 0; i < descs_size; ++i) {
+        descs.emplace_back(&options_.config.graph_options().optimizer_options().subgraph_descriptions(i));
+      }
       bool succ = SubgraphGenerator::ReplaceSubgraph(graph, cudagraph_serving, 
-                      options_.config.graph_options().optimizer_options().subgraph_descriptions(graph_idx));
-      */
-      return ExtendLocked(std::move(graph));
+                                                     descs,
+                                                     {64},
+                                                     {"output"});
+      DumpGraphDefToFile("replace", cudagraph_serving);
+      return ExtendLocked(std::move(cudagraph_serving));
     }
 #endif
     return ExtendLocked(std::move(graph));
