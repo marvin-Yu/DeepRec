@@ -159,9 +159,10 @@ bool GraphDefRewriter::AddPlaceholder(const std::string& ph_name, const DataType
   // step1. build an node def
   NodeDef ph_node;
   NodeDefBuilder builder(ph_name, PLACEHOLDER);
+  PartialTensorShape s({-1, 512});
   TF_CHECK_OK(builder.Attr("dtype", dtype)
-         .Attr("shape", shape)
-         .Attr("_output_shape", shape)
+         .Attr("shape", s)
+         .Attr("_output_shape", s)
          .Finalize(&ph_node));
   
   // step2. put new ph_node into node map
@@ -323,7 +324,9 @@ bool SubgraphGenerator::GenerateSubgraph(const GraphDef& origin_graph,
   // step1. gen new placeholder and replace edge
   for (int i = 0; i < subgraph_desc.input_tensors_size(); ++i) {
     PartialTensorShape shape;
+    LOG(INFO) << "[Jieluo] ph shape size " << subgraph_desc.input_tensors(i).shape_size();
     for (int j = 0; j < subgraph_desc.input_tensors(i).shape_size(); ++j) {
+      LOG(INFO) << "[Jieluo] add dim " << subgraph_desc.input_tensors(i).shape(j);
       shape.AddDim(subgraph_desc.input_tensors(i).shape(j));
     }
     std::string ph_name = subgraph_desc.input_tensors(i).ph_name();
@@ -381,7 +384,7 @@ bool SubgraphGenerator::GenerateSubgraph(const GraphDef& origin_graph,
 
 bool SubgraphGenerator::ReplaceSubgraph(const GraphDef& origin_graph, 
                                         GraphDef& output_graph, 
-                                        const std::vector<SubgraphDescription*>& subgraph_descriptions,
+                                        const std::vector<const SubgraphDescription*>& subgraph_descriptions,
                                         const std::vector<int> buckets,
                                         const std::vector<std::string>& output_nodes) {
   CopyCommonField(origin_graph, output_graph);

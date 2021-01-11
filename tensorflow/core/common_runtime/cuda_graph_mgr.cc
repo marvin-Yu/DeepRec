@@ -125,6 +125,10 @@ void CudaGraphMgr::Init() {
   }
 }
 
+Status CudaGraphMgr::GetCudaStream(int req_id, cudaStream_t& stream) {
+return Status::OK();
+}
+
 void CudaGraphMgr::GenerateInputs(const GraphDef& graph_def, const std::vector<string>& input_names,
                     std::vector<Tensor>& input_tensors, int batch_size) {
   input_tensors.clear();
@@ -208,15 +212,17 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
   }
 
   // First session run, init needed resources
-  int warm_batch = 1;
-  std::vector<Tensor> input_tensors_tf;
-  GenerateInputs(graph_def, input_node_names, input_tensors_tf, &rapoutput_tensors_tf);
+  for (int i = 0; i < batch_size.size(); ++i) {
+    int warm_batch = batch_size[i];
+    std::vector<Tensor> input_tensors_tf;
+    GenerateInputs(graph_def, input_node_names, input_tensors_tf, warm_batch);
 
-  InputsMap inputs_tf; // input map for Normal TF run
-  FillInputsMap(inputs_tf, input_names, input_tensors_tf);
+    InputsMap inputs_tf; // input map for Normal TF run
+    FillInputsMap(inputs_tf, input_node_names, input_tensors_tf);
     
-  std::vector<Tensor> output_tensors_tf;
-  TF_CHECK_OK(sess->Run(inputs, output_node_names, {}, output_tensors));
+    std::vector<Tensor> output_tensors_tf;
+    TF_CHECK_OK(session->Run(inputs_tf, output_node_names, {}, &output_tensors_tf));
+  }
 
   // capture the cuda graph
   assert(session->SupportsCudaGraph());

@@ -4933,6 +4933,17 @@ tf_kernel_library(
     ],
 )
 
+tf_kernel_library(
+    name = "cuda_graph_op",
+    prefix = "cuda_graph_op",
+    deps = REQUIRED_DEPS + [
+        "//tensorflow/core:lib_internal",
+        "//tensorflow/core:core_cpu",
+        "//tensorflow/core:cuda_graph_mgr",
+        "//tensorflow/core:cuda_graph_op_op_lib",
+    ],
+)
+
 cc_library(
     name = "sparse",
     deps = [

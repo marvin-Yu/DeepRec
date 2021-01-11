@@ -89,7 +89,8 @@ TEST_F(GraphDefRewriterTest, RepSubSimple) {
   input->set_type(DataType::DT_FLOAT);
   input->add_shape(-1);
   input->add_shape(512);
-  SubgraphGenerator::ReplaceSubgraph(graph_def_, output_graph, desc, {64}, {"output"}});
+  std::vector<SubgraphDescription*> descs = {&desc};
+  SubgraphGenerator::ReplaceSubgraph(graph_def_, output_graph, descs, {64}, {"output"});
 }
 
 }
