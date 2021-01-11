@@ -400,13 +400,14 @@ bool SubgraphGenerator::ReplaceSubgraph(const GraphDef& origin_graph,
 
     std::vector<int> fetch_index;
     std::vector<std::string> fetch_nodes;
+    std::vector<NodeOut> node_out;
+    node_out.reserve(subgraph_desc->input_tensors_size());
     NodeDefBuilder builder(subgraph_desc->subgraph_name(), CUDA_GRAPH);
     for (int i = 0; i < subgraph_desc->input_tensors_size(); ++i) {
       feed_names.emplace_back(subgraph_desc->input_tensors(i).ph_name());
-      T1.push_back(subgraph_desc->input_tensors(i).type());
-      builder.Input(subgraph_desc->input_tensors(i).tensor_provider_name(),
+      node_out.emplace_back(NodeOut(subgraph_desc->input_tensors(i).tensor_provider_name(),
                     subgraph_desc->input_tensors(i).tensor_provider_slot(),
-                    subgraph_desc->input_tensors(i).type());
+                    subgraph_desc->input_tensors(i).type()));      
     }
     for (int i = 0; i < subgraph_desc->output_node_names_size(); ++i) {
       rewriter.GetNodeConsumedTensorInfo(subgraph_desc->output_node_names(i),
@@ -420,7 +421,8 @@ bool SubgraphGenerator::ReplaceSubgraph(const GraphDef& origin_graph,
 
     // step2. build cudagraph node 
     NodeDef cudagraph_node;
-    TF_CHECK_OK(builder.Attr("feed_names", feed_names)
+    TF_CHECK_OK(builder.Input(node_out)
+          .Attr("feed_names", feed_names)
           .Attr("fetch_names", fetch_names)
           .Attr("T1", T1)
           .Attr("T2", T2)

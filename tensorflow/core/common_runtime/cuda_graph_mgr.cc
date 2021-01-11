@@ -126,7 +126,8 @@ void CudaGraphMgr::Init() {
 }
 
 Status CudaGraphMgr::GetCudaStream(int req_id, cudaStream_t& stream) {
-return Status::OK();
+  stream = streams_[req_id % num_instance_];
+  return Status::OK();
 }
 
 void CudaGraphMgr::GenerateInputs(const GraphDef& graph_def, const std::vector<string>& input_names,

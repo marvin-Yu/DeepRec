@@ -19,11 +19,13 @@ typedef std::function<void()> Callback;
 typedef struct CudaGraphCbArgs {
   OpKernelContext* ctx_;
   CudaGraphMeta* meta_;
+  int origin_batch_size_;
   Callback done_;
 
-  CudaGraphCbArgs(OpKernelContext* ctx, CudaGraphMeta* meta, Callback done) :
+  CudaGraphCbArgs(OpKernelContext* ctx, CudaGraphMeta* meta, int origin_batch_size, Callback done) :
       ctx_(ctx),
       meta_(meta),
+      origin_batch_size_(origin_batch_size),
       done_(done) {};
 } CudaGraphCbArgs;
 
@@ -59,13 +61,16 @@ void CUDART_CB CudaGraphCallback(cudaStream_t stream,
   // todo: copy output tensor;
   OpKernelContext* ctx = args->ctx_;
   CudaGraphMeta* meta = args->meta_;
+  int bucket = meta->output_tensors_[0].dim(0); // check tensor size
   for (int i = 0; i < meta->output_tensors_.size(); ++i) {
     Tensor *output = nullptr;
-    OP_REQUIRES_OK(ctx, ctx->allocate_output(i, meta->output_tensors_[i].shape(), &output));
-  //  output->CopyFrom(meta->output_tensors_[i]); shape~
+    TensorShape shape = meta->output_tensors_[i].shape();
+    shape.set_dim(0, args->origin_batch_size_);
+    OP_REQUIRES_OK(ctx, ctx->allocate_output(i, shape, &output));
+    output->CopyFrom(meta->output_tensors_[i], shape); 
   }
   CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
-//  mgr.ReturnCudaGraphMeta(graph_name_, bucket, meta);
+  mgr.ReturnCudaGraphMeta(graph_name_, bucket, meta);
   args->done_();
   delete args;
 }
@@ -108,13 +113,15 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
               ctx->num_inputs(), " .vs ", fetch_names_.size()), done);
 
   int req_id = 0; // get req_id from ctx
-  int batch_size = 0; // get batch size from input tensor
+  const Tensor& input_0 = ctx->input(0);
+  int batch_size = input_0.dim(0);
 
   cudaStream_t stream;
   CudaGraphMeta* meta;
   FetchCudaGraphMetaAndStream(batch_size, req_id, meta, stream);
 
   // do h2d copies first
+  // do not padding explictly
   for (int i = 0; i < feed_names_.size(); ++i) {
     const Tensor& input = ctx->input(i);
     const void* host_buffer;
