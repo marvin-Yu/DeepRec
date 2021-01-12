@@ -6,6 +6,8 @@
 // Description:
 // CudaGraphOp, fetch a cudagraph instance and launch cudagraph async
 
+#include <algorithm>
+
 #include "tensorflow/core/common_runtime/cuda_graph_meta.h"
 #include "tensorflow/core/common_runtime/cuda_graph_mgr.h"
 #include "tensorflow/core/framework/op.h"
@@ -34,10 +36,6 @@ public:
   explicit CudaGraphOp(OpKernelConstruction* ctx);
 
   void ComputeAsync(OpKernelContext* ctx, DoneCallback done) override;
-
-private:
-  bool FetchCudaGraphMetaAndStream(int batch_size, int req_id, 
-                                     CudaGraphMeta*& meta, cudaStream_t& stream);
 
 private:
   std::string graph_name_;
@@ -75,25 +73,6 @@ void CUDART_CB CudaGraphCallback(cudaStream_t stream,
   delete args;
 }
 
-bool CudaGraphOp::FetchCudaGraphMetaAndStream(int batch_size, int req_id, 
-                                     CudaGraphMeta*& meta, cudaStream_t& stream) {
-  int bucket = -1;
-  for (int i = 0; i < buckets_.size(); ++i) {
-    if (batch_size <= buckets_[i]) {
-      bucket = buckets_[i];
-      break;
-    }
-  }
-  if (bucket < 0) {
-    // todo: report error and return 
-  }
-
-  CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
-  mgr.GetCudagraphMeta(graph_name_, bucket, meta);
-  mgr.GetCudaStream(req_id, stream);
-  return true;
-}
-
 CudaGraphOp::CudaGraphOp(OpKernelConstruction* ctx) : AsyncOpKernel(ctx)  {
   OP_REQUIRES_OK(ctx, ctx->GetAttr("graph_name", &graph_name_));
 
@@ -112,13 +91,21 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
               errors::Internal("Op input size must equal to fetch_names size, ",
               ctx->num_inputs(), " .vs ", fetch_names_.size()), done);
 
-  int req_id = 0; // get req_id from ctx
+  int req_id = ctx->step_id(); // rtp will set session id as step id.
   const Tensor& input_0 = ctx->input(0);
   int batch_size = input_0.dim_size(0);
+  auto upper_iter = std::upper_bound(buckets_.begin(), buckets_.end(), batch_size);
+  if (upper_iter == buckets_.end()) {
+    // todo: record error message
+    return;
+  }
 
+  // step1. fetch metas
   cudaStream_t stream;
   CudaGraphMeta* meta;
-  FetchCudaGraphMetaAndStream(batch_size, req_id, meta, stream);
+  CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
+  OP_REQUIRES_OK_ASYNC(ctx, mgr.GetCudagraphMeta(graph_name_, bucket, meta), done);
+  OP_REQUIRES_OK_ASYNC(ctx, mgr.GetCudaStream(req_id, stream), done);
 
   // do h2d copies first
   // do not padding explictly
@@ -149,20 +136,21 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
     size_t num_elements = input.NumElements();
     size_t num_bytes = num_elements * ele_size;
     void* device_buffer = meta->src_dst_mapping_[i].second;
-    cudaMemcpyAsync(
-        device_buffer, host_buffer, num_bytes,
-        cudaMemcpyHostToDevice, stream); // check
+    OP_REQUIRES_ASYNC(ctx, cudaMemcpyAsync(device_buffer, host_buffer, num_bytes,
+        cudaMemcpyHostToDevice, stream) == cudaSuccess, 
+        errors::Internal("CudaMemCpy to " i " st tensor failed, device addr: ", device_buffer),
+        done);
   }
 
   // run cuda graph instance
   cudaError_t ret = cudaGraphLaunch(meta->cuda_graph_instance_, stream);
-  if (ret != cudaSuccess){
-    LOG(ERROR) << "cudagraph launch faild: " << ret;
-   return;
-  }
+  OP_REQUIRES_ASYNC(ctx, ret == cudaSuccess, 
+        errors::Internal("cudagraph launch faild: ", ret), done);
 
   CudaGraphCbArgs* args = new CudaGraphCbArgs(ctx, meta, batch_size, done);
-  cudaStreamAddCallback(stream, CudaGraphCallback, (void *)(args),0); //check
+  ret = cudaStreamAddCallback(stream, CudaGraphCallback, (void *)(args),0); 
+  OP_REQUIRES_ASYNC(ctx, ret == cudaSuccess, 
+        errors::Internal("Add cuda callback failed: ", ret), done);
   return;
 }
 

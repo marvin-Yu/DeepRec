@@ -248,7 +248,7 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
     FillInputsMap(inputs_cuda_graph, input_node_names, input_tensors_cuda_graph);
     
     for (int j = 0; j < num_instance_; j++) {
-      CudaGraphMeta* meta = new CudaGraphMeta();
+      CudaGraphMeta* meta = new CudaGraphMeta(graph_name, batch_size[i]);
       batch_meta_map[batch_size[i]].push_back(meta);
       TF_CHECK_OK(session->RunForCapture(inputs_cuda_graph, output_node_names, {}, meta));
     }
@@ -272,9 +272,11 @@ Status CudaGraphMgr::GetCudagraphMeta(const std::string& cudagraph_name,
                                       const int bucket,
                                       CudaGraphMeta*& meta) {
   if (meta_pool_lock_.find(cudagraph_name) == meta_pool_lock_.end()) {
-    // return
+    return errors::Internal("Cuda graph instance with name ", cudagraph_name, " not fount.");
   } else if (meta_pool_lock_[cudagraph_name].find(bucket) == meta_pool_lock_[cudagraph_name].end()) {
-    // return
+    return errors::Internal("Cuda graph intannce with name ", 
+                            cudagraph_name, " and batch size ", 
+                            bucket, " not found");
   }
 
   std::mutex* mutex = meta_pool_lock_[cudagraph_name][bucket].first;
@@ -296,18 +298,20 @@ Status CudaGraphMgr::GetCudagraphMeta(const std::string& cudagraph_name,
   }
 }
 
-Status CudaGraphMgr::ReturnCudaGraphMeta(const std::string& cudagraph_name, 
-                                      const int bucket,
-                                      CudaGraphMeta* meta) {
-  if (meta_pool_lock_.find(cudagraph_name) == meta_pool_lock_.end()) {
-    // return
-  } else if (meta_pool_lock_[cudagraph_name].find(bucket) == meta_pool_lock_[cudagraph_name].end()) {
-    // return
+Status CudaGraphMgr::ReturnCudaGraphMeta(CudaGraphMeta* meta) {
+  const std::string& graph_name = meta->graph_name_;
+  const int bucket = meta->batch_size_;
+  if (meta_pool_lock_.find(graph_name) == meta_pool_lock_.end()) {
+    return errors::Internal("Cuda graph instance with name ", graph_name, " not fount.");
+  } else if (meta_pool_lock_[graph_name].find(bucket) == meta_pool_lock_[graph_name].end()) {
+    return errors::Internal("Cuda graph intannce with name ", 
+                            graph_name, " and batch size ", 
+                            bucket, " not found");
   }
 
-  std::mutex* mutex = meta_pool_lock_[cudagraph_name][bucket].first;
-  std::condition_variable* cv = meta_pool_lock_[cudagraph_name][bucket].second;
-  std::vector<CudaGraphMeta*>& metas = graphname_batch_metas_map_[cudagraph_name][bucket];
+  std::mutex* mutex = meta_pool_lock_[graph_name][bucket].first;
+  std::condition_variable* cv = meta_pool_lock_[graph_name][bucket].second;
+  std::vector<CudaGraphMeta*>& metas = graphname_batch_metas_map_[graph_name][bucket];
 
   std::unique_lock<std::mutex> lock(*mutex);
   metas.push_back(meta);

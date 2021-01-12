@@ -27,6 +27,12 @@ typedef struct CudaGraphMeta {
   TensorHolder tensor_holder_;
   std::vector<std::pair<void*, void*>> src_dst_mapping_;
   std::vector<Tensor> output_tensors_;
+  std::string graph_name_;
+  int batch_size_;
+
+CudaGraphMeta(const std::string& graph_name, int batch_size) :
+    graph_name_(graph_name),
+    batch_size_(batch_size) {};
 
 ~CudaGraphMeta() {
   cudaGraphExecDestroy(cuda_graph_instance_);

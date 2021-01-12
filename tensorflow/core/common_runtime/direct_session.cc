@@ -437,6 +437,16 @@ Status DirectSession::Create(GraphDef&& graph) {
                                           subgraph_descriptions(i).
                                           subgraph_name());
       }
+      int buckets_size = options_.config.graph_options().
+                                optimizer_options().
+                                cuda_graph_batch_sizes_size();
+      std::vector<int> buckets;
+      buckets.reserve(buckets_size);
+      for (int i = 0; i < buckets_size; ++i) {
+        buckets.emplace_back(options_.config.graph_options().
+                                optimizer_options().
+                                cuda_graph_batch_sizes(i));
+      }
       // check and capture uncaptured graph
       if (try_capture_cuda_graph) {
         if (!mgr.CheckGraphAllCaptured(cuda_graph_names, uncaptured_index)) {
@@ -458,7 +468,7 @@ Status DirectSession::Create(GraphDef&& graph) {
                                  options_.config.graph_options().optimizer_options().subgraph_descriptions(uncaptured_index[i]).subgraph_name(),
                                  input_node_names,
                                  output_node_names,
-                                 {64});
+                                 buckets);
           }
         }
       }
@@ -474,10 +484,20 @@ Status DirectSession::Create(GraphDef&& graph) {
       for (int i = 0; i < descs_size; ++i) {
         descs.emplace_back(&options_.config.graph_options().optimizer_options().subgraph_descriptions(i));
       }
+      std::vector<std::string> final_outputs;
+      int final_output_size = options_.config.graph_options().
+                                optimizer_options().
+                                output_names_with_cg_size();
+      final_outputs.reserve(final_output_size);
+      for (int i = 0; i < final_output_size; ++i) {
+        final_outputs.emplace_back(options_.config.graph_options().
+                                optimizer_options().
+                                output_names_with_cg(i));
+      }
       bool succ = SubgraphGenerator::ReplaceSubgraph(graph, cudagraph_serving, 
                                                      descs,
-                                                     {64},
-                                                     {"output"});
+                                                     buckets,
+                                                     final_outputs);
       DumpGraphDefToFile("replace", cudagraph_serving);
       return ExtendLocked(std::move(cudagraph_serving));
     }

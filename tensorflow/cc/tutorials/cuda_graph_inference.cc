@@ -316,7 +316,7 @@ void PrepareSessionOption(SessionOptions& options) {
   options.config.mutable_graph_options()->mutable_optimizer_options()->set_cuda_graph_enable(true);
   options.config.mutable_graph_options()->mutable_optimizer_options()->set_try_capture_cuda_graph(true);
   options.config.mutable_graph_options()->mutable_optimizer_options()->add_cuda_graph_batch_sizes(64);
-  LOG(INFO) << "[Jieluo] option debug string: " << options.config.mutable_graph_options()->mutable_optimizer_options()->DebugString(); 
+  options.config.mutable_graph_options()->mutable_optimizer_options()->add_output_names_with_cg("output");
   SubgraphDescription* subgraph = options.config.mutable_graph_options()->mutable_optimizer_options()->add_subgraph_descriptions();
   subgraph->set_subgraph_name("test");
   subgraph->add_output_node_names("MatMul_3");

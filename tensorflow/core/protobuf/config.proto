@@ -280,6 +280,9 @@ message OptimizerOptions {
 
   // if capture cuda graph, capture fixed batch size graph instance
   repeated int32 cuda_graph_batch_sizes = 10;
+
+  // output node names of final serving graph with cuda graph
+  repeated string output_names_with_cg = 11;
 }
 
 message GraphOptions {

@@ -38,9 +38,7 @@ public:
   Status GetCudagraphMeta(const std::string& cudagrpah_name, 
                           const int bucket,
                           CudaGraphMeta*& meta);
-  Status ReturnCudaGraphMeta(const std::string& cudagraph_name,
-                             const int bucket,
-                             CudaGraphMeta* meta);
+  Status ReturnCudaGraphMeta(CudaGraphMeta* meta);
   void DestoryCudagraphMeta();
   Status GetCudaStream(int req_id, cudaStream_t& stream);
 
