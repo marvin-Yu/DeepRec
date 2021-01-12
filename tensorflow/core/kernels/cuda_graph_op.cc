@@ -68,7 +68,7 @@ void CUDART_CB CudaGraphCallback(cudaStream_t stream,
     output->CopyFrom(meta->output_tensors_[i], shape); 
   }
   CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
-//  mgr.ReturnCudaGraphMeta(graph_name_, bucket, meta);
+  mgr.ReturnCudaGraphMeta( meta);
   args->done_();
   delete args;
 }
@@ -104,7 +104,7 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
   cudaStream_t stream;
   CudaGraphMeta* meta;
   CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
-  OP_REQUIRES_OK_ASYNC(ctx, mgr.GetCudagraphMeta(graph_name_, bucket, meta), done);
+  OP_REQUIRES_OK_ASYNC(ctx, mgr.GetCudagraphMeta(graph_name_, *upper_iter, meta), done);
   OP_REQUIRES_OK_ASYNC(ctx, mgr.GetCudaStream(req_id, stream), done);
 
   // do h2d copies first
@@ -138,7 +138,7 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
     void* device_buffer = meta->src_dst_mapping_[i].second;
     OP_REQUIRES_ASYNC(ctx, cudaMemcpyAsync(device_buffer, host_buffer, num_bytes,
         cudaMemcpyHostToDevice, stream) == cudaSuccess, 
-        errors::Internal("CudaMemCpy to " i " st tensor failed, device addr: ", device_buffer),
+        errors::Internal("CudaMemCpy to ", i, " st tensor failed, device addr: ", device_buffer),
         done);
   }
 

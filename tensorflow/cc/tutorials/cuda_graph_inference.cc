@@ -343,7 +343,33 @@ Status Test(GraphDef & graph_def,
     std::unique_ptr<Session> session(NewSession(options));
     graph::SetDefaultDevice("/device:GPU:0", &graph_def);
     TF_CHECK_OK(session->Create(graph_def));
-   return Status();
+    
+    // init host_allocator
+    if (host_allocator == nullptr) {
+      const DeviceMgr* device_manager;
+      TF_CHECK_OK(session->LocalDeviceManager(&device_manager));
+      std::vector<Device*> devices = device_manager->ListDevices();
+      for (auto* d : devices) {
+        if (d->name().find("CPU") != std::string::npos) {
+          // todo: reuse this allocator
+          host_allocator = dynamic_cast<ThreadPoolDevice*>(d)->GetAllocator(
+              AllocatorAttributes());
+        }
+      }
+    }
+
+    // First session run, init needed resources
+    int test_batch = 3;
+    std::vector<Tensor> input_tensors_tf;
+    GenerateInputs(graph_def, input_names, input_tensors_tf, test_batch);
+
+    InputsMap inputs_tf; // input map for Normal TF run
+    FillInputsMap(inputs_tf, input_names, input_tensors_tf);
+    
+    std::vector<Tensor> output_tensors_tf;
+    TF_CHECK_OK(session->Run(inputs_tf, output_names, {}, &output_tensors_tf));
+
+    return Status();
 }
         
 }  // end namespace example
