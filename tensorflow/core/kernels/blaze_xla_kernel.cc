@@ -16,6 +16,7 @@ limitations under the License.
 #include "tensorflow/core/kernels/benchmark_helper.h"
 #include "tensorflow/core/kernels/blaze_predictor.h"
 #include "tensorflow/core/kernels/blaze_xla_predictor.h"
+#include "tensorflow/compiler/jit/flags.h"
 
 namespace tensorflow {
 class BlazeXlaOp : public OpKernel {
@@ -50,8 +51,8 @@ class BlazeXlaOp : public OpKernel {
   std::unique_ptr<BlazePredictor> predictor_;
   BlazeKernelOptions blaze_run_options_;
   Env* env_;
-  std::mutex tracing_mu_;
-  std::mutex benchmark_mu_;
+  mutex tracing_mu_;
+  mutex benchmark_mu_;
   std::atomic<int> benchmark_counter_;
 };
 
@@ -60,9 +61,23 @@ void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
   config->set_allow_soft_placement(true);
   config->mutable_gpu_options()->set_allow_growth(true);
 
+  if (blaze_run_options_.use_single_threaded_executor()) {
+    config->mutable_experimental()->set_executor_type("SINGLE_THREADED_EXECUTOR");
+  }
   LOG(INFO) << "Blaze create with options " << blaze_run_options_.DebugString();
   if (blaze_run_options_.xla_compilation()) {
     auto jitLevel = OptimizerOptions::ON_1;
+    {
+      tensorflow::BuildXlaOpsPassFlags* flags =
+          tensorflow::GetBuildXlaOpsPassFlags();
+      flags->tf_xla_enable_lazy_compilation = false;
+    }
+    {
+      tensorflow::MarkForCompilationPassFlags* flags =
+          tensorflow::GetMarkForCompilationPassFlags();
+      flags->tf_xla_cpu_global_jit = true;
+      flags->tf_xla_min_cluster_size = 1;
+    }
     config->mutable_graph_options()->mutable_optimizer_options()->set_global_jit_level(jitLevel);
     predictor_ = absl::make_unique<BlazeXlaPredictor>(input_names_, output_names_,
                                        graph_def_, device_, blaze_run_options_,
@@ -87,6 +102,7 @@ BlazeXlaOp::BlazeXlaOp(OpKernelConstruction* context)
   InitPredictor(context);
   OP_REQUIRES_OK(context, predictor_->InitSession());
   env_ = Env::Default();
+  benchmark_counter_ = 0;
 }
 
 Status BlazeXlaOp::ParseAttr() {
@@ -134,15 +150,22 @@ void BlazeXlaOp::ComputeNormal(OpKernelContext* ctx) {
 
 void BlazeXlaOp::ComputeBenchmark(OpKernelContext* ctx) {
   if (benchmark_counter_ < 200) {
+    // out from warmup
     ComputeNormal(ctx);
     ++benchmark_counter_;
   } else {
     auto& helper = BenchmarkHelper::GetInstance();
     helper.Start();
-    std::lock_guard<std::mutex> l(benchmark_mu_);
+    mutex_lock l(benchmark_mu_);
     while(1) {
+      auto start_ns = env_->NowNanos();
       predictor_->Compute(ctx);
+      auto end_ns = env_->NowNanos();
+      helper.RecordTM((end_ns - start_ns) / 1000000.0f);
       helper.Add();
+      for (int i = 0; i < ctx->num_outputs(); ++i) {
+        ctx->release_output(i);
+      }
     }
   }
 }
@@ -197,7 +220,7 @@ void BlazeXlaOp::CopyTensor(MemoryType mtype, OpKernelContext* ctx,
         [this, cpu_tensor, ctx, &name](const Status& s) {
           ctx->SetStatus(s);
           if (s.ok()) {
-            std::lock_guard<std::mutex> l(tracing_mu_);
+            mutex_lock l(tracing_mu_);
             if (ctx->traced_infos() && ctx->traced_infos()->traced_tensors) {
             auto name_tensor = ctx->traced_infos()->traced_tensors->add_name_tensors();
             name_tensor->set_name(name);

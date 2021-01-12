@@ -13,6 +13,7 @@ class BlazeXlaPredictor : public BlazePredictor {
   ~BlazeXlaPredictor() override {}
 
   void Compute(OpKernelContext* ctx) override;
+//  void ComputeNull(OpKernelContext* ctx) override;
  private:
   Status FindBlackPaddingInputs();
   InputNodeMap ToInputNodeMap();
@@ -36,6 +37,10 @@ class BlazeXlaPredictor : public BlazePredictor {
   std::vector<int32> batch_sizes_;
   std::vector<bool> skip_padding_;
   NodeMap node_map_;
+
+  bool infered_shapes_;
+  std::vector<TensorShape> output_shapes_;
+  std::mutex shape_mu_;
 };
 }
 #endif

@@ -6,7 +6,7 @@
 namespace tensorflow {
 void BenchmarkHelper::Start() {
   if (!is_running_) {
-    std::lock_guard<std::mutex> l(mu_);
+    mutex_lock l(mu_);
     reporter_thread_ = std::thread(ReportFunc, this);
     is_running_ = true;
   }
@@ -14,7 +14,7 @@ void BenchmarkHelper::Start() {
 
 void BenchmarkHelper::Stop() {
   if (!stop_) {
-    std::lock_guard<std::mutex> l(stop_mu_);
+    mutex_lock l(stop_mu_);
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     stop_ = true;
   }
@@ -31,9 +31,9 @@ void BenchmarkHelper::ReportFunc(BenchmarkHelper* helper) {
   stream.clear();
   while(!helper->stop_) {
     stream << "blaze kernel qps: " << helper->counter_ << "\n";
-    stream << "ts : ";
+    stream << "time_value: ";
     for (auto& pair : helper->time_recorder_) {
-      stream << "time:  " << pair.first << ", value: " << pair.second << "; ";
+      stream << "[" << pair.first << "," << pair.second << "]; ";
     }
     stream << "\n";
     helper->Clear();

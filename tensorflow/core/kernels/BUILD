@@ -7472,6 +7472,7 @@ blaze_deps = [
     "//tensorflow/core/kernels:gpu_utils",
     "//tensorflow/stream_executor/lib",
     "//tensorflow/core/kernels/data:captured_function",
+    "//tensorflow/compiler/jit:flags",
 ]
 
 cc_library(

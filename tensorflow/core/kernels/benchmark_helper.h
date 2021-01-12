@@ -7,6 +7,8 @@
 #include <utility>
 #include <vector>
 
+#include "tensorflow/core/platform/mutex.h"
+
 namespace tensorflow {
 class BenchmarkHelper {
  public:
@@ -49,8 +51,8 @@ class BenchmarkHelper {
   std::atomic<uint64_t> counter_;
   std::vector<std::pair<std::string, std::atomic<int>>> time_recorder_;
   bool is_running_;
-  std::mutex mu_;
-  std::mutex stop_mu_;
+  mutex mu_;
+  mutex stop_mu_;
 
   bool stop_;
   std::thread reporter_thread_;
