@@ -61,7 +61,7 @@ void CUDART_CB CudaGraphCallback(cudaStream_t stream,
   // todo: copy output tensor;
   OpKernelContext* ctx = args->ctx_;
   CudaGraphMeta* meta = args->meta_;
-  int bucket = meta->output_tensors_[0].dim(0); // check tensor size
+  int bucket = meta->output_tensors_[0].dim_size(0); // check tensor size
   for (int i = 0; i < meta->output_tensors_.size(); ++i) {
     Tensor *output = nullptr;
     TensorShape shape = meta->output_tensors_[i].shape();
@@ -70,7 +70,7 @@ void CUDART_CB CudaGraphCallback(cudaStream_t stream,
     output->CopyFrom(meta->output_tensors_[i], shape); 
   }
   CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
-  mgr.ReturnCudaGraphMeta(graph_name_, bucket, meta);
+//  mgr.ReturnCudaGraphMeta(graph_name_, bucket, meta);
   args->done_();
   delete args;
 }
@@ -114,7 +114,7 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
 
   int req_id = 0; // get req_id from ctx
   const Tensor& input_0 = ctx->input(0);
-  int batch_size = input_0.dim(0);
+  int batch_size = input_0.dim_size(0);
 
   cudaStream_t stream;
   CudaGraphMeta* meta;
@@ -161,7 +161,7 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
    return;
   }
 
-  CudaGraphCbArgs* args = new CudaGraphCbArgs(ctx, meta, done);
+  CudaGraphCbArgs* args = new CudaGraphCbArgs(ctx, meta, batch_size, done);
   cudaStreamAddCallback(stream, CudaGraphCallback, (void *)(args),0); //check
   return;
 }

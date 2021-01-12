@@ -341,6 +341,7 @@ Status Test(GraphDef & graph_def,
     PrepareSessionOption(options);
     // for cudagraph config
     std::unique_ptr<Session> session(NewSession(options));
+    graph::SetDefaultDevice("/device:GPU:0", &graph_def);
     TF_CHECK_OK(session->Create(graph_def));
    return Status();
 }

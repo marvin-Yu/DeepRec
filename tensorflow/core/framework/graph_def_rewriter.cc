@@ -22,6 +22,8 @@ static const std::string PLACEHOLDER = "Placeholder";
 static const std::string CUDA_GRAPH = "CudaGraph";
 static const std::string IDENTITY = "Identity";
 static const std::string OUTPUT_IDENTITY_SUFFIX = "/output_";
+static const std::string CPU_DEVICE = "/device:CPU:0";
+static const std::string GPU_DEVICE = "/device:GPU:0";
 
 namespace tensorflow {
 
@@ -372,11 +374,10 @@ bool SubgraphGenerator::GenerateSubgraph(const GraphDef& origin_graph,
   }
 
   // step3. set default device gpu
-  std::string device = "/device:GPU:0";
   for (int i = 0; i < output_graph.node_size(); ++i) {
     auto node = output_graph.mutable_node(i);
     if (node->device().empty()) {
-      node->set_device(device);
+      node->set_device(GPU_DEVICE);
     }
   }
   return true;
@@ -400,12 +401,13 @@ bool SubgraphGenerator::ReplaceSubgraph(const GraphDef& origin_graph,
 
     std::vector<int> fetch_index;
     std::vector<std::string> fetch_nodes;
-    std::vector<NodeOut> node_out;
+    std::vector<NodeDefBuilder::NodeOut> node_out;
     node_out.reserve(subgraph_desc->input_tensors_size());
     NodeDefBuilder builder(subgraph_desc->subgraph_name(), CUDA_GRAPH);
     for (int i = 0; i < subgraph_desc->input_tensors_size(); ++i) {
       feed_names.emplace_back(subgraph_desc->input_tensors(i).ph_name());
-      node_out.emplace_back(NodeOut(subgraph_desc->input_tensors(i).tensor_provider_name(),
+      T1.emplace_back(subgraph_desc->input_tensors(i).type());
+      node_out.emplace_back(NodeDefBuilder::NodeOut(subgraph_desc->input_tensors(i).tensor_provider_name(),
                     subgraph_desc->input_tensors(i).tensor_provider_slot(),
                     subgraph_desc->input_tensors(i).type()));      
     }
@@ -428,6 +430,7 @@ bool SubgraphGenerator::ReplaceSubgraph(const GraphDef& origin_graph,
           .Attr("T2", T2)
           .Attr("buckets", buckets)
           .Attr("graph_name", subgraph_desc->subgraph_name())
+          .Device(CPU_DEVICE)
           .Finalize(&cudagraph_node));
     rewriter.AddNode(std::move(cudagraph_node));
 
