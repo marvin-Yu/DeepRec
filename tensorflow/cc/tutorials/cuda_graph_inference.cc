@@ -310,25 +310,37 @@ void CopyTensorContents(Tensor &dst_tensor, Tensor &src_tensor){
     }
 }
 
-void PrepareSessionOption(SessionOptions& options) {
+void PrepareSessionOption(SessionOptions& options, bool cg_enable = false) {
   options.config.mutable_gpu_options()->set_force_gpu_compatible(true);
   options.config.mutable_gpu_options()->set_allow_growth(false);
-  options.config.mutable_graph_options()->mutable_optimizer_options()->set_cuda_graph_enable(true);
-  options.config.mutable_graph_options()->mutable_optimizer_options()->set_try_capture_cuda_graph(true);
-  options.config.mutable_graph_options()->mutable_optimizer_options()->add_cuda_graph_batch_sizes(64);
-  options.config.mutable_graph_options()->mutable_optimizer_options()->add_output_names_with_cg("output");
-  SubgraphDescription* subgraph = options.config.mutable_graph_options()->mutable_optimizer_options()->add_subgraph_descriptions();
-  subgraph->set_subgraph_name("test");
-  subgraph->add_output_node_names("MatMul_3");
-  SubgraphInputTensor* input = subgraph->add_input_tensors();
-  input->set_tensor_provider_name("MatMul_1");
-  input->set_tensor_provider_slot(0);
-  input->set_ph_name("ph");
-  input->set_type(DataType::DT_FLOAT);
-  input->add_shape(-1);
-  input->add_shape(512); 
+  if (cg_enable) {
+    options.config.mutable_graph_options()
+        ->mutable_optimizer_options()
+        ->set_cuda_graph_enable(true);
+    options.config.mutable_graph_options()
+        ->mutable_optimizer_options()
+        ->set_try_capture_cuda_graph(true);
+    options.config.mutable_graph_options()
+        ->mutable_optimizer_options()
+        ->add_cuda_graph_batch_sizes(64);
+    options.config.mutable_graph_options()
+        ->mutable_optimizer_options()
+        ->add_output_names_with_cg("output");
+    SubgraphDescription* subgraph = options.config.mutable_graph_options()
+                                        ->mutable_optimizer_options()
+                                        ->add_subgraph_descriptions();
+    subgraph->set_subgraph_name("test");
+    subgraph->add_output_node_names("MatMul_3");
+    SubgraphInputTensor* input = subgraph->add_input_tensors();
+    input->set_tensor_provider_name("MatMul_1");
+    input->set_tensor_provider_slot(0);
+    input->set_ph_name("ph");
+    input->set_type(DataType::DT_FLOAT);
+    input->add_shape(-1);
+    input->add_shape(512);
+  }
 }
-    
+
 Status Test(GraphDef & graph_def, 
             std::vector<std::string> & input_names,
             std::vector<std::string> & output_names,
@@ -336,14 +348,14 @@ Status Test(GraphDef & graph_def,
             int num_infers_per_thread,
             int num_streams,
             int num_threads){
+    graph::SetDefaultDevice("/device:GPU:0", &graph_def);
+
     // Creates a session.
     SessionOptions options;
-    PrepareSessionOption(options);
+    PrepareSessionOption(options, true); // for cuda graph
     // for cudagraph config
     std::unique_ptr<Session> session(NewSession(options));
-    graph::SetDefaultDevice("/device:GPU:0", &graph_def);
     TF_CHECK_OK(session->Create(graph_def));
-    
     // init host_allocator
     if (host_allocator == nullptr) {
       const DeviceMgr* device_manager;
@@ -358,16 +370,28 @@ Status Test(GraphDef & graph_def,
       }
     }
 
-    // First session run, init needed resources
+    // Prepare inputs
     int test_batch = 3;
-    std::vector<Tensor> input_tensors_tf;
-    GenerateInputs(graph_def, input_names, input_tensors_tf, test_batch);
-
-    InputsMap inputs_tf; // input map for Normal TF run
-    FillInputsMap(inputs_tf, input_names, input_tensors_tf);
+    std::vector<Tensor> input_tensors;
+    GenerateInputs(graph_def, input_names, input_tensors, test_batch);
+    InputsMap input_map; // input map for Normal TF run
+    FillInputsMap(input_map, input_names, input_tensors);
     
+
+    std::vector<Tensor> output_tensors_cg;
+    TF_CHECK_OK(session->Run(input_map, output_names, {}, &output_tensors_cg));
+
+    SessionOptions options_tf;
+    PrepareSessionOption(options_tf, false);
+    std::unique_ptr<Session> session_tf(NewSession(options));
+    TF_CHECK_OK(session->Create(graph_def));
     std::vector<Tensor> output_tensors_tf;
-    TF_CHECK_OK(session->Run(inputs_tf, output_names, {}, &output_tensors_tf));
+    TF_CHECK_OK(session->Run(input_map, output_names, {}, &output_tensors_tf));
+
+    LOG(INFO) << "CG results: ";
+    PrintTensorData(output_tensors_cg[0]); 
+    LOG(INFO) << "TF results: ";
+    PrintTensorData(output_tensors_tf[0]); 
 
     return Status();
 }

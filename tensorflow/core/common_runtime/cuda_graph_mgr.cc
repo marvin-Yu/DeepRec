@@ -279,11 +279,15 @@ Status CudaGraphMgr::GetCudagraphMeta(const std::string& cudagraph_name,
                             bucket, " not found");
   }
 
+  LOG(INFO) << "[Jieluo] Get cuda graph meta, name " << cudagraph_name
+            << " , batch size " << bucket;
+
   std::mutex* mutex = meta_pool_lock_[cudagraph_name][bucket].first;
   std::condition_variable* cv = meta_pool_lock_[cudagraph_name][bucket].second;
   std::vector<CudaGraphMeta*>& metas = graphname_batch_metas_map_[cudagraph_name][bucket];
 
   std::unique_lock<std::mutex> lock(*mutex);
+  LOG(INFO) << "[Jieluo] Before get, meta list size is " << metas.size();
   if (metas.size() > 0) {
     meta = metas[metas.size() - 1];
     metas.pop_back();
@@ -309,10 +313,14 @@ Status CudaGraphMgr::ReturnCudaGraphMeta(CudaGraphMeta* meta) {
                             bucket, " not found");
   }
 
+  LOG(INFO) << "[Jieluo] Return cuda graph meta, name " << cudagraph_name
+            << " , batch size " << bucket << " , meta addr " << meta;
+
   std::mutex* mutex = meta_pool_lock_[graph_name][bucket].first;
   std::condition_variable* cv = meta_pool_lock_[graph_name][bucket].second;
   std::vector<CudaGraphMeta*>& metas = graphname_batch_metas_map_[graph_name][bucket];
 
+  LOG(INFO) << "[Jieluo] Before reture, meta list size is " << metas.size();
   std::unique_lock<std::mutex> lock(*mutex);
   metas.push_back(meta);
   if (metas.size() == 1) {
