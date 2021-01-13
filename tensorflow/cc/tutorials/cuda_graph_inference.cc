@@ -353,17 +353,18 @@ void PrepareSessionOptionForGamma(SessionOptions& options, bool cg_enable = fals
         ->set_try_capture_cuda_graph(true);
     options.config.mutable_graph_options()
         ->mutable_optimizer_options()
-        ->add_cuda_graph_batch_sizes(64);
+        ->add_cuda_graph_batch_sizes(1);
     options.config.mutable_graph_options()
         ->mutable_optimizer_options()
-        ->add_output_names_with_cg("output");
+        ->add_output_names_with_cg("p4p_output");
     SubgraphDescription* subgraph = options.config.mutable_graph_options()
                                         ->mutable_optimizer_options()
                                         ->add_subgraph_descriptions();
     subgraph->set_subgraph_name("main");
     subgraph->add_output_node_names("p4p_Main_Score_Network/hiddenlayer_4/hiddenlayer_4/LeakyRelu");
+  //  subgraph->add_output_node_names("p4p_Main_Score_Network/hiddenlayer_0/MatMul");
     SubgraphInputTensor* input= subgraph->add_input_tensors();
-    input->set_tensor_provider_name("p4p_Main_Score_Network/hiddenlayer_0/MatMul");
+    input->set_tensor_provider_name("p4p_Main_Score_Network/concat");
     input->set_tensor_provider_slot(0);
     input->set_ph_name("ph");
     input->set_type(DataType::DT_FLOAT);
@@ -371,7 +372,7 @@ void PrepareSessionOptionForGamma(SessionOptions& options, bool cg_enable = fals
     input->add_shape(4440);
 
     SubgraphInputTensor* input1 = subgraph->add_input_tensors();
-    input1->set_tensor_provider_name("p4p_Main_Score_Network/column_extend/MatMul");
+    input1->set_tensor_provider_name("p4p_Main_Score_Network/column_extend/concat");
     input1->set_tensor_provider_slot(0);
     input1->set_ph_name("ph1");
     input1->set_type(DataType::DT_FLOAT);
@@ -392,7 +393,7 @@ Status Test(GraphDef & graph_def,
 
     // Creates a session.
     SessionOptions options;
-    PrepareSessionOption(options, true); // for cuda graph
+    PrepareSessionOptionForGamma(options, true); // for cuda graph
     // for cudagraph config
     std::unique_ptr<Session> session(NewSession(options));
     TF_CHECK_OK(session->Create(graph_def));
@@ -411,7 +412,7 @@ Status Test(GraphDef & graph_def,
     }
 
     // Prepare inputs
-    int test_batch = 3;
+    int test_batch = 1;
     std::vector<Tensor> input_tensors;
     GenerateInputs(graph_def, input_names, input_tensors, test_batch);
     InputsMap input_map; // input map for Normal TF run
@@ -422,7 +423,7 @@ Status Test(GraphDef & graph_def,
     TF_CHECK_OK(session->Run(input_map, output_names, {}, &output_tensors_cg));
 
     SessionOptions options_tf;
-    PrepareSessionOption(options_tf, false);
+    PrepareSessionOptionForGamma(options_tf, false);
     std::unique_ptr<Session> session_tf(NewSession(options_tf));
     TF_CHECK_OK(session_tf->Create(graph_def));
     std::vector<Tensor> output_tensors_tf;
@@ -432,6 +433,16 @@ Status Test(GraphDef & graph_def,
     PrintTensorData(output_tensors_cg[0]); 
     LOG(INFO) << "TF results: ";
     PrintTensorData(output_tensors_tf[0]); 
+
+
+    std::vector<Tensor> input_tensors_2;
+    GenerateInputs(graph_def, input_names, input_tensors_2, test_batch);
+    InputsMap input_map_2; // input map for Normal TF run
+    FillInputsMap(input_map_2, input_names, input_tensors_2);
+    std::vector<Tensor> output_tensors_cg_2;
+    TF_CHECK_OK(session->Run(input_map_2, output_names, {}, &output_tensors_cg_2));
+    LOG(INFO) << "CG results 2nd: ";
+    PrintTensorData(output_tensors_cg_2[0]);
 
     return Status();
 }

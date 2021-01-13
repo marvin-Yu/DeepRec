@@ -280,7 +280,6 @@ bool GraphDefRewriter::GenerateGraphDefFromTop(GraphDef& output_graph_def,
   int travel_idx = 0;
   while (travel_idx < output_graph_def.node_size()) {
     const NodeDef& curr_node = output_graph_def.node(travel_idx);
-    LOG(INFO) << "[jieluo] visit node " << curr_node.name() << " index is " << travel_idx;
     // check node type
     if (curr_node.op() == PLACEHOLDER) {
       input_names.push_back(curr_node.name());

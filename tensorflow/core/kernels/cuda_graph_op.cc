@@ -94,6 +94,10 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
   const Tensor& input_0 = ctx->input(0);
   int batch_size = input_0.dim_size(0);
   auto upper_iter = std::upper_bound(buckets_.begin(), buckets_.end(), batch_size);
+  // todo: optimize
+  if (upper_iter != buckets_.begin() && *(upper_iter - 1) == batch_size) {
+    --upper_iter;
+  }
   OP_REQUIRES_ASYNC(ctx, upper_iter != buckets_.end(),
               errors::Internal("Batch size ", batch_size, " is exceed max bucket ",
               buckets_.back()), done);
