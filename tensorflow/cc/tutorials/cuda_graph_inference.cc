@@ -383,10 +383,10 @@ Status Test(GraphDef & graph_def,
 
     SessionOptions options_tf;
     PrepareSessionOption(options_tf, false);
-    std::unique_ptr<Session> session_tf(NewSession(options));
-    TF_CHECK_OK(session->Create(graph_def));
+    std::unique_ptr<Session> session_tf(NewSession(options_tf));
+    TF_CHECK_OK(session_tf->Create(graph_def));
     std::vector<Tensor> output_tensors_tf;
-    TF_CHECK_OK(session->Run(input_map, output_names, {}, &output_tensors_tf));
+    TF_CHECK_OK(session_tf->Run(input_map, output_names, {}, &output_tensors_tf));
 
     LOG(INFO) << "CG results: ";
     PrintTensorData(output_tensors_cg[0]); 

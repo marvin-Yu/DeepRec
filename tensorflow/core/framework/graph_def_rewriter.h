@@ -43,7 +43,7 @@ public:
   GraphDefRewriter(const GraphDef& origin_graph_def);
   void InitNodeMap(const GraphDef& origin_graph_def);
   bool AddNode(NodeDef&& new_node);
-  bool AddPlaceholder(const std::string& ph_name, const DataType& dtype, const PartialTensorShape& shape);
+  bool AddPlaceholder(const std::string& ph_name, const DataType& dtype, const std::vector<int64>& shape);
   bool AddIdentityNode(const std::string& origin_node_name, const int origin_slot, std::string& identity_node_name);
   bool GetNodeConsumedTensorInfo(const std::string& provider_node_name, 
                                  std::vector<int>& consumed_index,

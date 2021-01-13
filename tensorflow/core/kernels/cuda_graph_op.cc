@@ -59,7 +59,6 @@ void CUDART_CB CudaGraphCallback(cudaStream_t stream,
   // todo: copy output tensor;
   OpKernelContext* ctx = args->ctx_;
   CudaGraphMeta* meta = args->meta_;
-  int bucket = meta->output_tensors_[0].dim_size(0); // check tensor size
   for (int i = 0; i < meta->output_tensors_.size(); ++i) {
     Tensor *output = nullptr;
     TensorShape shape = meta->output_tensors_[i].shape();
@@ -96,10 +95,10 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
   int batch_size = input_0.dim_size(0);
   auto upper_iter = std::upper_bound(buckets_.begin(), buckets_.end(), batch_size);
   OP_REQUIRES_ASYNC(ctx, upper_iter != buckets_.end(),
-              errors::internal("Batch size ", batch_size, " is exceed max bucket ",
+              errors::Internal("Batch size ", batch_size, " is exceed max bucket ",
               buckets_.back()), done);
   LOG(INFO) << "[Jieluo] input tensor for cuda graph batch size is " << batch_size 
-            << " , using bucket " << bucket;
+            << " , using bucket " << *upper_iter;
 
   // step1. fetch metas
   cudaStream_t stream;

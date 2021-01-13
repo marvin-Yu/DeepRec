@@ -140,10 +140,9 @@ bool GraphDefRewriter::GetNodeProviderTensorInfo(const std::string& consumer_nod
     int slot = 0;
     if (provider_parts.size() == 2) {
       absl::SimpleAtoi(provider_parts[1], &slot);
-    } else if (provider_parts.size() == 1) {
-      // do nothing
-    } else {
+    } else if (provider_parts.size() != 1) {
       LOG(ERROR) << "Node " << consumer_node_name << "'s input " << node.input(i) << " is invalid.";
+      return false;
     }
     provider_node.emplace_back(provider_parts[0]);
     provider_slot.emplace_back(slot);
@@ -151,7 +150,7 @@ bool GraphDefRewriter::GetNodeProviderTensorInfo(const std::string& consumer_nod
   return true;
 }
 
-bool GraphDefRewriter::AddPlaceholder(const std::string& ph_name, const DataType& dtype, const PartialTensorShape& shape) {
+bool GraphDefRewriter::AddPlaceholder(const std::string& ph_name, const DataType& dtype, const std::vector<int64>& shape) {
   // step0. check if name is duplicated
   if (node_map_.find(ph_name) != node_map_.end()) {
     LOG(ERROR) << "Node name " << ph_name << " for new placeholder is found in graph.";
@@ -161,7 +160,7 @@ bool GraphDefRewriter::AddPlaceholder(const std::string& ph_name, const DataType
   // step1. build an node def
   NodeDef ph_node;
   NodeDefBuilder builder(ph_name, PLACEHOLDER);
-  PartialTensorShape s({-1, 512});
+  PartialTensorShape s(gtl::ArraySlice<tensorflow::int64>(shape.data(), shape.size()));
   TF_CHECK_OK(builder.Attr("dtype", dtype)
          .Attr("shape", s)
          .Attr("_output_shape", s)
@@ -325,15 +324,16 @@ bool SubgraphGenerator::GenerateSubgraph(const GraphDef& origin_graph,
   std::unordered_set<std::string> empty_set;
   // step1. gen new placeholder and replace edge
   for (int i = 0; i < subgraph_desc.input_tensors_size(); ++i) {
-    PartialTensorShape shape;
+    std::vector<int64> shape;
     LOG(INFO) << "[Jieluo] ph shape size " << subgraph_desc.input_tensors(i).shape_size();
     for (int j = 0; j < subgraph_desc.input_tensors(i).shape_size(); ++j) {
       LOG(INFO) << "[Jieluo] add dim " << subgraph_desc.input_tensors(i).shape(j);
-      shape.AddDim(subgraph_desc.input_tensors(i).shape(j));
+      shape.push_back(subgraph_desc.input_tensors(i).shape(j));
     }
     std::string ph_name = subgraph_desc.input_tensors(i).ph_name();
     if (rewriter.AddPlaceholder(ph_name, 
-                                subgraph_desc.input_tensors(i).type(), shape)) {
+                                subgraph_desc.input_tensors(i).type(),
+                                shape)) {
       bool succ = rewriter.ReplaceEdgesForGivenConsumer(subgraph_desc.input_tensors(i).tensor_provider_name(),
                                                         subgraph_desc.input_tensors(i).tensor_provider_slot(),
                                                         ph_name, 0, empty_set);

@@ -313,7 +313,7 @@ Status CudaGraphMgr::ReturnCudaGraphMeta(CudaGraphMeta* meta) {
                             bucket, " not found");
   }
 
-  LOG(INFO) << "[Jieluo] Return cuda graph meta, name " << cudagraph_name
+  LOG(INFO) << "[Jieluo] Return cuda graph meta, name " << graph_name
             << " , batch size " << bucket << " , meta addr " << meta;
 
   std::mutex* mutex = meta_pool_lock_[graph_name][bucket].first;
