@@ -341,6 +341,46 @@ void PrepareSessionOption(SessionOptions& options, bool cg_enable = false) {
   }
 }
 
+void PrepareSessionOptionForGamma(SessionOptions& options, bool cg_enable = false) {
+  options.config.mutable_gpu_options()->set_force_gpu_compatible(true);
+  options.config.mutable_gpu_options()->set_allow_growth(false);
+  if (cg_enable) {
+    options.config.mutable_graph_options()
+        ->mutable_optimizer_options()
+        ->set_cuda_graph_enable(true);
+    options.config.mutable_graph_options()
+        ->mutable_optimizer_options()
+        ->set_try_capture_cuda_graph(true);
+    options.config.mutable_graph_options()
+        ->mutable_optimizer_options()
+        ->add_cuda_graph_batch_sizes(64);
+    options.config.mutable_graph_options()
+        ->mutable_optimizer_options()
+        ->add_output_names_with_cg("output");
+    SubgraphDescription* subgraph = options.config.mutable_graph_options()
+                                        ->mutable_optimizer_options()
+                                        ->add_subgraph_descriptions();
+    subgraph->set_subgraph_name("main");
+    subgraph->add_output_node_names("p4p_Main_Score_Network/hiddenlayer_4/hiddenlayer_4/LeakyRelu");
+    SubgraphInputTensor* input= subgraph->add_input_tensors();
+    input->set_tensor_provider_name("p4p_Main_Score_Network/hiddenlayer_0/MatMul");
+    input->set_tensor_provider_slot(0);
+    input->set_ph_name("ph");
+    input->set_type(DataType::DT_FLOAT);
+    input->add_shape(-1);
+    input->add_shape(4440);
+
+    SubgraphInputTensor* input1 = subgraph->add_input_tensors();
+    input1->set_tensor_provider_name("p4p_Main_Score_Network/column_extend/MatMul");
+    input1->set_tensor_provider_slot(0);
+    input1->set_ph_name("ph1");
+    input1->set_type(DataType::DT_FLOAT);
+    input1->add_shape(-1);
+    input1->add_shape(948);
+
+  }
+}
+
 Status Test(GraphDef & graph_def, 
             std::vector<std::string> & input_names,
             std::vector<std::string> & output_names,

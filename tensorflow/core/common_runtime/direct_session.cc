@@ -426,7 +426,6 @@ Status DirectSession::Create(GraphDef&& graph) {
       int num_cuda_graph = options_.config.graph_options().
                                optimizer_options().
                                subgraph_descriptions_size();
-      LOG(INFO) << "[Jieluo] subgraph size is " << num_cuda_graph;
       std::vector<std::string> cuda_graph_names;
       std::vector<int> uncaptured_index;
       cuda_graph_names.reserve(num_cuda_graph);
@@ -455,7 +454,6 @@ Status DirectSession::Create(GraphDef&& graph) {
             GraphDef cudagraph_capture;
             std::vector<std::string> input_node_names;
             std::vector<std::string> output_node_names;
-            LOG(INFO) << "[Jieluo] Begin to gen subgraph index " << uncaptured_index[i];
             bool gen_succ = SubgraphGenerator::GenerateSubgraph(graph, cudagraph_capture, 
                                 options_.config.graph_options().optimizer_options().subgraph_descriptions(uncaptured_index[i]),
                                 input_node_names, output_node_names);
@@ -463,7 +461,6 @@ Status DirectSession::Create(GraphDef&& graph) {
               LOG(ERROR) << "Generate subgraph for cudagraph capturing failed, please check GraphDef and session options";
               // todo: return not ok
             }
-           // LOG(INFO) << "[Jieluo] cudagraph debug string: " << cudagraph_capture.DebugString();
             mgr.CaptureCudagraph(cudagraph_capture, 
                                  options_.config.graph_options().optimizer_options().subgraph_descriptions(uncaptured_index[i]).subgraph_name(),
                                  input_node_names,
@@ -521,7 +518,6 @@ Status DirectSession::CreateForCapture(GraphDef&& graph) {
           "A Graph has already been created for this session.");
     }
     graph::SetDefaultDevice("/device:GPU:0", &graph);
-    LOG(INFO) << "[Jieluo] cudagraph debug string: " << graph.DebugString();
     return ExtendLocked(std::move(graph));
   }
   return Status::OK();

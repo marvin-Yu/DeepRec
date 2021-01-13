@@ -167,8 +167,7 @@ bool CudaGraphMgr::CheckGraphAllCaptured(const std::vector<std::string>& graph_n
   uncaptured_index.clear();
   for (int i = 0; i < graph_names.size(); ++i) {
     if (graphname_batch_metas_map_.find(graph_names[i]) == graphname_batch_metas_map_.end()) {
-      LOG(INFO) << "[Jieluo] graph name index " << i << ", " << graph_names[i] << " has not captured";
-      uncaptured_index.push_back(i);
+       uncaptured_index.push_back(i);
     }
   }
   return 0 == uncaptured_index.size();
@@ -195,7 +194,6 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
   options.config.mutable_gpu_options()->set_allow_growth(false);
   std::unique_ptr<Session> session(NewSession(options));
   
- // LOG(INFO) << "[Jieluo] graph for capture: " << graph_def.DebugString();
   TF_CHECK_OK(session->CreateForCapture(graph_def));
 
   // init host_allocator
@@ -279,15 +277,11 @@ Status CudaGraphMgr::GetCudagraphMeta(const std::string& cudagraph_name,
                             bucket, " not found");
   }
 
-  LOG(INFO) << "[Jieluo] Get cuda graph meta, name " << cudagraph_name
-            << " , batch size " << bucket;
-
   std::mutex* mutex = meta_pool_lock_[cudagraph_name][bucket].first;
   std::condition_variable* cv = meta_pool_lock_[cudagraph_name][bucket].second;
   std::vector<CudaGraphMeta*>& metas = graphname_batch_metas_map_[cudagraph_name][bucket];
 
   std::unique_lock<std::mutex> lock(*mutex);
-  LOG(INFO) << "[Jieluo] Before get, meta list size is " << metas.size();
   if (metas.size() > 0) {
     meta = metas[metas.size() - 1];
     metas.pop_back();
@@ -313,14 +307,10 @@ Status CudaGraphMgr::ReturnCudaGraphMeta(CudaGraphMeta* meta) {
                             bucket, " not found");
   }
 
-  LOG(INFO) << "[Jieluo] Return cuda graph meta, name " << graph_name
-            << " , batch size " << bucket << " , meta addr " << meta;
-
   std::mutex* mutex = meta_pool_lock_[graph_name][bucket].first;
   std::condition_variable* cv = meta_pool_lock_[graph_name][bucket].second;
   std::vector<CudaGraphMeta*>& metas = graphname_batch_metas_map_[graph_name][bucket];
 
-  LOG(INFO) << "[Jieluo] Before reture, meta list size is " << metas.size();
   std::unique_lock<std::mutex> lock(*mutex);
   metas.push_back(meta);
   if (metas.size() == 1) {

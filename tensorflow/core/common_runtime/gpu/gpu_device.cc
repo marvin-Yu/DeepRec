@@ -374,7 +374,6 @@ BaseGPUDevice::~BaseGPUDevice() {
 #ifdef GOOGLE_CUDA
 // For enabling cuda-graph
 void BaseGPUDevice::SetSingleStream(){
-    LOG(INFO) << "[Jieluo] begin set single stream";
     if(stream_catpure_mode_) return;
 
     stream_backup_ = *streams_[0];
@@ -732,10 +731,7 @@ void BaseGPUDevice::ComputeAsync(AsyncOpKernel* op_kernel,
   VLOG(1) << "GpuDevice::ComputeAsync " << op_kernel->name() << " op "
           << op_kernel->type_string() << " on GPU" << tf_gpu_id_ << " stream["
           << stream_id << "]";
-  LOG(INFO) << "[Jieluo] GpuDevice::ComputeAsync " << op_kernel->name() << " op "
-          << op_kernel->type_string() << " on GPU" << tf_gpu_id_ << " stream["
-          << stream_id << "]";
-
+          
   ScopedActivateExecutorContext scoped_activation{stream->parent()};
   op_kernel->ComputeAsync(context, done);
 }

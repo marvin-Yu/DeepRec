@@ -319,15 +319,12 @@ bool SubgraphGenerator::GenerateSubgraph(const GraphDef& origin_graph,
   // step0. copy other fields in graph
   CopyCommonField(origin_graph, output_graph);
  
-  LOG(INFO) << "[Jieluo] generate subgraph config " << subgraph_desc.DebugString(); 
   GraphDefRewriter rewriter(origin_graph);
   std::unordered_set<std::string> empty_set;
   // step1. gen new placeholder and replace edge
   for (int i = 0; i < subgraph_desc.input_tensors_size(); ++i) {
     std::vector<int64> shape;
-    LOG(INFO) << "[Jieluo] ph shape size " << subgraph_desc.input_tensors(i).shape_size();
     for (int j = 0; j < subgraph_desc.input_tensors(i).shape_size(); ++j) {
-      LOG(INFO) << "[Jieluo] add dim " << subgraph_desc.input_tensors(i).shape(j);
       shape.push_back(subgraph_desc.input_tensors(i).shape(j));
     }
     std::string ph_name = subgraph_desc.input_tensors(i).ph_name();
@@ -355,10 +352,8 @@ bool SubgraphGenerator::GenerateSubgraph(const GraphDef& origin_graph,
     consumed_idx.clear();
     const std::string& output_name = subgraph_desc.output_node_names(i);
     bool succ = rewriter.GetNodeConsumedTensorInfo(output_name, consumed_idx, types);
-    LOG(INFO) << "[Jieluo] consumed idx size " << consumed_idx.size();
     for (int j = 0; j < consumed_idx.size(); ++j) {
       std::string identity_name;
-      LOG(INFO) << "[Jieluo] add identtity node for " << output_name << " idx " << consumed_idx[j];
       if (!rewriter.AddIdentityNode(output_name, consumed_idx[j], identity_name)) {
         LOG(ERROR) << "Add Identity node failed, identity input " << output_name << " slot " << consumed_idx[j];
         return false;

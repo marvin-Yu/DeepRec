@@ -97,8 +97,6 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
   OP_REQUIRES_ASYNC(ctx, upper_iter != buckets_.end(),
               errors::Internal("Batch size ", batch_size, " is exceed max bucket ",
               buckets_.back()), done);
-  LOG(INFO) << "[Jieluo] input tensor for cuda graph batch size is " << batch_size 
-            << " , using bucket " << *upper_iter;
 
   // step1. fetch metas
   cudaStream_t stream;
@@ -106,8 +104,6 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
   CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
   OP_REQUIRES_OK_ASYNC(ctx, mgr.GetCudagraphMeta(graph_name_, *upper_iter, meta), done);
   OP_REQUIRES_OK_ASYNC(ctx, mgr.GetCudaStream(req_id, stream), done);
-
-  LOG(INFO) << "[Jieluo] Get meta " << meta << " stream " << stream;
 
   // do h2d copies first
   // do not padding explictly
@@ -144,13 +140,11 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
         done);
   }
 
-  LOG(INFO) << "[Jieluo] Before launch cuda graph";  
   // run cuda graph instance
   cudaError_t ret = cudaGraphLaunch(meta->cuda_graph_instance_, stream);
   OP_REQUIRES_ASYNC(ctx, ret == cudaSuccess, 
         errors::Internal("cudagraph launch faild: ", ret), done);
 
-  LOG(INFO) << "[Jieluo] Before add callback";  
   CudaGraphCbArgs* args = new CudaGraphCbArgs(ctx, meta, batch_size, done);
   ret = cudaStreamAddCallback(stream, CudaGraphCallback, (void *)(args),0); 
   OP_REQUIRES_ASYNC(ctx, ret == cudaSuccess, 
