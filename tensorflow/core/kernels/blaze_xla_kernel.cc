@@ -226,10 +226,7 @@ void BlazeXlaOp::CopyTensor(MemoryType mtype, OpKernelContext* ctx,
             if (info->traced_tensors) {
             auto name_tensor = info->traced_tensors->add_name_tensors();
             name_tensor->set_name(name);
-            auto tensor = name_tensor->mutable_tensor();
-            TensorProto proto;
-            cpu_tensor->AsProtoField(&proto);
-            *tensor = proto;
+            cpu_tensor->AsProtoField(name_tensor->mutable_tensor());
             } else {
               LOG(ERROR) << "blaze xla kernel trace error, something wrong1";
             }
