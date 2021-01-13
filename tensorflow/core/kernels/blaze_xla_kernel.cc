@@ -215,19 +215,24 @@ void BlazeXlaOp::CopyTensor(MemoryType mtype, OpKernelContext* ctx,
     Allocator* cpu_allocator = device->GetAllocator(host_alloc_attrs);
     Tensor* cpu_tensor =
         new Tensor(cpu_allocator, tensor.dtype(), tensor.shape());
+    auto info = ctx->traced_infos();
     device_ctxt->CopyDeviceTensorToCPU(
         &tensor, "TensorTrace", device, cpu_tensor,
-        [this, cpu_tensor, ctx, &name](const Status& s) {
+        [this, cpu_tensor, ctx, name, info](const Status& s) {
           ctx->SetStatus(s);
           if (s.ok()) {
             mutex_lock l(tracing_mu_);
-            if (ctx->traced_infos() && ctx->traced_infos()->traced_tensors) {
-            auto name_tensor = ctx->traced_infos()->traced_tensors->add_name_tensors();
+            if (info) {
+            if (info->traced_tensors) {
+            auto name_tensor = info->traced_tensors->add_name_tensors();
             name_tensor->set_name(name);
             auto tensor = name_tensor->mutable_tensor();
             TensorProto proto;
             cpu_tensor->AsProtoField(&proto);
             *tensor = proto;
+            } else {
+              LOG(ERROR) << "blaze xla kernel trace error, something wrong1";
+            }
             } else {
             LOG(ERROR) << "blaze xla kernel trace error, something wrong";
             }
