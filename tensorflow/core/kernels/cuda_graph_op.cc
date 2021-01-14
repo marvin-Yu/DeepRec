@@ -59,6 +59,7 @@ void CUDART_CB CudaGraphCallback(cudaStream_t stream,
   // todo: copy output tensor;
   OpKernelContext* ctx = args->ctx_;
   CudaGraphMeta* meta = args->meta_;
+  CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
   for (int i = 0; i < meta->output_tensors_.size(); ++i) {
     Tensor *output = nullptr;
     TensorShape shape = meta->output_tensors_[i].shape();
@@ -66,7 +67,6 @@ void CUDART_CB CudaGraphCallback(cudaStream_t stream,
     OP_REQUIRES_OK(ctx, ctx->allocate_output(i, shape, &output));
     output->CopyFrom(meta->output_tensors_[i], shape); 
   }
-  CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
   mgr.ReturnCudaGraphMeta( meta);
   args->done_();
   delete args;
@@ -153,6 +153,22 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
   ret = cudaStreamAddCallback(stream, CudaGraphCallback, (void *)(args),0); 
   OP_REQUIRES_ASYNC(ctx, ret == cudaSuccess, 
         errors::Internal("Add cuda callback failed: ", ret), done);
+/*
+  cudaEvent_t event;
+   cudaEventCreateWithFlags(&event, cudaEventBlockingSync);
+   cudaEventRecord(event, stream);
+   cudaEventSynchronize(event);
+   cudaEventDestroy(event);
+  for (int i = 0; i < meta->output_tensors_.size(); ++i) {
+    Tensor *output = nullptr;
+    TensorShape shape = meta->output_tensors_[i].shape();
+    shape.set_dim(0, batch_size);
+    OP_REQUIRES_OK(ctx, ctx->allocate_output(i, shape, &output));
+    output->CopyFrom(meta->output_tensors_[i], shape); 
+  }
+  mgr.ReturnCudaGraphMeta( meta);
+  done();
+*/
   return;
 }
 

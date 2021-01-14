@@ -260,12 +260,8 @@ void CudaGraphMgr::CheckCudaGraphScore(const GraphDef& graph_def,
   if (ret != cudaSuccess) {
     LOG(ERROR) << "cudagraph launch faild: " << ret;
   }
-
-  CudaGraphCbArgs* args = new CudaGraphCbArgs(ctx, meta, batch_size, done);
-  ret = cudaStreamAddCallback(stream, CudaGraphCallback, (void *)(args),0); 
-  if (ret != cudaSuccess) {
-    LOG(ERROR) << "Add cuda callback failed: " << ret;
-  }
+  cudaEvent_t event;
+  CheckCudaError(cudaEventCreateWithFlags(&event, cudaEventBlockingSync));
   CheckCudaError(cudaEventRecord(event, streams_[0]));
   CheckCudaError(cudaEventSynchronize(event));
   CheckCudaError(cudaEventDestroy(event));

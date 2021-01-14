@@ -57,6 +57,7 @@ private:
                           CudaGraphMeta* meta,
                           const std::vector<std::string>& input_node_names,
                           const std::vector<std::string>& output_node_names);
+public:
   void PrintTensorData(Tensor &t);
 
 public:
