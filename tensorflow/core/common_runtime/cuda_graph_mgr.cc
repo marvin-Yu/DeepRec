@@ -10,6 +10,7 @@
 #include "tensorflow/core/common_runtime/cuda_graph_mgr.h"
 
 #include <string>
+#include <sstream>
 #include <vector>
 #include <cuda_fp16.h>
 
@@ -22,7 +23,7 @@
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/public/session.h"
 
-static const int NUM_INSTANCE = 3;
+static const int NUM_INSTANCE = 1;
 
 namespace tensorflow {
 
@@ -42,11 +43,12 @@ void CudaGraphMgr::PrintTensorData(Tensor& t) {
   }
 
   int dims = t.dims();
-  LOG(INFO) << "shape: " << std::endl;
+  std::streamstring tensor_string;
+  tensor_string << "shape: " << std::endl;
   for (int i = 0; i < dims; i++) {
-    LOG(INFO) << t.dim_size(i) << ", ";
+    tensor_string << t.dim_size(i) << ", ";
   }
-  LOG(INFO) << std::endl;
+  tensor_string << std::endl;
 
   int size = t.NumElements();
   size = size > 32 ? 32 : size;
@@ -62,9 +64,9 @@ void CudaGraphMgr::PrintTensorData(Tensor& t) {
     } else {
       value = static_cast<float*>(data)[i];
     }
-    LOG(INFO) << value << ", ";
+    tensor_string << value << ",";
   }
-  LOG(INFO) << std::endl;
+  LOG(INFO) << tensor_string.toString();
 }
 
 void CheckCudaError(cudaError_t ERR) {
@@ -122,13 +124,15 @@ void RandomInitialize(Tensor& t) {
   if (t.dtype() == DT_HALF) {
     __half* data = reinterpret_cast<__half*>(t.flat<Eigen::half>().data());
     for (int i = 0; i < num_elements; i++) {
-      float value = static_cast<float>(rand() % 101 - 50) / 100.0f;
+    //  float value = static_cast<float>(rand() % 101 - 50) / 100.0f;
+      float value = 0.1;
       data[i] = __float2half(value);
     }
   } else if (t.dtype() == DT_FLOAT) {
     float* data = t.flat<float>().data();
     for (int i = 0; i < num_elements; i++) {
-      float value = static_cast<float>(rand() % 101 - 50) / 100.0f;
+   //   float value = static_cast<float>(rand() % 101 - 50) / 100.0f;
+      float value = 0.1;
       data[i] = value;
     }
   } else if (t.dtype() == DT_INT32) {
@@ -224,6 +228,9 @@ void CudaGraphMgr::CheckCudaGraphScore(const GraphDef& graph_def,
 
   for (int i = 0; i < input_tensors_tf.size(); ++i) {
     const Tensor& input = input_tensors_tf[i];
+    LOG(INFO) << "[Jieluo] Check cuda graph score input " << i 
+              << " data type is " << input.dtype();
+    PrintTensorData(input);
     const void* host_buffer;
     size_t ele_size = 1;
     if (input.dtype() == DT_HALF) {
@@ -249,6 +256,7 @@ void CudaGraphMgr::CheckCudaGraphScore(const GraphDef& graph_def,
     size_t num_elements = input.NumElements();
     size_t num_bytes = num_elements * ele_size;
     void* device_buffer = meta->src_dst_mapping_[i].second;
+    LOG(INFO) << "[Jieluo] In check score, CudaMemCpy to " << i <<  " st tensor, device addr: " << device_buffer;
     if (cudaMemcpyAsync(device_buffer, host_buffer, num_bytes,
         cudaMemcpyHostToDevice, streams_[0]) != cudaSuccess) {
       LOG(ERROR) << "CudaMemCpy to " << i <<  " st tensor failed, device addr: " << device_buffer;
@@ -266,6 +274,7 @@ void CudaGraphMgr::CheckCudaGraphScore(const GraphDef& graph_def,
   CheckCudaError(cudaEventSynchronize(event));
   CheckCudaError(cudaEventDestroy(event));
 
+  LOG(INFO) << "[Jieluo] output tensor content for check score";
   PrintTensorData(meta->output_tensors_[0]);
   return;
 }

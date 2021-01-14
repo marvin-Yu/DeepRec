@@ -165,13 +165,15 @@ void RandomInitialize(Tensor& t)
     if(t.dtype() == DT_HALF){
         __half * data = reinterpret_cast<__half*>(t.flat<Eigen::half>().data());
         for(int i = 0; i < num_elements; i ++){
-            float value = static_cast<float>(rand() % 101 - 50) / 100.0f;
+     //       float value = static_cast<float>(rand() % 101 - 50) / 100.0f;
+            float value = 0.1;
             data[i] = __float2half(value);
         }
     }else if(t.dtype() == DT_FLOAT){
         float * data = t.flat<float>().data();
         for(int i =0; i < num_elements; i ++){
-            float value = static_cast<float>(rand() % 101 - 50) / 100.0f;
+       //     float value = static_cast<float>(rand() % 101 - 50) / 100.0f;
+            float value = 0.1;
             data[i] = value;
         }
     }else if(t.dtype() == DT_INT32){
@@ -433,17 +435,6 @@ Status Test(GraphDef & graph_def,
     PrintTensorData(output_tensors_cg[0]); 
     LOG(INFO) << "TF results: ";
     PrintTensorData(output_tensors_tf[0]); 
-
-
-    std::vector<Tensor> input_tensors_2;
-    GenerateInputs(graph_def, input_names, input_tensors_2, test_batch);
-    InputsMap input_map_2; // input map for Normal TF run
-    FillInputsMap(input_map_2, input_names, input_tensors_2);
-    std::vector<Tensor> output_tensors_cg_2;
-    TF_CHECK_OK(session->Run(input_map_2, output_names, {}, &output_tensors_cg_2));
-    LOG(INFO) << "CG results 2nd: ";
-    PrintTensorData(output_tensors_cg_2[0]);
-
     return Status();
 }
         

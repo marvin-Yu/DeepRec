@@ -113,6 +113,8 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
   // do not padding explictly
   for (int i = 0; i < feed_names_.size(); ++i) {
     const Tensor& input = ctx->input(i);
+    LOG(INFO) << "[Jieluo] input in cuda graph op " << i << " type is " << input.dtype();
+    mgr.PrintTensorData(input);
     const void* host_buffer;
     size_t ele_size = 1;
     if (input.dtype() == DT_HALF) {
@@ -138,6 +140,7 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
     size_t num_elements = input.NumElements();
     size_t num_bytes = num_elements * ele_size;
     void* device_buffer = meta->src_dst_mapping_[i].second;
+    LOG(INFO) << "[Jieluo] In run op, CudaMemCpy to " << i <<  " st tensor, device addr: " << device_buffer;
     OP_REQUIRES_ASYNC(ctx, cudaMemcpyAsync(device_buffer, host_buffer, num_bytes,
         cudaMemcpyHostToDevice, stream) == cudaSuccess, 
         errors::Internal("CudaMemCpy to ", i, " st tensor failed, device addr: ", device_buffer),

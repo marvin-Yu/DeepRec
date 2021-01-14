@@ -461,6 +461,8 @@ Status DirectSession::Create(GraphDef&& graph) {
               LOG(ERROR) << "Generate subgraph for cudagraph capturing failed, please check GraphDef and session options";
               // todo: return not ok
             }
+            DumpGraphDefToFile(options_.config.graph_options().optimizer_options().subgraph_descriptions(uncaptured_index[i]).subgraph_name(), 
+                               cudagraph_capture);
             mgr.CaptureCudagraph(cudagraph_capture, 
                                  options_.config.graph_options().optimizer_options().subgraph_descriptions(uncaptured_index[i]).subgraph_name(),
                                  input_node_names,
@@ -495,7 +497,7 @@ Status DirectSession::Create(GraphDef&& graph) {
                                                      descs,
                                                      buckets,
                                                      final_outputs);
-      DumpGraphDefToFile("replace", cudagraph_serving);
+      DumpGraphDefToFile("cuda_graph_serving", cudagraph_serving);
       return ExtendLocked(std::move(cudagraph_serving));
     }
 #endif
