@@ -53,7 +53,11 @@ private:
                     std::vector<Tensor>& input_tensors, int batch_size);
   void FillInputsMap(InputsMap& inputs_map, const std::vector<std::string>& input_names,
                    std::vector<Tensor>& input_tensors);
-  void LogCudaGraphStatus(Session* sess);
+  void CheckCudaGraphScore(const GraphDef& graph_def,
+                          CudaGraphMeta* meta,
+                          const std::vector<std::string>& input_node_names,
+                          const std::vector<std::string>& output_node_names);
+  void PrintTensorData(Tensor &t);
 
 public:
   // Check given graph names are captured already

@@ -26,9 +26,50 @@ static const int NUM_INSTANCE = 3;
 
 namespace tensorflow {
 
+void CudaGraphMgr::PrintTensorData(Tensor& t) {
+  void* data;
+  if (t.dtype() == DT_HALF) {
+    data = static_cast<void*>(t.flat<Eigen::half>().data());
+  } else if (t.dtype() == DT_FLOAT) {
+    data = static_cast<void*>(t.flat<float>().data());
+  } else if (t.dtype() == DT_BOOL) {
+    data = static_cast<void*>(t.flat<bool>().data());
+  } else if (t.dtype() == DT_INT32) {
+    data = static_cast<void*>(t.flat<int>().data());
+  } else {
+    LOG(INFO) << "Print Tensor: Unsupported data type!" << std::endl;
+    return;
+  }
+
+  int dims = t.dims();
+  LOG(INFO) << "shape: " << std::endl;
+  for (int i = 0; i < dims; i++) {
+    LOG(INFO) << t.dim_size(i) << ", ";
+  }
+  LOG(INFO) << std::endl;
+
+  int size = t.NumElements();
+  size = size > 32 ? 32 : size;
+
+  for (int i = 0; i < size; i++) {
+    float value;
+    if (t.dtype() == DT_HALF) {
+      value = __half2float(static_cast<__half*>(data)[i]);
+    } else if (t.dtype() == DT_INT32) {
+      value = static_cast<int*>(data)[i];
+    } else if (t.dtype() == DT_BOOL) {
+      value = static_cast<bool*>(data)[i];
+    } else {
+      value = static_cast<float*>(data)[i];
+    }
+    LOG(INFO) << value << ", ";
+  }
+  LOG(INFO) << std::endl;
+}
+
 void CheckCudaError(cudaError_t ERR) {
   if ((ERR) != cudaSuccess) {
-    std::cout << "cuda error: " << ERR << " " << cudaGetErrorString(ERR)
+    LOG(INFO) << "cuda error: " << ERR << " " << cudaGetErrorString(ERR)
               << std::endl;
   }
 }
@@ -109,8 +150,8 @@ void RandomInitialize(Tensor& t) {
       data[i] = value;
     }
   } else {
-    std::cout << t.dtype() << std::endl;
-    std::cout << "Random init: unsupported data type." << std::endl;
+    LOG(INFO) << t.dtype() << std::endl;
+    LOG(INFO) << "Random init: unsupported data type." << std::endl;
   }
 }
 
@@ -155,8 +196,82 @@ void CudaGraphMgr::FillInputsMap(InputsMap& inputs_map, const std::vector<std::s
   }
 }
 
-void CudaGraphMgr::LogCudaGraphStatus(Session* sess) {
-  // todo
+void CudaGraphMgr::CheckCudaGraphScore(const GraphDef& graph_def,
+                          CudaGraphMeta* meta,
+                          const std::vector<std::string>& input_node_names,
+                          const std::vector<std::string>& output_node_names) {
+  if (host_allocator_ == nullptr) {
+    return;
+  }
+
+  SessionOptions options;
+  options.config.mutable_gpu_options()->set_force_gpu_compatible(true);
+  options.config.mutable_gpu_options()->set_allow_growth(false);
+  std::unique_ptr<Session> session(NewSession(options));
+  
+  TF_CHECK_OK(session->CreateForCapture(graph_def));
+
+  int warm_batch = 1;
+  std::vector<Tensor> input_tensors_tf;
+  GenerateInputs(graph_def, input_node_names, input_tensors_tf, warm_batch);
+  InputsMap inputs_tf; // input map for Normal TF run
+  FillInputsMap(inputs_tf, input_node_names, input_tensors_tf);
+  std::vector<Tensor> output_tensors_tf;
+  TF_CHECK_OK(session->Run(inputs_tf, output_node_names, {}, &output_tensors_tf));
+
+  LOG(INFO) << "TF results: ";
+  PrintTensorData(output_tensors_tf[0]); 
+
+  for (int i = 0; i < input_tensors_tf.size(); ++i) {
+    const Tensor& input = input_tensors_tf[i];
+    const void* host_buffer;
+    size_t ele_size = 1;
+    if (input.dtype() == DT_HALF) {
+      ele_size = 2;
+      host_buffer = reinterpret_cast<const void*>(input.flat<Eigen::half>().data());
+    } else if (input.dtype() == DT_FLOAT) {
+      ele_size = 4;
+      host_buffer = reinterpret_cast<const void*>(input.flat<float>().data());
+    } else if (input.dtype() == DT_INT32) {
+      ele_size = 4;
+      host_buffer = reinterpret_cast<const void*>(input.flat<int>().data());
+    } else if (input.dtype() == DT_BOOL) {
+      ele_size = 1;
+      host_buffer = reinterpret_cast<const void*>(input.flat<bool>().data());
+    } else if (input.dtype() == DT_INT64) {
+      ele_size = 8;
+      host_buffer = reinterpret_cast<const void*>(input.flat<int64>().data());
+    } else {
+      std::cout << "Unsupported data type!" << std::endl;
+      exit(1);
+    }
+
+    size_t num_elements = input.NumElements();
+    size_t num_bytes = num_elements * ele_size;
+    void* device_buffer = meta->src_dst_mapping_[i].second;
+    if (cudaMemcpyAsync(device_buffer, host_buffer, num_bytes,
+        cudaMemcpyHostToDevice, streams_[0]) != cudaSuccess) {
+      LOG(ERROR) << "CudaMemCpy to " << i <<  " st tensor failed, device addr: " << device_buffer;
+    } 
+  }
+
+  // run cuda graph instance
+  cudaError_t ret = cudaGraphLaunch(meta->cuda_graph_instance_, streams_[0]);
+  if (ret != cudaSuccess) {
+    LOG(ERROR) << "cudagraph launch faild: " << ret;
+  }
+
+  CudaGraphCbArgs* args = new CudaGraphCbArgs(ctx, meta, batch_size, done);
+  ret = cudaStreamAddCallback(stream, CudaGraphCallback, (void *)(args),0); 
+  if (ret != cudaSuccess) {
+    LOG(ERROR) << "Add cuda callback failed: " << ret;
+  }
+  CheckCudaError(cudaEventRecord(event, streams_[0]));
+  CheckCudaError(cudaEventSynchronize(event));
+  CheckCudaError(cudaEventDestroy(event));
+
+  PrintTensorData(meta->output_tensors_[0]);
+  return;
 }
 
 void CudaGraphMgr::DestoryCudagraphMeta() {
@@ -232,6 +347,7 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
                   "Get stream for graph capturing failed.");
   }
 
+  CudaGraphMeta* meta_check = nullptr;
   for (int i = 0; i < batch_size.size(); ++i) {
     if (graphname_batch_metas_map_.find(graph_name) == graphname_batch_metas_map_.end()) {
       graphname_batch_metas_map_.emplace(graph_name, BatchGraphMetaMap());
@@ -249,6 +365,9 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
       CudaGraphMeta* meta = new CudaGraphMeta(graph_name, batch_size[i]);
       batch_meta_map[batch_size[i]].push_back(meta);
       TF_CHECK_OK(session->RunForCapture(inputs_cuda_graph, output_node_names, {}, meta));
+      if (meta_check == nullptr) {
+        meta_check = meta;
+      }
     }
 
     // add pool lock
@@ -263,6 +382,7 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
   }
   // turn off graph capture mode
   session->DisableGraphCapture();
+  CheckCudaGraphScore(graph_def, meta_check, input_node_names, output_node_names);
   return Status::OK();
 }
 
