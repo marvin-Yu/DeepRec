@@ -11,6 +11,7 @@
 
 #include <string>
 #include <sstream>
+#include <thread>
 #include <vector>
 #include <cuda_fp16.h>
 
@@ -168,6 +169,9 @@ void CudaGraphMgr::Init() {
   for (int i = 0; i < num_instance_; i++) {
     CheckCudaError(cudaStreamCreate(&streams_[i]));
   }
+
+  args_saved_ = false;
+  replay_meta_ = nullptr;
 }
 
 Status CudaGraphMgr::GetCudaStream(int req_id, cudaStream_t& stream) {
@@ -200,12 +204,35 @@ void CudaGraphMgr::FillInputsMap(InputsMap& inputs_map, const std::vector<std::s
   }
 }
 
+void CudaGraphMgr::CheckScoreReplay() {
+  if (!args_saved_) {
+    LOG(INFO) << "[Jieluo] args have not be saved, can not replay";
+    return; 
+  }
+  CheckCudaGraphScore(replay_graph_def_, 
+                      replay_meta_, 
+                      replay_input_names_,
+                      replay_output_names_);
+  return;
+}
+
 void CudaGraphMgr::CheckCudaGraphScore(const GraphDef& graph_def,
                           CudaGraphMeta* meta,
                           const std::vector<std::string>& input_node_names,
                           const std::vector<std::string>& output_node_names) {
   if (host_allocator_ == nullptr) {
     return;
+  }
+
+  if (!args_saved_) {
+    LOG(INFO) << "[Jieluo] replay args unsaved";
+    replay_graph_def_ = graph_def;
+    replay_meta_ = meta;
+    replay_input_names_ = input_node_names;
+    replay_output_names_ = output_node_names;
+    args_saved_ = true; 
+  } else {
+    LOG(INFO) << "[Jieluo] replay args saved";
   }
 
   SessionOptions options;
@@ -264,32 +291,32 @@ void CudaGraphMgr::CheckCudaGraphScore(const GraphDef& graph_def,
   }
 
   // run cuda graph instance
-  cudaError_t ret = cudaGraphLaunch(meta->cuda_graph_instance_, streams_[0]);
+  LOG(INFO) << "[Jieluo] In check score, copy and launch in same thread";
+  LaunchGraphInMeta(meta, stream_[0]);
+
+  LOG(INFO) << "[Jieluo] In check score, launch in same thread without copy";
+  LaunchGraphInMeta(meta, stream_[0]);
+
+  LOG(INFO) << "[Jieluo] In check score, launch in new thread without copy";
+  std::thread new_thread = std::thread(LaunchGraphInMeta, meta, streams_[0]);
+  new_thread.join();
+  
+  return;
+}
+
+void CudaGraphMgr::LaunchGraphInMeta(CudaGraphMeta* meta, cudaStream_t& stream) {
+  cudaError_t ret = cudaGraphLaunch(meta->cuda_graph_instance_, stream);
   if (ret != cudaSuccess) {
     LOG(ERROR) << "cudagraph launch faild: " << ret;
   }
   cudaEvent_t event;
   CheckCudaError(cudaEventCreateWithFlags(&event, cudaEventBlockingSync));
-  CheckCudaError(cudaEventRecord(event, streams_[0]));
+  CheckCudaError(cudaEventRecord(event, stream));
   CheckCudaError(cudaEventSynchronize(event));
   CheckCudaError(cudaEventDestroy(event));
 
   LOG(INFO) << "[Jieluo] output tensor content for check score";
   PrintTensorData(meta->output_tensors_[0]);
-do {
-  cudaError_t ret = cudaGraphLaunch(meta->cuda_graph_instance_, streams_[0]);
-  if (ret != cudaSuccess) {
-    LOG(ERROR) << "cudagraph launch faild: " << ret;
-  }
-  cudaEvent_t event;
-  CheckCudaError(cudaEventCreateWithFlags(&event, cudaEventBlockingSync));
-  CheckCudaError(cudaEventRecord(event, streams_[0]));
-  CheckCudaError(cudaEventSynchronize(event));
-  CheckCudaError(cudaEventDestroy(event));
-
-  LOG(INFO) << "[Jieluo] Launch without memcpy, output tensor content for check score";
-  PrintTensorData(meta->output_tensors_[0]);
-} while(0);
   return;
 }
 

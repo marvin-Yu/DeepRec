@@ -420,9 +420,15 @@ Status Test(GraphDef & graph_def,
     InputsMap input_map; // input map for Normal TF run
     FillInputsMap(input_map, input_names, input_tensors);
     
+    CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
+    LOG(INFO) << "[Jieluo] Before cuda graph run, replay check score" << std::endl;
+    mgr.CheckScoreReplay();
 
     std::vector<Tensor> output_tensors_cg;
     TF_CHECK_OK(session->Run(input_map, output_names, {}, &output_tensors_cg));
+
+    LOG(INFO) << "[Jieluo] After cuda graph run, replay check score" << std::endl;
+    mgr.CheckScoreReplay();
 
     SessionOptions options_tf;
     PrepareSessionOptionForGamma(options_tf, false);

@@ -67,7 +67,7 @@ void CUDART_CB CudaGraphCallback(cudaStream_t stream,
     OP_REQUIRES_OK(ctx, ctx->allocate_output(i, shape, &output));
     output->CopyFrom(meta->output_tensors_[i], shape); 
   }
-  mgr.ReturnCudaGraphMeta( meta);
+  mgr.ReturnCudaGraphMeta(meta);
   args->done_();
   delete args;
 }
