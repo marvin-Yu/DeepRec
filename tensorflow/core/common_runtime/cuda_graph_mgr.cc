@@ -27,23 +27,23 @@ static const int NUM_INSTANCE = 1;
 
 namespace tensorflow {
 
-void CudaGraphMgr::PrintTensorData(Tensor& t) {
-  void* data;
+void CudaGraphMgr::PrintTensorData(const Tensor& t) {
+  const void* data;
   if (t.dtype() == DT_HALF) {
-    data = static_cast<void*>(t.flat<Eigen::half>().data());
+    data = static_cast<const void*>(t.flat<Eigen::half>().data());
   } else if (t.dtype() == DT_FLOAT) {
-    data = static_cast<void*>(t.flat<float>().data());
+    data = static_cast<const void*>(t.flat<float>().data());
   } else if (t.dtype() == DT_BOOL) {
-    data = static_cast<void*>(t.flat<bool>().data());
+    data = static_cast<const void*>(t.flat<bool>().data());
   } else if (t.dtype() == DT_INT32) {
-    data = static_cast<void*>(t.flat<int>().data());
+    data = static_cast<const void*>(t.flat<int>().data());
   } else {
     LOG(INFO) << "Print Tensor: Unsupported data type!" << std::endl;
     return;
   }
 
   int dims = t.dims();
-  std::streamstring tensor_string;
+  std::ostringstream tensor_string;
   tensor_string << "shape: " << std::endl;
   for (int i = 0; i < dims; i++) {
     tensor_string << t.dim_size(i) << ", ";
@@ -56,17 +56,17 @@ void CudaGraphMgr::PrintTensorData(Tensor& t) {
   for (int i = 0; i < size; i++) {
     float value;
     if (t.dtype() == DT_HALF) {
-      value = __half2float(static_cast<__half*>(data)[i]);
+      value = __half2float(static_cast<const __half*>(data)[i]);
     } else if (t.dtype() == DT_INT32) {
-      value = static_cast<int*>(data)[i];
+      value = static_cast<const int*>(data)[i];
     } else if (t.dtype() == DT_BOOL) {
-      value = static_cast<bool*>(data)[i];
+      value = static_cast<const bool*>(data)[i];
     } else {
-      value = static_cast<float*>(data)[i];
+      value = static_cast<const float*>(data)[i];
     }
     tensor_string << value << ",";
   }
-  LOG(INFO) << tensor_string.toString();
+  LOG(INFO) << tensor_string.str();
 }
 
 void CheckCudaError(cudaError_t ERR) {
@@ -227,7 +227,7 @@ void CudaGraphMgr::CheckCudaGraphScore(const GraphDef& graph_def,
   PrintTensorData(output_tensors_tf[0]); 
 
   for (int i = 0; i < input_tensors_tf.size(); ++i) {
-    const Tensor& input = input_tensors_tf[i];
+    const Tensor& input = meta->input_tensors_[i];
     LOG(INFO) << "[Jieluo] Check cuda graph score input " << i 
               << " data type is " << input.dtype();
     PrintTensorData(input);
@@ -276,6 +276,20 @@ void CudaGraphMgr::CheckCudaGraphScore(const GraphDef& graph_def,
 
   LOG(INFO) << "[Jieluo] output tensor content for check score";
   PrintTensorData(meta->output_tensors_[0]);
+do {
+  cudaError_t ret = cudaGraphLaunch(meta->cuda_graph_instance_, streams_[0]);
+  if (ret != cudaSuccess) {
+    LOG(ERROR) << "cudagraph launch faild: " << ret;
+  }
+  cudaEvent_t event;
+  CheckCudaError(cudaEventCreateWithFlags(&event, cudaEventBlockingSync));
+  CheckCudaError(cudaEventRecord(event, streams_[0]));
+  CheckCudaError(cudaEventSynchronize(event));
+  CheckCudaError(cudaEventDestroy(event));
+
+  LOG(INFO) << "[Jieluo] Launch without memcpy, output tensor content for check score";
+  PrintTensorData(meta->output_tensors_[0]);
+} while(0);
   return;
 }
 
@@ -368,6 +382,7 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
     
     for (int j = 0; j < num_instance_; j++) {
       CudaGraphMeta* meta = new CudaGraphMeta(graph_name, batch_size[i]);
+      meta->input_tensors_ = input_tensors_cuda_graph; 
       batch_meta_map[batch_size[i]].push_back(meta);
       TF_CHECK_OK(session->RunForCapture(inputs_cuda_graph, output_node_names, {}, meta));
       if (meta_check == nullptr) {

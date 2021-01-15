@@ -109,10 +109,27 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
   OP_REQUIRES_OK_ASYNC(ctx, mgr.GetCudagraphMeta(graph_name_, *upper_iter, meta), done);
   OP_REQUIRES_OK_ASYNC(ctx, mgr.GetCudaStream(req_id, stream), done);
 
+LOG(INFO) << "[Jieluo] Before directly launch in cuda graph op ";
+mgr.PrintTensorData(meta->output_tensors_[0]);
+
+cudaGraphExec_t new_instance;
+cudaGraphInstantiate(&(new_instance), meta->cuda_graph_, NULL, NULL, 0);
+/*
+cudaGraphLaunch(meta->cuda_graph_instance_, stream);
+  cudaEvent_t event;
+   cudaEventCreateWithFlags(&event, cudaEventBlockingSync);
+   cudaEventRecord(event, stream);
+   cudaEventSynchronize(event);
+   cudaEventDestroy(event);
+LOG(INFO) << "[Jieluo] directly launch in cuda graph op ";
+mgr.PrintTensorData(meta->output_tensors_[0]);
+*/     
+
   // do h2d copies first
   // do not padding explictly
   for (int i = 0; i < feed_names_.size(); ++i) {
-    const Tensor& input = ctx->input(i);
+//    const Tensor& input = ctx->input(i);
+    const Tensor& input = meta->input_tensors_[i];
     LOG(INFO) << "[Jieluo] input in cuda graph op " << i << " type is " << input.dtype();
     mgr.PrintTensorData(input);
     const void* host_buffer;
@@ -148,8 +165,9 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
   }
 
   // run cuda graph instance
-  cudaError_t ret = cudaGraphLaunch(meta->cuda_graph_instance_, stream);
-  OP_REQUIRES_ASYNC(ctx, ret == cudaSuccess, 
+//  cudaError_t ret = cudaGraphLaunch(meta->cuda_graph_instance_, stream);
+ cudaError_t ret = cudaGraphLaunch(new_instance, stream);
+   OP_REQUIRES_ASYNC(ctx, ret == cudaSuccess, 
         errors::Internal("cudagraph launch faild: ", ret), done);
 
   CudaGraphCbArgs* args = new CudaGraphCbArgs(ctx, meta, batch_size, done);

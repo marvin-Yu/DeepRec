@@ -58,7 +58,7 @@ private:
                           const std::vector<std::string>& input_node_names,
                           const std::vector<std::string>& output_node_names);
 public:
-  void PrintTensorData(Tensor &t);
+  void PrintTensorData(const Tensor &t);
 
 public:
   // Check given graph names are captured already

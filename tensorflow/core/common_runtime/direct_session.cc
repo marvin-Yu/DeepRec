@@ -468,6 +468,22 @@ Status DirectSession::Create(GraphDef&& graph) {
                                  input_node_names,
                                  output_node_names,
                                  buckets);
+/*
+do{
+LOG(INFO) << "[Jieluo] Launch in direct session";
+   cudaStream_t stream;
+  CudaGraphMeta* meta;
+  mgr.GetCudagraphMeta(options_.config.graph_options().optimizer_options().subgraph_descriptions(uncaptured_index[i]).subgraph_name(), buckets[0], meta);
+  mgr.GetCudaStream(0, stream);
+  cudaGraphLaunch(meta->cuda_graph_instance_, stream);
+    cudaEvent_t event;
+   cudaEventCreateWithFlags(&event, cudaEventBlockingSync);
+   cudaEventRecord(event, stream);
+   cudaEventSynchronize(event);
+   cudaEventDestroy(event);
+mgr.PrintTensorData(meta->output_tensors_[0]);
+} while(0);
+*/
           }
         }
       }

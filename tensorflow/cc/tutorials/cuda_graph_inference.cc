@@ -201,16 +201,16 @@ void RandomInitialize(Tensor& t)
     }
 }
 
-void PrintTensorData(Tensor &t){
-    void * data;
+void PrintTensorData(const Tensor &t){
+    const void * data;
     if(t.dtype() == DT_HALF){
-        data = static_cast<void*>(t.flat<Eigen::half>().data());
+        data = static_cast<const void*>(t.flat<Eigen::half>().data());
     }else if(t.dtype() == DT_FLOAT){
-        data = static_cast<void*>(t.flat<float>().data());
+        data = static_cast<const void*>(t.flat<float>().data());
     }else if(t.dtype() == DT_BOOL){
-        data = static_cast<void*>(t.flat<bool>().data());
+        data = static_cast<const void*>(t.flat<bool>().data());
     }else if(t.dtype() == DT_INT32){
-        data = static_cast<void*>(t.flat<int>().data());
+        data = static_cast<const void*>(t.flat<int>().data());
     }else{
         std::cout << "Print Tensor: Unsupported data type!" << std::endl;
         return;
@@ -229,14 +229,14 @@ void PrintTensorData(Tensor &t){
     for(int i = 0; i < size; i ++){
         float value;
         if(t.dtype() == DT_HALF){
-            value = __half2float(static_cast<__half*>(data)[i]);
+            value = __half2float(static_cast<const __half*>(data)[i]);
         }else if(t.dtype() == DT_INT32){
-            value = static_cast<int*>(data)[i];
+            value = static_cast<const int*>(data)[i];
         }else if(t.dtype() == DT_BOOL){
-            value = static_cast<bool*>(data)[i];
+            value = static_cast<const bool*>(data)[i];
         }
         else{
-            value = static_cast<float*>(data)[i];
+            value = static_cast<const float*>(data)[i];
         }        
         std::cout << value << ", ";
     }
