@@ -57,7 +57,7 @@ private:
                           CudaGraphMeta* meta,
                           const std::vector<std::string>& input_node_names,
                           const std::vector<std::string>& output_node_names);
-  void LaunchGraphInMeta(CudaGraphMeta* meta, cudaStream_t& stream);
+  static void LaunchGraphInMeta(CudaGraphMeta* meta, cudaStream_t* stream);
 public:
   void PrintTensorData(const Tensor &t);
 
@@ -88,7 +88,8 @@ private:
   GraphDef replay_graph_def_;
   CudaGraphMeta* replay_meta_;
   std::vector<std::string> replay_input_names_;
-  std::vcetor<std::string> replay_output_names_;
+  std::vector<std::string> replay_output_names_;
+
 
 public:
   void CheckScoreReplay();

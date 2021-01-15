@@ -112,8 +112,16 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
 LOG(INFO) << "[Jieluo] Before directly launch in cuda graph op ";
 mgr.PrintTensorData(meta->output_tensors_[0]);
 
-cudaGraphExec_t new_instance;
-cudaGraphInstantiate(&(new_instance), meta->cuda_graph_, NULL, NULL, 0);
+  for (int i = 0; i < meta->output_tensors_.size(); ++i) {
+    Tensor *output = nullptr;
+    TensorShape shape = meta->output_tensors_[i].shape();
+    shape.set_dim(0, 1);
+    OP_REQUIRES_OK(ctx, ctx->allocate_output(i, shape, &output));
+    output->CopyFrom(meta->output_tensors_[i], shape); 
+  }
+  mgr.ReturnCudaGraphMeta(meta);
+  done();
+  return;
 /*
 cudaGraphLaunch(meta->cuda_graph_instance_, stream);
   cudaEvent_t event;
@@ -127,6 +135,7 @@ mgr.PrintTensorData(meta->output_tensors_[0]);
 
   // do h2d copies first
   // do not padding explictly
+/*
   for (int i = 0; i < feed_names_.size(); ++i) {
 //    const Tensor& input = ctx->input(i);
     const Tensor& input = meta->input_tensors_[i];
@@ -163,11 +172,10 @@ mgr.PrintTensorData(meta->output_tensors_[0]);
         errors::Internal("CudaMemCpy to ", i, " st tensor failed, device addr: ", device_buffer),
         done);
   }
-
+*/
   // run cuda graph instance
-//  cudaError_t ret = cudaGraphLaunch(meta->cuda_graph_instance_, stream);
- cudaError_t ret = cudaGraphLaunch(new_instance, stream);
-   OP_REQUIRES_ASYNC(ctx, ret == cudaSuccess, 
+  cudaError_t ret = cudaGraphLaunch(meta->cuda_graph_instance_, stream);
+  OP_REQUIRES_ASYNC(ctx, ret == cudaSuccess, 
         errors::Internal("cudagraph launch faild: ", ret), done);
 
   CudaGraphCbArgs* args = new CudaGraphCbArgs(ctx, meta, batch_size, done);

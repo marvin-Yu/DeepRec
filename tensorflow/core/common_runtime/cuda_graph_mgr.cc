@@ -292,31 +292,33 @@ void CudaGraphMgr::CheckCudaGraphScore(const GraphDef& graph_def,
 
   // run cuda graph instance
   LOG(INFO) << "[Jieluo] In check score, copy and launch in same thread";
-  LaunchGraphInMeta(meta, stream_[0]);
+  LaunchGraphInMeta(meta, &(streams_[0]));
+  LOG(INFO) << "[Jieluo] output tensor content for check score";
+  PrintTensorData(meta->output_tensors_[0]);
 
   LOG(INFO) << "[Jieluo] In check score, launch in same thread without copy";
-  LaunchGraphInMeta(meta, stream_[0]);
+  LaunchGraphInMeta(meta, &(streams_[0]));
+  LOG(INFO) << "[Jieluo] output tensor content for check score";
+  PrintTensorData(meta->output_tensors_[0]);
 
   LOG(INFO) << "[Jieluo] In check score, launch in new thread without copy";
-  std::thread new_thread = std::thread(LaunchGraphInMeta, meta, streams_[0]);
+  std::thread new_thread = std::thread(LaunchGraphInMeta, meta, &(streams_[0]));
   new_thread.join();
-  
+  LOG(INFO) << "[Jieluo] output tensor content for check score";
+  PrintTensorData(meta->output_tensors_[0]);  
   return;
 }
 
-void CudaGraphMgr::LaunchGraphInMeta(CudaGraphMeta* meta, cudaStream_t& stream) {
-  cudaError_t ret = cudaGraphLaunch(meta->cuda_graph_instance_, stream);
+void CudaGraphMgr::LaunchGraphInMeta(CudaGraphMeta* meta, cudaStream_t* stream) {
+  cudaError_t ret = cudaGraphLaunch(meta->cuda_graph_instance_, *stream);
   if (ret != cudaSuccess) {
     LOG(ERROR) << "cudagraph launch faild: " << ret;
   }
   cudaEvent_t event;
   CheckCudaError(cudaEventCreateWithFlags(&event, cudaEventBlockingSync));
-  CheckCudaError(cudaEventRecord(event, stream));
+  CheckCudaError(cudaEventRecord(event, *stream));
   CheckCudaError(cudaEventSynchronize(event));
   CheckCudaError(cudaEventDestroy(event));
-
-  LOG(INFO) << "[Jieluo] output tensor content for check score";
-  PrintTensorData(meta->output_tensors_[0]);
   return;
 }
 
