@@ -176,15 +176,6 @@ class DirectSession : public Session {
   bool cuda_graph_capture_mode_ = false;
   cudaStream_t capturing_stream_ = nullptr;
   std::string captured_model_name_ = "";
-  // holds the tensors allocated during graph capturing
-  // model_name --> tensor_holders
-  // for each model, multiple graphs can be captured,
-  // so we can run multiple graph instances in parallel
-  // (to separate their memory, mutiple graphs are needed).
-
-  using tensor_holder_pair = std::pair<std::string, std::vector<TensorHolder>>;
-  using cuda_graph_pair = std::pair<std::string, std::vector<cudaGraph_t>>;
-  using cuda_graph_instance_pair = std::pair<std::string, std::vector<cudaGraphExec_t>>;
 
   std::mutex cuda_graph_instance_mutex_;
 

@@ -785,7 +785,10 @@ Status OpKernelContext::allocate_tensor(
   
   if(tensor_holder){
       if(new_tensor.AllocatedBytes() > 0){
-          tensor_holder->Add(&new_tensor);
+          size_t tensor_size = tensor_holder->Add(&new_tensor);
+          LOG(INFO) << "[Jieluo] Add a new tensor to tensorholder, current size " 
+                    << tensor_size << ", Op name is " << op_kernel()->name()
+                    << " op type is " << op_kernel()->type(); 
       }
   }
   

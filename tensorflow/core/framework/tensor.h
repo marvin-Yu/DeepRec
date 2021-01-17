@@ -1043,7 +1043,8 @@ public:
     TensorHolder(const TensorHolder& tensor_holder);
     
     Tensor FindUsableTensor(DataType type, const TensorShape & shape);    
-    void Add(const Tensor* tensor);
+    size_t Add(const Tensor* tensor);
+    const Tensor* GetTensorPtr(unsigned int index);
     int AllocatedBytes();
     bool HostContains(const void * address) const;
     

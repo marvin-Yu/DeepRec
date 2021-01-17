@@ -1276,13 +1276,18 @@ Tensor TensorHolder::FindUsableTensor(DataType type, const TensorShape & shape) 
 }
 
 
-void TensorHolder::Add(const Tensor* tensor) {
+int TensorHolder::Add(const Tensor* tensor) {
     std::lock_guard<std::mutex> lck(mtx_);
     tensors_.push_back(Tensor());
     auto & t = tensors_[tensors_.size() - 1];
     t.shape_ = tensor->shape_;
     t.buf_ = tensor->buf_;
-    t.buf_->Ref();
+    t.buf_->Ref();    
+    return tensors_.size();
+}
+
+const Tensor* TensorHolder::GetTensorPtr(unsigned int index) {
+  return &(tensors_[index]);
 }
 
 int TensorHolder::AllocatedBytes(){
