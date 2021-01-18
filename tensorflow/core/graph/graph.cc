@@ -651,9 +651,7 @@ GraphDef Graph::ToGraphDefDebug() const {
 }
 
 Node* Graph::FindNodeByName(const std::string& node_name) const {
-  LOG(INFO) << "[jieluo] Find node by name begin";
   for (Node* node : this->nodes()) {
-    LOG(INFO) << "[jieluo] Node name is " << node->name();
     if (node->name() == node_name) {
       return node;
     }

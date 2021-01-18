@@ -107,40 +107,13 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
   CudaGraphMeta* meta;
   CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
   OP_REQUIRES_OK_ASYNC(ctx, mgr.GetCudagraphMeta(graph_name_, *upper_iter, meta), done);
-  OP_REQUIRES_OK_ASYNC(ctx, mgr.GetCudaStream(req_id, stream), done);
-
-LOG(INFO) << "[Jieluo] Before directly launch in cuda graph op ";
-mgr.PrintTensorData(meta->output_tensors_[0]);
-/*
-  for (int i = 0; i < meta->output_tensors_.size(); ++i) {
-    Tensor *output = nullptr;
-    TensorShape shape = meta->output_tensors_[i].shape();
-    shape.set_dim(0, 1);
-    OP_REQUIRES_OK(ctx, ctx->allocate_output(i, shape, &output));
-    output->CopyFrom(meta->output_tensors_[i], shape); 
-  }
-  mgr.ReturnCudaGraphMeta(meta);
-  done();
-  return;
-
-cudaGraphLaunch(meta->cuda_graph_instance_, stream);
-  cudaEvent_t event;
-   cudaEventCreateWithFlags(&event, cudaEventBlockingSync);
-   cudaEventRecord(event, stream);
-   cudaEventSynchronize(event);
-   cudaEventDestroy(event);
-LOG(INFO) << "[Jieluo] directly launch in cuda graph op ";
-mgr.PrintTensorData(meta->output_tensors_[0]);
-*/     
+  OP_REQUIRES_OK_ASYNC(ctx, mgr.GetCudaStream(req_id, stream), done); 
 
   // do h2d copies first
   // do not padding explictly
 
   for (int i = 0; i < feed_names_.size(); ++i) {
-//    const Tensor& input = ctx->input(i);
-    const Tensor& input = meta->input_tensors_[i];
-    LOG(INFO) << "[Jieluo] input in cuda graph op " << i << " type is " << input.dtype();
-    mgr.PrintTensorData(input);
+    const Tensor& input = ctx->input(i);
     const void* host_buffer;
     size_t ele_size = 1;
     if (input.dtype() == DT_HALF) {
@@ -166,7 +139,6 @@ mgr.PrintTensorData(meta->output_tensors_[0]);
     size_t num_elements = input.NumElements();
     size_t num_bytes = num_elements * ele_size;
     void* device_buffer = meta->src_dst_mapping_[i].second;
-    LOG(INFO) << "[Jieluo] In run op, CudaMemCpy to " << i <<  " st tensor, device addr: " << device_buffer;
     OP_REQUIRES_ASYNC(ctx, cudaMemcpyAsync(device_buffer, host_buffer, num_bytes,
         cudaMemcpyHostToDevice, stream) == cudaSuccess, 
         errors::Internal("CudaMemCpy to ", i, " st tensor failed, device addr: ", device_buffer),

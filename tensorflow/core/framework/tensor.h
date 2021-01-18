@@ -175,12 +175,6 @@ class Tensor {
   template <typename T>
   Tensor(T value, host_scalar_tag tag);
 
- // for debug
- public:
-  void* data_addr() const {
-    return buf_->data();
-  };
-
  public:
   // A series of specialized constructors for scalar tensors in host memory.
   //

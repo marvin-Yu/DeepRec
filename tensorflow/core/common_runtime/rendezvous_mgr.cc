@@ -150,8 +150,6 @@ void IntraProcessRendezvous::SameWorkerRecvDone(
         // as we may do H2D copy mannualy 
         Tensor copy(out_allocator, in.dtype(), in.shape(), aa);
         size_t size = tensor_holder->Add(&copy);
-	LOG(INFO) << "[Jieluo] Add a new tensor to tensorholder, current size " 
-                    << size << ", Op name is rendezvous";
         *out = copy;
         
     }else{

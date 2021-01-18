@@ -204,35 +204,12 @@ void CudaGraphMgr::FillInputsMap(InputsMap& inputs_map, const std::vector<std::s
   }
 }
 
-void CudaGraphMgr::CheckScoreReplay() {
-  if (!args_saved_) {
-    LOG(INFO) << "[Jieluo] args have not be saved, can not replay";
-    return; 
-  }
-  CheckCudaGraphScore(replay_graph_def_, 
-                      replay_meta_, 
-                      replay_input_names_,
-                      replay_output_names_);
-  return;
-}
-
 void CudaGraphMgr::CheckCudaGraphScore(const GraphDef& graph_def,
                           CudaGraphMeta* meta,
                           const std::vector<std::string>& input_node_names,
                           const std::vector<std::string>& output_node_names) {
   if (host_allocator_ == nullptr) {
     return;
-  }
-
-  if (!args_saved_) {
-    LOG(INFO) << "[Jieluo] replay args unsaved";
-    replay_graph_def_ = graph_def;
-    replay_meta_ = meta;
-    replay_input_names_ = input_node_names;
-    replay_output_names_ = output_node_names;
-    args_saved_ = true; 
-  } else {
-    LOG(INFO) << "[Jieluo] replay args saved";
   }
 
   SessionOptions options;
@@ -254,10 +231,7 @@ void CudaGraphMgr::CheckCudaGraphScore(const GraphDef& graph_def,
   PrintTensorData(output_tensors_tf[0]); 
 
   for (int i = 0; i < input_tensors_tf.size(); ++i) {
-    const Tensor& input = meta->input_tensors_[i];
-    LOG(INFO) << "[Jieluo] Check cuda graph score input " << i 
-              << " data type is " << input.dtype();
-    PrintTensorData(input);
+    const Tensor& input = input_tensors_tf[i];
     const void* host_buffer;
     size_t ele_size = 1;
     if (input.dtype() == DT_HALF) {
@@ -283,7 +257,6 @@ void CudaGraphMgr::CheckCudaGraphScore(const GraphDef& graph_def,
     size_t num_elements = input.NumElements();
     size_t num_bytes = num_elements * ele_size;
     void* device_buffer = meta->src_dst_mapping_[i].second;
-    LOG(INFO) << "[Jieluo] In check score, CudaMemCpy to " << i <<  " st tensor, device addr: " << device_buffer;
     if (cudaMemcpyAsync(device_buffer, host_buffer, num_bytes,
         cudaMemcpyHostToDevice, streams_[0]) != cudaSuccess) {
       LOG(ERROR) << "CudaMemCpy to " << i <<  " st tensor failed, device addr: " << device_buffer;
@@ -291,21 +264,9 @@ void CudaGraphMgr::CheckCudaGraphScore(const GraphDef& graph_def,
   }
 
   // run cuda graph instance
-  LOG(INFO) << "[Jieluo] In check score, copy and launch in same thread";
   LaunchGraphInMeta(meta, &(streams_[0]));
-  LOG(INFO) << "[Jieluo] output tensor content for check score";
   PrintTensorData(meta->output_tensors_[0]);
 
-  LOG(INFO) << "[Jieluo] In check score, launch in same thread without copy";
-  LaunchGraphInMeta(meta, &(streams_[0]));
-  LOG(INFO) << "[Jieluo] output tensor content for check score";
-  PrintTensorData(meta->output_tensors_[0]);
-
-  LOG(INFO) << "[Jieluo] In check score, launch in new thread without copy";
-  std::thread new_thread = std::thread(LaunchGraphInMeta, meta, &(streams_[0]));
-  new_thread.join();
-  LOG(INFO) << "[Jieluo] output tensor content for check score";
-  PrintTensorData(meta->output_tensors_[0]);  
   return;
 }
 
@@ -431,7 +392,7 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
   }
   // turn off graph capture mode
   session->DisableGraphCapture();
-  CheckCudaGraphScore(graph_def, meta_check, input_node_names, output_node_names);
+ // CheckCudaGraphScore(graph_def, meta_check, input_node_names, output_node_names);
   return Status::OK();
 }
 

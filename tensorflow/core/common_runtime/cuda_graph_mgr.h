@@ -81,18 +81,6 @@ private:
   // stream and cuda graph instance count, each instance corresponds to one stream
   int num_instance_; 
   Allocator* host_allocator_;
-
-  // for replay check score
-private:
-  bool args_saved_;
-  GraphDef replay_graph_def_;
-  CudaGraphMeta* replay_meta_;
-  std::vector<std::string> replay_input_names_;
-  std::vector<std::string> replay_output_names_;
-
-
-public:
-  void CheckScoreReplay();
 };
 
 /* static */ CudaGraphMgr& CudaGraphMgr::Singleton() {
