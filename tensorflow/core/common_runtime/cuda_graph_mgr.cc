@@ -169,9 +169,6 @@ void CudaGraphMgr::Init() {
   for (int i = 0; i < num_instance_; i++) {
     CheckCudaError(cudaStreamCreate(&streams_[i]));
   }
-
-  args_saved_ = false;
-  replay_meta_ = nullptr;
 }
 
 Status CudaGraphMgr::GetCudaStream(int req_id, cudaStream_t& stream) {
@@ -372,7 +369,6 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
     
     for (int j = 0; j < num_instance_; j++) {
       CudaGraphMeta* meta = new CudaGraphMeta(graph_name, batch_size[i]);
-      meta->input_tensors_ = input_tensors_cuda_graph; 
       batch_meta_map[batch_size[i]].push_back(meta);
       TF_CHECK_OK(session->RunForCapture(inputs_cuda_graph, output_node_names, {}, meta));
       if (meta_check == nullptr) {
