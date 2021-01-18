@@ -147,7 +147,7 @@ class DirectSession : public Session {
                      RunMetadata* run_metadata,
                      CudaGraphMeta* cuda_graph_meta) override;
   bool SupportsCudaGraph() override { return true; };
-  cudaStream_t EnableGraphCapture(std::string model_name) override;
+  cudaStream_t EnableGraphCapture() override;
   void DisableGraphCapture() override;
 #endif
 
@@ -172,12 +172,10 @@ class DirectSession : public Session {
  private:
 
 #ifdef GOOGLE_CUDA
-  bool cuda_graph_enable_ = false;
   bool cuda_graph_capture_mode_ = false;
   cudaStream_t capturing_stream_ = nullptr;
-  std::string captured_model_name_ = "";
 
-  std::mutex cuda_graph_instance_mutex_;
+
 
   bool RemoveH2DNodes(cudaGraph_t graph, std::vector<std::pair<void*, void*>> &mappings,
                       CudaGraphMeta* cuda_graph_meta);

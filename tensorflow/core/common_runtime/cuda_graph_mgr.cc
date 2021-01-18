@@ -346,7 +346,7 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
 
   // capture the cuda graph
   assert(session->SupportsCudaGraph());
-  cudaStream_t stream = session->EnableGraphCapture(graph_name);
+  cudaStream_t stream = session->EnableGraphCapture();
   LOG(INFO) << "capturing on stream -- " << stream;
   if (stream == NULL) {
     return Status(error::Code::INTERNAL,

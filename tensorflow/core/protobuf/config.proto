@@ -272,17 +272,13 @@ message OptimizerOptions {
   // and replace subgraph with cudagraphOp when serving.
   bool cuda_graph_enable = 7;
 
-  // If true, will check if cuda graph captured in cuda graph mgr, if not, capture 
-  // subgraphs as cuda graphs which described in below.
-  bool try_capture_cuda_graph = 8;
-
-  repeated SubgraphDescription subgraph_descriptions = 9;
+  repeated SubgraphDescription subgraph_descriptions = 8;
 
   // if capture cuda graph, capture fixed batch size graph instance
-  repeated int32 cuda_graph_batch_sizes = 10;
+  repeated int32 cuda_graph_batch_sizes = 9;
 
   // output node names of final serving graph with cuda graph
-  repeated string output_names_with_cg = 11;
+  repeated string output_names_with_cg = 10;
 }
 
 message GraphOptions {

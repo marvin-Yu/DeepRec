@@ -139,7 +139,7 @@ class Session {
     return Run(run_options, inputs, output_tensor_names, target_node_names, &(cuda_graph_meta->output_tensors_), run_metadata);
   };
   virtual bool SupportsCudaGraph() { return false; }
-  virtual cudaStream_t  EnableGraphCapture(std::string model_name) {return nullptr;} 
+  virtual cudaStream_t  EnableGraphCapture() {return nullptr;} 
   virtual void DisableGraphCapture() { }
 #endif
   

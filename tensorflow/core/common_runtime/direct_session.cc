@@ -413,14 +413,11 @@ Status DirectSession::Create(GraphDef&& graph) {
           "A Graph has already been created for this session.");
     }
 #ifdef GOOGLE_CUDA
-    cuda_graph_enable_ = options_.config.graph_options().
+    bool cuda_graph_enable = options_.config.graph_options().
                              optimizer_options().
                              cuda_graph_enable();
-    bool try_capture_cuda_graph = options_.config.graph_options().
-                                      optimizer_options().
-                                      try_capture_cuda_graph();
     
-    if (cuda_graph_enable_) {
+    if (cuda_graph_enable) {
       CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
       // get all cudagraph num, for checking existance and capturing
       int num_cuda_graph = options_.config.graph_options().
@@ -447,33 +444,36 @@ Status DirectSession::Create(GraphDef&& graph) {
                                 cuda_graph_batch_sizes(i));
       }
       // check and capture uncaptured graph
-      if (try_capture_cuda_graph) {
-        if (!mgr.CheckGraphAllCaptured(cuda_graph_names, uncaptured_index)) {
-          // capture uncaptured graph
-          for (int i = 0; i < uncaptured_index.size(); ++i) {
-            GraphDef cudagraph_capture;
-            std::vector<std::string> input_node_names;
-            std::vector<std::string> output_node_names;
-            bool gen_succ = SubgraphGenerator::GenerateSubgraph(graph, cudagraph_capture, 
-                                options_.config.graph_options().optimizer_options().subgraph_descriptions(uncaptured_index[i]),
-                                input_node_names, output_node_names);
-            if (!gen_succ) {
-              LOG(ERROR) << "Generate subgraph for cudagraph capturing failed, please check GraphDef and session options";
-              // todo: return not ok
-            }
-            DumpGraphDefToFile(options_.config.graph_options().optimizer_options().subgraph_descriptions(uncaptured_index[i]).subgraph_name(), 
-                               cudagraph_capture);
-            mgr.CaptureCudagraph(cudagraph_capture, 
-                                 options_.config.graph_options().optimizer_options().subgraph_descriptions(uncaptured_index[i]).subgraph_name(),
-                                 input_node_names,
-                                 output_node_names,
-                                 buckets);
-          }
-        }
-      }
-      // check if all subgraph are captured
       if (!mgr.CheckGraphAllCaptured(cuda_graph_names, uncaptured_index)) {
-        LOG(ERROR) << "Not all subgraph are captured as cudagraphs";
+        LOG(INFO) << "Not all subgraph are captured as cudagraphs";
+        // capture uncaptured graph
+        for (int i = 0; i < uncaptured_index.size(); ++i) {
+          GraphDef cudagraph_capture;
+          std::vector<std::string> input_node_names;
+          std::vector<std::string> output_node_names;
+          bool gen_succ = SubgraphGenerator::GenerateSubgraph(
+              graph, cudagraph_capture,
+              options_.config.graph_options()
+                  .optimizer_options()
+                  .subgraph_descriptions(uncaptured_index[i]),
+              input_node_names, output_node_names);
+          if (!gen_succ) {
+            LOG(ERROR) << "Generate subgraph for cudagraph capturing failed, "
+                          "please check GraphDef and session options";
+            // todo: return not ok
+          }
+          DumpGraphDefToFile(options_.config.graph_options()
+                                 .optimizer_options()
+                                 .subgraph_descriptions(uncaptured_index[i])
+                                 .subgraph_name(),
+                             cudagraph_capture);
+          mgr.CaptureCudagraph(cudagraph_capture,
+                               options_.config.graph_options()
+                                   .optimizer_options()
+                                   .subgraph_descriptions(uncaptured_index[i])
+                                   .subgraph_name(),
+                               input_node_names, output_node_names, buckets);
+        }
       }
       GraphDef cudagraph_serving;
       int graph_idx = 0;
@@ -1927,7 +1927,7 @@ Status DirectSession::AfterRunAsync(const ::tensorflow::RunOptions& run_options,
 
 #ifdef GOOGLE_CUDA
 
-cudaStream_t DirectSession::EnableGraphCapture(std::string model_name){
+cudaStream_t DirectSession::EnableGraphCapture(){
     
     if(model_name.size() == 0){
         return nullptr;
@@ -1951,7 +1951,6 @@ cudaStream_t DirectSession::EnableGraphCapture(std::string model_name){
         }
     }
     cuda_graph_capture_mode_ = true;
-    captured_model_name_ = model_name;
     //disable event poll
     EventMgr::SetStreamCaptureMode(true);
     
@@ -1977,7 +1976,6 @@ void DirectSession::DisableGraphCapture(){
     }
     cuda_graph_capture_mode_ = false;
     EventMgr::SetStreamCaptureMode(false);
-    captured_model_name_ = "";
 }
 
 #endif
