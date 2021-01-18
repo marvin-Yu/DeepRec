@@ -365,8 +365,9 @@ void PrepareSessionOptionForGamma(SessionOptions& options, bool cg_enable = fals
                                         ->add_subgraph_descriptions();
     subgraph->set_subgraph_name("main");
     subgraph->add_output_node_names("p4p_Main_Score_Network/hiddenlayer_4/hiddenlayer_4/LeakyRelu");
-  //  subgraph->add_output_node_names("p4p_Main_Score_Network/hiddenlayer_0/MatMul");
+ //   subgraph->add_output_node_names("p4p_Main_Score_Network/add");
     SubgraphInputTensor* input= subgraph->add_input_tensors();
+  //  input->set_tensor_provider_name("p4p_Main_Score_Network/hiddenlayer_0/hiddenlayer_0/LeakyRelu");
     input->set_tensor_provider_name("p4p_Main_Score_Network/concat");
     input->set_tensor_provider_slot(0);
     input->set_ph_name("ph");
@@ -375,6 +376,7 @@ void PrepareSessionOptionForGamma(SessionOptions& options, bool cg_enable = fals
     input->add_shape(4440);
 
     SubgraphInputTensor* input1 = subgraph->add_input_tensors();
+//    input1->set_tensor_provider_name("p4p_Main_Score_Network/column_extend/column_extend/LeakyRelu");
     input1->set_tensor_provider_name("p4p_Main_Score_Network/column_extend/concat");
     input1->set_tensor_provider_slot(0);
     input1->set_ph_name("ph1");

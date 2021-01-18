@@ -454,6 +454,9 @@ class MatMulOp : public OpKernel {
     const Tensor& a = ctx->input(0);
     const Tensor& b = ctx->input(1);
 
+    LOG(INFO) << "[Jieluo] In matmul op, input tensor 0 addr is " << a.data_addr()
+              << ", input tensor 1 addr is " << b.data_addr();
+
     // Check that the dimensions of the two matrices are valid.
     OP_REQUIRES(
         ctx, TensorShapeUtils::IsMatrix(a.shape()),

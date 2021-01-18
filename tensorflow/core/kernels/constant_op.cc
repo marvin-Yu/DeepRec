@@ -83,6 +83,15 @@ ConstantOp::ConstantOp(OpKernelConstruction* ctx)
 }
 
 void ConstantOp::Compute(OpKernelContext* ctx) {
+  LOG(INFO) << "[Jieluo] In const op, return tensor addr " << tensor_.data_addr();
+  if (ctx->tensor_holder) {
+    if (tensor_.AllocatedBytes() > 0) {
+      size_t tensor_size = ctx->tensor_holder->Add(&tensor_);
+      LOG(INFO) << "[Jieluo] Add a new tensor to tensorholder, current size " 
+                    << tensor_size << ", Op name is " << name()
+                    << " op type is const"; 
+    }
+  } 
   ctx->set_output(0, tensor_);
   if (TF_PREDICT_FALSE(ctx->track_allocations())) {
     ctx->record_persistent_memory_allocation(tensor_.AllocatedBytes());

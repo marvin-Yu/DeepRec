@@ -111,7 +111,7 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
 
 LOG(INFO) << "[Jieluo] Before directly launch in cuda graph op ";
 mgr.PrintTensorData(meta->output_tensors_[0]);
-
+/*
   for (int i = 0; i < meta->output_tensors_.size(); ++i) {
     Tensor *output = nullptr;
     TensorShape shape = meta->output_tensors_[i].shape();
@@ -122,7 +122,7 @@ mgr.PrintTensorData(meta->output_tensors_[0]);
   mgr.ReturnCudaGraphMeta(meta);
   done();
   return;
-/*
+
 cudaGraphLaunch(meta->cuda_graph_instance_, stream);
   cudaEvent_t event;
    cudaEventCreateWithFlags(&event, cudaEventBlockingSync);
@@ -135,7 +135,7 @@ mgr.PrintTensorData(meta->output_tensors_[0]);
 
   // do h2d copies first
   // do not padding explictly
-/*
+
   for (int i = 0; i < feed_names_.size(); ++i) {
 //    const Tensor& input = ctx->input(i);
     const Tensor& input = meta->input_tensors_[i];
@@ -172,7 +172,7 @@ mgr.PrintTensorData(meta->output_tensors_[0]);
         errors::Internal("CudaMemCpy to ", i, " st tensor failed, device addr: ", device_buffer),
         done);
   }
-*/
+
   // run cuda graph instance
   cudaError_t ret = cudaGraphLaunch(meta->cuda_graph_instance_, stream);
   OP_REQUIRES_ASYNC(ctx, ret == cudaSuccess, 

@@ -1276,12 +1276,13 @@ Tensor TensorHolder::FindUsableTensor(DataType type, const TensorShape & shape) 
 }
 
 
-int TensorHolder::Add(const Tensor* tensor) {
+size_t TensorHolder::Add(const Tensor* tensor) {
     std::lock_guard<std::mutex> lck(mtx_);
     tensors_.push_back(Tensor());
     auto & t = tensors_[tensors_.size() - 1];
     t.shape_ = tensor->shape_;
     t.buf_ = tensor->buf_;
+    LOG(INFO) << "[Jieluo] Data buf addr in tensor holder is " << t.buf_->data();
     t.buf_->Ref();    
     return tensors_.size();
 }
