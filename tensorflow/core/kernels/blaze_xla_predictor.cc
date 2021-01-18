@@ -1,3 +1,4 @@
+#include "tensorflow/core/framework/types.h"
 #include "tensorflow/core/kernels/blaze_xla_predictor.h"
 #include "tensorflow/core/util/env_var.h"
 
@@ -280,6 +281,13 @@ Status BlazeXlaPredictor::PadToStatic(const std::vector<Tensor>& inputs,
       auto* stream = ctx->op_device_context()->stream();
       auto input_dev_ptr = AsDeviceMemory(input_ptr, input_size);
       auto padded_dev_ptr = AsDeviceMemory(padded_ptr, padded_size);
+      if (DataTypeIsInteger(inputs[i].dtype())) {
+        bool copy_status =
+            stream->ThenMemZero(&padded_dev_ptr, padded_size).ok();
+        if (!copy_status) {
+          return errors::Internal("MemZero failed.");
+        }
+      }
       bool copy_status =
           stream->ThenMemcpyD2D(&padded_dev_ptr, input_dev_ptr, input_size).ok();
       if (!copy_status) {

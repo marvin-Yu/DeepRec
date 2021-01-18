@@ -5,16 +5,16 @@
 
 namespace tensorflow {
 void BenchmarkHelper::Start() {
+  mutex_lock l(mu_);
   if (!is_running_) {
-    mutex_lock l(mu_);
     reporter_thread_ = std::thread(ReportFunc, this);
     is_running_ = true;
   }
 }
 
 void BenchmarkHelper::Stop() {
+  mutex_lock l(mu_);
   if (!stop_) {
-    mutex_lock l(stop_mu_);
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     stop_ = true;
   }
