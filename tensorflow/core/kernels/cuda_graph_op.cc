@@ -13,6 +13,7 @@
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/platform/macros.h"
+#include "tensorflow/tools/traffic/traffic.h"
 
 namespace tensorflow {
 
@@ -38,6 +39,9 @@ public:
   void ComputeAsync(OpKernelContext* ctx, DoneCallback done) override;
 
 private:
+  void RecordTraffic(int batch_size);
+
+private:
   std::string graph_name_;
   std::vector<std::string> feed_names_;
   std::vector<std::string> fetch_names_;
@@ -50,6 +54,28 @@ private:
   if (def.attr().find(#k) != def.attr().end()) {   \
     OP_REQUIRES_OK(ctx, ctx->GetAttr(#k, &v));     \
   }                                                \
+}
+
+void CudaGraphOp::RecordTraffic(int batch_size) {
+  ::Traffic::Instance()->Record("CgBatchSize", "CudaGraph");
+  if (batch_size <= 32) {
+    ::Traffic::Instance()->Record("CgBatchSize-32", "CudaGraph");
+  } else if (batch_size <= 64) {
+    ::Traffic::Instance()->Record("CgBatchSize33-64", "CudaGraph");
+  } else if (batch_size <= 96) {
+    ::Traffic::Instance()->Record("CgBatchSize64-96", "CudaGraph");
+  } else if (batch_size <= 96) {
+    ::Traffic::Instance()->Record("CgBatchSize64-96", "CudaGraph");
+  } else if (batch_size <= 128) {
+    ::Traffic::Instance()->Record("CgBatchSize97-128", "CudaGraph");
+  } else if (batch_size <= 160) {
+    ::Traffic::Instance()->Record("CgBatchSize129-160", "CudaGraph");
+  } else if (batch_size <= 192) {
+    ::Traffic::Instance()->Record("CgBatchSize161-192", "CudaGraph");
+  } else {
+    ::Traffic::Instance()->Record("CgBatchSize192-", "CudaGraph");
+  }
+  return;
 }
 
 void CUDART_CB CudaGraphCallback(cudaStream_t stream, 

@@ -23,6 +23,7 @@
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/public/session.h"
+#include "tensorflow/tools/traffic/traffic.h"
 
 static const int NUM_INSTANCE = 1;
 
@@ -169,6 +170,17 @@ void CudaGraphMgr::Init() {
   for (int i = 0; i < num_instance_; i++) {
     CheckCudaError(cudaStreamCreate(&streams_[i]));
   }
+}
+
+void CudaGraphMgr::InitTraffic() {
+  ::Traffic::Instance()->RegistRecord("CgBatchSize", ::Traffic::STAT, "CudaGraph");
+  ::Traffic::Instance()->RegistRecord("CgBatchSize-32", ::Traffic::COUNT, "CudaGraph");
+  ::Traffic::Instance()->RegistRecord("CgBatchSize33-64", ::Traffic::COUNT, "CudaGraph");
+  ::Traffic::Instance()->RegistRecord("CgBatchSize64-96", ::Traffic::COUNT, "CudaGraph");
+  ::Traffic::Instance()->RegistRecord("CgBatchSize97-128", ::Traffic::COUNT, "CudaGraph");
+  ::Traffic::Instance()->RegistRecord("CgBatchSize129-160", ::Traffic::COUNT, "CudaGraph");
+  ::Traffic::Instance()->RegistRecord("CgBatchSize161-192", ::Traffic::COUNT, "CudaGraph");
+  ::Traffic::Instance()->RegistRecord("CgBatchSize192-", ::Traffic::COUNT, "CudaGraph");
 }
 
 Status CudaGraphMgr::GetCudaStream(int req_id, cudaStream_t& stream) {

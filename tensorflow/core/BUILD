@@ -3444,6 +3444,7 @@ tf_cuda_library(
         ":lib",
         ":lib_internal",
         ":proto_text",
+        "//tensorflow/tools/traffic:traffic",
     ]
 
 )

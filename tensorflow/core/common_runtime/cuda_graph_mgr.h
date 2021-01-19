@@ -47,6 +47,7 @@ private:
   ~CudaGraphMgr();
 
   void Init();
+  void InitTraffic();
 
   // assistant functions for capturing
   void GenerateInputs(const GraphDef& graph_def, const std::vector<string>& input_names,
