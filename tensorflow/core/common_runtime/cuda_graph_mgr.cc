@@ -324,7 +324,7 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
                                       const std::vector<int>& batch_size) {
   SessionOptions options;
   options.config.mutable_gpu_options()->set_force_gpu_compatible(true);
-  options.config.mutable_gpu_options()->set_allow_growth(false);
+  options.config.mutable_gpu_options()->set_allow_growth(true);
   std::unique_ptr<Session> session(NewSession(options));
   
   TF_CHECK_OK(session->CreateForCapture(graph_def));

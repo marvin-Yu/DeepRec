@@ -1,8 +1,11 @@
+load('//tensorflow:tensorflow.bzl', 'transitive_hdrs')
+
 cc_library(
     name = 'traffic',
-    srcs = ['//tensorflow/tools/traffic/traffic.cc',],
-    hdrs = ['//tensorflow/tools/traffic/traffic.h',].
-    deps = [
-        '#pthread',
+    srcs = ['traffic.cc',],
+    hdrs = ['traffic.h',],
+    linkopts = [
+        '-lpthread',
     ],
+    visibility = ["//visibility:public"],
 )

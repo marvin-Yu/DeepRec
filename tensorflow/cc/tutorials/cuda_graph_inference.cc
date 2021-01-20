@@ -315,14 +315,14 @@ void CopyTensorContents(Tensor &dst_tensor, Tensor &src_tensor){
 
 void PrepareSessionOption(SessionOptions& options, bool cg_enable = false) {
   options.config.mutable_gpu_options()->set_force_gpu_compatible(true);
-  options.config.mutable_gpu_options()->set_allow_growth(false);
+  options.config.mutable_gpu_options()->set_allow_growth(true);
   if (cg_enable) {
     options.config.mutable_graph_options()
         ->mutable_optimizer_options()
         ->set_cuda_graph_enable(true);
     options.config.mutable_graph_options()
         ->mutable_optimizer_options()
-        ->set_try_capture_cuda_graph(true);
+        ->set_cuda_graph_capture(true);
     options.config.mutable_graph_options()
         ->mutable_optimizer_options()
         ->add_cuda_graph_batch_sizes(64);
@@ -346,14 +346,14 @@ void PrepareSessionOption(SessionOptions& options, bool cg_enable = false) {
 
 void PrepareSessionOptionForGamma(SessionOptions& options, bool cg_enable = false) {
   options.config.mutable_gpu_options()->set_force_gpu_compatible(true);
-  options.config.mutable_gpu_options()->set_allow_growth(false);
+  options.config.mutable_gpu_options()->set_allow_growth(true);
   if (cg_enable) {
     options.config.mutable_graph_options()
         ->mutable_optimizer_options()
         ->set_cuda_graph_enable(true);
     options.config.mutable_graph_options()
         ->mutable_optimizer_options()
-        ->set_try_capture_cuda_graph(true);
+        ->set_cuda_graph_capture(true);
     options.config.mutable_graph_options()
         ->mutable_optimizer_options()
         ->add_cuda_graph_batch_sizes(1);

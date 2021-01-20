@@ -279,6 +279,8 @@ message OptimizerOptions {
 
   // output node names of final serving graph with cuda graph
   repeated string output_names_with_cg = 10;
+  
+  bool cuda_graph_capture = 11;
 }
 
 message GraphOptions {

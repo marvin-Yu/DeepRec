@@ -416,6 +416,9 @@ Status DirectSession::Create(GraphDef&& graph) {
     bool cuda_graph_enable = options_.config.graph_options().
                              optimizer_options().
                              cuda_graph_enable();
+    bool cuda_graph_capture = options_.config.graph_options().
+                              optimizer_options().
+                              cuda_graph_capture();
     
     if (cuda_graph_enable) {
       CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
@@ -444,6 +447,7 @@ Status DirectSession::Create(GraphDef&& graph) {
                                 cuda_graph_batch_sizes(i));
       }
       // check and capture uncaptured graph
+      if (cuda_graph_capture) {
       if (!mgr.CheckGraphAllCaptured(cuda_graph_names, uncaptured_index)) {
         LOG(INFO) << "Not all subgraph are captured as cudagraphs";
         // capture uncaptured graph
@@ -474,6 +478,7 @@ Status DirectSession::Create(GraphDef&& graph) {
                                    .subgraph_name(),
                                input_node_names, output_node_names, buckets);
         }
+      }
       }
       GraphDef cudagraph_serving;
       int graph_idx = 0;
@@ -598,8 +603,6 @@ Status DirectSession::ExtendLocked(GraphDef graph) {
       }
   }
 #endif
-
-  graph::CheckNodeDevice("/device:GPU:0", &graph);
   
   if (!(flib_def_ && execution_state_)) {
     // If this is the first call, we can initialize the execution state
@@ -1928,11 +1931,6 @@ Status DirectSession::AfterRunAsync(const ::tensorflow::RunOptions& run_options,
 #ifdef GOOGLE_CUDA
 
 cudaStream_t DirectSession::EnableGraphCapture(){
-    
-    if(model_name.size() == 0){
-        return nullptr;
-    }
-    
     // modify the streams
     // so that we only have one stream for computing, D2H, H2D, D2D
     std::vector<Device*> devices = device_mgr_->ListDevices();
