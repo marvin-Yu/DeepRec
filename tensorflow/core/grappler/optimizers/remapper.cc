@@ -2500,20 +2500,19 @@ Status Remapper::Optimize(Cluster* cluster, const GrapplerItem& item,
     // it for MatMul as well, but in practice this pattern does not appear in
     // real Tensorflow graphs.
 
-    // TODO(penporn):
-    // Remove this once TF-OneDNN supports _FusedConv2D with these operations.
-    if (DisableMKL()) {
-      // Remap Conv2D+Squeeze+BiasAdd into the _FusedConv2D+Squeeze.
-      ContractionWithSqueezeAndBiasAdd contract_with_squeeze_and_bias;
-      if (allow_non_differentiable_rewrites &&
-          FindConv2DWithSqueezeAndBias(ctx, i,
-                                       &contract_with_squeeze_and_bias)) {
-        TF_RETURN_IF_ERROR(
-            AddFusedConv2DNode(&ctx, contract_with_squeeze_and_bias,
-                               &invalidated_nodes, &nodes_to_delete));
-        continue;
-      }
+    // Remap Conv2D+Squeeze+BiasAdd into the _FusedConv2D+Squeeze.
+    ContractionWithSqueezeAndBiasAdd contract_with_squeeze_and_bias;
+    if (allow_non_differentiable_rewrites &&
+        FindConv2DWithSqueezeAndBias(ctx, i, &contract_with_squeeze_and_bias)) {
+      TF_RETURN_IF_ERROR(
+          AddFusedConv2DNode(&ctx, contract_with_squeeze_and_bias,
+                             &invalidated_nodes, &nodes_to_delete));
+      continue;
+    }
 
+    // TODO(intel-tf):
+    // Remove this once TF-oneDNN supports _FusedConv2D with these operations.
+    if (DisableMKL()) {
       // Remap Conv2D+FusedBatchNorm into the _FusedConv2D;
       ContractionWithBatchNorm contract_with_batch_norm;
       if (allow_non_differentiable_rewrites &&
