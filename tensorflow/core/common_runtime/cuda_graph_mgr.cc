@@ -482,7 +482,7 @@ bool CudaGraphMgr::DestoryCudaGraphResource(const std::string& subgraph_name) {
   
   auto lock_iter = meta_pool_lock_.find(subgraph_name);
   if (lock_iter != meta_pool_lock_.end()) {
-    BatchMetaLockMap& lock_map = iter->second;
+    BatchMetaLockMap& lock_map = lock_iter->second;
     for (auto mutex_iter = lock_map.begin(); mutex_iter != lock_map.end(); ++mutex_iter) {
       delete mutex_iter->second.first;
       delete mutex_iter->second.second;

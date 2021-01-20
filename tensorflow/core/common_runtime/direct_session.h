@@ -149,7 +149,7 @@ class DirectSession : public Session {
   bool SupportsCudaGraph() override { return true; };
   cudaStream_t EnableGraphCapture() override;
   void DisableGraphCapture() override;
-  std::unordered_map<std::string, GraphDef>* GetCudaGraphRewriteDefs() virtual {
+  std::unordered_map<std::string, GraphDef>* GetCudaGraphRewriteDefs() override {
     return &cudagraph_defs_;
   };
 #endif

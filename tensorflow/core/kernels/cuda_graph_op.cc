@@ -13,6 +13,7 @@
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/platform/macros.h"
+#include "tensorflow/core/lib/core/threadpool.h"
 #include "tensorflow/tools/traffic/traffic.h"
 
 namespace tensorflow {
@@ -79,7 +80,6 @@ void CudaGraphOp::RecordTraffic(int batch_size) {
 }
 
 void CopyRetAndReturnMeta(CudaGraphCbArgs* args) {
-  CudaGraphCbArgs* args = (CudaGraphCbArgs*)data;
   OpKernelContext* ctx = args->ctx_;
   CudaGraphMeta* meta = args->meta_;
 
@@ -103,7 +103,7 @@ void CUDART_CB CudaGraphCallback(cudaStream_t stream,
   CudaGraphCbArgs* args = (CudaGraphCbArgs*)data;
   OpKernelContext* ctx = args->ctx_;
 
-  CpuWorkerThreads* threads = ctx->device->tensorflow_cpu_worker_threads();
+  const DeviceBase::CpuWorkerThreads* threads = ctx->device()->tensorflow_cpu_worker_threads();
   if (threads == nullptr) {
     CopyRetAndReturnMeta(args);
   } else {

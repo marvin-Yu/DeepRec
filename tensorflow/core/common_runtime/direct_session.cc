@@ -469,7 +469,6 @@ Status DirectSession::Create(GraphDef&& graph) {
         }
       }
       GraphDef cudagraph_serving;
-      int graph_idx = 0;
       std::vector<const SubgraphDescription*> descs;
       int descs_size = options_.config.graph_options().optimizer_options().subgraph_descriptions_size();
       descs.reserve(descs_size);
@@ -490,7 +489,7 @@ Status DirectSession::Create(GraphDef&& graph) {
                                                      descs,
                                                      buckets,
                                                      final_outputs);
-      if (!gen_succ) {
+      if (!succ) {
         LOG(ERROR) << "Generate subgraph for cudagraph capturing failed, "
                       "please check GraphDef and session options";
         // todo: return not ok
