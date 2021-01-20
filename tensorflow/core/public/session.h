@@ -141,6 +141,7 @@ class Session {
   virtual bool SupportsCudaGraph() { return false; }
   virtual cudaStream_t  EnableGraphCapture() {return nullptr;} 
   virtual void DisableGraphCapture() { }
+  virtual std::unordered_map<std::string, GraphDef>* GetCudaGraphRewriteDefs() { return nullptr; };
 #endif
   
   /// \brief Runs the graph with the provided input tensors and fills

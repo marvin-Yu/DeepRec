@@ -39,7 +39,10 @@ public:
                           const int bucket,
                           CudaGraphMeta*& meta);
   Status ReturnCudaGraphMeta(CudaGraphMeta* meta);
+  
   void DestoryCudagraphMeta();
+  bool DestoryCudaGraphResource(const std::string& subgraph_name);
+
   Status GetCudaStream(int req_id, cudaStream_t& stream);
 
 private:

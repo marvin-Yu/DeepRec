@@ -78,13 +78,11 @@ void CudaGraphOp::RecordTraffic(int batch_size) {
   return;
 }
 
-void CUDART_CB CudaGraphCallback(cudaStream_t stream, 
-                                 cudaError_t status, 
-                                 void* data) {
+void CopyRetAndReturnMeta(CudaGraphCbArgs* args) {
   CudaGraphCbArgs* args = (CudaGraphCbArgs*)data;
-  // todo: copy output tensor;
   OpKernelContext* ctx = args->ctx_;
   CudaGraphMeta* meta = args->meta_;
+
   CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
   for (int i = 0; i < meta->output_tensors_.size(); ++i) {
     Tensor *output = nullptr;
@@ -96,6 +94,22 @@ void CUDART_CB CudaGraphCallback(cudaStream_t stream,
   mgr.ReturnCudaGraphMeta(meta);
   args->done_();
   delete args;
+  return;
+}
+
+void CUDART_CB CudaGraphCallback(cudaStream_t stream, 
+                                 cudaError_t status, 
+                                 void* data) {
+  CudaGraphCbArgs* args = (CudaGraphCbArgs*)data;
+  OpKernelContext* ctx = args->ctx_;
+
+  CpuWorkerThreads* threads = ctx->device->tensorflow_cpu_worker_threads();
+  if (threads == nullptr) {
+    CopyRetAndReturnMeta(args);
+  } else {
+    threads->workers->Schedule(std::bind(&CopyRetAndReturnMeta, args));
+  }
+  return;
 }
 
 CudaGraphOp::CudaGraphOp(OpKernelConstruction* ctx) : AsyncOpKernel(ctx)  {

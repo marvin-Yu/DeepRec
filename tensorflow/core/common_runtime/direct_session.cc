@@ -421,21 +421,12 @@ Status DirectSession::Create(GraphDef&& graph) {
                               cuda_graph_capture();
     
     if (cuda_graph_enable) {
+      cudagraph_defs_.clear();
       CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
       // get all cudagraph num, for checking existance and capturing
       int num_cuda_graph = options_.config.graph_options().
                                optimizer_options().
                                subgraph_descriptions_size();
-      std::vector<std::string> cuda_graph_names;
-      std::vector<int> uncaptured_index;
-      cuda_graph_names.reserve(num_cuda_graph);
-      uncaptured_index.reserve(num_cuda_graph);
-      for (int i = 0; i < num_cuda_graph; ++i) {
-        cuda_graph_names.emplace_back(options_.config.graph_options().
-                                          optimizer_options().
-                                          subgraph_descriptions(i).
-                                          subgraph_name());
-      }
       int buckets_size = options_.config.graph_options().
                                 optimizer_options().
                                 cuda_graph_batch_sizes_size();
@@ -448,10 +439,8 @@ Status DirectSession::Create(GraphDef&& graph) {
       }
       // check and capture uncaptured graph
       if (cuda_graph_capture) {
-      if (!mgr.CheckGraphAllCaptured(cuda_graph_names, uncaptured_index)) {
-        LOG(INFO) << "Not all subgraph are captured as cudagraphs";
         // capture uncaptured graph
-        for (int i = 0; i < uncaptured_index.size(); ++i) {
+        for (int i = 0; i < num_cuda_graph; ++i) {
           GraphDef cudagraph_capture;
           std::vector<std::string> input_node_names;
           std::vector<std::string> output_node_names;
@@ -459,26 +448,25 @@ Status DirectSession::Create(GraphDef&& graph) {
               graph, cudagraph_capture,
               options_.config.graph_options()
                   .optimizer_options()
-                  .subgraph_descriptions(uncaptured_index[i]),
+                  .subgraph_descriptions(i),
               input_node_names, output_node_names);
           if (!gen_succ) {
             LOG(ERROR) << "Generate subgraph for cudagraph capturing failed, "
                           "please check GraphDef and session options";
             // todo: return not ok
           }
-          DumpGraphDefToFile(options_.config.graph_options()
-                                 .optimizer_options()
-                                 .subgraph_descriptions(uncaptured_index[i])
-                                 .subgraph_name(),
-                             cudagraph_capture);
+          std::string graph_name = options_.config.graph_options().
+                                          optimizer_options().
+                                          subgraph_descriptions(i).
+                                          subgraph_name();
+          cudagraph_defs_.emplace(graph_name, cudagraph_capture);
           mgr.CaptureCudagraph(cudagraph_capture,
                                options_.config.graph_options()
                                    .optimizer_options()
-                                   .subgraph_descriptions(uncaptured_index[i])
+                                   .subgraph_descriptions(i)
                                    .subgraph_name(),
                                input_node_names, output_node_names, buckets);
         }
-      }
       }
       GraphDef cudagraph_serving;
       int graph_idx = 0;
@@ -502,7 +490,12 @@ Status DirectSession::Create(GraphDef&& graph) {
                                                      descs,
                                                      buckets,
                                                      final_outputs);
-      DumpGraphDefToFile("cuda_graph_serving", cudagraph_serving);
+      if (!gen_succ) {
+        LOG(ERROR) << "Generate subgraph for cudagraph capturing failed, "
+                      "please check GraphDef and session options";
+        // todo: return not ok
+      }
+      cudagraph_defs_.emplace("_SERVING", cudagraph_serving);
       return ExtendLocked(std::move(cudagraph_serving));
     }
 #endif

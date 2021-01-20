@@ -325,8 +325,9 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
   SessionOptions options;
   options.config.mutable_gpu_options()->set_force_gpu_compatible(true);
   options.config.mutable_gpu_options()->set_allow_growth(true);
+  LOG(INFO) << "[Jieluo] begin create new session for capturing";
   std::unique_ptr<Session> session(NewSession(options));
-  
+  LOG(INFO) << "[Jieluo] create new session for capture finished";
   TF_CHECK_OK(session->CreateForCapture(graph_def));
 
   // init host_allocator
@@ -342,7 +343,7 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
       }
     }
   }
-
+  LOG(INFO) << "[Jieluo] begin run session for capturing warmup";
   // First session run, init needed resources
   for (int i = 0; i < batch_size.size(); ++i) {
     int warm_batch = batch_size[i];
@@ -354,6 +355,12 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
     
     std::vector<Tensor> output_tensors_tf;
     TF_CHECK_OK(session->Run(inputs_tf, output_node_names, {}, &output_tensors_tf));
+  }
+  LOG(INFO) << "[Jieluo] run session for capturing warmup finished";
+
+  bool destoried = DestoryCudaGraphResource(graph_name);
+  if (destoried) {
+    LOG(INFO) << "Old cuda graph resources for " << graph_name << " destoried";
   }
 
   // capture the cuda graph
@@ -387,7 +394,7 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
         meta_check = meta;
       }
     }
-
+    LOG(INFO) << "[Jieluo] run session for capturing finish, batch size " << batch_size[i];
     // add pool lock
     if (meta_pool_lock_.find(graph_name) == meta_pool_lock_.end()) {
       meta_pool_lock_.emplace(graph_name, BatchMetaLockMap());
@@ -455,6 +462,34 @@ Status CudaGraphMgr::ReturnCudaGraphMeta(CudaGraphMeta* meta) {
     cv->notify_one();
   }
   return Status::OK();
+}
+
+// todo: make sure thread safety!
+bool CudaGraphMgr::DestoryCudaGraphResource(const std::string& subgraph_name) {
+  bool delete_meta = false;
+  auto iter = graphname_batch_metas_map_.find(subgraph_name);
+  if (iter != graphname_batch_metas_map_.end()) {
+    BatchGraphMetaMap& meta_map = iter->second;
+    for (auto meta_iter = meta_map.begin(); meta_iter != meta_map.end(); ++meta_iter) {
+      for (int i = 0; i < meta_iter->second.size(); ++i) {
+        delete (meta_iter->second)[i];
+      }
+      meta_iter->second.clear();
+    }
+    graphname_batch_metas_map_.erase(iter);
+    delete_meta = true;
+  }
+  
+  auto lock_iter = meta_pool_lock_.find(subgraph_name);
+  if (lock_iter != meta_pool_lock_.end()) {
+    BatchMetaLockMap& lock_map = iter->second;
+    for (auto mutex_iter = lock_map.begin(); mutex_iter != lock_map.end(); ++mutex_iter) {
+      delete mutex_iter->second.first;
+      delete mutex_iter->second.second;
+    }
+    meta_pool_lock_.erase(lock_iter);
+  }
+  return delete_meta;
 }
 
 } // tensorflow
