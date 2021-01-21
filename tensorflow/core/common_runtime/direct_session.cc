@@ -496,6 +496,7 @@ Status DirectSession::Create(GraphDef&& graph) {
       }
       cudagraph_defs_.emplace("_SERVING", cudagraph_serving);
       return ExtendLocked(std::move(cudagraph_serving));
+   //   return Status::OK();
     }
 #endif
     return ExtendLocked(std::move(graph));

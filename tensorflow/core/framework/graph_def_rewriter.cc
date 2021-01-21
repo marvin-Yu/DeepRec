@@ -265,6 +265,7 @@ bool GraphDefRewriter::GenerateGraphDefFromTop(GraphDef& output_graph_def,
                                std::vector<std::string>& input_names) {
   // BFS gen graph from top
   // step1. clear output_graph_def nodes
+  std::unordered_set<std::string> visited_nodes;
   output_graph_def.clear_node();
   for (int i = 0; i < top_nodes.size(); ++i) {
     if (node_map_.find(top_nodes[i]) == node_map_.end()) {
@@ -273,6 +274,7 @@ bool GraphDefRewriter::GenerateGraphDefFromTop(GraphDef& output_graph_def,
     } else {
       NodeDef* new_node = output_graph_def.add_node();
       *new_node = node_map_[top_nodes[i]];
+      visited_nodes.emplace(top_nodes[i]);
     }
   }
 
@@ -280,10 +282,14 @@ bool GraphDefRewriter::GenerateGraphDefFromTop(GraphDef& output_graph_def,
   int travel_idx = 0;
   while (travel_idx < output_graph_def.node_size()) {
     const NodeDef& curr_node = output_graph_def.node(travel_idx);
-    // check node type
+    ++travel_idx;
+
     if (curr_node.op() == PLACEHOLDER) {
+      // LOG(INFO) << "[Jieluo] add placeholder " << curr_node.name();
       input_names.push_back(curr_node.name());
-    } 
+    }
+
+    // check node type
     for (int i = 0; i < curr_node.input_size(); ++i) {
       int separator_pos = curr_node.input(i).find(':');
       if (separator_pos == std::string::npos) {
@@ -292,12 +298,13 @@ bool GraphDefRewriter::GenerateGraphDefFromTop(GraphDef& output_graph_def,
       std::string input_node_name = curr_node.input(i).substr(0, separator_pos);
       if (node_map_.find(input_node_name) == node_map_.end()) {
         LOG(ERROR) << "Node " << input_node_name << " not found in graph.";
-      } else {
+        return false;
+      } else if (visited_nodes.find(input_node_name) == visited_nodes.end()) {
         NodeDef* new_node = output_graph_def.add_node();
         *new_node = node_map_[input_node_name];
+        visited_nodes.emplace(input_node_name);
       }
     }
-    ++travel_idx;
   }
 
   return true;

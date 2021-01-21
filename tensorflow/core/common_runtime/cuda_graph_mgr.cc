@@ -330,6 +330,9 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
   LOG(INFO) << "[Jieluo] create new session for capture finished";
   TF_CHECK_OK(session->CreateForCapture(graph_def));
 
+  LOG(INFO) << "[Jieluo] input size " << input_node_names.size()
+            << " output size " << output_node_names.size();
+
   // init host_allocator
   if (host_allocator_ == nullptr) {
     const DeviceMgr* device_manager;
