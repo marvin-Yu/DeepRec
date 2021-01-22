@@ -203,48 +203,6 @@ void RandomInitialize(Tensor& t)
     }
 }
 
-void PrintTensorData(const Tensor &t){
-    const void * data;
-    if(t.dtype() == DT_HALF){
-        data = static_cast<const void*>(t.flat<Eigen::half>().data());
-    }else if(t.dtype() == DT_FLOAT){
-        data = static_cast<const void*>(t.flat<float>().data());
-    }else if(t.dtype() == DT_BOOL){
-        data = static_cast<const void*>(t.flat<bool>().data());
-    }else if(t.dtype() == DT_INT32){
-        data = static_cast<const void*>(t.flat<int>().data());
-    }else{
-        std::cout << "Print Tensor: Unsupported data type!" << std::endl;
-        return;
-    }
-
-    int dims = t.dims();
-    std::cout << "shape: " << std::endl;
-    for(int i = 0; i < dims; i ++){
-        std::cout << t.dim_size(i) << ", ";
-    }
-    std::cout << std::endl;
-    
-    int size = t.NumElements();
-    size = size > 32 ? 32 : size;
-    
-    for(int i = 0; i < size; i ++){
-        float value;
-        if(t.dtype() == DT_HALF){
-            value = __half2float(static_cast<const __half*>(data)[i]);
-        }else if(t.dtype() == DT_INT32){
-            value = static_cast<const int*>(data)[i];
-        }else if(t.dtype() == DT_BOOL){
-            value = static_cast<const bool*>(data)[i];
-        }
-        else{
-            value = static_cast<const float*>(data)[i];
-        }        
-        std::cout << value << ", ";
-    }
-    std::cout << std::endl;
-}
-
 void GenerateInputs(GraphDef & graph_def, 
                     const std::vector<string> &input_names,
                     std::vector<Tensor> & input_tensors, int batch_size){
@@ -437,9 +395,9 @@ Status Test(GraphDef & graph_def,
     TF_CHECK_OK(session_tf->Run(input_map, output_names, {}, &output_tensors_tf));
 
     LOG(INFO) << "CG results: ";
-    PrintTensorData(output_tensors_cg[0]); 
+  //  PrintTensorData(output_tensors_cg[0]); 
     LOG(INFO) << "TF results: ";
-    PrintTensorData(output_tensors_tf[0]); 
+  //  PrintTensorData(output_tensors_tf[0]); 
     return Status();
 }
 

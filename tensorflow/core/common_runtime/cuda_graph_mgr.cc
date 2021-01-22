@@ -19,57 +19,17 @@
 #include "tensorflow/core/common_runtime/threadpool_device.h"
 #include "tensorflow/core/framework/allocator.h"
 #include "tensorflow/core/framework/tensor.h"
+#include "tensorflow/core/framework/tensor_util.h"
 #include "tensorflow/core/graph/default_device.h"
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/public/session.h"
 #include "tensorflow/tools/traffic/traffic.h"
 
-static const int NUM_INSTANCE = 1;
+static const int NUM_INSTANCE_DEFAULT = 3;
+static const int NUM_STREAM_DEFAULT = 3;
 
 namespace tensorflow {
-
-void CudaGraphMgr::PrintTensorData(const Tensor& t) {
-  const void* data;
-  if (t.dtype() == DT_HALF) {
-    data = static_cast<const void*>(t.flat<Eigen::half>().data());
-  } else if (t.dtype() == DT_FLOAT) {
-    data = static_cast<const void*>(t.flat<float>().data());
-  } else if (t.dtype() == DT_BOOL) {
-    data = static_cast<const void*>(t.flat<bool>().data());
-  } else if (t.dtype() == DT_INT32) {
-    data = static_cast<const void*>(t.flat<int>().data());
-  } else {
-    LOG(INFO) << "Print Tensor: Unsupported data type!" << std::endl;
-    return;
-  }
-
-  int dims = t.dims();
-  std::ostringstream tensor_string;
-  tensor_string << "shape: " << std::endl;
-  for (int i = 0; i < dims; i++) {
-    tensor_string << t.dim_size(i) << ", ";
-  }
-  tensor_string << std::endl;
-
-  int size = t.NumElements();
-  size = size > 32 ? 32 : size;
-
-  for (int i = 0; i < size; i++) {
-    float value;
-    if (t.dtype() == DT_HALF) {
-      value = __half2float(static_cast<const __half*>(data)[i]);
-    } else if (t.dtype() == DT_INT32) {
-      value = static_cast<const int*>(data)[i];
-    } else if (t.dtype() == DT_BOOL) {
-      value = static_cast<const bool*>(data)[i];
-    } else {
-      value = static_cast<const float*>(data)[i];
-    }
-    tensor_string << value << ",";
-  }
-  LOG(INFO) << tensor_string.str();
-}
 
 void CheckCudaError(cudaError_t ERR) {
   if ((ERR) != cudaSuccess) {
@@ -163,11 +123,38 @@ void RandomInitialize(Tensor& t) {
 
 void CudaGraphMgr::Init() {
   host_allocator_ = nullptr;
-  num_instance_ = NUM_INSTANCE;
+  
+  char* stream_num_var = getenv("TF_CUDA_GRAPH_STREAM_NUM");
+  if (stream_num_var == NULL) {
+    LOG(INFO) << "Environment Variable TF_CUDA_GRAPH_STREAM_NUM not set, use default " << NUM_STREAM_DEFAULT;
+    num_stream_ = NUM_STREAM_DEFAULT;
+  } else {
+    num_stream_ = atoi(stream_num_var);
+    if (num_stream_ <= 0) {
+      num_stream_ = NUM_STREAM_DEFAULT;
+      LOG(INFO) << "Environment Variable TF_CUDA_GRAPH_STREAM_NUM invalid " << stream_num_var 
+                << " use default " << NUM_STREAM_DEFAULT;
+    }
+    LOG(INFO) << "cuda stream num " << num_stream_;
+  }
+
+  char* instance_num_var = getenv("TF_CUDA_GRAPH_INSTANCE_NUM");
+  if (instance_num_var == NULL) {
+    LOG(INFO) << "Environment Variable TF_CUDA_GRAPH_INSTANCE_NUM not set, use default " << NUM_INSTANCE_DEFAULT;
+    num_meta_instance_ = NUM_INSTANCE_DEFAULT;
+  } else {
+    num_meta_instance_ = atoi(instance_num_var);
+    if (num_meta_instance_ <= 0) {
+      num_meta_instance_ = NUM_INSTANCE_DEFAULT;
+      LOG(INFO) << "Environment Variable TF_CUDA_GRAPH_INSTANCE_NUM invalid " << instance_num_var 
+                << " use default " << NUM_INSTANCE_DEFAULT;
+    }
+    LOG(INFO) << "cuda meta instance num " << num_meta_instance_;
+  }
 
   // create launching streams
-  streams_.resize(num_instance_);
-  for (int i = 0; i < num_instance_; i++) {
+  streams_.resize(num_stream_);
+  for (int i = 0; i < num_stream_; i++) {
     CheckCudaError(cudaStreamCreate(&streams_[i]));
   }
 }
@@ -184,7 +171,7 @@ void CudaGraphMgr::InitTraffic() {
 }
 
 Status CudaGraphMgr::GetCudaStream(int req_id, cudaStream_t& stream) {
-  stream = streams_[req_id % num_instance_];
+  stream = streams_[req_id % num_stream_];
   return Status::OK();
 }
 
@@ -274,6 +261,7 @@ void CudaGraphMgr::CheckCudaGraphScore(const GraphDef& graph_def,
 
   // run cuda graph instance
   LaunchGraphInMeta(meta, &(streams_[0]));
+  LOG(INFO) << "CudaGraph results: ";
   PrintTensorData(meta->output_tensors_[0]);
 
   return;
@@ -296,16 +284,6 @@ void CudaGraphMgr::DestoryCudagraphMeta() {
   graphname_batch_metas_map_.clear();
 }
 
-bool CudaGraphMgr::CheckGraphAllCaptured(const std::vector<std::string>& graph_names, std::vector<int>& uncaptured_index) {
-  uncaptured_index.clear();
-  for (int i = 0; i < graph_names.size(); ++i) {
-    if (graphname_batch_metas_map_.find(graph_names[i]) == graphname_batch_metas_map_.end()) {
-       uncaptured_index.push_back(i);
-    }
-  }
-  return 0 == uncaptured_index.size();
-}
-
 // todo: move batch size, num instance into options.
 /**
  * @brief Capture cuda graph by given graph def
@@ -325,12 +303,10 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
   SessionOptions options;
   options.config.mutable_gpu_options()->set_force_gpu_compatible(true);
   options.config.mutable_gpu_options()->set_allow_growth(true);
-  LOG(INFO) << "[Jieluo] begin create new session for capturing";
   std::unique_ptr<Session> session(NewSession(options));
-  LOG(INFO) << "[Jieluo] create new session for capture finished";
   TF_CHECK_OK(session->CreateForCapture(graph_def));
 
-  LOG(INFO) << "[Jieluo] input size " << input_node_names.size()
+  LOG(INFO) << "input size " << input_node_names.size()
             << " output size " << output_node_names.size();
 
   // init host_allocator
@@ -339,14 +315,13 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
     TF_CHECK_OK(session->LocalDeviceManager(&device_manager));
     std::vector<Device*> devices = device_manager->ListDevices();
     for (auto* d : devices) {
-      if (d->name().find("CPU") != std::string::npos) {
-        // todo: reuse this allocator
+      LOG(INFO) << "device name is " << d->name() << " type is  "  << d->attributes().device_type();
+      if (d->attributes().device_type() == "CPU") {
         host_allocator_ = dynamic_cast<ThreadPoolDevice*>(d)->GetAllocator(
             AllocatorAttributes());
       }
     }
   }
-  LOG(INFO) << "[Jieluo] begin run session for capturing warmup";
   // First session run, init needed resources
   for (int i = 0; i < batch_size.size(); ++i) {
     int warm_batch = batch_size[i];
@@ -389,7 +364,7 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
     GenerateInputs(graph_def, input_node_names, input_tensors_cuda_graph, batch_size[i]);
     FillInputsMap(inputs_cuda_graph, input_node_names, input_tensors_cuda_graph);
     
-    for (int j = 0; j < num_instance_; j++) {
+    for (int j = 0; j < num_meta_instance_; j++) {
       CudaGraphMeta* meta = new CudaGraphMeta(graph_name, batch_size[i]);
       batch_meta_map[batch_size[i]].push_back(meta);
       TF_CHECK_OK(session->RunForCapture(inputs_cuda_graph, output_node_names, {}, meta));
@@ -403,9 +378,9 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
       meta_pool_lock_.emplace(graph_name, BatchMetaLockMap());
     }
     if (meta_pool_lock_[graph_name].find(batch_size[i]) == meta_pool_lock_[graph_name].end()) {
-      std::mutex* mutex_ptr = new std::mutex();
-      std::condition_variable* cv_ptr = new std::condition_variable();
-      meta_pool_lock_[graph_name].emplace(batch_size[i], std::make_pair(mutex_ptr, cv_ptr));
+      meta_pool_lock_[graph_name].emplace(batch_size[i], 
+          std::make_pair(std::make_shared<std::mutex>, 
+                         std::make_shared<std::condition_variable>));
     }  
   }
   // turn off graph capture mode
@@ -425,8 +400,8 @@ Status CudaGraphMgr::GetCudagraphMeta(const std::string& cudagraph_name,
                             bucket, " not found");
   }
 
-  std::mutex* mutex = meta_pool_lock_[cudagraph_name][bucket].first;
-  std::condition_variable* cv = meta_pool_lock_[cudagraph_name][bucket].second;
+  std::shared_ptr<std::mutex> mutex = meta_pool_lock_[cudagraph_name][bucket].first;
+  std::shared_ptr<std::condition_variable> cv = meta_pool_lock_[cudagraph_name][bucket].second;
   std::vector<CudaGraphMeta*>& metas = graphname_batch_metas_map_[cudagraph_name][bucket];
 
   std::unique_lock<std::mutex> lock(*mutex);
@@ -455,8 +430,8 @@ Status CudaGraphMgr::ReturnCudaGraphMeta(CudaGraphMeta* meta) {
                             bucket, " not found");
   }
 
-  std::mutex* mutex = meta_pool_lock_[graph_name][bucket].first;
-  std::condition_variable* cv = meta_pool_lock_[graph_name][bucket].second;
+  std::shared_ptr<std::mutex> mutex = meta_pool_lock_[graph_name][bucket].first;
+  std::shared_ptr<std::condition_variable> cv = meta_pool_lock_[graph_name][bucket].second;
   std::vector<CudaGraphMeta*>& metas = graphname_batch_metas_map_[graph_name][bucket];
 
   std::unique_lock<std::mutex> lock(*mutex);
@@ -486,10 +461,7 @@ bool CudaGraphMgr::DestoryCudaGraphResource(const std::string& subgraph_name) {
   auto lock_iter = meta_pool_lock_.find(subgraph_name);
   if (lock_iter != meta_pool_lock_.end()) {
     BatchMetaLockMap& lock_map = lock_iter->second;
-    for (auto mutex_iter = lock_map.begin(); mutex_iter != lock_map.end(); ++mutex_iter) {
-      delete mutex_iter->second.first;
-      delete mutex_iter->second.second;
-    }
+    lock_map.clear();
     meta_pool_lock_.erase(lock_iter);
   }
   return delete_meta;

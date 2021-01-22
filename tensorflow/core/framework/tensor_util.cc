@@ -55,6 +55,48 @@ void DeepCopy(const Tensor& input, Tensor* output) {
   }
 }
 
+void PrintTensorData(const Tensor& t) {
+  const void* data;
+  if (t.dtype() == DT_HALF) {
+    data = static_cast<const void*>(t.flat<Eigen::half>().data());
+  } else if (t.dtype() == DT_FLOAT) {
+    data = static_cast<const void*>(t.flat<float>().data());
+  } else if (t.dtype() == DT_BOOL) {
+    data = static_cast<const void*>(t.flat<bool>().data());
+  } else if (t.dtype() == DT_INT32) {
+    data = static_cast<const void*>(t.flat<int>().data());
+  } else {
+    LOG(INFO) << "Print Tensor: Unsupported data type!" << std::endl;
+    return;
+  }
+
+  int dims = t.dims();
+  std::ostringstream tensor_string;
+  tensor_string << "shape: " << std::endl;
+  for (int i = 0; i < dims; i++) {
+    tensor_string << t.dim_size(i) << ", ";
+  }
+  tensor_string << std::endl;
+
+  int size = t.NumElements();
+  size = size > 32 ? 32 : size;
+
+  for (int i = 0; i < size; i++) {
+    float value;
+    if (t.dtype() == DT_HALF) {
+      value = __half2float(static_cast<const __half*>(data)[i]);
+    } else if (t.dtype() == DT_INT32) {
+      value = static_cast<const int*>(data)[i];
+    } else if (t.dtype() == DT_BOOL) {
+      value = static_cast<const bool*>(data)[i];
+    } else {
+      value = static_cast<const float*>(data)[i];
+    }
+    tensor_string << value << ",";
+  }
+  LOG(INFO) << tensor_string.str();
+}
+
 Status Concat(const gtl::ArraySlice<Tensor>& tensors, Tensor* result) {
   if (tensors.empty()) {
     return errors::InvalidArgument("Cannot concatenate zero tensors");

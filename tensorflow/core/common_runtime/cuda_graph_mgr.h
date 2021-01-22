@@ -24,7 +24,9 @@ namespace tensorflow {
 
 typedef std::vector<std::pair<std::string, Tensor>> InputsMap;
 typedef std::unordered_map<int, std::vector<CudaGraphMeta*>> BatchGraphMetaMap;
-typedef std::unordered_map<int, std::pair<std::mutex*, std::condition_variable*>> BatchMetaLockMap;
+typedef std::unordered_map<int, 
+            std::pair<std::shared_ptr<std::mutex>, 
+                std::shared_ptr<std::condition_variable>>> BatchMetaLockMap;
 
 class CudaGraphMgr {
 public:
@@ -62,15 +64,8 @@ private:
                           const std::vector<std::string>& input_node_names,
                           const std::vector<std::string>& output_node_names);
   static void LaunchGraphInMeta(CudaGraphMeta* meta, cudaStream_t* stream);
-public:
-  void PrintTensorData(const Tensor &t);
 
 public:
-  // Check given graph names are captured already
-  // If all captured return true, else reture false and record all uncaptured name index in graph_names 
-  // to uncaptured_index.
-  bool CheckGraphAllCaptured(const std::vector<std::string>& graph_names, std::vector<int>& uncaptured_index);
-
   TF_DISALLOW_COPY_AND_ASSIGN(CudaGraphMgr);
 
 private:
@@ -83,7 +78,8 @@ private:
   std::unordered_map<std::string, BatchMetaLockMap> meta_pool_lock_;
   std::vector<cudaStream_t> streams_;
   // stream and cuda graph instance count, each instance corresponds to one stream
-  int num_instance_; 
+  int num_stream_;
+  int num_meta_instance_;
   Allocator* host_allocator_;
 };
 

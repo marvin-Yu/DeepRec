@@ -449,7 +449,7 @@ Status DirectSession::Create(GraphDef&& graph) {
               options_.config.graph_options()
                   .optimizer_options()
                   .subgraph_descriptions(i),
-              input_node_names, output_node_names);
+                input_node_names, output_node_names);
           if (!gen_succ) {
             LOG(ERROR) << "Generate subgraph for cudagraph capturing failed, "
                           "please check GraphDef and session options";
@@ -496,7 +496,6 @@ Status DirectSession::Create(GraphDef&& graph) {
       }
       cudagraph_defs_.emplace("_SERVING", cudagraph_serving);
       return ExtendLocked(std::move(cudagraph_serving));
-   //   return Status::OK();
     }
 #endif
     return ExtendLocked(std::move(graph));

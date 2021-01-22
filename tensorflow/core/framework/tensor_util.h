@@ -65,6 +65,10 @@ Status Concat(const gtl::ArraySlice<Tensor>& tensors,
 Status Split(const Tensor& tensor, const gtl::ArraySlice<int64>& sizes,
              std::vector<Tensor>* result) TF_MUST_USE_RESULT;
 
+// Print tensor shape and content first 32 element
+// Print to log
+void PrintTensorData(const Tensor& t);
+
 namespace internal {
 void SetTensorProtoShape(std::vector<size_t> shape,
                          TensorShapeProto* shape_proto);
