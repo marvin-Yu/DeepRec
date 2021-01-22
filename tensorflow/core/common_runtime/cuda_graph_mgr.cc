@@ -224,7 +224,7 @@ void CudaGraphMgr::CheckCudaGraphScore(const GraphDef& graph_def,
   TF_CHECK_OK(session->Run(inputs_tf, output_node_names, {}, &output_tensors_tf));
 
   LOG(INFO) << "TF results: ";
-  PrintTensorData(output_tensors_tf[0]); 
+ // PrintTensorData(output_tensors_tf[0]); 
 
   for (int i = 0; i < input_tensors_tf.size(); ++i) {
     const Tensor& input = input_tensors_tf[i];
@@ -262,7 +262,7 @@ void CudaGraphMgr::CheckCudaGraphScore(const GraphDef& graph_def,
   // run cuda graph instance
   LaunchGraphInMeta(meta, &(streams_[0]));
   LOG(INFO) << "CudaGraph results: ";
-  PrintTensorData(meta->output_tensors_[0]);
+  // PrintTensorData(meta->output_tensors_[0]);
 
   return;
 }
@@ -379,8 +379,8 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
     }
     if (meta_pool_lock_[graph_name].find(batch_size[i]) == meta_pool_lock_[graph_name].end()) {
       meta_pool_lock_[graph_name].emplace(batch_size[i], 
-          std::make_pair(std::make_shared<std::mutex>, 
-                         std::make_shared<std::condition_variable>));
+          std::make_pair(std::make_shared<std::mutex>(), 
+                         std::make_shared<std::condition_variable>()));
     }  
   }
   // turn off graph capture mode
