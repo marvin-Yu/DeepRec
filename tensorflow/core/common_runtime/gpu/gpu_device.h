@@ -128,6 +128,8 @@ class BaseGPUDevice : public LocalDevice {
   // the compute stream and are not yet known to have completed.
   int PendingKernels();
 
+  bool ReserveGPUMemChunks(size_t chunk_size, int chunk_num);
+
 
 #ifdef GOOGLE_CUDA
   // For enabling cuda-graph 
@@ -294,6 +296,7 @@ class GPUKernelTracker {
       pending_decreased_.wait(l);
     }
   }
+
 
  private:
   friend class GPUKernelTrackerTest;

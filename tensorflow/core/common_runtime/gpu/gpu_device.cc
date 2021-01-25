@@ -409,6 +409,13 @@ void BaseGPUDevice::ResetStreams(){
 }
 #endif
 
+bool BaseGPUDevice::ReserveGPUMemChunks(size_t chunk_size, int chunk_num) {
+  if (gpu_allocator_ != nullptr) {
+    return gpu_allocator_->ReserveChunks(chunk_size, chunk_num);
+  } else {
+    return false;
+  }
+}
 
 // This should be idempotent if already initialized.
 Status BaseGPUDevice::InitScratchBuffers() {

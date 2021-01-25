@@ -96,6 +96,19 @@ const BFCAllocator::Chunk* BFCAllocator::ChunkFromHandle(ChunkHandle h) const {
   return &(chunks_[h]);
 }
 
+bool BFCAllocator::ReserveChunks(size_t chunk_size, int chunk_num) {
+  LOG(INFO) << "[Jieluo] Reserve chunk, chunk size " << chunk_size << " chunk num " << chunk_num;
+  bool all_succ = true;
+  size_t alignment = 64;
+  for (int i = 0; i < chunk_num; ++i) {
+    if (!Extend(alignment, chunk_size)) {
+      LOG(ERROR) << "Reserve chunk No." << i << "failed, not all chunk reserved.";
+      return false; 
+    }
+  }
+  return true;
+}
+
 bool BFCAllocator::Extend(size_t alignment, size_t rounded_bytes) {
   size_t available_bytes = memory_limit_ - total_region_allocated_bytes_;
   // Rounds available_bytes down to the nearest multiple of kMinAllocationSize.

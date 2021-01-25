@@ -28,6 +28,7 @@
 
 static const int NUM_INSTANCE_DEFAULT = 3;
 static const int NUM_STREAM_DEFAULT = 3;
+static const size_t CHUNK_SIZE = 32 * 1024 * 1024;
 
 namespace tensorflow {
 
@@ -303,8 +304,8 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
                                       const std::vector<int>& batch_size) {
   SessionOptions options;
   options.config.mutable_gpu_options()->set_force_gpu_compatible(true);
-  options.config.mutable_gpu_options()->set_allow_growth(false);
-  options.config.mutable_gpu_options()->set_per_process_gpu_memory_fraction(0.1);
+  options.config.mutable_gpu_options()->set_allow_growth(true);
+ // options.config.mutable_gpu_options()->set_per_process_gpu_memory_fraction(0.1);
   std::unique_ptr<Session> session(NewSession(options));
   TF_CHECK_OK(session->CreateForCapture(graph_def));
 
@@ -345,6 +346,17 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
   }
   */
   // capture the cuda graph
+
+  // reserve
+  for (auto * d : devices){
+    if(d->attributes().device_type() == "GPU"){
+      auto gpu = dynamic_cast<BaseGPUDevice*>(d);
+      if (!gpu->ReserveGPUMemChunks(CHUNK_SIZE, 4)) {
+        LOG(ERROR) << "Reserve chunk failed"; 
+      }
+    }
+  }
+
   assert(session->SupportsCudaGraph());
   cudaStream_t stream = session->EnableGraphCapture();
   LOG(INFO) << "capturing on stream -- " << stream;
