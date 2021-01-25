@@ -325,7 +325,8 @@ def tf_proto_library_cc(
         j2objc_api_version = 1,
         cc_api_version = 2,
         js_codegen = "jspb",
-        make_default_target_header_only = False):
+        make_default_target_header_only = False,
+        include = None):
     js_codegen = js_codegen  # unused argument
     native.filegroup(
         name = name + "_proto_srcs",
@@ -338,16 +339,29 @@ def tf_proto_library_cc(
     if cc_grpc_version:
         use_grpc_plugin = True
 
+    protolib_deps = tf_deps(protodeps, "")
     cc_deps = tf_deps(protodeps, "_cc")
     cc_name = name + "_cc"
     if not srcs:
         # This is a collection of sub-libraries. Build header-only and impl
         # libraries containing all the sources.
         proto_gen(
-            name = cc_name + "_genproto",
+            name = name + "_genproto",
             protoc = "@com_google_protobuf//:protoc",
             visibility = ["//visibility:public"],
-            deps = [s + "_genproto" for s in cc_deps],
+            deps = [s + "_genproto" for s in protolib_deps],
+        )
+        native.alias(
+            name = cc_name + "_genproto",
+            actual = name + "_genproto",
+            testonly = testonly,
+            visibility = visibility,
+        )
+        native.alias(
+            name = cc_name + "_headers_only",
+            actual = cc_name,
+            testonly = testonly,
+            visibility = visibility,
         )
         native.cc_library(
             name = cc_name,
@@ -358,12 +372,14 @@ def tf_proto_library_cc(
         native.cc_library(
             name = cc_name + "_impl",
             deps = [s + "_impl" for s in cc_deps] + ["@com_google_protobuf//:cc_wkt_protos"],
+            visibility = visibility
         )
 
         return
 
     cc_proto_library(
         name = cc_name,
+        protolib_name = name,
         testonly = testonly,
         srcs = srcs,
         cc_libs = cc_libs + if_static(
@@ -380,6 +396,8 @@ def tf_proto_library_cc(
         use_grpc_plugin = use_grpc_plugin,
         visibility = visibility,
         deps = cc_deps + ["@com_google_protobuf//:cc_wkt_protos"],
+        protolib_deps = protolib_deps,
+        include = include,
     )
 
 def tf_proto_library_py(
@@ -390,7 +408,8 @@ def tf_proto_library_py(
         visibility = None,
         testonly = 0,
         srcs_version = "PY2AND3",
-        use_grpc_plugin = False):
+        use_grpc_plugin = False,
+        include = None):
     py_deps = tf_deps(protodeps, "_py")
     py_name = name + "_py"
     if not srcs:
@@ -420,6 +439,7 @@ def tf_proto_library_py(
         use_grpc_plugin = use_grpc_plugin,
         visibility = visibility,
         deps = deps + py_deps + ["@com_google_protobuf//:protobuf_python"],
+        include = include,
     )
 
 def tf_jspb_proto_library(**kwargs):
@@ -433,6 +453,7 @@ def tf_proto_library(
         srcs = [],
         has_services = None,
         protodeps = [],
+        include = None,
         visibility = None,
         testonly = 0,
         cc_libs = [],
@@ -441,7 +462,8 @@ def tf_proto_library(
         j2objc_api_version = 1,
         js_codegen = "jspb",
         provide_cc_alias = False,
-        make_default_target_header_only = False):
+        make_default_target_header_only = False,
+        include = None):
     """Make a proto library, possibly depending on other proto libraries."""
     _ignore = (js_codegen, provide_cc_alias)
 
@@ -454,6 +476,7 @@ def tf_proto_library(
         make_default_target_header_only = make_default_target_header_only,
         protodeps = protodeps,
         visibility = visibility,
+        include = include,
     )
 
     tf_proto_library_py(
@@ -464,6 +487,7 @@ def tf_proto_library(
         srcs_version = "PY2AND3",
         use_grpc_plugin = has_services,
         visibility = visibility,
+        include = include
     )
 
 # A list of all files under platform matching the pattern in 'files'. In
