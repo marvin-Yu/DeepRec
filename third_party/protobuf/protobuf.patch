@@ -1,89 +1,59 @@
-diff --git a/protobuf.bzl b/protobuf.bzl
-index 78f19c6..4226a14 100644
---- a/protobuf.bzl
-+++ b/protobuf.bzl
-@@ -266,8 +266,8 @@ def internal_gen_well_known_protos_java(srcs):
-   Args:
-     srcs: the well known protos
-   """
--  root = Label("%s//protobuf_java" % (REPOSITORY_NAME)).workspace_root
--  pkg = PACKAGE_NAME + "/" if PACKAGE_NAME else ""
-+  root = Label("%s//protobuf_java" % (native.repository_name())).workspace_root
-+  pkg = native.package_name() + "/" if native.package_name() else ""
-   if root == "":
-     include = " -I%ssrc " % pkg
-   else:
-diff --git a/python/google/protobuf/pyext/descriptor.cc b/python/google/protobuf/pyext/descriptor.cc
-index 8af0cb1..19a1c38 100644
---- a/python/google/protobuf/pyext/descriptor.cc
-+++ b/python/google/protobuf/pyext/descriptor.cc
-@@ -56,7 +56,7 @@
-   #endif
-   #define PyString_AsStringAndSize(ob, charpp, sizep) \
-     (PyUnicode_Check(ob)? \
--       ((*(charpp) = PyUnicode_AsUTF8AndSize(ob, (sizep))) == NULL? -1: 0): \
-+       ((*(charpp) = const_cast<char*>(PyUnicode_AsUTF8AndSize(ob, (sizep)))) == NULL? -1: 0): \
-        PyBytes_AsStringAndSize(ob, (charpp), (sizep)))
- #endif
+diff --git a/BUILD b/BUILD
+index 2fb2605..7861c43 100644
+--- a/BUILD
++++ b/BUILD
+@@ -4,6 +4,7 @@ licenses(["notice"])
  
-diff --git a/python/google/protobuf/pyext/descriptor_containers.cc b/python/google/protobuf/pyext/descriptor_containers.cc
-index bc007f7..0153664 100644
---- a/python/google/protobuf/pyext/descriptor_containers.cc
-+++ b/python/google/protobuf/pyext/descriptor_containers.cc
-@@ -66,7 +66,7 @@
-   #endif
-   #define PyString_AsStringAndSize(ob, charpp, sizep) \
-     (PyUnicode_Check(ob)? \
--       ((*(charpp) = PyUnicode_AsUTF8AndSize(ob, (sizep))) == NULL? -1: 0): \
-+       ((*(charpp) = const_cast<char*>(PyUnicode_AsUTF8AndSize(ob, (sizep)))) == NULL? -1: 0): \
-        PyBytes_AsStringAndSize(ob, (charpp), (sizep)))
- #endif
+ exports_files(["LICENSE"])
  
-diff --git a/python/google/protobuf/pyext/descriptor_pool.cc b/python/google/protobuf/pyext/descriptor_pool.cc
-index 95882ae..962accc 100644
---- a/python/google/protobuf/pyext/descriptor_pool.cc
-+++ b/python/google/protobuf/pyext/descriptor_pool.cc
-@@ -48,7 +48,7 @@
-   #endif
-   #define PyString_AsStringAndSize(ob, charpp, sizep) \
-     (PyUnicode_Check(ob)? \
--       ((*(charpp) = PyUnicode_AsUTF8AndSize(ob, (sizep))) == NULL? -1: 0): \
-+       ((*(charpp) = const_cast<char*>(PyUnicode_AsUTF8AndSize(ob, (sizep)))) == NULL? -1: 0): \
-        PyBytes_AsStringAndSize(ob, (charpp), (sizep)))
- #endif
++load("@bazel_tools//tools/build_defs/pkg:pkg.bzl", "pkg_tar")
+ ################################################################################
+ # Java 9 configuration
+ ################################################################################
+@@ -19,7 +20,7 @@ config_setting(
+ # ZLIB configuration
+ ################################################################################
  
-diff --git a/python/google/protobuf/pyext/extension_dict.cc b/python/google/protobuf/pyext/extension_dict.cc
-index 018b5c2..174c547 100644
---- a/python/google/protobuf/pyext/extension_dict.cc
-+++ b/python/google/protobuf/pyext/extension_dict.cc
-@@ -53,7 +53,7 @@
-   #endif
-   #define PyString_AsStringAndSize(ob, charpp, sizep) \
-     (PyUnicode_Check(ob)? \
--       ((*(charpp) = PyUnicode_AsUTF8AndSize(ob, (sizep))) == NULL? -1: 0): \
-+       ((*(charpp) = const_cast<char*>(PyUnicode_AsUTF8AndSize(ob, (sizep)))) == NULL? -1: 0): \
-        PyBytes_AsStringAndSize(ob, (charpp), (sizep)))
- #endif
+-ZLIB_DEPS = ["@zlib//:zlib"]
++ZLIB_DEPS = ["@zlib_archive//:zlib"]
  
-diff --git a/python/google/protobuf/pyext/message.cc b/python/google/protobuf/pyext/message.cc
-index 5893533..31094b7 100644
---- a/python/google/protobuf/pyext/message.cc
-+++ b/python/google/protobuf/pyext/message.cc
-@@ -79,7 +79,7 @@
-     (PyUnicode_Check(ob)? PyUnicode_AsUTF8(ob): PyBytes_AsString(ob))
-   #define PyString_AsStringAndSize(ob, charpp, sizep) \
-     (PyUnicode_Check(ob)? \
--       ((*(charpp) = PyUnicode_AsUTF8AndSize(ob, (sizep))) == NULL? -1: 0): \
-+       ((*(charpp) = const_cast<char*>(PyUnicode_AsUTF8AndSize(ob, (sizep)))) == NULL? -1: 0): \
-        PyBytes_AsStringAndSize(ob, (charpp), (sizep)))
-   #endif
- #endif
-@@ -1529,7 +1529,7 @@ PyObject* HasField(CMessage* self, PyObject* arg) {
-     return NULL;
-   }
- #else
--  field_name = PyUnicode_AsUTF8AndSize(arg, &size);
-+  field_name = const_cast<char*>(PyUnicode_AsUTF8AndSize(arg, &size));
-   if (!field_name) {
-     return NULL;
-   }
+ ################################################################################
+ # Protobuf Runtime Library
+@@ -218,7 +219,7 @@ cc_library(
+ # TODO(keveman): Remove this target once the support gets added to Bazel.
+ cc_library(
+     name = "protobuf_headers",
+-    hdrs = glob(["src/**/*.h"]),
++    hdrs = glob(["src/**/*.h", "src/**/*.inc"]),
+     includes = ["src/"],
+     visibility = ["//visibility:public"],
+ )
+@@ -674,8 +675,6 @@ py_library(
+             "python/google/protobuf/**/*.py",
+         ],
+         exclude = [
+-            "python/google/protobuf/__init__.py",
+-            "python/google/protobuf/**/__init__.py",
+             "python/google/protobuf/internal/*_test.py",
+             "python/google/protobuf/internal/test_util.py",
+         ],
+@@ -836,6 +835,19 @@ py_library(
+     ],
+ )
+ 
++pkg_tar(
++    name = "protobuf_python_package",
++    package_dir = "usr/local/lib/python/site-packages/",
++    extension = "tar",
++    srcs = [
++        ":python_srcs",
++        ":protobuf_python",
++    ],
++    strip_prefix = "python",
++    tags = ["manual"],
++    visibility = ["//visibility:public"],
++)
++
+ internal_protobuf_py_tests(
+     name = "python_tests_batch",
+     data = glob([
