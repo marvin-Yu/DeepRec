@@ -367,7 +367,7 @@ Status Test(GraphDef & graph_def,
       TF_CHECK_OK(session->LocalDeviceManager(&device_manager));
       std::vector<Device*> devices = device_manager->ListDevices();
       for (auto* d : devices) {
-        if (d->name().find("CPU") != std::string::npos) {
+        if (d->attributes().device_type() == "CPU") {
           // todo: reuse this allocator
           host_allocator = dynamic_cast<ThreadPoolDevice*>(d)->GetAllocator(
               AllocatorAttributes());

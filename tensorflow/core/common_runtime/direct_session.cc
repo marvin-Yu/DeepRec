@@ -1929,7 +1929,7 @@ cudaStream_t DirectSession::EnableGraphCapture(){
     // filter the gpu devices
     cudaStream_t stream = NULL;
     for (auto * d : devices){
-        if(d->name().find("GPU") != std::string::npos){
+        if(d->attributes().device_type() == "GPU"){
             auto gpu = dynamic_cast<BaseGPUDevice*>(d);
 
             // todo: combine following calls
@@ -1953,7 +1953,7 @@ void DirectSession::DisableGraphCapture(){
     // filter the gpu devices
     cudaStream_t stream = NULL;
     for (auto * d : devices){
-        if(d->name().find("GPU") != std::string::npos){
+        if(d->attributes().device_type() == "GPU"){
             auto gpu = dynamic_cast<BaseGPUDevice*>(d);
 
             // Todo: combine the following calls

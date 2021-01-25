@@ -210,7 +210,8 @@ void CudaGraphMgr::CheckCudaGraphScore(const GraphDef& graph_def,
 
   SessionOptions options;
   options.config.mutable_gpu_options()->set_force_gpu_compatible(true);
-  options.config.mutable_gpu_options()->set_allow_growth(false);
+  options.config.mutable_gpu_options()->set_allow_growth(true);
+//  options.config.mutable_gpu_options()->set_per_process_gpu_memory_fraction(0.1);
   std::unique_ptr<Session> session(NewSession(options));
   
   TF_CHECK_OK(session->CreateForCapture(graph_def));
@@ -302,7 +303,8 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
                                       const std::vector<int>& batch_size) {
   SessionOptions options;
   options.config.mutable_gpu_options()->set_force_gpu_compatible(true);
-  options.config.mutable_gpu_options()->set_allow_growth(true);
+  options.config.mutable_gpu_options()->set_allow_growth(false);
+  options.config.mutable_gpu_options()->set_per_process_gpu_memory_fraction(0.1);
   std::unique_ptr<Session> session(NewSession(options));
   TF_CHECK_OK(session->CreateForCapture(graph_def));
 
@@ -330,17 +332,18 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
 
     InputsMap inputs_tf; // input map for Normal TF run
     FillInputsMap(inputs_tf, input_node_names, input_tensors_tf);
-    
-    std::vector<Tensor> output_tensors_tf;
-    TF_CHECK_OK(session->Run(inputs_tf, output_node_names, {}, &output_tensors_tf));
+    for (int j = 0; j < num_meta_instance_; ++j) { 
+      std::vector<Tensor> output_tensors_tf;
+      TF_CHECK_OK(session->Run(inputs_tf, output_node_names, {}, &output_tensors_tf));
+    }
   }
   LOG(INFO) << "[Jieluo] run session for capturing warmup finished";
-
+  /*
   bool destoried = DestoryCudaGraphResource(graph_name);
   if (destoried) {
     LOG(INFO) << "Old cuda graph resources for " << graph_name << " destoried";
   }
-
+  */
   // capture the cuda graph
   assert(session->SupportsCudaGraph());
   cudaStream_t stream = session->EnableGraphCapture();
