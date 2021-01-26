@@ -3435,6 +3435,9 @@ tf_cuda_library(
     hdrs = [        
         "common_runtime/cuda_graph_mgr.h",
         "common_runtime/cuda_graph_meta.h",
+        "common_runtime/gpu/gpu_device.h",
+        "common_runtime/gpu/gpu_id_utils.h",
+        "common_runtime/gpu_device_context.h",
     ],
     deps = [
         ":core_cpu_internal",

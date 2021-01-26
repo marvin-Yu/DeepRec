@@ -17,6 +17,7 @@
 
 #include "tensorflow/core/common_runtime/device_mgr.h"
 #include "tensorflow/core/common_runtime/threadpool_device.h"
+#include "tensorflow/core/common_runtime/gpu/gpu_device.h"
 #include "tensorflow/core/framework/allocator.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/tensor_util.h"
@@ -312,11 +313,11 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
   LOG(INFO) << "input size " << input_node_names.size()
             << " output size " << output_node_names.size();
 
+  const DeviceMgr* device_manager;
+  TF_CHECK_OK(session->LocalDeviceManager(&device_manager));
+  std::vector<Device*> devices = device_manager->ListDevices();
   // init host_allocator
   if (host_allocator_ == nullptr) {
-    const DeviceMgr* device_manager;
-    TF_CHECK_OK(session->LocalDeviceManager(&device_manager));
-    std::vector<Device*> devices = device_manager->ListDevices();
     for (auto* d : devices) {
       LOG(INFO) << "device name is " << d->name() << " type is  "  << d->attributes().device_type();
       if (d->attributes().device_type() == "CPU") {
