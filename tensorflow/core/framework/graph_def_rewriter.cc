@@ -27,16 +27,7 @@ static const std::string GPU_DEVICE = "/device:GPU:0";
 
 namespace tensorflow {
 
-bool GraphDefRewriter::CollectOutputNodeNames(std::vector<std::string>& output_nodes) {
-  for (auto iter = node_map_.begin(); iter != node_map_.end(); ++iter) {
-    if (provider_consumer_info_map_.find(iter->first) == provider_consumer_info_map_.end()) {
-      output_nodes.emplace_back(iter->first);
-    }
-  }
-  return output_nodes.size() == 0;
-}
-
-bool GraphDefRewriter::ExtractInputNodeAndSlot(const std::string& input, std::string& node, int& slot) {
+bool GraphDefRewriter::ExtractInputNodeAndSlot(const std::string& input, std::string& node, int& slot, bool& is_control) {
   std::vector<std::string> provider_parts = absl::StrSplit(input, ':');
   if (provider_parts.size() == 2) {
     absl::SimpleAtoi(provider_parts[1], &slot);
@@ -44,7 +35,13 @@ bool GraphDefRewriter::ExtractInputNodeAndSlot(const std::string& input, std::st
     LOG(ERROR) << "input " << input << " is invalid.";
     return false;
   }
-  node = provider_parts[0];
+  if (provider_parts[0].size() > 0 && provider_parts[0][0] == '^') {
+    is_control = true;
+    node = provider_parts[0].substr(1);
+  } else {
+    is_control = false;
+    node = provider_parts[0];
+  }
   return true;
 }
 
@@ -53,7 +50,8 @@ bool GraphDefRewriter::ExtractConsumerInfo(const NodeDef& node) {
   for (int j = 0; j < node.input_size(); ++j) {
     int slot = 0;
     std::string input_node;
-    if (!ExtractInputNodeAndSlot(node.input(j), input_node, slot)) {
+    bool is_control = false;
+    if (!ExtractInputNodeAndSlot(node.input(j), input_node, slot, is_control)) {
       return false;
     }
 
@@ -66,6 +64,7 @@ bool GraphDefRewriter::ExtractConsumerInfo(const NodeDef& node) {
     info.consumer_name_ = node_name;
     info.consumer_slot_ = j;
     info.provider_slot_ = slot;
+    info.control_edge_ = is_control;
     provider_consumer_info_map_[input_node].emplace_back(info);
   }
   return true;
@@ -119,34 +118,6 @@ bool GraphDefRewriter::AddNode(NodeDef&& node) {
   const std::string& node_name = node.name();
   ExtractConsumerInfo(node);
   node_map_.emplace(node_name, node);
-  return true;
-}
-
-bool GraphDefRewriter::GetNodeProviderTensorInfo(const std::string& consumer_node_name,
-                                 std::vector<std::string>& provider_tensor,
-                                 std::vector<std::string>& provider_node,
-                                 std::vector<int>& provider_slot) {
-  // step1. check node existance
-  auto iter = node_map_.find(consumer_node_name);
-  if (iter == node_map_.end()) {
-    return false;
-  }
-
-  // step2. get input infos
-  NodeDef& node = iter->second;
-  for (int i = 0; i < node.input_size(); ++i) {
-    provider_tensor.emplace_back(node.input(i));
-    std::vector<std::string> provider_parts = absl::StrSplit(node.input(i), ':');
-    int slot = 0;
-    if (provider_parts.size() == 2) {
-      absl::SimpleAtoi(provider_parts[1], &slot);
-    } else if (provider_parts.size() != 1) {
-      LOG(ERROR) << "Node " << consumer_node_name << "'s input " << node.input(i) << " is invalid.";
-      return false;
-    }
-    provider_node.emplace_back(provider_parts[0]);
-    provider_slot.emplace_back(slot);
-  }
   return true;
 }
 
@@ -240,6 +211,10 @@ bool GraphDefRewriter::ReplaceEdgesForGivenConsumer(const std::string& origin_pr
         continue;
       }
       std::string replaced_input_name = strings::StrCat(replacer_provider_name, ":", replacer_provider_slot);
+      // for control edge
+      if (info.control_edge_) {
+        replaced_input_name = "^" + replaced_input_name;
+      }
       node_map_[info.consumer_name_].set_input(info.consumer_slot_, replaced_input_name);
 
       // step4. add new edge to map info
@@ -295,7 +270,12 @@ bool GraphDefRewriter::GenerateGraphDefFromTop(GraphDef& output_graph_def,
       if (separator_pos == std::string::npos) {
         separator_pos = curr_node.input(i).size();
       }
-      std::string input_node_name = curr_node.input(i).substr(0, separator_pos);
+      // for control edge
+      int start_pos = 0;
+      if (separator_pos > 0 && curr_node.input(i)[0] == '^') {
+        start_pos = 1;
+      }
+      std::string input_node_name = curr_node.input(i).substr(start_pos, separator_pos);
       if (node_map_.find(input_node_name) == node_map_.end()) {
         LOG(ERROR) << "Node " << input_node_name << " not found in graph.";
         return false;

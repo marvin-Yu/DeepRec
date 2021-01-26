@@ -32,6 +32,7 @@ private:
     std::string consumer_name_;
     int consumer_slot_;
     int provider_slot_;
+    bool control_edge_ = false;
   }; 
 
 private:
@@ -48,10 +49,6 @@ public:
   bool GetNodeConsumedTensorInfo(const std::string& provider_node_name, 
                                  std::vector<int>& consumed_index,
                                  std::vector<DataType>& data_types);
-  bool GetNodeProviderTensorInfo(const std::string& consumer_node_name,
-                                 std::vector<std::string>& provider_tensor,
-                                 std::vector<std::string>& provider_node,
-                                 std::vector<int>& provider_slot);
   bool ReplaceEdgesForGivenConsumer(const std::string& origin_provider_name,
                                     const int origin_provider_slot,
                                     const std::string& replacer_provider_name,
@@ -65,7 +62,6 @@ public:
 private:
   bool ExtractConsumerInfo(const NodeDef& node); 
   bool ExtractInputNodeAndSlot(const std::string& input, std::string& node, int& slot);
-  bool CollectOutputNodeNames(std::vector<std::string>& output_nodes);
   
 };
 
