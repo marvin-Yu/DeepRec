@@ -61,7 +61,7 @@ public:
 
 private:
   bool ExtractConsumerInfo(const NodeDef& node); 
-  bool ExtractInputNodeAndSlot(const std::string& input, std::string& node, int& slot);
+  bool ExtractInputNodeAndSlot(const std::string& input, std::string& node, int& slot, bool& is_control);
   
 };
 

@@ -416,7 +416,10 @@ void PrepareSessionOptionForDarvin(SessionOptions& options, bool cg_enable = fal
         ->add_cuda_graph_batch_sizes(1);
     options.config.mutable_graph_options()
         ->mutable_optimizer_options()
-        ->add_output_names_with_cg("p4p_predict");
+        ->add_output_names_with_cg("matchdoc");
+    options.config.mutable_graph_options()
+        ->mutable_optimizer_options()
+        ->add_output_names_with_cg("notFoundPk");
     SubgraphDescription* subgraph = options.config.mutable_graph_options()
                                         ->mutable_optimizer_options()
                                         ->add_subgraph_descriptions();
