@@ -2612,7 +2612,7 @@ void SetXlaCompileFlag(Graph* graph) {
     if (requested_device.find("CPU") != std::string::npos ||
         requested_device.find("cpu") != std::string::npos) {
       VLOG(2) << "node: " << node->DebugString();
-      node->AddAttr("_XlaCompile", false);
+      //node->AddAttr("_XlaCompile", false);
     }
   }
 }

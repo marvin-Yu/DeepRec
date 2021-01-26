@@ -207,7 +207,7 @@ void TF_GraphSetDevice(TF_Graph* graph, int cpu_id, int gpu_id) {
   mutex_lock l(graph->mu);
   Graph* g = &(graph->graph);
 
-  LOG(INFO) << "TF_GraphSetDevice: cpu_id, gpu_id = "
+  LOG(INFO) << "TF_GraphSetDevice: cpu_id, gpu_id = "		
             << cpu_id << ", " << gpu_id;
   std::string cpu_device = "/device:CPU:" + std::to_string(cpu_id);
   std::string gpu_device = "/device:GPU:" + std::to_string(gpu_id);
@@ -217,12 +217,12 @@ void TF_GraphSetDevice(TF_Graph* graph, int cpu_id, int gpu_id) {
   } else {
     device = cpu_device;
   }
+  
   for (Node* node : g->nodes()) {
     std::string requested_device = node->requested_device();
     if (requested_device.find("CPU") != std::string::npos ||
         requested_device.find("cpu") != std::string::npos) {
       node->set_requested_device(cpu_device);
-      node->AddAttr("_XlaCompile", false);
       VLOG(1) << "Place node " << node->name() << " on " << cpu_device;
     } else {
       node->set_requested_device(device);
@@ -746,5 +746,19 @@ void TF_SaveRunMetadata(const TF_Buffer* run_metadata, const char* dir,
   LOG(INFO) << "Dumped run_metadata " << file_path;
 }
 
-}  // end extern "C"
+bool TF_IsXlaFalseNode(TF_Graph* graph, const char* node_name) {
+  auto iter = graph->name_map.find(node_name);
+  if (iter == graph->name_map.end()) {
+    LOG(ERROR) << "Cannot find node " << node_name << "in graph";
+    return false;
+  }
+  auto node = iter->second;
+  bool xla_compile = true;
+  if (TryGetNodeAttr(node->def(), "_XlaCompile", &xla_compile) &&
+      !xla_compile) {
+    return true;
+  }
+  return false;
+}
 
+}  // end extern "C"

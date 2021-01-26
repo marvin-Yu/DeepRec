@@ -16,6 +16,7 @@ limitations under the License.
 #ifndef TENSORFLOW_CORE_FRAMEWORK_NUMERIC_TYPES_H_
 #define TENSORFLOW_CORE_FRAMEWORK_NUMERIC_TYPES_H_
 
+#define EIGEN_USE_THREADS
 #include <complex>
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
 // Disable clang-format to prevent 'FixedPoint' header from being included

@@ -158,11 +158,12 @@ bool CpuInstructionFusion::ShouldFuse(HloInstruction* consumer,
 
   // Don't fuse reductions over the major dimensions. These have an efficient
   // lowering that's only implemented for the unfused case.
-  if (consumer->opcode() == HloOpcode::kReduce) {
+	// yuxing
+  /*if (consumer->opcode() == HloOpcode::kReduce) {
     return absl::c_linear_search(
         consumer->dimensions(),
         LayoutUtil::Minor(consumer->operand(0)->shape().layout(), 0));
-  }
+  }*/
   if (producer->opcode() == HloOpcode::kReduce) {
     return absl::c_linear_search(
         producer->dimensions(),

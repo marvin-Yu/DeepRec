@@ -4,7 +4,7 @@
 ##############################################################
 Name: %(echo t-ads-tensorflow-cc-lib${SUFFIX})
 Packager:wenqi.gwq
-Version:1.15.6
+Version:1.15.10
 # if you want get version number from outside, use like this
 Release:%(echo $RELEASE)%{?dist}
 
@@ -57,6 +57,7 @@ mkdir -p .%{_prefix}/tensorflow/lib
 
 cp -r $OLDPWD/../../_external/usr/local/include/* .%{_prefix}/tensorflow/include
 cp -a $OLDPWD/../../_external/usr/local/lib64/* .%{_prefix}/tensorflow/lib
+cp -a $OLDPWD/../rpm/.dep_create/var/home/a/mklml/lib/libmklml_intel.so .%{_prefix}/tensorflow/lib/
 
 %files
 %defattr(-,ads,users)

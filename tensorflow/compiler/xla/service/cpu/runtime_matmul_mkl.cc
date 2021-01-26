@@ -15,8 +15,8 @@ limitations under the License.
 
 #if defined(INTEL_MKL) && !defined(INTEL_MKL_DNN_ONLY)
 #include "tensorflow/compiler/xla/service/cpu/runtime_matmul_mkl.h"
-#include "third_party/intel_mkl_ml/include/mkl_cblas.h"
-#include "third_party/intel_mkl_ml/include/mkl_service.h"
+#include "mkl_cblas.h"
+#include "mkl_service.h"
 
 #include "tensorflow/compiler/xla/executable_run_options.h"
 #include "tensorflow/core/platform/types.h"
@@ -49,6 +49,11 @@ void MatMulF32(const void* run_options_ptr, float* out, float* lhs, float* rhs,
   cblas_sgemm(CblasColMajor, transpose_lhs ? CblasTrans : CblasNoTrans,
               transpose_rhs ? CblasTrans : CblasNoTrans, m, n, k, alpha, lhs,
               lda, rhs, ldb, beta, out, ldc);
+  //[PROF-STATS]
+  auto ptr = static_cast<const xla::ExecutableRunOptions*>(run_options_ptr);
+  if(ptr && ptr->prof_stats) {
+    ptr->prof_stats->flops += m * k *n * 2;
+  }
 }
 
 // BLAS GEMM API for 64-bit Matrix Multiplication.
@@ -71,6 +76,11 @@ void MatMulF64(const void* run_options_ptr, double* out, double* lhs,
   cblas_dgemm(CblasColMajor, transpose_lhs ? CblasTrans : CblasNoTrans,
               transpose_rhs ? CblasTrans : CblasNoTrans, m, n, k, alpha, lhs,
               lda, rhs, ldb, beta, out, ldc);
+  //[PROF-STATS]
+  auto ptr = static_cast<const xla::ExecutableRunOptions*>(run_options_ptr);
+  if(ptr && ptr->prof_stats) {
+    ptr->prof_stats->flops += m * k *n * 2;
+  }
 }
 
 }  // namespace
@@ -84,7 +94,7 @@ TF_ATTRIBUTE_NO_SANITIZE_MEMORY void __xla_cpu_runtime_MKLMatMulF32(
   // number specified in intra_op_thread_pool to MKL.
   int prev_num_threads = mkl_set_num_threads_local(
       run_options->intra_op_thread_pool()->numThreads());
-  MatMulF32(nullptr, out, lhs, rhs, m, n, k, transpose_lhs, transpose_rhs);
+  MatMulF32(run_options_ptr, out, lhs, rhs, m, n, k, transpose_lhs, transpose_rhs);
   // Set thread number back to the previous number.
   mkl_set_num_threads_local(prev_num_threads);
 }
@@ -99,7 +109,7 @@ TF_ATTRIBUTE_NO_SANITIZE_MEMORY void __xla_cpu_runtime_MKLMatMulF64(
   // number specified in intra_op_thread_pool to MKL.
   int prev_num_threads = mkl_set_num_threads_local(
       run_options->intra_op_thread_pool()->numThreads());
-  MatMulF64(nullptr, out, lhs, rhs, m, n, k, transpose_lhs, transpose_rhs);
+  MatMulF64(run_options_ptr, out, lhs, rhs, m, n, k, transpose_lhs, transpose_rhs);
   // Set thread number back to the previous number.
   mkl_set_num_threads_local(prev_num_threads);
 }
@@ -112,7 +122,7 @@ __xla_cpu_runtime_MKLSingleThreadedMatMulF32(const void* run_options_ptr,
                                              int32 transpose_rhs) {
   // Set the thread number to 1 for single threaded execution.
   int prev_num_threads = mkl_set_num_threads_local(1);
-  MatMulF32(nullptr, out, lhs, rhs, m, n, k, transpose_lhs, transpose_rhs);
+  MatMulF32(run_options_ptr, out, lhs, rhs, m, n, k, transpose_lhs, transpose_rhs);
   // Set thread number back to the previous number.
   mkl_set_num_threads_local(prev_num_threads);
 }
@@ -125,7 +135,7 @@ __xla_cpu_runtime_MKLSingleThreadedMatMulF64(const void* run_options_ptr,
                                              int32 transpose_rhs) {
   // Set the thread number to 1 for single threaded execution.
   int prev_num_threads = mkl_set_num_threads_local(1);
-  MatMulF64(nullptr, out, lhs, rhs, m, n, k, transpose_lhs, transpose_rhs);
+  MatMulF64(run_options_ptr, out, lhs, rhs, m, n, k, transpose_lhs, transpose_rhs);
   // Set thread number back to the previous number.
   mkl_set_num_threads_local(prev_num_threads);
 }
