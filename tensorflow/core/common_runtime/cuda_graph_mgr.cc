@@ -303,14 +303,17 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
                                       const std::vector<std::string>& input_node_names,
                                       const std::vector<std::string>& output_node_names,
                                       const std::vector<int>& batch_size) {
+  LOG(INFO) << "[Jieluo] Begin capture cuda graph";
   SessionOptions options;
   options.config.mutable_gpu_options()->set_force_gpu_compatible(true);
   options.config.mutable_gpu_options()->set_allow_growth(true);
  // options.config.mutable_gpu_options()->set_per_process_gpu_memory_fraction(0.1);
+  LOG(INFO) << "[Jieluo] new session for capture";
   std::unique_ptr<Session> session(NewSession(options));
+  LOG(INFO) << "[Jieluo] create graph for capture, graph: " << graph_def.ShortDebugString();
   TF_CHECK_OK(session->CreateForCapture(graph_def));
 
-  LOG(INFO) << "input size " << input_node_names.size()
+  LOG(INFO) << "[Jieluo] input size " << input_node_names.size()
             << " output size " << output_node_names.size();
 
   const DeviceMgr* device_manager;

@@ -323,9 +323,11 @@ DirectSession::DirectSession(const SessionOptions& options,
     for (int i = 0; i < thread_pool_size; ++i) {
       thread::ThreadPool* pool = nullptr;
       bool owned = false;
+      LOG(INFO) << "[Jieluo] before update init error";
       init_error_.Update(NewThreadPoolFromThreadPoolOptions(
           options_, options_.config.session_inter_op_thread_pool(i), i, &pool,
           &owned));
+      LOG(INFO) << "[Jieluo] init error " << init_error_.error_message();
       thread_pools_.emplace_back(pool, owned);
     }
   } else if (options_.config.use_per_session_threads()) {
@@ -405,6 +407,8 @@ Status DirectSession::Create(const GraphDef& graph) {
 }
 
 Status DirectSession::Create(GraphDef&& graph) {
+  LOG(INFO) << "[Jieluo] Direct session create graph " << graph.ShortDebugString()
+            << " init error msg " << init_error_.error_message();
   TF_RETURN_IF_ERROR(init_error_);
   if (graph.node_size() > 0) {
     mutex_lock l(graph_state_lock_);
@@ -421,6 +425,7 @@ Status DirectSession::Create(GraphDef&& graph) {
                               cuda_graph_capture();
     
     if (cuda_graph_enable) {
+      LOG(INFO) << "[Jieluo] cuda graph is enable";
       cudagraph_defs_.clear();
       CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
       // get all cudagraph num, for checking existance and capturing
@@ -439,6 +444,7 @@ Status DirectSession::Create(GraphDef&& graph) {
       }
       // check and capture uncaptured graph
       if (cuda_graph_capture) {
+        LOG(INFO) << "[Jieluo] cuda graph capture is enable";
         // capture uncaptured graph
         for (int i = 0; i < num_cuda_graph; ++i) {
           GraphDef cudagraph_capture;
@@ -460,12 +466,14 @@ Status DirectSession::Create(GraphDef&& graph) {
                                           subgraph_descriptions(i).
                                           subgraph_name();
           cudagraph_defs_.emplace(graph_name, cudagraph_capture);
+          LOG(INFO) << "Begin capture sub graph " << i;
           mgr.CaptureCudagraph(cudagraph_capture,
                                options_.config.graph_options()
                                    .optimizer_options()
                                    .subgraph_descriptions(i)
                                    .subgraph_name(),
                                input_node_names, output_node_names, buckets);
+          LOG(INFO) << "End capture sub graph " << i;
         }
       }
       GraphDef cudagraph_serving;
@@ -489,6 +497,7 @@ Status DirectSession::Create(GraphDef&& graph) {
                                                      descs,
                                                      buckets,
                                                      final_outputs);
+      LOG(INFO) << "Gen cuda graph serving graph finished, graph: " << cudagraph_serving.ShortDebugString();
       if (!succ) {
         LOG(ERROR) << "Generate subgraph for cudagraph capturing failed, "
                       "please check GraphDef and session options";
@@ -509,6 +518,8 @@ Status DirectSession::CreateForCapture(const GraphDef& graph) {
 }
 
 Status DirectSession::CreateForCapture(GraphDef&& graph) {
+  LOG(INFO) << "[Jieluo] Direct session capture graph " << graph.ShortDebugString()
+            << " init error msg " << init_error_.error_message();
   TF_RETURN_IF_ERROR(init_error_);
   if (graph.node_size() > 0) {
     mutex_lock l(graph_state_lock_);

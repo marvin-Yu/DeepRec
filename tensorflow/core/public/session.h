@@ -29,9 +29,9 @@ limitations under the License.
 #include "tensorflow/core/public/session_options.h"
 
 
-#ifdef GOOGLE_CUDA
+// #ifdef GOOGLE_CUDA
 #include <cuda_runtime.h>
-#endif
+// #endif
 
 
 namespace tensorflow {
@@ -119,7 +119,7 @@ class Session {
 #endif
 
 
-#ifdef GOOGLE_CUDA
+// #ifdef GOOGLE_CUDA
   virtual Status CreateForCapture(const GraphDef& graph) { return Create(graph); };
 #ifndef SWIG
   virtual Status CreateForCapture(GraphDef&& graph) { return CreateForCapture(graph); }
@@ -142,7 +142,7 @@ class Session {
   virtual cudaStream_t  EnableGraphCapture() {return nullptr;} 
   virtual void DisableGraphCapture() { }
   virtual std::unordered_map<std::string, GraphDef>* GetCudaGraphRewriteDefs() { return nullptr; };
-#endif
+// #endif
   
   /// \brief Runs the graph with the provided input tensors and fills
   /// `outputs` for the endpoints specified in `output_tensor_names`.
