@@ -172,8 +172,8 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
       ele_size = 8;
       host_buffer = reinterpret_cast<const void*>(input.flat<int64>().data());
     } else {
-      std::cout << "Unsupported data type!" << std::endl;
-      exit(1);
+      OP_REQUIRES_ASYNC(ctx, false,
+              errors::Internal("Unsupported data type ", input.dtype()), done);
     }
 
     size_t num_elements = input.NumElements();
@@ -194,22 +194,6 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
   ret = cudaStreamAddCallback(stream, CudaGraphCallback, (void *)(args),0); 
   OP_REQUIRES_ASYNC(ctx, ret == cudaSuccess, 
         errors::Internal("Add cuda callback failed: ", ret), done);
-/*
-  cudaEvent_t event;
-   cudaEventCreateWithFlags(&event, cudaEventBlockingSync);
-   cudaEventRecord(event, stream);
-   cudaEventSynchronize(event);
-   cudaEventDestroy(event);
-  for (int i = 0; i < meta->output_tensors_.size(); ++i) {
-    Tensor *output = nullptr;
-    TensorShape shape = meta->output_tensors_[i].shape();
-    shape.set_dim(0, batch_size);
-    OP_REQUIRES_OK(ctx, ctx->allocate_output(i, shape, &output));
-    output->CopyFrom(meta->output_tensors_[i], shape); 
-  }
-  mgr.ReturnCudaGraphMeta( meta);
-  done();
-*/
   return;
 }
 

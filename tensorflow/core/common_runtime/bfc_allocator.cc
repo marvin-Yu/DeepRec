@@ -97,7 +97,7 @@ const BFCAllocator::Chunk* BFCAllocator::ChunkFromHandle(ChunkHandle h) const {
 }
 
 bool BFCAllocator::ReserveChunks(size_t chunk_size, int chunk_num) {
-  LOG(INFO) << "[Jieluo] Reserve chunk, chunk size " << chunk_size << " chunk num " << chunk_num;
+  // LOG(INFO) << "[Jieluo] Reserve chunk, chunk size " << chunk_size << " chunk num " << chunk_num;
   bool all_succ = true;
   size_t alignment = 64;
   for (int i = 0; i < chunk_num; ++i) {

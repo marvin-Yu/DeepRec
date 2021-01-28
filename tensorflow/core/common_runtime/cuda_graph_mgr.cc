@@ -88,15 +88,15 @@ void RandomInitialize(Tensor& t) {
   if (t.dtype() == DT_HALF) {
     __half* data = reinterpret_cast<__half*>(t.flat<Eigen::half>().data());
     for (int i = 0; i < num_elements; i++) {
-    //  float value = static_cast<float>(rand() % 101 - 50) / 100.0f;
-      float value = 0.1;
+      float value = static_cast<float>(rand() % 101 - 50) / 100.0f;
+    //  float value = 0.1;
       data[i] = __float2half(value);
     }
   } else if (t.dtype() == DT_FLOAT) {
     float* data = t.flat<float>().data();
     for (int i = 0; i < num_elements; i++) {
-   //   float value = static_cast<float>(rand() % 101 - 50) / 100.0f;
-      float value = 0.1;
+      float value = static_cast<float>(rand() % 101 - 50) / 100.0f;
+    //  float value = 0.1;
       data[i] = value;
     }
   } else if (t.dtype() == DT_INT32) {
@@ -170,6 +170,11 @@ void CudaGraphMgr::InitTraffic() {
   ::Traffic::Instance()->RegistRecord("CgBatchSize129-160", ::Traffic::COUNT, "CudaGraph");
   ::Traffic::Instance()->RegistRecord("CgBatchSize161-192", ::Traffic::COUNT, "CudaGraph");
   ::Traffic::Instance()->RegistRecord("CgBatchSize192-", ::Traffic::COUNT, "CudaGraph");
+
+  static auto traffic_cb = [](const char* param) {
+    LOG(INFO) << "Traffic:[" << param << "]";
+  };
+  ::Traffic::Instance()->Start(traffic_cb);
 }
 
 Status CudaGraphMgr::GetCudaStream(int req_id, cudaStream_t& stream) {
@@ -213,7 +218,6 @@ void CudaGraphMgr::CheckCudaGraphScore(const GraphDef& graph_def,
   SessionOptions options;
   options.config.mutable_gpu_options()->set_force_gpu_compatible(true);
   options.config.mutable_gpu_options()->set_allow_growth(true);
-//  options.config.mutable_gpu_options()->set_per_process_gpu_memory_fraction(0.1);
   std::unique_ptr<Session> session(NewSession(options));
   
   TF_CHECK_OK(session->CreateForCapture(graph_def));
@@ -249,8 +253,8 @@ void CudaGraphMgr::CheckCudaGraphScore(const GraphDef& graph_def,
       ele_size = 8;
       host_buffer = reinterpret_cast<const void*>(input.flat<int64>().data());
     } else {
-      std::cout << "Unsupported data type!" << std::endl;
-      exit(1);
+      LOG(ERROR) << "Unsupported data type: " << input.dtype();
+      return;
     }
 
     size_t num_elements = input.NumElements();
@@ -303,18 +307,18 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
                                       const std::vector<std::string>& input_node_names,
                                       const std::vector<std::string>& output_node_names,
                                       const std::vector<int>& batch_size) {
-  LOG(INFO) << "[Jieluo] Begin capture cuda graph";
+  // LOG(INFO) << "[Jieluo] Begin capture cuda graph";
   SessionOptions options;
   options.config.mutable_gpu_options()->set_force_gpu_compatible(true);
   options.config.mutable_gpu_options()->set_allow_growth(true);
- // options.config.mutable_gpu_options()->set_per_process_gpu_memory_fraction(0.1);
-  LOG(INFO) << "[Jieluo] new session for capture";
+  // options.config.mutable_gpu_options()->set_per_process_gpu_memory_fraction(0.1);
+  // LOG(INFO) << "[Jieluo] new session for capture";
   std::unique_ptr<Session> session(NewSession(options));
-  LOG(INFO) << "[Jieluo] create graph for capture, graph: " << graph_def.ShortDebugString();
+  // LOG(INFO) << "[Jieluo] create graph for capture, graph: " << graph_def.ShortDebugString();
   TF_CHECK_OK(session->CreateForCapture(graph_def));
 
-  LOG(INFO) << "[Jieluo] input size " << input_node_names.size()
-            << " output size " << output_node_names.size();
+  // LOG(INFO) << "[Jieluo] input size " << input_node_names.size()
+  //           << " output size " << output_node_names.size();
 
   const DeviceMgr* device_manager;
   TF_CHECK_OK(session->LocalDeviceManager(&device_manager));
@@ -342,13 +346,11 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
       TF_CHECK_OK(session->Run(inputs_tf, output_node_names, {}, &output_tensors_tf));
     }
   }
-  LOG(INFO) << "[Jieluo] run session for capturing warmup finished";
-  /*
+  // LOG(INFO) << "[Jieluo] run session for capturing warmup finished";
   bool destoried = DestoryCudaGraphResource(graph_name);
   if (destoried) {
     LOG(INFO) << "Old cuda graph resources for " << graph_name << " destoried";
   }
-  */
   // capture the cuda graph
 
   // reserve
@@ -391,7 +393,7 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
         meta_check = meta;
       }
     }
-    LOG(INFO) << "[Jieluo] run session for capturing finish, batch size " << batch_size[i];
+    // LOG(INFO) << "[Jieluo] run session for capturing finish, batch size " << batch_size[i];
     // add pool lock
     if (meta_pool_lock_.find(graph_name) == meta_pool_lock_.end()) {
       meta_pool_lock_.emplace(graph_name, BatchMetaLockMap());
