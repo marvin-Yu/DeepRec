@@ -46,9 +46,9 @@ limitations under the License.
 #include "tensorflow/core/public/session.h"
 
 
-// #ifdef GOOGLE_CUDA
+#ifdef GOOGLE_CUDA
 #include <cuda_runtime.h>
-// #endif
+#endif
 
 namespace tensorflow {
 
@@ -133,7 +133,7 @@ class DirectSession : public Session {
 
   const SessionOptions& options() const { return options_; }
 
-// #ifdef GOOGLE_CUDA
+#ifdef GOOGLE_CUDA
   ::tensorflow::Status CreateForCapture(const GraphDef& graph) override;
   ::tensorflow::Status CreateForCapture(GraphDef&& graph) override;
   ::tensorflow::Status RunForCapture(const std::vector<std::pair<string, Tensor> >& inputs,
@@ -152,7 +152,7 @@ class DirectSession : public Session {
   std::unordered_map<std::string, GraphDef>* GetCudaGraphRewriteDefs() override {
     return &cudagraph_defs_;
   };
-// #endif
+#endif
 
   void RunAsync(const RunOptions& run_options,
       const NamedTensorList& inputs,
@@ -174,7 +174,7 @@ class DirectSession : public Session {
 
  private:
 
-// #ifdef GOOGLE_CUDA
+#ifdef GOOGLE_CUDA
   bool cuda_graph_capture_mode_ = false;
   cudaStream_t capturing_stream_ = nullptr;
 
@@ -193,7 +193,7 @@ class DirectSession : public Session {
   std::vector<const void*> host_memory_inputs_address_;
 
   std::unordered_map<std::string, GraphDef> cudagraph_defs_;
-// #endif
+#endif
 
   // For access to collective_graph_key_.
   friend class DirectSessionCollectiveTest;
