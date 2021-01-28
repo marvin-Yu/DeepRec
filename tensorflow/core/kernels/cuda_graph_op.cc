@@ -13,6 +13,7 @@
 #include "tensorflow/core/common_runtime/cuda_graph_mgr.h"
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_kernel.h"
+#include "tensorflow/core/framework/tensor_util.h"
 #include "tensorflow/core/platform/macros.h"
 #include "tensorflow/core/lib/core/threadpool.h"
 #include "tensorflow/tools/traffic/traffic.h"
@@ -67,6 +68,14 @@ public:
 
 private:
   void RecordTraffic(int batch_size);
+  void ComputeAsyncSlice(OpKernelContext* ctx, 
+                                    DoneCallback done, 
+                                    size_t begin, 
+                                    size_t end,
+                                    size_t origin_batch_size,
+                                    int req_id,
+                                    CudaGraphCbArgs* args,
+                                    int slice_idx);
 
 private:
   std::string graph_name_;
@@ -122,13 +131,13 @@ void CopyRetAndReturnMeta(CudaGraphCbSliceArgs* args) {
     for (int i = 0; i < meta->output_tensors_.size(); ++i) {
       TensorShape shape = meta->output_tensors_[i].shape();
       shape.set_dim(0, args->slice_batch_);
-      args->cb_args_->slice_output_tensor_[i][args->slice_idx_] output->CopyFrom(meta->output_tensors_[i], shape);
+      args->cb_args_->slice_output_tensor_[i][args->slice_idx_].CopyFrom(meta->output_tensors_[i], shape);
     }
     // if not all slice finished
     do {
-      std::lock_guard<std::mutex> lock(args->mtx_);
-      --args->waiting_slice_num_;
-      if (args->waiting_slice_num_ > 0) {
+      std::lock_guard<std::mutex> lock(args->cb_args_->mtx_);
+      --args->cb_args_->waiting_slice_num_;
+      if (args->cb_args_->waiting_slice_num_ > 0) {
         mgr.ReturnCudaGraphMeta(meta);
         delete args;
         return;
@@ -136,12 +145,12 @@ void CopyRetAndReturnMeta(CudaGraphCbSliceArgs* args) {
     } while (0);
 
     // if all slice finished 
-    for (int i = 0; i < fetch_names_.size(); ++i) {
+    for (int i = 0; i < meta->output_tensors_.size(); ++i) {
       Tensor* output = nullptr;
-      TensorShape shape = args->slice_metas_[0]->output_tensors_[i].shape();
+      TensorShape shape = meta->output_tensors_[i].shape();
       shape.set_dim(0, args->cb_args_->origin_batch_size_);
       OP_REQUIRES_OK(ctx, ctx->allocate_output(i, shape, &output));
-      Concat(args->cb_args_->slice_output_tensor_[i], output);
+      tensor::Concat(args->cb_args_->slice_output_tensor_[i], output);
     }
   }
   mgr.ReturnCudaGraphMeta(meta);
@@ -155,13 +164,13 @@ void CUDART_CB CudaGraphCallback(cudaStream_t stream,
                                  cudaError_t status, 
                                  void* data) {
   CudaGraphCbSliceArgs* args = (CudaGraphCbSliceArgs*)data;
-  OpKernelContext* ctx = args->ctx_;
+  OpKernelContext* ctx = args->cb_args_->ctx_;
 
   const DeviceBase::CpuWorkerThreads* threads = ctx->device()->tensorflow_cpu_worker_threads();
   if (threads == nullptr) {
     CopyRetAndReturnMeta(args);
   } else {
-    threads->workers->Schedule(std::bind(&CudaGraphCbSliceArgs, args));
+    threads->workers->Schedule(std::bind(&CopyRetAndReturnMeta, args));
   }
   return;
 }
@@ -237,7 +246,6 @@ void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx,
       return;
     }
 
-    size_t num_elements = input.NumElements();
     size_t num_bytes = ele_num_per_dim0 * ele_size * (end - begin);
     void* device_buffer = meta->src_dst_mapping_[i].second;
     OP_REQUIRES_ASYNC(ctx, cudaMemcpyAsync(device_buffer, host_buffer, num_bytes,
