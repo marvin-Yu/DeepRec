@@ -315,7 +315,7 @@ void PrepareSessionOptionForGamma(SessionOptions& options, bool cg_enable = fals
         ->set_cuda_graph_capture(true);
     options.config.mutable_graph_options()
         ->mutable_optimizer_options()
-        ->add_cuda_graph_batch_sizes(1);
+        ->add_cuda_graph_batch_sizes(2);
     options.config.mutable_graph_options()
         ->mutable_optimizer_options()
         ->add_output_names_with_cg("p4p_output");
@@ -324,9 +324,7 @@ void PrepareSessionOptionForGamma(SessionOptions& options, bool cg_enable = fals
                                         ->add_subgraph_descriptions();
     subgraph->set_subgraph_name("main");
     subgraph->add_output_node_names("p4p_Main_Score_Network/hiddenlayer_4/hiddenlayer_4/LeakyRelu");
- //   subgraph->add_output_node_names("p4p_Main_Score_Network/add");
     SubgraphInputTensor* input= subgraph->add_input_tensors();
-  //  input->set_tensor_provider_name("p4p_Main_Score_Network/hiddenlayer_0/hiddenlayer_0/LeakyRelu");
     input->set_tensor_provider_name("p4p_Main_Score_Network/concat");
     input->set_tensor_provider_slot(0);
     input->set_ph_name("ph");
@@ -335,7 +333,6 @@ void PrepareSessionOptionForGamma(SessionOptions& options, bool cg_enable = fals
     input->add_shape(4440);
 
     SubgraphInputTensor* input1 = subgraph->add_input_tensors();
-//    input1->set_tensor_provider_name("p4p_Main_Score_Network/column_extend/column_extend/LeakyRelu");
     input1->set_tensor_provider_name("p4p_Main_Score_Network/column_extend/concat");
     input1->set_tensor_provider_slot(0);
     input1->set_ph_name("ph1");
@@ -376,9 +373,8 @@ Status Test(GraphDef & graph_def,
     }
 
     // Prepare inputs
-    int test_batch = 1;
     std::vector<Tensor> input_tensors;
-    GenerateInputs(graph_def, input_names, input_tensors, test_batch);
+    GenerateInputs(graph_def, input_names, input_tensors, batch_size);
     InputsMap input_map; // input map for Normal TF run
     FillInputsMap(input_map, input_names, input_tensors);
     
@@ -395,9 +391,9 @@ Status Test(GraphDef & graph_def,
     TF_CHECK_OK(session_tf->Run(input_map, output_names, {}, &output_tensors_tf));
 
     LOG(INFO) << "CG results: ";
-  //  PrintTensorData(output_tensors_cg[0]); 
+    tensor::PrintTensorData(output_tensors_cg[0]); 
     LOG(INFO) << "TF results: ";
-  //  PrintTensorData(output_tensors_tf[0]); 
+    tensor::PrintTensorData(output_tensors_tf[0]); 
     return Status();
 }
 
@@ -407,7 +403,7 @@ void PrepareSessionOptionForDarvin(SessionOptions& options, bool cg_enable = fal
   if (cg_enable) {
     options.config.mutable_graph_options()
         ->mutable_optimizer_options()
-        ->set_cuda_graph_enable(true);
+        ->set_cuda_graph_enable(cg_enable);
     options.config.mutable_graph_options()
         ->mutable_optimizer_options()
         ->set_cuda_graph_capture(true);
@@ -566,10 +562,10 @@ int main(int argc, char* argv[]) {
         std::cout << status.ToString() << "\n";
         return 1;
     }
-/*    
+    
     example::Test(graph_def, input_names, output_names,
                   batch_size, num_infers_per_thread, num_streams, num_threads);
-*/
-    example::CheckGraph(graph_def);
+
+  //  example::CheckGraph(graph_def);
     return 0;
 }
