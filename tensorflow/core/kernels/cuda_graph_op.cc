@@ -70,7 +70,7 @@ public:
 
 private:
   void RecordTraffic(int batch_size);
-  bool ComputeAsyncSlice(OpKernelContext* ctx, 
+  void ComputeAsyncSlice(OpKernelContext* ctx, 
                                     DoneCallback done, 
                                     size_t begin, 
                                     size_t end,
@@ -148,16 +148,20 @@ void CopyRetAndReturnMeta(CudaGraphCbSliceArgs* args) {
     for (int i = 0; i < meta->output_tensors_.size(); ++i) {
       Tensor* output = nullptr;
       TensorShape shape = meta->output_tensors_[i].shape();
+      tensor::PrintTensorData(meta->output_tensors_[i]);
+      LOG(INFO) << "[Jieluo] copy output " << i << " dim0 " << args->cb_args_->origin_batch_size_;
       shape.set_dim(0, args->cb_args_->origin_batch_size_);
       OP_REQUIRES_OK(ctx, ctx->allocate_output(i, shape, &output));
-      output->CopyFrom(meta->output_tensors_[i], shape);
+      tensor::PrintTensorData(*output);
+      tensor::DeepCopy(meta->output_tensors_[i].Slice(0, args->cb_args_->origin_batch_size_), output);
+      tensor::PrintTensorData(*output);
     }
   } else {
     LOG(INFO) << "[Jieluo] multi slice, slice index " << args->slice_idx_;
     for (int i = 0; i < meta->output_tensors_.size(); ++i) {
       TensorShape shape = meta->output_tensors_[i].shape();
       shape.set_dim(0, args->slice_batch_);
-      args->cb_args_->slice_output_tensor_[i][args->slice_idx_].CopyFrom(meta->output_tensors_[i], shape);
+      args->cb_args_->slice_output_tensor_[i][args->slice_idx_] = tensor::DeepCopy(meta->output_tensors_[i].Slice(0, args->slice_batch_));
     }
     // if not all slice finished
     do {
@@ -229,11 +233,11 @@ void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx,
   if (upper_iter != buckets_.begin() && *(upper_iter - 1) == batch_size) {
     --upper_iter;
   }
-  if (upper_iter != buckets_.end()) {
+  if (upper_iter == buckets_.end()) {
     args->has_failed_slice_ = true;
-    LOG(ERROR) << "Batch size " << batch_size << " is exceed max bucket " << buckets_.end();
+  //  LOG(ERROR) << "Batch size " << batch_size << " is exceed max bucket " << buckets_.end();
     CopyRetAndReturnMeta(slice_args);
-    return false;
+    return;
   }
 
   // step1. fetch metas
@@ -292,7 +296,6 @@ void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx,
   OP_REQUIRES_ASYNC(ctx, ret == cudaSuccess, 
         errors::Internal("cudagraph launch faild: ", ret), done);
 
-  CudaGraphCbSliceArgs* slice_args = new CudaGraphCbSliceArgs(batch_size, slice_idx, meta, args);
   ret = cudaStreamAddCallback(stream, CudaGraphCallback, (void *)(slice_args), 0); 
   OP_REQUIRES_ASYNC(ctx, ret == cudaSuccess, 
         errors::Internal("Add cuda callback failed: ", ret), done);
@@ -331,7 +334,7 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
     end += slice_size;
   }
   end = batch_size;
-  ComputeAsyncSlice(ctx, done, begin, end, batch_size, req_id + i, args, i);
+  ComputeAsyncSlice(ctx, done, begin, end, batch_size, req_id + slice_num, args, slice_num - 1);
   return;
 }
 

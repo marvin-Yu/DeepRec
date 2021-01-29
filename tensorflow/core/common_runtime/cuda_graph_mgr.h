@@ -48,7 +48,10 @@ public:
   Status GetCudaStream(int req_id, cudaStream_t& stream);
 
 private:
-  CudaGraphMgr(/* args */) { Init(); };
+  CudaGraphMgr(/* args */) { 
+    Init();  
+    InitTraffic();
+  };
   ~CudaGraphMgr();
 
   void Init();

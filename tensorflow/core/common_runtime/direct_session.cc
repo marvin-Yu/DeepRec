@@ -497,7 +497,6 @@ Status DirectSession::Create(GraphDef&& graph) {
                                                      descs,
                                                      buckets,
                                                      final_outputs);
-      LOG(INFO) << "Gen cuda graph serving graph finished, graph: " << cudagraph_serving.ShortDebugString();
       if (!succ) {
         LOG(ERROR) << "Generate subgraph for cudagraph capturing failed, "
                       "please check GraphDef and session options";

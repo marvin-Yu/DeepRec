@@ -13,6 +13,7 @@
 #include "tensorflow/cc/client/client_session.h"
 #include "tensorflow/core/framework/graph.pb.h"
 #include "tensorflow/core/framework/tensor.h"
+#include "tensorflow/core/framework/tensor_util.h"
 #include "tensorflow/core/framework/allocator.h"
 #include "tensorflow/core/common_runtime/cuda_graph_mgr.h"
 #include "tensorflow/core/graph/default_device.h"
@@ -315,7 +316,7 @@ void PrepareSessionOptionForGamma(SessionOptions& options, bool cg_enable = fals
         ->set_cuda_graph_capture(true);
     options.config.mutable_graph_options()
         ->mutable_optimizer_options()
-        ->add_cuda_graph_batch_sizes(2);
+        ->add_cuda_graph_batch_sizes(4);
     options.config.mutable_graph_options()
         ->mutable_optimizer_options()
         ->add_output_names_with_cg("p4p_output");
