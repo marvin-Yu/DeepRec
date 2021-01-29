@@ -587,6 +587,7 @@ tf_cc_shared_object(
         "//tensorflow/core:lib_internal_impl",
         "//tensorflow/stream_executor:stream_executor_impl",
         "//tensorflow:tf_framework_version_script.lds",
+        "@com_google_protobuf//:protobuf"
     ] + tf_additional_binary_deps(),
 )
 
