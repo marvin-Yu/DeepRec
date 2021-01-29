@@ -30,6 +30,7 @@
 static const int NUM_INSTANCE_DEFAULT = 3;
 static const int NUM_STREAM_DEFAULT = 3;
 static const size_t CHUNK_SIZE = 32 * 1024 * 1024;
+static const size_t MAX_RESERVE_CHUNK = 128;
 
 namespace tensorflow {
 
@@ -172,7 +173,7 @@ void CudaGraphMgr::InitTraffic() {
   ::Traffic::Instance()->RegistRecord("CgBatchSize192-", ::Traffic::COUNT, "CudaGraph");
 
   static auto traffic_cb = [](const char* param) {
-    LOG(INFO) << "Traffic:[" << param << "]";
+    LOG(WARNING) << "Traffic:[" << param << "]";
   };
   ::Traffic::Instance()->Start(traffic_cb);
 }
@@ -357,8 +358,9 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
   for (auto * d : devices){
     if(d->attributes().device_type() == "GPU"){
       auto gpu = dynamic_cast<BaseGPUDevice*>(d);
+      int reserve_chunk_num = std::min(MAX_RESERVE_CHUNK, 2 * batch_size.size() * num_meta_instance_);
       if (!gpu->ReserveGPUMemChunks(CHUNK_SIZE, 4)) {
-        LOG(ERROR) << "Reserve chunk failed"; 
+        LOG(ERROR) << "Reserve chunk failed, request chunk num " << reserve_chunk_num; 
       }
     }
   }

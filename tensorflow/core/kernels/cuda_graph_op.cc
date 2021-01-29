@@ -122,7 +122,7 @@ void CopyRetAndReturnMeta(CudaGraphCbSliceArgs* args) {
   CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
 
   if (meta == nullptr) {
-    LOG(INFO) << "[Jieluo] meta is null";
+    // LOG(INFO) << "[Jieluo] meta is null";
     if (args->cb_args_->single_slice_) {
       args->cb_args_->done_();
       delete args->cb_args_;
@@ -144,12 +144,12 @@ void CopyRetAndReturnMeta(CudaGraphCbSliceArgs* args) {
   }
 
   if (args->cb_args_->single_slice_) {
-    LOG(INFO) << "[Jieluo] single slice";
+    // LOG(INFO) << "[Jieluo] single slice";
     for (int i = 0; i < meta->output_tensors_.size(); ++i) {
       Tensor* output = nullptr;
       TensorShape shape = meta->output_tensors_[i].shape();
       tensor::PrintTensorData(meta->output_tensors_[i]);
-      LOG(INFO) << "[Jieluo] copy output " << i << " dim0 " << args->cb_args_->origin_batch_size_;
+      // LOG(INFO) << "[Jieluo] copy output " << i << " dim0 " << args->cb_args_->origin_batch_size_;
       shape.set_dim(0, args->cb_args_->origin_batch_size_);
       OP_REQUIRES_OK(ctx, ctx->allocate_output(i, shape, &output));
       tensor::PrintTensorData(*output);
@@ -157,7 +157,7 @@ void CopyRetAndReturnMeta(CudaGraphCbSliceArgs* args) {
       tensor::PrintTensorData(*output);
     }
   } else {
-    LOG(INFO) << "[Jieluo] multi slice, slice index " << args->slice_idx_;
+    // LOG(INFO) << "[Jieluo] multi slice, slice index " << args->slice_idx_;
     for (int i = 0; i < meta->output_tensors_.size(); ++i) {
       TensorShape shape = meta->output_tensors_[i].shape();
       shape.set_dim(0, args->slice_batch_);
@@ -167,7 +167,7 @@ void CopyRetAndReturnMeta(CudaGraphCbSliceArgs* args) {
     do {
       std::lock_guard<std::mutex> lock(args->cb_args_->mtx_);
       --args->cb_args_->waiting_slice_num_;
-      LOG(INFO) << "[Jieluo] waiting slice num is " << args->cb_args_->waiting_slice_num_;
+      // LOG(INFO) << "[Jieluo] waiting slice num is " << args->cb_args_->waiting_slice_num_;
       if (args->cb_args_->waiting_slice_num_ > 0) {
         mgr.ReturnCudaGraphMeta(meta);
         delete args;
@@ -177,7 +177,7 @@ void CopyRetAndReturnMeta(CudaGraphCbSliceArgs* args) {
 
     // if all slice finished 
     for (int i = 0; i < meta->output_tensors_.size(); ++i) {
-      LOG(INFO) << "[Jieluo] merge slices " << i;
+      // LOG(INFO) << "[Jieluo] merge slices " << i;
       Tensor* output = nullptr;
       TensorShape shape = meta->output_tensors_[i].shape();
       shape.set_dim(0, args->cb_args_->origin_batch_size_);
@@ -226,7 +226,7 @@ void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx,
                                     int slice_idx) {
   int batch_size = end - begin;
   CudaGraphCbSliceArgs* slice_args = new CudaGraphCbSliceArgs(batch_size, slice_idx, nullptr, args);
-   LOG(INFO) << "[Jieluo] create slice args, batch size " << batch_size
+   LOG(INFO) << "[] create slice args, batch size " << batch_size
              << " slice idx " << slice_idx;
   auto upper_iter = std::upper_bound(buckets_.begin(), buckets_.end(), batch_size);
   // todo: optimize
@@ -247,7 +247,7 @@ void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx,
   OP_REQUIRES_OK_ASYNC(ctx, mgr.GetCudaStream(req_id, stream), done); 
   OP_REQUIRES_OK_ASYNC(ctx, mgr.GetCudagraphMeta(graph_name_, *upper_iter, meta), done);
   slice_args->meta_ = meta;
-  LOG(INFO) << "[Jieluo] set meta to slice args";
+  // LOG(INFO) << "[Jieluo] set meta to slice args";
 
   for (int i = 0; i < feed_names_.size(); ++i) {
     const Tensor& input = ctx->input(i);
@@ -255,9 +255,6 @@ void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx,
     size_t num_elements = input.NumElements();
     size_t ele_num_per_dim0 = num_elements / dim0;
     int copy_offset =  ele_num_per_dim0 * begin;
-    LOG(INFO) << "[Jieluo] before copy dim0 " << dim0 << " num element " 
-              << num_elements << " ele per dim0 " << ele_num_per_dim0
-              << " copy offset " << copy_offset;
 
     const void* host_buffer;
     size_t ele_size = 1;
@@ -283,7 +280,6 @@ void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx,
     }
 
     size_t num_bytes = ele_num_per_dim0 * ele_size * batch_size;
-    LOG(INFO) << "[Jieluo] luanch copy num bytes " << num_bytes;
     void* device_buffer = meta->src_dst_mapping_[i].second;
     OP_REQUIRES_ASYNC(ctx, cudaMemcpyAsync(device_buffer, host_buffer, num_bytes,
         cudaMemcpyHostToDevice, stream) == cudaSuccess, 
@@ -322,9 +318,6 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
   int slice_num = (batch_size - 1) / buckets_.back() + 1;
   int slice_size = buckets_.back();
   CudaGraphCbArgs* args = new CudaGraphCbArgs(ctx, batch_size, slice_num, done, fetch_names_.size());
-
-  LOG(INFO) << "[Jieluo] cuda graph op slice num " << slice_num 
-            << " slice size " << slice_size;
 
   int begin = 0;
   int end = slice_size;
