@@ -148,13 +148,10 @@ void CopyRetAndReturnMeta(CudaGraphCbSliceArgs* args) {
     for (int i = 0; i < meta->output_tensors_.size(); ++i) {
       Tensor* output = nullptr;
       TensorShape shape = meta->output_tensors_[i].shape();
-      tensor::PrintTensorData(meta->output_tensors_[i]);
       // LOG(INFO) << "[Jieluo] copy output " << i << " dim0 " << args->cb_args_->origin_batch_size_;
       shape.set_dim(0, args->cb_args_->origin_batch_size_);
       OP_REQUIRES_OK(ctx, ctx->allocate_output(i, shape, &output));
-      tensor::PrintTensorData(*output);
       tensor::DeepCopy(meta->output_tensors_[i].Slice(0, args->cb_args_->origin_batch_size_), output);
-      tensor::PrintTensorData(*output);
     }
   } else {
     // LOG(INFO) << "[Jieluo] multi slice, slice index " << args->slice_idx_;
@@ -226,8 +223,6 @@ void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx,
                                     int slice_idx) {
   int batch_size = end - begin;
   CudaGraphCbSliceArgs* slice_args = new CudaGraphCbSliceArgs(batch_size, slice_idx, nullptr, args);
-   LOG(INFO) << "[] create slice args, batch size " << batch_size
-             << " slice idx " << slice_idx;
   auto upper_iter = std::upper_bound(buckets_.begin(), buckets_.end(), batch_size);
   // todo: optimize
   if (upper_iter != buckets_.begin() && *(upper_iter - 1) == batch_size) {

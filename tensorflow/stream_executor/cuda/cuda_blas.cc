@@ -1563,6 +1563,7 @@ bool CUDABlas::DoBlasGemm(
     float alpha, const DeviceMemory<Eigen::half> &a, int lda,
     const DeviceMemory<Eigen::half> &b, int ldb, float beta,
     DeviceMemory<Eigen::half> *c, int ldc) {
+
 #if CUDA_VERSION >= 7050
   VLOG(1) << absl::StrFormat(
       "doing cuBLAS SGEMM: at=%d bt=%d m=%u n=%u "
@@ -1604,7 +1605,6 @@ bool CUDABlas::DoBlasGemm(
     use_tensor_ops = true;
   }
 #endif
-
   return DoBlasInternalImpl(
       cublasSgemmEx, stream, true /* = pointer_mode_host */,
       true /* = err_on_failure= */, use_tensor_ops, CUDABlasTranspose(transa),
