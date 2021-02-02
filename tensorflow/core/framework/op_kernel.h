@@ -1877,6 +1877,25 @@ void CheckNotInComputeAsync(OpKernelContext* ctx,
     }                                                       \
   } while (0)
 
+#define OP_REQUIRES_ASYNC_WITH_ARGS(CTX, EXP, STATUS, CALLBACK, ARGS)  \
+  do {                                                 \
+    if (!TF_PREDICT_TRUE(EXP)) {                       \
+      (CTX)->CtxFailure(__FILE__, __LINE__, (STATUS)); \
+      (CALLBACK)(ARGS);                                \
+      return;                                          \
+    }                                                  \
+  } while (0)
+
+#define OP_REQUIRES_OK_ASYNC_WITH_ARGS(CTX, STATUS, CALLBACK, ARGS)         \
+  do {                                                      \
+    ::tensorflow::Status _s(STATUS);                        \
+    if (!TF_PREDICT_TRUE(_s.ok())) {                        \
+      (CTX)->CtxFailureWithWarning(__FILE__, __LINE__, _s); \
+      (CALLBACK)(ARGS);                                     \
+      return;                                               \
+    }                                                       \
+  } while (0)
+
 }  // namespace tensorflow
 
 #endif  // TENSORFLOW_CORE_FRAMEWORK_OP_KERNEL_H_

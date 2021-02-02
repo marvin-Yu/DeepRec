@@ -116,45 +116,49 @@ void CudaGraphOp::RecordTraffic(int batch_size) {
   return;
 }
 
+void CopyRetAndReturnMetaWhenFail(CudaGraphCbSliceArgs* args) {
+  OpKernelContext* ctx = args->cb_args_->ctx_;
+  CudaGraphMeta* meta = args->meta_;
+  args->cb_args_->has_failed_slice_ = true;
+
+  if (meta != nullptr) {
+    CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
+    mgr.ReturnCudaGraphMeta(meta);
+  }
+
+  if (args->cb_args_->single_slice_) {
+    args->cb_args_->done_();
+    delete args->cb_args_;
+    delete args;
+  } else {
+    do {
+      std::lock_guard<std::mutex> lock(args->cb_args_->mtx_);
+      --args->cb_args_->waiting_slice_num_;
+      if (args->cb_args_->waiting_slice_num_ > 0) {
+        delete args;
+        return;
+      }
+      args->cb_args_->done_();
+      delete args->cb_args_;
+      delete args;
+    } while (0);
+  }
+}
+
 void CopyRetAndReturnMeta(CudaGraphCbSliceArgs* args) {
   OpKernelContext* ctx = args->cb_args_->ctx_;
   CudaGraphMeta* meta = args->meta_;
   CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
 
-  if (meta == nullptr) {
-    // LOG(INFO) << "[Jieluo] meta is null";
-    if (args->cb_args_->single_slice_) {
-      args->cb_args_->done_();
-      delete args->cb_args_;
-      delete args;
-      return;
-    } else {
-      do {
-        std::lock_guard<std::mutex> lock(args->cb_args_->mtx_);
-        --args->cb_args_->waiting_slice_num_;
-        if (args->cb_args_->waiting_slice_num_ > 0) {
-          delete args;
-          return;
-        }
-        args->cb_args_->done_();
-        delete args->cb_args_;
-        return;
-      } while (0);
-    }
-  }
-
   if (args->cb_args_->single_slice_) {
-    // LOG(INFO) << "[Jieluo] single slice";
     for (int i = 0; i < meta->output_tensors_.size(); ++i) {
       Tensor* output = nullptr;
       TensorShape shape = meta->output_tensors_[i].shape();
-      // LOG(INFO) << "[Jieluo] copy output " << i << " dim0 " << args->cb_args_->origin_batch_size_;
       shape.set_dim(0, args->cb_args_->origin_batch_size_);
       OP_REQUIRES_OK(ctx, ctx->allocate_output(i, shape, &output));
       tensor::DeepCopy(meta->output_tensors_[i].Slice(0, args->cb_args_->origin_batch_size_), output);
     }
   } else {
-    // LOG(INFO) << "[Jieluo] multi slice, slice index " << args->slice_idx_;
     for (int i = 0; i < meta->output_tensors_.size(); ++i) {
       TensorShape shape = meta->output_tensors_[i].shape();
       shape.set_dim(0, args->slice_batch_);
@@ -164,7 +168,6 @@ void CopyRetAndReturnMeta(CudaGraphCbSliceArgs* args) {
     do {
       std::lock_guard<std::mutex> lock(args->cb_args_->mtx_);
       --args->cb_args_->waiting_slice_num_;
-      // LOG(INFO) << "[Jieluo] waiting slice num is " << args->cb_args_->waiting_slice_num_;
       if (args->cb_args_->waiting_slice_num_ > 0) {
         mgr.ReturnCudaGraphMeta(meta);
         delete args;
@@ -174,7 +177,6 @@ void CopyRetAndReturnMeta(CudaGraphCbSliceArgs* args) {
 
     // if all slice finished 
     for (int i = 0; i < meta->output_tensors_.size(); ++i) {
-      // LOG(INFO) << "[Jieluo] merge slices " << i;
       Tensor* output = nullptr;
       TensorShape shape = meta->output_tensors_[i].shape();
       shape.set_dim(0, args->cb_args_->origin_batch_size_);
@@ -223,26 +225,29 @@ void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx,
                                     int slice_idx) {
   int batch_size = end - begin;
   CudaGraphCbSliceArgs* slice_args = new CudaGraphCbSliceArgs(batch_size, slice_idx, nullptr, args);
+  if (args->has_failed_slice_) {
+    CopyRetAndReturnMetaWhenFail(slice_args);
+    return;
+  }
+
   auto upper_iter = std::upper_bound(buckets_.begin(), buckets_.end(), batch_size);
   // todo: optimize
   if (upper_iter != buckets_.begin() && *(upper_iter - 1) == batch_size) {
     --upper_iter;
   }
-  if (upper_iter == buckets_.end()) {
-    args->has_failed_slice_ = true;
-  //  LOG(ERROR) << "Batch size " << batch_size << " is exceed max bucket " << buckets_.end();
-    CopyRetAndReturnMeta(slice_args);
-    return;
-  }
+  OP_REQUIRES_ASYNC_WITH_ARGS(ctx, upper_iter == buckets_.end(), 
+          errors::Internal("Batch size ", batch_size, " exceed to largest bucket"),
+          CopyRetAndReturnMetaWhenFail, slice_args);
 
   // step1. fetch metas
   cudaStream_t stream;
   CudaGraphMeta* meta;
   CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
-  OP_REQUIRES_OK_ASYNC(ctx, mgr.GetCudaStream(req_id, stream), done); 
-  OP_REQUIRES_OK_ASYNC(ctx, mgr.GetCudagraphMeta(graph_name_, *upper_iter, meta), done);
+  OP_REQUIRES_OK_ASYNC_WITH_ARGS(ctx, mgr.GetCudaStream(req_id, stream), 
+          CopyRetAndReturnMetaWhenFail, slice_args); 
+  OP_REQUIRES_OK_ASYNC_WITH_ARGS(ctx, mgr.GetCudagraphMeta(graph_name_, *upper_iter, meta), 
+          CopyRetAndReturnMetaWhenFail, slice_args);
   slice_args->meta_ = meta;
-  // LOG(INFO) << "[Jieluo] set meta to slice args";
 
   for (int i = 0; i < feed_names_.size(); ++i) {
     const Tensor& input = ctx->input(i);
@@ -270,26 +275,30 @@ void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx,
       host_buffer = reinterpret_cast<const void*>(input.flat<int64>().data() + copy_offset);
     } else {
       LOG(ERROR) << "Unsupported data type " <<  input.dtype(); // todo: if callback, return meta
-      CopyRetAndReturnMeta(slice_args);
+      ctx->CtxFailureWithWarning(__FILE__, __LINE__, 
+            errors::Internal("Unsupported data type ", input.dtype()));
+      CopyRetAndReturnMetaWhenFail(slice_args);
       return;
     }
 
     size_t num_bytes = ele_num_per_dim0 * ele_size * batch_size;
     void* device_buffer = meta->src_dst_mapping_[i].second;
-    OP_REQUIRES_ASYNC(ctx, cudaMemcpyAsync(device_buffer, host_buffer, num_bytes,
+    OP_REQUIRES_ASYNC_WITH_ARGS(ctx, cudaMemcpyAsync(device_buffer, host_buffer, num_bytes,
         cudaMemcpyHostToDevice, stream) == cudaSuccess, 
         errors::Internal("CudaMemCpy to ", i, " st tensor failed, device addr: ", device_buffer),
-        done);
+        CopyRetAndReturnMetaWhenFail, slice_args);
   }
 
   // run cuda graph instance
   cudaError_t ret = cudaGraphLaunch(meta->cuda_graph_instance_, stream);
-  OP_REQUIRES_ASYNC(ctx, ret == cudaSuccess, 
-        errors::Internal("cudagraph launch faild: ", ret), done);
+  OP_REQUIRES_ASYNC_WITH_ARGS(ctx, ret == cudaSuccess, 
+        errors::Internal("cudagraph launch faild: ", ret), 
+        CopyRetAndReturnMetaWhenFail, slice_args);
 
   ret = cudaStreamAddCallback(stream, CudaGraphCallback, (void *)(slice_args), 0); 
-  OP_REQUIRES_ASYNC(ctx, ret == cudaSuccess, 
-        errors::Internal("Add cuda callback failed: ", ret), done);
+  OP_REQUIRES_ASYNC_WITH_ARGS(ctx, ret == cudaSuccess, 
+        errors::Internal("Add cuda callback failed: ", ret), 
+        CopyRetAndReturnMetaWhenFail, slice_args);
   return;
 
 }
