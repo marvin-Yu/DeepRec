@@ -366,6 +366,7 @@ bool SubgraphGenerator::GenerateSubgraph(const GraphDef& origin_graph,
 
 bool SubgraphGenerator::ReplaceSubgraph(const GraphDef& origin_graph, 
                                         GraphDef& output_graph, 
+                                        const std::string& group_name,
                                         const std::vector<const SubgraphDescription*>& subgraph_descriptions,
                                         const std::vector<int> buckets,
                                         const std::vector<std::string>& output_nodes) {
@@ -410,7 +411,7 @@ bool SubgraphGenerator::ReplaceSubgraph(const GraphDef& origin_graph,
           .Attr("T1", T1)
           .Attr("T2", T2)
           .Attr("buckets", buckets)
-          .Attr("graph_name", subgraph_desc->subgraph_name())
+          .Attr("graph_name", group_name + subgraph_desc->subgraph_name())
           .Device(CPU_DEVICE)
           .Finalize(&cudagraph_node));
     rewriter.AddNode(std::move(cudagraph_node));

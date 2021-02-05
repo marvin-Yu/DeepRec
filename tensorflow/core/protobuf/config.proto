@@ -219,6 +219,13 @@ message SubgraphDescription {
 
   // output node name, which are subgraph's top node
   repeated string output_node_names = 3;
+  
+  // if capture cuda graph, capture fixed batch size graph instance
+  repeated int32 cuda_graph_batch_sizes = 4;
+
+  // if true, capture a graph whose all non -1 input tensor first dim 
+  // rewritted to 1
+  bool capture_single_batch = 5;
 }
 
 // Options passed to the graph optimizer
@@ -274,8 +281,8 @@ message OptimizerOptions {
 
   repeated SubgraphDescription subgraph_descriptions = 8;
 
-  // if capture cuda graph, capture fixed batch size graph instance
-  repeated int32 cuda_graph_batch_sizes = 9;
+  // model name
+  string subgraph_group_name = 9;
 
   // output node names of final serving graph with cuda graph
   repeated string output_names_with_cg = 10;

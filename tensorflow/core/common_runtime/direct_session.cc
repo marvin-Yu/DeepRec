@@ -432,21 +432,27 @@ Status DirectSession::Create(GraphDef&& graph) {
       int num_cuda_graph = options_.config.graph_options().
                                optimizer_options().
                                subgraph_descriptions_size();
-      int buckets_size = options_.config.graph_options().
-                                optimizer_options().
-                                cuda_graph_batch_sizes_size();
-      std::vector<int> buckets;
-      buckets.reserve(buckets_size);
-      for (int i = 0; i < buckets_size; ++i) {
-        buckets.emplace_back(options_.config.graph_options().
-                                optimizer_options().
-                                cuda_graph_batch_sizes(i));
-      }
+      const std::string& group_name = options_.config.graph_options().
+                                          optimizer_options().
+                                          subgraph_descriptions(i).
+                                          subgraph_group_name();
       // check and capture uncaptured graph
       if (cuda_graph_capture) {
         // LOG(INFO) << "[Jieluo] cuda graph capture is enable";
         // capture uncaptured graph
         for (int i = 0; i < num_cuda_graph; ++i) {
+          int buckets_size = options_.config.graph_options().
+                                optimizer_options().
+                                cuda_graph_batch_sizes_size();
+          std::vector<int> buckets;
+          buckets.reserve(buckets_size);
+          for (int j = 0; j < buckets_size; ++j) {
+            buckets.emplace_back(options_.config.graph_options()
+                                  .optimizer_options()
+                                  .subgraph_descriptions(i)
+                                  .cuda_graph_batch_sizes(j));
+          }
+
           GraphDef cudagraph_capture;
           std::vector<std::string> input_node_names;
           std::vector<std::string> output_node_names;
@@ -461,17 +467,14 @@ Status DirectSession::Create(GraphDef&& graph) {
                           "please check GraphDef and session options";
             // todo: return not ok
           }
-          std::string graph_name = options_.config.graph_options().
+          const std::string& graph_name = options_.config.graph_options().
                                           optimizer_options().
                                           subgraph_descriptions(i).
                                           subgraph_name();
           cudagraph_defs_.emplace(graph_name, cudagraph_capture);
           LOG(INFO) << "Begin capture sub graph " << i;
           mgr.CaptureCudagraph(cudagraph_capture,
-                               options_.config.graph_options()
-                                   .optimizer_options()
-                                   .subgraph_descriptions(i)
-                                   .subgraph_name(),
+                               group_name, graph_name,
                                input_node_names, output_node_names, buckets);
           LOG(INFO) << "End capture sub graph " << i;
         }
@@ -493,7 +496,8 @@ Status DirectSession::Create(GraphDef&& graph) {
                                 optimizer_options().
                                 output_names_with_cg(i));
       }
-      bool succ = SubgraphGenerator::ReplaceSubgraph(graph, cudagraph_serving, 
+      bool succ = SubgraphGenerator::ReplaceSubgraph(graph, cudagraph_serving,
+                                                     group_name,
                                                      descs,
                                                      buckets,
                                                      final_outputs);

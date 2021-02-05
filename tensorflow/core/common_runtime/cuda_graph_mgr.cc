@@ -31,6 +31,7 @@ static const int NUM_INSTANCE_DEFAULT = 3;
 static const int NUM_STREAM_DEFAULT = 3;
 static const size_t CHUNK_SIZE = 256 * 1024 * 1024;
 static const size_t MAX_RESERVE_CHUNK = 16;
+static const std::string DEFAULT_GROUP = "_DEFAULT_";
 
 namespace tensorflow {
 
@@ -288,8 +289,28 @@ void CudaGraphMgr::LaunchGraphInMeta(CudaGraphMeta* meta, cudaStream_t* stream) 
   return;
 }
 
-void CudaGraphMgr::DestoryCudagraphMeta() {
-  graphname_batch_metas_map_.clear();
+void CudaGraphMgr::RegisterCudaGraphGroup(const std::string group_name,
+                                          const std::string& cudagraph_name) {
+  auto iter = graphname_group_map_.find(group_name);
+  if (iter == graphname_group_map_.end()) {
+    graphname_group_map_.emplace(graph_name, std::unordered_set<std::string>());
+  }
+  graphname_group_map_[graph_name].emplace(cudagraph_name);
+  return;
+}
+
+int CudaGraphMgr::DestoryCudaGraphGroupResource(const std::string& group_name) {
+  int destoried_num = 0;
+  auto iter = graphname_group_map_.find(group_name);
+  if (iter != graphname_group_map_.end()) {
+    for (auto name_iter : iter->second) {
+      if(DestoryCudaGraphResource(*name_iter)) {
+        ++destoried_num;
+      }
+    }
+    graphname_group_map_.erase(iter);
+  }
+  return destoried_num;
 }
 
 // todo: move batch size, num instance into options.
@@ -304,7 +325,8 @@ void CudaGraphMgr::DestoryCudagraphMeta() {
  * @return Status 
  */
 Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def, 
-                                      const std::string& graph_name, 
+                                      const std::string& group_name,
+                                      const std::string& origin_graph_name, 
                                       const std::vector<std::string>& input_node_names,
                                       const std::vector<std::string>& output_node_names,
                                       const std::vector<int>& batch_size) {
@@ -312,14 +334,10 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
   SessionOptions options;
   options.config.mutable_gpu_options()->set_force_gpu_compatible(true);
   options.config.mutable_gpu_options()->set_allow_growth(true);
-  // options.config.mutable_gpu_options()->set_per_process_gpu_memory_fraction(0.1);
-  // LOG(INFO) << "[Jieluo] new session for capture";
   std::unique_ptr<Session> session(NewSession(options));
-  // LOG(INFO) << "[Jieluo] create graph for capture, graph: " << graph_def.ShortDebugString();
   TF_CHECK_OK(session->CreateForCapture(graph_def));
 
-  // LOG(INFO) << "[Jieluo] input size " << input_node_names.size()
-  //           << " output size " << output_node_names.size();
+  std::string graph_name = group_name + origin_graph_name;
 
   const DeviceMgr* device_manager;
   TF_CHECK_OK(session->LocalDeviceManager(&device_manager));
@@ -347,7 +365,7 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
       TF_CHECK_OK(session->Run(inputs_tf, output_node_names, {}, &output_tensors_tf));
     }
   }
-  // LOG(INFO) << "[Jieluo] run session for capturing warmup finished";
+
   bool destoried = DestoryCudaGraphResource(graph_name);
   if (destoried) {
     LOG(INFO) << "Old cuda graph resources for " << graph_name << " destoried";
@@ -408,6 +426,7 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
   }
   // turn off graph capture mode
   session->DisableGraphCapture();
+  RegisterCudaGraphGroup(group_name, graph_name);
  // CheckCudaGraphScore(graph_def, meta_check, input_node_names, output_node_names);
   return Status::OK();
 }

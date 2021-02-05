@@ -82,6 +82,7 @@ public:
                                std::vector<std::string>& subgraph_final_outputs);
   bool static ReplaceSubgraph(const GraphDef&  origin_graph, 
                               GraphDef& output_graph, 
+                              const std::string& group_name,
                               const std::vector<const SubgraphDescription*>& subgraph_descriptions,
                               const std::vector<int> buckets,
                               const std::vector<std::string>& output_nodes);

@@ -33,7 +33,8 @@ public:
   static CudaGraphMgr& Singleton();
 
   Status CaptureCudagraph(const GraphDef& graph_def, 
-                          const std::string& graph_name, 
+                          const std::string& group_name,
+                          const std::string& origin_graph_name, 
                           const std::vector<std::string>& input_node_names,
                           const std::vector<std::string>& output_node_names,
                           const std::vector<int>& batch_size);
@@ -41,9 +42,12 @@ public:
                           const int bucket,
                           CudaGraphMeta*& meta);
   Status ReturnCudaGraphMeta(CudaGraphMeta* meta);
-  
-  void DestoryCudagraphMeta();
-  bool DestoryCudaGraphResource(const std::string& subgraph_name);
+
+  void RegisterCudaGraphGroup(const std::string& group_name,
+                              const std::string& cudagraph_name);
+  // destory all cudagraph resouce belongs to certain group
+  // return num of destoried cudagraphs 
+  int DestoryCudaGraphGroupResource(const std::string& group_name);
 
   Status GetCudaStream(int req_id, cudaStream_t& stream);
 
@@ -67,6 +71,7 @@ private:
                           const std::vector<std::string>& input_node_names,
                           const std::vector<std::string>& output_node_names);
   static void LaunchGraphInMeta(CudaGraphMeta* meta, cudaStream_t* stream);
+  bool DestoryCudaGraphResource(const std::string& subgraph_name);
 
 public:
   TF_DISALLOW_COPY_AND_ASSIGN(CudaGraphMgr);
@@ -78,6 +83,9 @@ private:
   // so we can run multiple graph instances in parallel
   // (to separate their memory, mutiple graphs are needed).
   std::unordered_map<std::string, BatchGraphMetaMap> graphname_batch_metas_map_;
+  // devide all graph name into different group, support 
+  // manage all cudagraph instances for certain graph
+  std::unordered_map<std::string, std::unordered_set<std::string>> graphname_group_map_;
   std::unordered_map<std::string, BatchMetaLockMap> meta_pool_lock_;
   std::vector<cudaStream_t> streams_;
   // stream and cuda graph instance count, each instance corresponds to one stream

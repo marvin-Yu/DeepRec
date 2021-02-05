@@ -285,13 +285,11 @@ void PrepareSessionOption(SessionOptions& options, bool cg_enable = false) {
         ->set_cuda_graph_capture(true);
     options.config.mutable_graph_options()
         ->mutable_optimizer_options()
-        ->add_cuda_graph_batch_sizes(64);
-    options.config.mutable_graph_options()
-        ->mutable_optimizer_options()
         ->add_output_names_with_cg("output");
     SubgraphDescription* subgraph = options.config.mutable_graph_options()
                                         ->mutable_optimizer_options()
                                         ->add_subgraph_descriptions();
+    subgraph->add_cuda_graph_batch_sizes(64);
     subgraph->set_subgraph_name("test");
     subgraph->add_output_node_names("MatMul_3");
     SubgraphInputTensor* input = subgraph->add_input_tensors();
@@ -316,13 +314,11 @@ void PrepareSessionOptionForGamma(SessionOptions& options, bool cg_enable = fals
         ->set_cuda_graph_capture(true);
     options.config.mutable_graph_options()
         ->mutable_optimizer_options()
-        ->add_cuda_graph_batch_sizes(4);
-    options.config.mutable_graph_options()
-        ->mutable_optimizer_options()
         ->add_output_names_with_cg("p4p_output");
     SubgraphDescription* subgraph = options.config.mutable_graph_options()
                                         ->mutable_optimizer_options()
                                         ->add_subgraph_descriptions();
+    subgraph->add_cuda_graph_batch_sizes(4);                         
     subgraph->set_subgraph_name("main");
     subgraph->add_output_node_names("p4p_Main_Score_Network/hiddenlayer_4/hiddenlayer_4/LeakyRelu");
     SubgraphInputTensor* input= subgraph->add_input_tensors();
@@ -410,16 +406,17 @@ void PrepareSessionOptionForDarvin(SessionOptions& options, bool cg_enable = fal
         ->set_cuda_graph_capture(true);
     options.config.mutable_graph_options()
         ->mutable_optimizer_options()
-        ->add_cuda_graph_batch_sizes(1);
-    options.config.mutable_graph_options()
-        ->mutable_optimizer_options()
         ->add_output_names_with_cg("matchdoc");
     options.config.mutable_graph_options()
         ->mutable_optimizer_options()
         ->add_output_names_with_cg("notFoundPk");
+    options.config.mutable_graph_options()
+        ->mutable_optimizer_options()
+        ->set_subgraph_group_name("darvin");
     SubgraphDescription* subgraph = options.config.mutable_graph_options()
                                         ->mutable_optimizer_options()
                                         ->add_subgraph_descriptions();
+    subgraph->add_cuda_graph_batch_sizes(4);
     subgraph->set_subgraph_name("main");
     subgraph->add_output_node_names("p4p_Main_Score_Network/hiddenlayer_4/hiddenlayer_4/LeakyRelu");
  //   subgraph->add_output_node_names("p4p_Main_Score_Network/add");

@@ -235,7 +235,7 @@ void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx,
   if (upper_iter != buckets_.begin() && *(upper_iter - 1) == batch_size) {
     --upper_iter;
   }
-  OP_REQUIRES_ASYNC_WITH_ARGS(ctx, upper_iter == buckets_.end(), 
+  OP_REQUIRES_ASYNC_WITH_ARGS(ctx, upper_iter != buckets_.end(), 
           errors::Internal("Batch size ", batch_size, " exceed to largest bucket"),
           CopyRetAndReturnMetaWhenFail, slice_args);
 
