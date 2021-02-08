@@ -84,7 +84,6 @@ public:
                               GraphDef& output_graph, 
                               const std::string& group_name,
                               const std::vector<const SubgraphDescription*>& subgraph_descriptions,
-                              const std::vector<int> buckets,
                               const std::vector<std::string>& output_nodes);
 private:
   void static CopyCommonField(const GraphDef& origin_graph, GraphDef& output_graph);

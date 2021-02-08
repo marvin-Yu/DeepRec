@@ -368,7 +368,6 @@ bool SubgraphGenerator::ReplaceSubgraph(const GraphDef& origin_graph,
                                         GraphDef& output_graph, 
                                         const std::string& group_name,
                                         const std::vector<const SubgraphDescription*>& subgraph_descriptions,
-                                        const std::vector<int> buckets,
                                         const std::vector<std::string>& output_nodes) {
   CopyCommonField(origin_graph, output_graph);
 
@@ -401,6 +400,12 @@ bool SubgraphGenerator::ReplaceSubgraph(const GraphDef& origin_graph,
         fetch_names.emplace_back(strings::StrCat(subgraph_desc->output_node_names(i), ":", fetch_index[j]));
         fetch_nodes.emplace_back(subgraph_desc->output_node_names(i));
       }
+    }
+
+    std::vector<int> buckets;
+    buckets.reserve(subgraph_desc->cuda_graph_batch_sizes_size());
+    for (int j = 0; j < subgraph_desc->cuda_graph_batch_sizes_size(); ++j) {
+      buckets.emplace_back(subgraph_desc->cuda_graph_batch_sizes(j));
     }
 
     // step2. build cudagraph node 

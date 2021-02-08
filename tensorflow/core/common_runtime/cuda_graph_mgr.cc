@@ -289,13 +289,13 @@ void CudaGraphMgr::LaunchGraphInMeta(CudaGraphMeta* meta, cudaStream_t* stream) 
   return;
 }
 
-void CudaGraphMgr::RegisterCudaGraphGroup(const std::string group_name,
+void CudaGraphMgr::RegisterCudaGraphGroup(const std::string& group_name,
                                           const std::string& cudagraph_name) {
   auto iter = graphname_group_map_.find(group_name);
   if (iter == graphname_group_map_.end()) {
-    graphname_group_map_.emplace(graph_name, std::unordered_set<std::string>());
+    graphname_group_map_.emplace(group_name, std::unordered_set<std::string>());
   }
-  graphname_group_map_[graph_name].emplace(cudagraph_name);
+  graphname_group_map_[group_name].emplace(cudagraph_name);
   return;
 }
 
@@ -303,8 +303,8 @@ int CudaGraphMgr::DestoryCudaGraphGroupResource(const std::string& group_name) {
   int destoried_num = 0;
   auto iter = graphname_group_map_.find(group_name);
   if (iter != graphname_group_map_.end()) {
-    for (auto name_iter : iter->second) {
-      if(DestoryCudaGraphResource(*name_iter)) {
+    for (auto& name_iter : iter->second) {
+      if(DestoryCudaGraphResource(name_iter)) {
         ++destoried_num;
       }
     }

@@ -340,6 +340,75 @@ void PrepareSessionOptionForGamma(SessionOptions& options, bool cg_enable = fals
   }
 }
 
+void PrepareSessionOptionForDarvin(SessionOptions& options, bool cg_enable = false) {
+  options.config.mutable_gpu_options()->set_force_gpu_compatible(true);
+  options.config.mutable_gpu_options()->set_allow_growth(true);
+  if (cg_enable) {
+    options.config.mutable_graph_options()
+        ->mutable_optimizer_options()
+        ->set_cuda_graph_enable(cg_enable);
+    options.config.mutable_graph_options()
+        ->mutable_optimizer_options()
+        ->set_cuda_graph_capture(true);
+/*
+    options.config.mutable_graph_options()
+        ->mutable_optimizer_options()
+        ->add_output_names_with_cg("matchdoc");
+    options.config.mutable_graph_options()
+        ->mutable_optimizer_options()
+        ->add_output_names_with_cg("notFoundPk");
+*/
+    options.config.mutable_graph_options()
+        ->mutable_optimizer_options()
+        ->add_output_names_with_cg("p4p_Main_Score_Network/hiddenlayer_4/hiddenlayer_4/LeakyRelu/output_0");
+    options.config.mutable_graph_options()
+        ->mutable_optimizer_options()
+        ->set_subgraph_group_name("darvin");
+    SubgraphDescription* subgraph = options.config.mutable_graph_options()
+                                        ->mutable_optimizer_options()
+                                        ->add_subgraph_descriptions();
+    subgraph->add_cuda_graph_batch_sizes(4);
+    subgraph->set_subgraph_name("main");
+    subgraph->add_output_node_names("p4p_Main_Score_Network/hiddenlayer_4/hiddenlayer_4/LeakyRelu");   
+    SubgraphInputTensor* input= subgraph->add_input_tensors();
+   //  input->set_tensor_provider_name("p4p_Main_Score_Network/concat");
+    input->set_tensor_provider_name("ph");
+    input->set_tensor_provider_slot(0);
+    input->set_ph_name("phi");
+    input->set_type(DataType::DT_FLOAT);
+    input->add_shape(-1);
+    input->add_shape(4440);
+
+    SubgraphInputTensor* input1 = subgraph->add_input_tensors();
+   // input1->set_tensor_provider_name("p4p_Main_Score_Network/hiddenlayer_0/column_extend/concat_2");
+    input1->set_tensor_provider_name("ph1");
+    input1->set_tensor_provider_slot(0);
+    input1->set_ph_name("phi1");
+    input1->set_type(DataType::DT_FLOAT);
+    input1->add_shape(-1);
+    input1->add_shape(948);
+
+    SubgraphInputTensor* input2 = subgraph->add_input_tensors();
+//    input2->set_tensor_provider_name("p4p_Main_Score_Network/hiddenlayer_0/column_extend_darwin/concat_1");
+    input2->set_tensor_provider_name("ph2");
+    input2->set_tensor_provider_slot(0);
+    input2->set_ph_name("phi2");
+    input2->set_type(DataType::DT_FLOAT);
+    input2->add_shape(1);
+    input2->add_shape(512);
+
+    SubgraphInputTensor* input3 = subgraph->add_input_tensors();
+//    input3->set_tensor_provider_name("p4p_Main_Score_Network/hiddenlayer_0/Sum");
+    input3->set_tensor_provider_name("ph3");
+    input3->set_tensor_provider_slot(0);
+    input3->set_ph_name("phi3");
+    input3->set_type(DataType::DT_FLOAT);
+    input3->add_shape(-1);
+    input3->add_shape(1648);
+
+  }
+}
+
 Status Test(GraphDef & graph_def, 
             std::vector<std::string> & input_names,
             std::vector<std::string> & output_names,
@@ -351,7 +420,7 @@ Status Test(GraphDef & graph_def,
 
     // Creates a session.
     SessionOptions options;
-    PrepareSessionOptionForGamma(options, true); // for cuda graph
+    PrepareSessionOptionForDarvin(options, true); // for cuda graph
     // for cudagraph config
     std::unique_ptr<Session> session(NewSession(options));
     TF_CHECK_OK(session->Create(graph_def));
@@ -381,7 +450,7 @@ Status Test(GraphDef & graph_def,
     TF_CHECK_OK(session->Run(input_map, output_names, {}, &output_tensors_cg));
 
     SessionOptions options_tf;
-    PrepareSessionOptionForGamma(options_tf, false);
+    PrepareSessionOptionForDarvin(options_tf, false);
     std::unique_ptr<Session> session_tf(NewSession(options_tf));
     TF_CHECK_OK(session_tf->Create(graph_def));
     std::vector<Tensor> output_tensors_tf;
@@ -392,69 +461,6 @@ Status Test(GraphDef & graph_def,
     LOG(INFO) << "TF results: ";
     tensor::PrintTensorData(output_tensors_tf[0]); 
     return Status();
-}
-
-void PrepareSessionOptionForDarvin(SessionOptions& options, bool cg_enable = false) {
-  options.config.mutable_gpu_options()->set_force_gpu_compatible(true);
-  options.config.mutable_gpu_options()->set_allow_growth(true);
-  if (cg_enable) {
-    options.config.mutable_graph_options()
-        ->mutable_optimizer_options()
-        ->set_cuda_graph_enable(cg_enable);
-    options.config.mutable_graph_options()
-        ->mutable_optimizer_options()
-        ->set_cuda_graph_capture(true);
-    options.config.mutable_graph_options()
-        ->mutable_optimizer_options()
-        ->add_output_names_with_cg("matchdoc");
-    options.config.mutable_graph_options()
-        ->mutable_optimizer_options()
-        ->add_output_names_with_cg("notFoundPk");
-    options.config.mutable_graph_options()
-        ->mutable_optimizer_options()
-        ->set_subgraph_group_name("darvin");
-    SubgraphDescription* subgraph = options.config.mutable_graph_options()
-                                        ->mutable_optimizer_options()
-                                        ->add_subgraph_descriptions();
-    subgraph->add_cuda_graph_batch_sizes(4);
-    subgraph->set_subgraph_name("main");
-    subgraph->add_output_node_names("p4p_Main_Score_Network/hiddenlayer_4/hiddenlayer_4/LeakyRelu");
- //   subgraph->add_output_node_names("p4p_Main_Score_Network/add");
-    SubgraphInputTensor* input= subgraph->add_input_tensors();
-  //  input->set_tensor_provider_name("p4p_Main_Score_Network/hiddenlayer_0/hiddenlayer_0/LeakyRelu");
-    input->set_tensor_provider_name("p4p_Main_Score_Network/concat");
-    input->set_tensor_provider_slot(0);
-    input->set_ph_name("ph");
-    input->set_type(DataType::DT_FLOAT);
-    input->add_shape(-1);
-    input->add_shape(4440);
-
-    SubgraphInputTensor* input1 = subgraph->add_input_tensors();
-//    input1->set_tensor_provider_name("p4p_Main_Score_Network/column_extend/column_extend/LeakyRelu");
-    input1->set_tensor_provider_name("p4p_Main_Score_Network/hiddenlayer_0/column_extend/concat_2");
-    input1->set_tensor_provider_slot(0);
-    input1->set_ph_name("ph1");
-    input1->set_type(DataType::DT_FLOAT);
-    input1->add_shape(-1);
-    input1->add_shape(948);
-
-    SubgraphInputTensor* input2 = subgraph->add_input_tensors();
-    input2->set_tensor_provider_name("p4p_Main_Score_Network/hiddenlayer_0/column_extend_darwin/concat_1");
-    input2->set_tensor_provider_slot(0);
-    input2->set_ph_name("ph2");
-    input2->set_type(DataType::DT_FLOAT);
-    input2->add_shape(-1);
-    input2->add_shape(512);
-
-    SubgraphInputTensor* input3 = subgraph->add_input_tensors();
-    input3->set_tensor_provider_name("p4p_Main_Score_Network/hiddenlayer_0/Sum");
-    input3->set_tensor_provider_slot(0);
-    input3->set_ph_name("ph3");
-    input3->set_type(DataType::DT_FLOAT);
-    input3->add_shape(-1);
-    input3->add_shape(1648);
-
-  }
 }
 
 Status CheckGraph(GraphDef& graph_def) {
@@ -564,6 +570,6 @@ int main(int argc, char* argv[]) {
     example::Test(graph_def, input_names, output_names,
                   batch_size, num_infers_per_thread, num_streams, num_threads);
 
-  //  example::CheckGraph(graph_def);
+ //   example::CheckGraph(graph_def);
     return 0;
 }

@@ -434,7 +434,6 @@ Status DirectSession::Create(GraphDef&& graph) {
                                subgraph_descriptions_size();
       const std::string& group_name = options_.config.graph_options().
                                           optimizer_options().
-                                          subgraph_descriptions(i).
                                           subgraph_group_name();
       // check and capture uncaptured graph
       if (cuda_graph_capture) {
@@ -443,6 +442,7 @@ Status DirectSession::Create(GraphDef&& graph) {
         for (int i = 0; i < num_cuda_graph; ++i) {
           int buckets_size = options_.config.graph_options().
                                 optimizer_options().
+                                subgraph_descriptions(i).
                                 cuda_graph_batch_sizes_size();
           std::vector<int> buckets;
           buckets.reserve(buckets_size);
@@ -499,7 +499,6 @@ Status DirectSession::Create(GraphDef&& graph) {
       bool succ = SubgraphGenerator::ReplaceSubgraph(graph, cudagraph_serving,
                                                      group_name,
                                                      descs,
-                                                     buckets,
                                                      final_outputs);
       if (!succ) {
         LOG(ERROR) << "Generate subgraph for cudagraph capturing failed, "
@@ -507,6 +506,7 @@ Status DirectSession::Create(GraphDef&& graph) {
         // todo: return not ok
       }
       cudagraph_defs_.emplace("_SERVING", cudagraph_serving);
+     // return Status::OK(); 
       return ExtendLocked(std::move(cudagraph_serving));
     }
 #endif
@@ -1965,7 +1965,6 @@ void DirectSession::DisableGraphCapture(){
     
     std::vector<Device*> devices = device_mgr_->ListDevices();
     // filter the gpu devices
-    cudaStream_t stream = NULL;
     for (auto * d : devices){
         if(d->attributes().device_type() == "GPU"){
             auto gpu = dynamic_cast<BaseGPUDevice*>(d);
