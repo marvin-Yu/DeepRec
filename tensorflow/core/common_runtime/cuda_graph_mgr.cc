@@ -299,6 +299,31 @@ void CudaGraphMgr::RegisterCudaGraphGroup(const std::string& group_name,
   return;
 }
 
+// not thread safe!
+void CudaGraphMgr::DestoryAllCudaGraphResource() {
+  // step1. clear lock
+  meta_pool_lock_.clear();
+
+  // step2. clear group info
+  graphname_group_map_.clear();
+
+  // step3. clear metas
+  for (auto graph_iter = graphname_batch_metas_map_.begin(); graph_iter != graphname_batch_metas_map_.end(); ++graph_iter) {
+    BatchGraphMetaMap& meta_map = graph_iter->second;
+    for (auto meta_iter = meta_map.begin(); meta_iter != meta_map.end(); ++meta_iter) {
+      if (meta_iter->second.size() != num_meta_instance_) {
+        LOG(WARNING) << "Not all meta intance returned, expect " << num_meta_instance_
+                     << " actual " << meta_iter->second.size();
+      }
+      for (int i = 0; i < meta_iter->second.size(); ++i) {
+        delete (meta_iter->second)[i];
+      }
+      meta_iter->second.clear();
+    }
+  }
+  return;
+}
+
 int CudaGraphMgr::DestoryCudaGraphGroupResource(const std::string& group_name) {
   int destoried_num = 0;
   auto iter = graphname_group_map_.find(group_name);
@@ -465,11 +490,14 @@ Status CudaGraphMgr::ReturnCudaGraphMeta(CudaGraphMeta* meta) {
   const std::string& graph_name = meta->graph_name_;
   const int bucket = meta->batch_size_;
   if (meta_pool_lock_.find(graph_name) == meta_pool_lock_.end()) {
-    return errors::Internal("Cuda graph instance with name ", graph_name, " not fount.");
+    LOG(ERROR) << "Cuda graph instance with name " << graph_name << " not fount, delete it.";
+    delete meta;
+    return Status::OK();
   } else if (meta_pool_lock_[graph_name].find(bucket) == meta_pool_lock_[graph_name].end()) {
-    return errors::Internal("Cuda graph intannce with name ", 
-                            graph_name, " and batch size ", 
-                            bucket, " not found");
+    LOG(ERROR) << "Cuda graph intannce with name " << graph_name << " and batch size " 
+               << bucket << " not found";
+    delete meta;
+    return Status::OK();
   }
 
   std::shared_ptr<std::mutex> mutex = meta_pool_lock_[graph_name][bucket].first;
@@ -487,10 +515,21 @@ Status CudaGraphMgr::ReturnCudaGraphMeta(CudaGraphMeta* meta) {
 // todo: make sure thread safety!
 bool CudaGraphMgr::DestoryCudaGraphResource(const std::string& subgraph_name) {
   bool delete_meta = false;
+  auto lock_iter = meta_pool_lock_.find(subgraph_name);
+  if (lock_iter != meta_pool_lock_.end()) {
+    BatchMetaLockMap& lock_map = lock_iter->second;
+    lock_map.clear();
+    meta_pool_lock_.erase(lock_iter);
+  }
+
   auto iter = graphname_batch_metas_map_.find(subgraph_name);
   if (iter != graphname_batch_metas_map_.end()) {
     BatchGraphMetaMap& meta_map = iter->second;
     for (auto meta_iter = meta_map.begin(); meta_iter != meta_map.end(); ++meta_iter) {
+      if (meta_iter->second.size() != num_meta_instance_) {
+        LOG(WARNING) << "Not all meta intance returned, expect " << num_meta_instance_
+                     << " actual " << meta_iter->second.size();
+      }
       for (int i = 0; i < meta_iter->second.size(); ++i) {
         delete (meta_iter->second)[i];
       }
@@ -498,13 +537,6 @@ bool CudaGraphMgr::DestoryCudaGraphResource(const std::string& subgraph_name) {
     }
     graphname_batch_metas_map_.erase(iter);
     delete_meta = true;
-  }
-  
-  auto lock_iter = meta_pool_lock_.find(subgraph_name);
-  if (lock_iter != meta_pool_lock_.end()) {
-    BatchMetaLockMap& lock_map = lock_iter->second;
-    lock_map.clear();
-    meta_pool_lock_.erase(lock_iter);
   }
   return delete_meta;
 }

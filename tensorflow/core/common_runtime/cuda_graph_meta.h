@@ -26,6 +26,8 @@ typedef struct CudaGraphMeta {
   cudaGraphExec_t cuda_graph_instance_;
   TensorHolder tensor_holder_;
   std::vector<std::pair<void*, void*>> src_dst_mapping_;
+  // todo: check input tensor dim0
+  // std::vector<int> input_tensor_dim0_;
   std::vector<Tensor> output_tensors_;
   std::string graph_name_;
   int batch_size_;

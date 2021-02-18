@@ -47,6 +47,8 @@ public:
                               const std::string& cudagraph_name);
   // destory all cudagraph resouce belongs to certain group
   // return num of destoried cudagraphs 
+  void DestoryAllCudaGraphResource();
+
   int DestoryCudaGraphGroupResource(const std::string& group_name);
 
   Status GetCudaStream(int req_id, cudaStream_t& stream);
@@ -71,8 +73,8 @@ private:
                           const std::vector<std::string>& input_node_names,
                           const std::vector<std::string>& output_node_names);
   static void LaunchGraphInMeta(CudaGraphMeta* meta, cudaStream_t* stream);
-  bool DestoryCudaGraphResource(const std::string& subgraph_name);
 
+  bool DestoryCudaGraphResource(const std::string& subgraph_name);
 public:
   TF_DISALLOW_COPY_AND_ASSIGN(CudaGraphMgr);
 
