@@ -230,6 +230,10 @@ Status ArgFeedRewrite::AddNode(Graph* g, NodeBuilder::NodeOut feed_tensor,
           .Attr("T", BaseType(feed_tensor.node->output_type(feed_tensor.index)))
           .Attr("index", arg_index_)
           .Finalize(g, out_node, /*consume=*/true));
+  if (HasNodeAttr(feed_tensor.node->def(), "shape")) {
+    (*out_node)->AddAttr("_output_shapes",
+                         feed_tensor.node->def().attr().at("shape"));
+  }
   (*out_node)->set_assigned_device_name(device_info().name());
   return Status::OK();
 }
