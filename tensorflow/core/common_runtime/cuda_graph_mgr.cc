@@ -296,11 +296,14 @@ void CudaGraphMgr::RegisterCudaGraphGroup(const std::string& group_name,
     graphname_group_map_.emplace(group_name, std::unordered_set<std::string>());
   }
   graphname_group_map_[group_name].emplace(cudagraph_name);
+  LOG(INFO) << "register cuda graph name " << cudagraph_name 
+            << "in group " << group_name;
   return;
 }
 
 // not thread safe!
 void CudaGraphMgr::DestoryAllCudaGraphResource() {
+  LOG(INFO) << "begin destory all cuda graph resource";
   // step1. clear lock
   meta_pool_lock_.clear();
 
@@ -312,7 +315,7 @@ void CudaGraphMgr::DestoryAllCudaGraphResource() {
     BatchGraphMetaMap& meta_map = graph_iter->second;
     for (auto meta_iter = meta_map.begin(); meta_iter != meta_map.end(); ++meta_iter) {
       if (meta_iter->second.size() != num_meta_instance_) {
-        LOG(WARNING) << "Not all meta intance returned, expect " << num_meta_instance_
+        LOG(WARNING) << "not all meta intance returned, expect " << num_meta_instance_
                      << " actual " << meta_iter->second.size();
       }
       for (int i = 0; i < meta_iter->second.size(); ++i) {
@@ -326,9 +329,11 @@ void CudaGraphMgr::DestoryAllCudaGraphResource() {
 
 int CudaGraphMgr::DestoryCudaGraphGroupResource(const std::string& group_name) {
   int destoried_num = 0;
+  LOG(INFO) << "begin release all cuda graph resources in group " << group_name;
   auto iter = graphname_group_map_.find(group_name);
   if (iter != graphname_group_map_.end()) {
     for (auto& name_iter : iter->second) {
+      LOG(INFO) << "release all cuda graph resources for " << name_iter;
       if(DestoryCudaGraphResource(name_iter)) {
         ++destoried_num;
       }

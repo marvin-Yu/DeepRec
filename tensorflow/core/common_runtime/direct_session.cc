@@ -472,7 +472,8 @@ Status DirectSession::Create(GraphDef&& graph) {
                                           subgraph_descriptions(i).
                                           subgraph_name();
           cudagraph_defs_.emplace(graph_name, cudagraph_capture);
-          LOG(INFO) << "Begin capture sub graph " << i;
+          LOG(INFO) << "Begin capture sub graph " << i 
+                    << " graph name " << graph_name;
           mgr.CaptureCudagraph(cudagraph_capture,
                                group_name, graph_name,
                                input_node_names, output_node_names, buckets);

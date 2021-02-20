@@ -85,6 +85,7 @@ private:
   std::vector<std::string> fetch_names_;
   std::vector<DataType> data_type_;
   std::vector<int> buckets_;
+  bool empty_bucket_;
 };
 
 #define GET_ATTR(k, v) {                           \
@@ -213,6 +214,7 @@ CudaGraphOp::CudaGraphOp(OpKernelConstruction* ctx) : AsyncOpKernel(ctx)  {
   GET_ATTR(fetch_names, fetch_names_);
   GET_ATTR(T1, data_type_);
   GET_ATTR(buckets, buckets_);
+  empty_bucket_ = (buckets_.size() == 0);
 }
 
 void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx, 
@@ -311,6 +313,9 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
   OP_REQUIRES_ASYNC(ctx, ctx->num_outputs() == fetch_names_.size(),
               errors::Internal("Op input size must equal to fetch_names size, ",
               ctx->num_inputs(), " .vs ", fetch_names_.size()), done);
+ 
+  OP_REQUIRES_ASYNC(ctx, !empty_bucket_,
+              errors::Internal("buckets for cuda graph is empty, check config."), done);
 
   int req_id = ctx->step_id(); // rtp will set session id as step id.
   const Tensor& input_0 = ctx->input(0);
@@ -331,6 +336,7 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
     end += slice_size;
   }
   end = batch_size;
+
   ComputeAsyncSlice(ctx, done, begin, end, batch_size, req_id + slice_num, args, slice_num - 1);
   return;
 }
