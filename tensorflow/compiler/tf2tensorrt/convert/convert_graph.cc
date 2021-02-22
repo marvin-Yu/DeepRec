@@ -731,7 +731,10 @@ Status ConvertAfterShapes(const ConversionParams& params) {
         StrCat("TensorRT node ", engine.engine_name, " added for segment ", i,
                " consisting of ", converted_segments.at(i).size(), " nodes");
     if (status.ok()) {
-      LOG(INFO) << msg << " succeeded.";
+      LOG(INFO) << msg << " succeeded. They are:";
+      for (auto node : converted_segments.at(i)) {
+        LOG(INFO) << "    " << node->name();
+      }
     } else {
       // Graph is not modified.
       LOG(WARNING) << msg << " failed: " << status << ". Fallback to TF...";
