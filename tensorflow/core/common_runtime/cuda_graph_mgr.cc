@@ -367,7 +367,9 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
   std::unique_ptr<Session> session(NewSession(options));
   TF_CHECK_OK(session->CreateForCapture(graph_def));
 
-  std::string graph_name = group_name + origin_graph_name;
+//  std::string graph_name = group_name + origin_graph_name;
+  std::string graph_name = origin_graph_name; 
+//  LOG(INFO) << "[Jieluo] graph name is " << graph_name; 
 
   const DeviceMgr* device_manager;
   TF_CHECK_OK(session->LocalDeviceManager(&device_manager));
@@ -424,6 +426,7 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
   CudaGraphMeta* meta_check = nullptr;
   for (int i = 0; i < batch_size.size(); ++i) {
     if (graphname_batch_metas_map_.find(graph_name) == graphname_batch_metas_map_.end()) {
+//      LOG(INFO) << "[Jieluo] find " << graph_name << " in meta map failed, insert";
       graphname_batch_metas_map_.emplace(graph_name, BatchGraphMetaMap());
     }
     auto& batch_meta_map = graphname_batch_metas_map_[graph_name];
@@ -446,6 +449,7 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
     // LOG(INFO) << "[Jieluo] run session for capturing finish, batch size " << batch_size[i];
     // add pool lock
     if (meta_pool_lock_.find(graph_name) == meta_pool_lock_.end()) {
+ //     LOG(INFO) << "[Jieluo] find " << graph_name << " in lock map failed, insert";
       meta_pool_lock_.emplace(graph_name, BatchMetaLockMap());
     }
     if (meta_pool_lock_[graph_name].find(batch_size[i]) == meta_pool_lock_[graph_name].end()) {
