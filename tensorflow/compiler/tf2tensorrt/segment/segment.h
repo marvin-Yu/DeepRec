@@ -38,6 +38,7 @@ struct SegmentOptions {
   // Segment must contain at least this many nodes.
   int minimum_segment_size = 2;
   std::set<string> exclude_node_list;
+  std::vector<string> convert_ranges;
 };
 
 // Get the subgraphs of a graph that can be handled by TensorRT.
@@ -50,7 +51,7 @@ struct SegmentOptions {
 // all the NodeDefs in that subgraph.
 // @return the status.
 Status SegmentGraph(const Graph* tf_graph,
-                    const std::function<Status(const Node*)>& candidate_fn,
+                    const std::function<Status(const Node*, const std::unordered_set<string> &target_nodes)>& candidate_fn,
                     const std::function<bool(const Edge*)>& input_candidate_fn,
                     const std::function<bool(const Edge*)>& output_candidate_fn,
                     const SegmentOptions& options,

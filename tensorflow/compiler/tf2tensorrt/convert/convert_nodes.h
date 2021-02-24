@@ -386,7 +386,7 @@ class TrtNodeValidator {
 
   // Returns OK iff 'node' is a TF-TRT conversion candidate, which will be added
   // to TRT subgraph and later converted into TRT engine.
-  Status IsTensorRTCandidate(const Node* node);
+  Status IsTensorRTCandidate(const Node* node, const std::unordered_set<string> &target_nodes);
 
  private:
   static const std::set<string>* quantize_ops;

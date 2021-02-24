@@ -401,8 +401,59 @@ void ContractEdge(SimpleEdge* edge, SimpleGraph* graph,
   }
 }
 
+void SearchNodesWithRanges(const Graph* graph, const std::vector<string> &ranges, std::unordered_set<string> &target_nodes) {
+  target_nodes.clear();
+  for (string range_str: ranges) {
+    // get inputs and outputs
+    std::vector<string> tokens = str_util::Split(range_str, ":");
+    if (tokens.size() != 2) {
+      LOG(WARNING) << "SearchNodesWithRanges: convert_node_range pattern wrong: " << range_str;
+      continue;
+    }
+    std::vector<string> input_nodes = str_util::Split(tokens[0], ",");
+    std::vector<string> output_nodes = str_util::Split(tokens[1], ",");
+    std::unordered_set<string> inputs(input_nodes.begin(), input_nodes.end());
+    std::unordered_set<string> outputs(output_nodes.begin(), output_nodes.end());
+
+    std::deque<const Node*> node_deque;
+    for (auto node_name: outputs) {
+      const Node *node = graph->FindNodeByName(node_name);
+      if (!node) {
+        LOG(WARNING) << "SearchNodesWithRanges: not find output_node" << node_name;
+        continue;
+      }
+      node_deque.push_back(node);
+    }
+    std::unordered_set<const Node*> visited_node;
+    // BFS search target nodes within convert_ranges
+    while (!node_deque.empty()) {
+      const Node* curr_node = node_deque.front();
+      visited_node.insert(curr_node);
+      node_deque.pop_front();
+      // skip if it's not GPU node
+      std::string tmp_device = curr_node->requested_device().length() <= 5 ? "NOT_SUPPORT": (curr_node->requested_device().substr(curr_node->requested_device().length()-5, 3));
+      if (tmp_device != DEVICE_GPU) {
+        continue;
+      }
+      // add current node into target_nodes set
+      target_nodes.insert(curr_node->name());
+      // if it's input node, continue
+      if (inputs.find(curr_node->name()) != inputs.end()) {
+        continue;
+      }
+      // did't reach input node, and it's in_nodes to queue
+      for (const Node* in_node : curr_node->in_nodes()) {
+        node_deque.push_back(in_node);
+      }
+    }
+  }
+  for (auto node_name: target_nodes) {
+    LOG(INFO) << "SearchNodesWithRanges: target node: " << node_name;
+  }
+}
+
 Status SegmentGraph(const Graph* tf_graph,
-                    const std::function<Status(const Node*)>& candidate_fn,
+                    const std::function<Status(const Node*, const std::unordered_set<string> &target_nodes)>& candidate_fn,
                     const std::function<bool(const Edge*)>& input_candidate_fn,
                     const std::function<bool(const Edge*)>& output_candidate_fn,
                     const SegmentOptions& options,
@@ -414,6 +465,10 @@ Status SegmentGraph(const Graph* tf_graph,
   //    segment but are not eligible, using input/output_candidate_fn to
   //    determine the eligibilities;
   // 3. convert the segment into expected return format and return the result.
+
+  // get target convert nodes
+  std::unordered_set<string> target_nodes;
+  SearchNodesWithRanges(tf_graph, options.convert_ranges, target_nodes);
 
   // --------------------------------- Step 1 ---------------------------------
   auto graph = std::unique_ptr<SimpleGraph>(new SimpleGraph(tf_graph));
@@ -434,7 +489,7 @@ Status SegmentGraph(const Graph* tf_graph,
       num_unsupported_ops++;
       node = nullptr;
     } else {
-      const Status status = candidate_fn(node->tf_node());
+      const Status status = candidate_fn(node->tf_node(), target_nodes);
       if (!status.ok()) {
         VLOG(1) << "Not a TF-TRT candidate, "
                 << "(Op type: " << node->tf_node()->type_string() << "), "

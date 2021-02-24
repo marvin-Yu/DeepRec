@@ -71,6 +71,7 @@ class TRTOptimizationPass : public grappler::CustomGraphOptimizer {
   int max_cached_batches_;
   int64_t max_workspace_size_bytes_;
   bool use_calibration_;
+  std::vector<string> convert_ranges_;
 
 };
 

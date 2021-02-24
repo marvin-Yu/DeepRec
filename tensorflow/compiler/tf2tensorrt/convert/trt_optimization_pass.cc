@@ -67,6 +67,13 @@ Status TRTOptimizationPass::Init(
   if (params.count("use_calibration")) {
     use_calibration_ = params.at("use_calibration").b();
   }
+  if (params.count("convert_ranges")) {
+    int range_sizes = params.at("convert_ranges").list().s_size();
+    for (int i = 0; i < range_sizes; i++) {
+      auto node_range = params.at("convert_ranges").list().s(i);
+      convert_ranges_.push_back(node_range);
+    }
+  }
   return Status::OK();
 }
 
@@ -255,6 +262,7 @@ Status TRTOptimizationPass::Optimize(grappler::Cluster* cluster,
   cp.is_dyn_op = is_dynamic_op_;
   cp.max_cached_engines = max_cached_batches_;
   cp.use_calibration = use_calibration_;
+  cp.convert_ranges = convert_ranges_;
   auto status = ConvertAfterShapes(cp);
   VLOG(1) << "Returning from " << name_;
   return status;

@@ -1125,13 +1125,17 @@ Status TrtNodeValidator::ConvertToTensorOrWeights(
   return Status::OK();
 }
 
-Status TrtNodeValidator::IsTensorRTCandidate(const Node* node) {
+Status TrtNodeValidator::IsTensorRTCandidate(const Node* node, const std::unordered_set<string> &target_nodes) {
   VLOG(3) << "[biaofang_test convert_nodes]: " << node->def().name() << ", " << node->def().op() << ", " << node->def().device() 
       << ", "  << node->id() << ", " << node->name() << ", " << node->requested_device() << ", " << node->assigned_device_name();
   // KGB model only support GPU
   std::string tmp_device = node->requested_device().length() <= 5 ? "NOT_SUPPORT": (node->requested_device().substr(node->requested_device().length()-5, 3));
   if (tmp_device != DEVICE_GPU) {
     return errors::Unimplemented("Device type ", tmp_device, " is not supported.");
+  }
+  LOG(INFO) << "GPU node: " << node->name();
+  if (!target_nodes.empty() && target_nodes.find(node->name()) == target_nodes.end()) {
+    return errors::Unimplemented("Node(", node->name(), ") is not in convert_ranges.");
   }
 
   const string& op = node->def().op();

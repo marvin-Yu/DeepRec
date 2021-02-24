@@ -619,13 +619,14 @@ Status ConvertAfterShapes(const ConversionParams& params) {
     segment_options.exclude_node_list.insert(node);
   }
   segment_options.minimum_segment_size = params.minimum_segment_size;
+  segment_options.convert_ranges = params.convert_ranges;
   segment::SegmentNodesVector initial_segments;
   TrtNodeValidator validator(*params.graph_properties, params.precision_mode,
                              params.use_calibration);
   TF_RETURN_IF_ERROR(segment::SegmentGraph(
       &graph,
       std::bind(&TrtNodeValidator::IsTensorRTCandidate, &validator,
-                std::placeholders::_1),
+                std::placeholders::_1, std::placeholders::_2),
       // Input validation is already done by TrtNodeValidator, so we don't
       // need to check the input edges.
       [](const Edge* edge) { return true; }, OutputEdgeValidator(),

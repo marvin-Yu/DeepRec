@@ -47,6 +47,7 @@ struct ConversionParams {
   // maximum number of cached engines
   int max_cached_engines = 1;
   bool use_calibration = true;
+  std::vector<string> convert_ranges;
 };
 
 // Method to call from optimization pass
