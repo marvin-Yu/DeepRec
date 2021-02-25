@@ -24,39 +24,33 @@ typedef std::function<void()> Callback;
 
 typedef struct CudaGraphCbArgs {
   OpKernelContext* ctx_;
-  int origin_batch_size_;
   int waiting_slice_num_; // atomic
   Callback done_;
   bool single_slice_;
   std::mutex mtx_;
-  std::vector<std::vector<Tensor>> slice_output_tensor_;  // new row-
+  std::vector<Tensor*> output_tensors_;
   bool has_failed_slice_;
 
-  CudaGraphCbArgs(OpKernelContext* ctx, int origin_batch_size, int slice_num, Callback done, int output_num) :
+  CudaGraphCbArgs(OpKernelContext* ctx, int slice_num, Callback done, int output_num) :
       ctx_(ctx),
-      origin_batch_size_(origin_batch_size),
       waiting_slice_num_(slice_num),
       done_(done) {
     single_slice_ = (slice_num == 1);
-    if (!single_slice_) {
-      slice_output_tensor_.resize(output_num);
-      for (int i = 0; i < output_num; ++i) {
-        slice_output_tensor_[i].resize(slice_num);
-      }
-    }
+    output_tensors_.reserve(output_num);
     has_failed_slice_ = false;
   };
 } CudaGraphCbArgs;
 
 typedef struct CudaGraphCbSliceArgs {
   int slice_batch_;
-  int slice_idx_;
+  int slice_offset_;
   CudaGraphMeta* meta_;
   CudaGraphCbArgs* cb_args_;
+  cudaStream_t stream_;
 
-  CudaGraphCbSliceArgs(int slice_batch, int slice_idx, CudaGraphMeta* meta, CudaGraphCbArgs* args) :
+  CudaGraphCbSliceArgs(int slice_batch, int slice_offset, CudaGraphMeta* meta, CudaGraphCbArgs* args) :
       slice_batch_(slice_batch),
-      slice_idx_(slice_idx),
+      slice_offset_(slice_offset),
       meta_(meta),
       cb_args_(args) {};
 
@@ -70,16 +64,11 @@ public:
 
 private:
   void RecordTraffic(int batch_size);
-  void ComputeAsyncSlice(OpKernelContext* ctx, 
-                                    DoneCallback done, 
-                                    size_t begin, 
-                                    size_t end,
-                                    size_t origin_batch_size,
-                                    int req_id,
-                                    CudaGraphCbArgs* args,
-                                    int slice_idx);
+  void ComputeAsyncSlice(OpKernelContext* ctx, DoneCallback done, size_t begin,
+                         size_t end, size_t origin_batch_size, int req_id,
+                         CudaGraphCbArgs* args, int slice_idx);
 
-private:
+ private:
   std::string graph_name_;
   std::vector<std::string> feed_names_;
   std::vector<std::string> fetch_names_;
@@ -113,6 +102,55 @@ void CudaGraphOp::RecordTraffic(int batch_size) {
     ::Traffic::Instance()->Record("CgBatchSize161-192", "CudaGraph");
   } else {
     ::Traffic::Instance()->Record("CgBatchSize192-", "CudaGraph");
+  }
+  return;
+}
+
+void CopyOutputTensorContent(const Tensor* metaTensor, Tensor* opTensor,
+                             size_t batch_offset, size_t batch_size,
+                             cudaStream_t stream) {
+  if (metaTensor->dtype() != opTensor->dtype()) {
+    return;
+  }
+
+  size_t num_elements = metaTensor->NumElements();
+  size_t ele_num_per_dim0 = num_elements / metaTensor->dim_size(0);
+  size_t copy_ele_offset = ele_num_per_dim0 * batch_offset;
+  size_t copy_eles = ele_num_per_dim0 * batch_size;
+
+  size_t ele_size = 1;
+  const void* meta_buffer = nullptr;
+  void* op_buffer = nullptr;
+  if (opTensor->dtype() == DT_HALF) {
+    ele_size = 2;
+    op_buffer = reinterpret_cast<const void*>(opTensor->flat<Eigen::half>().data() + copy_ele_offset);
+    meta_buffer = reinterpret_cast<const void*>(metaTensor->flat<Eigen::half>().data());
+  } else if (opTensor->dtype() == DT_FLOAT) {
+    ele_size = 4;
+    op_buffer = reinterpret_cast<const void*>(opTensor->flat<float>().data() + copy_ele_offset);
+    meta_buffer = reinterpret_cast<const void*>(metaTensor->flat<float>().data());
+  } else if (opTensor->dtype() == DT_INT32) {
+    ele_size = 4;
+    op_buffer = reinterpret_cast<const void*>(opTensor->flat<int>().data() + copy_ele_offset);
+    meta_buffer = reinterpret_cast<const void*>(metaTensor->flat<int>().data());
+  } else if (opTensor->dtype() == DT_BOOL) {
+    ele_size = 1;
+    op_buffer = reinterpret_cast<const void*>(opTensor->flat<bool>().data() + copy_ele_offset);
+    meta_buffer = reinterpret_cast<const void*>(metaTensor->flat<bool>().data());
+  } else if (opTensor->dtype() == DT_INT64) {
+    ele_size = 8;
+    op_buffer = reinterpret_cast<const void*>(opTensor->flat<int64>().data() + copy_ele_offset);
+    meta_buffer = reinterpret_cast<const void*>(metaTensor->flat<int64>().data());
+  } else {
+    LOG(ERROR) << "Unsupported data type "
+               << opTensor->dtype();  // todo: if callback, return meta
+    return;
+  }
+
+  size_t num_bytes = ele_size * copy_eles;
+  // stream use tensorflow
+  if (cudaMemcpy(op_buffer, meta_buffer, num_bytes, cudaMemcpyHostToDevice, stream) != cudaSuccess) {
+    LOG(ERROR) << "Copy tensor context from meta to op output failed";
   }
   return;
 }
@@ -151,21 +189,13 @@ void CopyRetAndReturnMeta(CudaGraphCbSliceArgs* args) {
   CudaGraphMeta* meta = args->meta_;
   CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
 
-  if (args->cb_args_->single_slice_) {
-    for (int i = 0; i < meta->output_tensors_.size(); ++i) {
-      Tensor* output = nullptr;
-      TensorShape shape = meta->output_tensors_[i].shape();
-      shape.set_dim(0, args->cb_args_->origin_batch_size_);
-      OP_REQUIRES_OK(ctx, ctx->allocate_output(i, shape, &output));
-//      tensor::DeepCopy(meta->output_tensors_[i].Slice(0, args->cb_args_->origin_batch_size_), output);
-    }
-  } else {
-    for (int i = 0; i < meta->output_tensors_.size(); ++i) {
-      TensorShape shape = meta->output_tensors_[i].shape();
-      shape.set_dim(0, args->slice_batch_);
-//      args->cb_args_->slice_output_tensor_[i][args->slice_idx_] = tensor::DeepCopy(meta->output_tensors_[i].Slice(0, args->slice_batch_));
-    }
-    // if not all slice finished
+  for (int i = 0; i < meta->output_tensors_.size(); ++i) {
+    CopyOutputTensorContent(&meta->output_tensors_[i], args->output_tensors_[i], 
+                            args->cb_args_->slice_offset_, args->cb_args_->slice_batch_,
+                            args->cb_args_->stream_);
+  }
+  // if not all slice finished
+  if (!args->cb_args_->single_slice_) {
     do {
       std::lock_guard<std::mutex> lock(args->cb_args_->mtx_);
       --args->cb_args_->waiting_slice_num_;
@@ -175,16 +205,9 @@ void CopyRetAndReturnMeta(CudaGraphCbSliceArgs* args) {
         return;
       }
     } while (0);
-
-    // if all slice finished 
-    for (int i = 0; i < meta->output_tensors_.size(); ++i) {
-      Tensor* output = nullptr;
-      TensorShape shape = meta->output_tensors_[i].shape();
-      shape.set_dim(0, args->cb_args_->origin_batch_size_);
-      OP_REQUIRES_OK(ctx, ctx->allocate_output(i, shape, &output));
-  //    tensor::Concat(args->cb_args_->slice_output_tensor_[i], output);
-    }
   }
+
+  // if all slice finished
   mgr.ReturnCudaGraphMeta(meta);
   args->cb_args_->done_();
   delete args->cb_args_;
@@ -217,16 +240,12 @@ CudaGraphOp::CudaGraphOp(OpKernelConstruction* ctx) : AsyncOpKernel(ctx)  {
   empty_bucket_ = (buckets_.size() == 0);
 }
 
-void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx, 
-                                    DoneCallback done, 
-                                    size_t begin, 
-                                    size_t end,
-                                    size_t origin_batch_size,
-                                    int req_id,
-                                    CudaGraphCbArgs* args,
-                                    int slice_idx) {
+void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx, DoneCallback done,
+                                    size_t begin, size_t end,
+                                    size_t origin_batch_size, int req_id,
+                                    CudaGraphCbArgs* args, int slice_idx) {
   int batch_size = end - begin;
-  CudaGraphCbSliceArgs* slice_args = new CudaGraphCbSliceArgs(batch_size, slice_idx, nullptr, args);
+  CudaGraphCbSliceArgs* slice_args = new CudaGraphCbSliceArgs(batch_size, begin, nullptr, args);
   if (args->has_failed_slice_) {
     CopyRetAndReturnMetaWhenFail(slice_args);
     return;
@@ -250,6 +269,19 @@ void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx,
   OP_REQUIRES_OK_ASYNC_WITH_ARGS(ctx, mgr.GetCudagraphMeta(graph_name_, *upper_iter, meta), 
           CopyRetAndReturnMetaWhenFail, slice_args);
   slice_args->meta_ = meta;
+  slice_args->stream_ = stream;
+
+  // allocate output when first slice 
+  if (slice_idx == 0) {
+    for (int i = 0; i < meta->output_tensors_.size(); ++i) {
+      Tensor* output = nullptr;
+      TensorShape shape = meta->output_tensors_[i].shape();
+      shape.set_dim(0, origin_batch_size);
+      OP_REQUIRES_OK_ASYNC_WITH_ARGS(ctx, ctx->allocate_output(i, shape, &output)，
+          CopyRetAndReturnMetaWhenFail, slice_args);
+      args->output_tensors_.push_back(output);
+    }
+  }
 
   for (int i = 0; i < feed_names_.size(); ++i) {
     const Tensor& input = ctx->input(i);
@@ -302,7 +334,6 @@ void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx,
         errors::Internal("Add cuda callback failed: ", ret), 
         CopyRetAndReturnMetaWhenFail, slice_args);
   return;
-
 }
 
 void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
@@ -327,7 +358,7 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
 
   int slice_num = (batch_size - 1) / buckets_.back() + 1;
   int slice_size = buckets_.back();
-  CudaGraphCbArgs* args = new CudaGraphCbArgs(ctx, batch_size, slice_num, done, fetch_names_.size());
+  CudaGraphCbArgs* args = new CudaGraphCbArgs(ctx, slice_num, done, fetch_names_.size());
 
   int begin = 0;
   int end = slice_size;
