@@ -157,13 +157,13 @@ void CopyRetAndReturnMeta(CudaGraphCbSliceArgs* args) {
       TensorShape shape = meta->output_tensors_[i].shape();
       shape.set_dim(0, args->cb_args_->origin_batch_size_);
       OP_REQUIRES_OK(ctx, ctx->allocate_output(i, shape, &output));
-      tensor::DeepCopy(meta->output_tensors_[i].Slice(0, args->cb_args_->origin_batch_size_), output);
+//      tensor::DeepCopy(meta->output_tensors_[i].Slice(0, args->cb_args_->origin_batch_size_), output);
     }
   } else {
     for (int i = 0; i < meta->output_tensors_.size(); ++i) {
       TensorShape shape = meta->output_tensors_[i].shape();
       shape.set_dim(0, args->slice_batch_);
-      args->cb_args_->slice_output_tensor_[i][args->slice_idx_] = tensor::DeepCopy(meta->output_tensors_[i].Slice(0, args->slice_batch_));
+//      args->cb_args_->slice_output_tensor_[i][args->slice_idx_] = tensor::DeepCopy(meta->output_tensors_[i].Slice(0, args->slice_batch_));
     }
     // if not all slice finished
     do {
@@ -182,7 +182,7 @@ void CopyRetAndReturnMeta(CudaGraphCbSliceArgs* args) {
       TensorShape shape = meta->output_tensors_[i].shape();
       shape.set_dim(0, args->cb_args_->origin_batch_size_);
       OP_REQUIRES_OK(ctx, ctx->allocate_output(i, shape, &output));
-      tensor::Concat(args->cb_args_->slice_output_tensor_[i], output);
+  //    tensor::Concat(args->cb_args_->slice_output_tensor_[i], output);
     }
   }
   mgr.ReturnCudaGraphMeta(meta);
@@ -286,7 +286,7 @@ void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx,
     size_t num_bytes = ele_num_per_dim0 * ele_size * batch_size;
     void* device_buffer = meta->src_dst_mapping_[i].second;
     OP_REQUIRES_ASYNC_WITH_ARGS(ctx, cudaMemcpyAsync(device_buffer, host_buffer, num_bytes,
-        cudaMemcpyHostToDevice, stream) == cudaSuccess, 
+        cudaMemcpyDeviceToDevice, stream) == cudaSuccess, 
         errors::Internal("CudaMemCpy to ", i, " st tensor failed, device addr: ", device_buffer),
         CopyRetAndReturnMetaWhenFail, slice_args);
   }
@@ -317,6 +317,7 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
   OP_REQUIRES_ASYNC(ctx, !empty_bucket_,
               errors::Internal("buckets for cuda graph is empty, check config."), done);
 
+
   int req_id = ctx->step_id(); // rtp will set session id as step id.
   const Tensor& input_0 = ctx->input(0);
   int batch_size = input_0.dim_size(0);
@@ -341,6 +342,5 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
   return;
 }
 
-REGISTER_KERNEL_BUILDER(Name("CudaGraph").Device(DEVICE_CPU), CudaGraphOp);
-
+REGISTER_KERNEL_BUILDER(Name("CudaGraph").Device(DEVICE_GPU), CudaGraphOp);
 }
