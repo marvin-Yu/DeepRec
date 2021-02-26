@@ -29,7 +29,7 @@ using namespace tensorflow;
 
 HostStream::HostStream() {
   auto status = ReadBoolFromEnvVar("TF_HOST_STREAM_RUN_SYNC",
-                                   /*default_val=*/false, &run_sync);
+                                   /*default_val=*/true, &run_sync);
   if (!status.ok()) {
     LOG(ERROR) << "TF_HOST_STREAM_RUN_SYNC: " << status.error_message();
   }
