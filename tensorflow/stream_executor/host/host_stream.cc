@@ -17,6 +17,7 @@ limitations under the License.
 // the HostExecutor implementation.
 #include "tensorflow/stream_executor/host/host_stream.h"
 
+#include "tensorflow/core/util/env_var.h"
 #include "absl/synchronization/notification.h"
 #include "tensorflow/core/platform/denormal.h"
 #include "tensorflow/core/platform/setround.h"
@@ -24,9 +25,21 @@ limitations under the License.
 namespace stream_executor {
 namespace host {
 
-HostStream::HostStream()
-    : thread_(port::Env::Default()->StartThread(
-          port::ThreadOptions(), "host_executor", [this]() { WorkLoop(); })) {}
+using namespace tensorflow;
+
+HostStream::HostStream() {
+  auto status = ReadBoolFromEnvVar("TF_HOST_STREAM_RUN_SYNC",
+                                   /*default_val=*/true, &run_sync);
+  if (!status.ok()) {
+    LOG(ERROR) << "TF_HOST_STREAM_RUN_SYNC: " << status.error_message();
+  }
+  VLOG(0) << "New host stream run in " << (run_sync? "sync": "async") << " mode";
+  if (! run_sync) {
+    VLOG(0) << "Start WorkLoop Thread";
+    thread_.reset(port::Env::Default()->StartThread(
+              port::ThreadOptions(), "host_executor", [this]() { WorkLoop(); }));
+  }
+}
 
 HostStream::~HostStream() {
   {
@@ -39,6 +52,11 @@ HostStream::~HostStream() {
 
 bool HostStream::EnqueueTask(std::function<void()> fn) {
   CHECK(fn != nullptr);
+  if (run_sync) {
+    fn();
+    return true;
+  }
+
   absl::MutexLock lock(&mu_);
   work_queue_.push(std::move(fn));
   return true;

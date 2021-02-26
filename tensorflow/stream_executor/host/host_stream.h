@@ -48,6 +48,7 @@ class HostStream : public internal::StreamInterface {
   absl::Mutex mu_;
   std::queue<std::function<void()>> work_queue_ GUARDED_BY(mu_);
   std::unique_ptr<port::Thread> thread_;
+  bool run_sync = false;
 };
 
 }  // namespace host

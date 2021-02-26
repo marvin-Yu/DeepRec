@@ -150,9 +150,7 @@ XlaOpRegistry::~XlaOpRegistry() = default;
           registry.compilation_devices_[DEVICE_CPU];
       registration.compilation_device_name = DEVICE_CPU_XLA_JIT;
       registration.autoclustering_policy =
-          cpu_global_jit
-              ? XlaOpRegistry::AutoclusteringPolicy::kIfEnabledGlobally
-              : XlaOpRegistry::AutoclusteringPolicy::kIfExplicitlyRequested;
+          XlaOpRegistry::AutoclusteringPolicy::kIfEnabledGlobally;
     }
     if (LaunchOpHasKernelForDevice(DeviceType(DEVICE_GPU)).ok()) {
       DeviceRegistration& registration =
