@@ -178,8 +178,12 @@ class DirectSession : public Session {
   bool cuda_graph_capture_mode_ = false;
   cudaStream_t capturing_stream_ = nullptr;
 
-  bool RemoveH2DNodes(cudaGraph_t graph, std::vector<std::pair<void*, void*>> &mappings,
+  bool RemoveH2DNodes(cudaGraph_t graph, std::vector<std::pair<void*, void*>> &input_mappings,
+                      std::vector<std::pair<void*, void*>>& output_mappings,
                       CudaGraphMeta* cuda_graph_meta);
+
+  bool ExtractOutputMetaInfo(CudaGraphMeta* cuda_graph_meta);
+
   size_t num_output_tensors_;
 
   // Names of place holders which will be the host_memory_inputs of GPU ops
@@ -191,6 +195,8 @@ class DirectSession : public Session {
   std::vector<std::string> host_memory_inputs_; 
   std::vector<const void*> input_host_address_;
   std::vector<const void*> host_memory_inputs_address_;
+
+  std::vector<const void*> output_host_address_;
 
   std::unordered_map<std::string, GraphDef> cudagraph_defs_;
 #endif

@@ -978,8 +978,7 @@ Status DirectSession::RunInternal(
   }
 
   // Build and return the cost model as instructed.
-  if (update_cost_model) {
-    // Build the cost model
+  if (update_cost_model) {    // Build the cost model
     std::unordered_map<string, const Graph*> device_to_graph;
     for (const PerPartitionExecutorsAndLib& partition :
          executors_and_keys->items) {
@@ -1020,7 +1019,10 @@ Status DirectSession::RunInternal(
     }
 
     //remove the begining H2D nodes, and get the src-dst mapping
-    bool capture_valid = RemoveH2DNodes(cuda_graph_meta->cuda_graph_, cuda_graph_meta->src_dst_mapping_, cuda_graph_meta);
+    bool capture_valid = RemoveH2DNodes(cuda_graph_meta->cuda_graph_, 
+                                        cuda_graph_meta->src_dst_mapping_,
+                                        cuda_graph_meta->output_dst_src_mappping_,
+                                        cuda_graph_meta);
 
     if(! capture_valid){
         LOG(ERROR) << "the captured CUDA graph is not valid, please check the network.";
@@ -1040,191 +1042,229 @@ Status DirectSession::RunInternal(
 
 #ifdef GOOGLE_CUDA
 
-bool DirectSession::RemoveH2DNodes(cudaGraph_t graph, std::vector<std::pair<void*, void*>> &mappings, 
-                                   CudaGraphMeta* cuda_graph_meta){
-    mappings.clear();
+bool DirectSession::RemoveH2DNodes(
+    cudaGraph_t graph, std::vector<std::pair<void*, void*>>& input_mappings,
+    std::vector<std::pair<void*, void*>>& output_mappings,
+    CudaGraphMeta* cuda_graph_meta) {
+  mappings.clear();
 
-    size_t num_nodes;
-    cudaError_t ret = cudaGraphGetNodes(graph, NULL, &num_nodes);
-    if(ret != cudaSuccess){
-        LOG(ERROR) << "Get CUDA graph node num  failed." << ret;
-        return false;
+  size_t num_nodes;
+  cudaError_t ret = cudaGraphGetNodes(graph, NULL, &num_nodes);
+  if (ret != cudaSuccess) {
+    LOG(ERROR) << "Get CUDA graph node num  failed." << ret;
+    return false;
+  }
+
+  std::vector<cudaGraphNode_t> nodes(num_nodes);
+  ret = cudaGraphGetNodes(graph, &nodes[0], &num_nodes);
+  if (ret != cudaSuccess) {
+    LOG(ERROR) << "Get CUDA graph nodes failed." << ret;
+    return false;
+  }
+
+  size_t num_d2h_nodes = 0;
+  const TensorHolder* tensor_holder = &(cuda_graph_meta->tensor_holder_);
+  if (tensor_holder == nullptr) {
+    LOG(ERROR) << "Get current tensor holder failed" << ret;
+    return false;
+  }
+
+  for (int i = 0; i < num_nodes; i++) {
+    cudaGraphNodeType node_type;
+    ret = cudaGraphNodeGetType(nodes[i], &node_type);
+    if (ret != cudaSuccess) {
+      LOG(ERROR) << "Get CUDA graph node type failed." << ret;
+      return false;
     }
 
-    std::vector<cudaGraphNode_t> nodes(num_nodes);
-    ret = cudaGraphGetNodes(graph, &nodes[0], &num_nodes);
-    if(ret != cudaSuccess){
-        LOG(ERROR) << "Get CUDA graph nodes failed." << ret;
-        return false;
+    if (node_type != cudaGraphNodeTypeMemcpy) {
+      continue;
     }
 
-    size_t num_d2h_nodes = 0;
-    const TensorHolder * tensor_holder = &(cuda_graph_meta->tensor_holder_);
-    if(tensor_holder == nullptr){
-        LOG(ERROR) << "Get current tensor holder failed" << ret;
-        return false;
+    cudaMemcpy3DParms params;
+    ret = cudaGraphMemcpyNodeGetParams(nodes[i], &params);
+    if (ret != cudaSuccess) {
+      LOG(ERROR) << "Get CUDA graph memcpy node params failed." << ret;
+      return false;
     }
 
-    for(int i = 0; i < num_nodes; i ++){
-        cudaGraphNodeType node_type;
-        ret = cudaGraphNodeGetType(nodes[i], &node_type);
-        if(ret != cudaSuccess){
-            LOG(ERROR) << "Get CUDA graph node type failed." << ret;
-            return false;
-        }
+    bool is_h2d = (params.kind == cudaMemcpyHostToDevice);
+    bool is_d2h = (params.kind == cudaMemcpyDeviceToHost);
+    void* host_buffer = nullptr;
+    void* device_buffer = nullptr;
 
-        if(node_type != cudaGraphNodeTypeMemcpy) {
-            continue;
-        }
-
-        cudaMemcpy3DParms params;
-        ret = cudaGraphMemcpyNodeGetParams(nodes[i], &params);
-        if(ret != cudaSuccess){
-            LOG(ERROR) << "Get CUDA graph memcpy node params failed." << ret;
-            return false;
-        }
-
-        if(params.kind != cudaMemcpyHostToDevice){
-            if (params.kind == cudaMemcpyDeviceToHost){
-                LOG(INFO) << "D2H node.";
-                num_d2h_nodes += 1;
-            }
-            continue;
-        }
-
+    if (is_h2d || is_d2h) {
+      // input nodes
+      if (is_h2d) {
         LOG(INFO) << "H2D node.";
+        host_buffer = params.srcPtr.ptr;
+        device_buffer = params.dstPtr.ptr;
 
-        void * host_buffer = params.srcPtr.ptr;
-        void * device_buffer = params.dstPtr.ptr;
-
-        if(std::find(input_host_address_.begin(), input_host_address_.end(),
-                     host_buffer) == input_host_address_.end()){
-            // h2d node should be kept,
-            // make sure it's in tensor_holder
-            if( ! tensor_holder->HostContains(host_buffer)){
-                LOG(ERROR) << "The captured graph not valid, contains src(host) tensors not reserved.";
-                return false;
-            }
-            continue;
-        }
-
-        for(auto &it: mappings){
-            if(host_buffer == it.first){
-                LOG(ERROR) << "The captured graph not valid, contains H2D nodes with same src addresses.";
-                return false;
-            }
-        }
-
-        size_t num_edges;
-        ret = cudaGraphGetEdges(graph, NULL, NULL, &num_edges);
-        if(ret != cudaSuccess){
-            LOG(ERROR) << "Get CUDA graph edge num failed." << ret;
+        if (std::find(input_host_address_.begin(), input_host_address_.end(),
+                      host_buffer) == input_host_address_.end()) {
+          // h2d node should be kept,
+          // make sure it's in tensor_holder
+          if (!tensor_holder->HostContains(host_buffer)) {
+            LOG(ERROR) << "The captured graph not valid, contains "
+                          "src(host) tensors not reserved.";
             return false;
+          }
+          continue;
         }
 
-        std::vector<cudaGraphNode_t> from(num_edges);
-        std::vector<cudaGraphNode_t> to(num_edges);
-
-        ret = cudaGraphGetEdges(graph, &from[0], &to[0], &num_edges);
-        if(ret != cudaSuccess){
-            LOG(ERROR) << "Get CUDA graph edges failed." << ret;
+        for (auto& it : input_mappings) {
+          if (host_buffer == it.first) {
+            LOG(ERROR) << "The captured graph not valid, contains H2D "
+                          "nodes with same src addresses.";
             return false;
-        }
-
-        auto from_iter = std::find(from.begin(), from.end(), nodes[i]);
-        auto to_iter = std::find(to.begin(), to.end(), nodes[i]);
-
-        int from_idx = -1;
-        int to_idx = -1;
-
-        if(from_iter != from.end()){
-            from_idx = std::distance(from.begin(), from_iter);
-        }
-
-        if(to_iter != to.end()){
-            to_idx = std::distance(to.begin(), to_iter);
-        }
-
-        if(from_idx >= 0 && to_idx >= 0){
-            // need to to graph surgeon
-            // ...->n1->h2d->n2->...  convert to ...->n1->n2->...
-            cudaGraphNode_t n1 = from[to_idx];
-            cudaGraphNode_t n2 = to[from_idx];
-
-            ret = cudaGraphRemoveDependencies(graph, &n1, &nodes[i], 1);
-            if(ret != cudaSuccess){
-                LOG(ERROR) << "cuda graph remove dependencies failed." << ret;
-                return false;
-            }
-            ret = cudaGraphRemoveDependencies(graph, &nodes[i], &n2, 1);
-            if(ret != cudaSuccess){
-                LOG(ERROR) << "cuda graph remove dependencies failed." << ret;
-                return false;
-            }
-            ret = cudaGraphAddDependencies(graph, &n1, &n2, 1);
-            if(ret != cudaSuccess){
-                LOG(ERROR) << "cuda graph add dependencies failed." << ret;
-                return false;
-            }
-        }
-        else if(from_idx >= 0){
-            // simple case:   h2d->n2->...
-            cudaGraphNode_t n2 = to[from_idx];
-            ret = cudaGraphRemoveDependencies(graph, &nodes[i], &n2, 1);
-            if(ret != cudaSuccess){
-                LOG(ERROR) << "cuda graph remove dependencies failed." << ret;
-                return false;
-                return false;
-            }
-        }else if(to_idx >= 0){
-            // simple case:  ...->n1->h2d
-            cudaGraphNode_t n1 = from[to_idx];
-            ret = cudaGraphRemoveDependencies(graph, &n1, &nodes[i], 1);
-            if(ret != cudaSuccess){
-                LOG(ERROR) << "cuda graph remove dependencies failed." << ret;
-                return false;
-            }
-        }
-
-        ret = cudaGraphDestroyNode(nodes[i]);
-        if(ret != cudaSuccess){
-            LOG(ERROR) << "cuda graph remove nodes failed." << ret;
-            return false;
+          }
         }
 
         // remove the node successfully
-        mappings.push_back(std::pair<void*, void*>(host_buffer, device_buffer));
-    }
+        input_mappings.push_back(std::pair<void*, void*>(host_buffer, device_buffer));
+      } else {  // d2h output nodes
+        LOG(INFO) << "D2H node.";
+        num_d2h_nodes += 1;
+        host_buffer = params.dstPtr.ptr;
+        device_buffer = params.srcPtr.ptr;
 
-    LOG(INFO) << "remove " << mappings.size() << " H2D nodes.";
-    if(num_d2h_nodes != num_output_tensors_){
-        LOG(ERROR) << "Captured graph not valid, num of D2H nodes not matched with output tensors: " << num_d2h_nodes << " vs. " << num_output_tensors_;
-        return false;
-    }
-
-    // all input tensors (except host_memory input), has corresponding H2D nodes
-    for(const auto& host_address : input_host_address_){
-        bool found = false;
-        for(const auto& host_device_address : mappings){
-            if(host_device_address.first == host_address){
-                found = true;
-                break;
-            }
-        }
-
-        if(found) continue;
-
-        if(std::find(host_memory_inputs_address_.begin(), host_memory_inputs_address_.end(), host_address) != host_memory_inputs_address_.end()){
-            LOG(WARNING) << "Num of removed H2D nodes not matched with input tensors, due to host_memory input constraints: " << mappings.size()
-                         << " vs. " << input_host_address_.size();
-        }else{
-            LOG(ERROR) << "Captured graph not valid, num of removed H2D nodes not matched with input tensors: " << mappings.size()
-                       << " vs. " << input_host_address_.size();
+        if (std::find(output_host_address_.begin(), output_host_address_.end(),
+                      host_buffer) == output_host_address_.end()) {
+          // h2d node should be kept,
+          // make sure it's in tensor_holder
+          if (!tensor_holder->HostContains(host_buffer)) {
+            LOG(ERROR) << "The captured graph not valid, contains "
+                          "dst(host) tensors not reserved.";
             return false;
+          }
+          continue;
         }
+        for (auto& it : output_mappings) {
+          if (host_buffer == it.first) {
+            LOG(ERROR) << "The captured graph not valid, contains D2H "
+                          "nodes with same dst addresses.";
+            return false;
+          }
+        }
+        output_mappings.push_back(std::pair<void*, void*>(host_buffer, device_buffer));
+      }
+    } else {
+      continue;
     }
 
-    return true;
+    size_t num_edges;
+    ret = cudaGraphGetEdges(graph, NULL, NULL, &num_edges);
+    if (ret != cudaSuccess) {
+      LOG(ERROR) << "Get CUDA graph edge num failed." << ret;
+      return false;
+    }
+
+    std::vector<cudaGraphNode_t> from(num_edges);
+    std::vector<cudaGraphNode_t> to(num_edges);
+
+    ret = cudaGraphGetEdges(graph, &from[0], &to[0], &num_edges);
+    if (ret != cudaSuccess) {
+      LOG(ERROR) << "Get CUDA graph edges failed." << ret;
+      return false;
+    }
+
+    auto from_iter = std::find(from.begin(), from.end(), nodes[i]);
+    auto to_iter = std::find(to.begin(), to.end(), nodes[i]);
+
+    int from_idx = -1;
+    int to_idx = -1;
+
+    if (from_iter != from.end()) {
+      from_idx = std::distance(from.begin(), from_iter);
+    }
+
+    if (to_iter != to.end()) {
+      to_idx = std::distance(to.begin(), to_iter);
+    }
+
+    if (from_idx >= 0 && to_idx >= 0) {
+      // need to to graph surgeon
+      // ...->n1->h2d->n2->...  convert to ...->n1->n2->...
+      cudaGraphNode_t n1 = from[to_idx];
+      cudaGraphNode_t n2 = to[from_idx];
+
+      ret = cudaGraphRemoveDependencies(graph, &n1, &nodes[i], 1);
+      if (ret != cudaSuccess) {
+        LOG(ERROR) << "cuda graph remove dependencies failed." << ret;
+        return false;
+      }
+      ret = cudaGraphRemoveDependencies(graph, &nodes[i], &n2, 1);
+      if (ret != cudaSuccess) {
+        LOG(ERROR) << "cuda graph remove dependencies failed." << ret;
+        return false;
+      }
+      ret = cudaGraphAddDependencies(graph, &n1, &n2, 1);
+      if (ret != cudaSuccess) {
+        LOG(ERROR) << "cuda graph add dependencies failed." << ret;
+        return false;
+      }
+    } else if (from_idx >= 0) {
+      // simple case:   h2d->n2->...
+      cudaGraphNode_t n2 = to[from_idx];
+      ret = cudaGraphRemoveDependencies(graph, &nodes[i], &n2, 1);
+      if (ret != cudaSuccess) {
+        LOG(ERROR) << "cuda graph remove dependencies failed." << ret;
+        return false;
+      }
+    } else if (to_idx >= 0) {
+      // simple case:  ...->n1->h2d
+      cudaGraphNode_t n1 = from[to_idx];
+      ret = cudaGraphRemoveDependencies(graph, &n1, &nodes[i], 1);
+      if (ret != cudaSuccess) {
+        LOG(ERROR) << "cuda graph remove dependencies failed." << ret;
+        return false;
+      }
+    }
+
+    ret = cudaGraphDestroyNode(nodes[i]);
+    if (ret != cudaSuccess) {
+      LOG(ERROR) << "cuda graph remove nodes failed." << ret;
+      return false;
+    }
+  }
+
+  LOG(INFO) << "remove " << input_mappings.size() << " H2D nodes.";
+  LOG(INFO) << "remove " << output_mappings.size() << " D2H nodes.";
+
+  if (num_d2h_nodes != num_output_tensors_) {
+    LOG(ERROR) << "Captured graph not valid, num of D2H nodes not matched with "
+                  "output tensors: "
+               << num_d2h_nodes << " vs. " << num_output_tensors_;
+    return false;
+  }
+
+  // all input tensors (except host_memory input), has corresponding H2D nodes
+  for (const auto& host_address : input_host_address_) {
+    bool found = false;
+    for (const auto& host_device_address : input_mappings) {
+      if (host_device_address.first == host_address) {
+        found = true;
+        break;
+      }
+    }
+
+    if (found) continue;
+
+    if (std::find(host_memory_inputs_address_.begin(),
+                  host_memory_inputs_address_.end(),
+                  host_address) != host_memory_inputs_address_.end()) {
+      LOG(WARNING) << "Num of removed H2D nodes not matched with input "
+                      "tensors, due to host_memory input constraints: "
+                   << input_mappings.size() << " vs. " << input_host_address_.size();
+    } else {
+      LOG(ERROR) << "Captured graph not valid, num of removed H2D nodes not "
+                    "matched with input tensors: "
+                 << input_mappings.size() << " vs. " << input_host_address_.size();
+      return false;
+    }
+  }
+
+  return true;
 }
 
 #endif
@@ -1808,10 +1848,52 @@ Status DirectSession::RunForCapture(const RunOptions& run_options,
       }
       output_size += outputs->back().AllocatedBytes();
     }
+    ExtractOutputMetaInfo(cuda_graph_meta);
     metrics::RecordGraphOutputTensors(output_size);
   }
 
   return Status::OK();
+}
+
+bool DirectSession::ExtractOutputMetaInfo(CudaGraphMeta* cuda_graph_meta) {
+  for (int i = 0; i < cuda_graph_meta->output_tensors_; ++i) {
+    void* host_buffer = nullptr;
+    Tensor* tensor = &(cuda_graph_meta->output_tensors_[i]);
+    if (tensor->dtype() == DT_HALF) {
+      host_buffer = reinterpret_cast<void*>(tensor->flat<Eigen::half>().data());
+    } else if (tensor->dtype() == DT_FLOAT) {
+      host_buffer = reinterpret_cast<void*>(tensor->flat<float>().data());
+    } else if (tensor->dtype() == DT_INT32) {
+      host_buffer = reinterpret_cast<void*>(tensor->flat<int>().data());
+    } else if (tensor->dtype() == DT_BOOL) {
+      host_buffer = reinterpret_cast<void*>(tensor->flat<bool>().data());
+    } else if (tensor->dtype() == DT_INT64) {
+      host_buffer = reinterpret_cast<void*>(tensor->flat<int64>().data());
+    } else {
+      LOG(ERROR) << "Unsupported data type "
+                 << tensor->dtype();  // todo: if callback, return meta
+      return false;
+    }
+
+    CudaGraphOutputInfo info;
+    bool found = false;
+    info.shape_ = tensor.shape();
+    info.dtype_ = tensor.dtype();
+    info.ele_num_per_dim0_ = tensor.NumElements() / tensor.dim_size(0);
+    for (int j = 0; j < cuda_graph_meta->output_dst_src_mappping_.size(); ++j) {
+      if (host_buffer == cuda_graph_meta->output_dst_src_mappping_[j].first) {
+        found = true;
+        info.device_buffer_ = cuda_graph_meta->output_dst_src_mappping_[j].second;
+        break;
+      }
+    }
+    if (!found) {
+      return false;
+    }
+    cuda_graph_meta->output_infos_.emplace_back(info);
+  }
+  cuda_graph_meta->output_tensors_.clear();
+  return true;
 }
 
 Status DirectSession::AfterRunAsync(const ::tensorflow::RunOptions& run_options,

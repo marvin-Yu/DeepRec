@@ -20,6 +20,13 @@
 
 namespace tensorflow {
 
+typedef struct CudaGraphOutputInfo {
+  const void* device_buffer_;
+  DataType dtype_;
+  TensorShape shape_;
+  size_t ele_num_per_dim0_;
+} CudaGraphOutputInfo;
+
 typedef struct CudaGraphMeta {
 #ifdef GOOGLE_CUDA
   cudaGraph_t cuda_graph_;
@@ -29,6 +36,8 @@ typedef struct CudaGraphMeta {
   // todo: check input tensor dim0
   // std::vector<int> input_tensor_dim0_;
   std::vector<Tensor> output_tensors_;
+  std::vector<std::pair<void*, void*>> output_dst_src_mappping_;
+  std::vector<CudaGraphOutputInfo> output_infos_;
   std::string graph_name_;
   int batch_size_;
 
@@ -41,6 +50,8 @@ CudaGraphMeta(const std::string& graph_name, int batch_size) :
   cudaGraphDestroy(cuda_graph_);
   output_tensors_.clear();
   src_dst_mapping_.clear();
+  output_dst_src_mappping_.clear();
+  output_infos_.clear();
 }
 #endif
 
