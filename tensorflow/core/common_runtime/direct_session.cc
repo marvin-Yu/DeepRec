@@ -1046,7 +1046,8 @@ bool DirectSession::RemoveH2DNodes(
     cudaGraph_t graph, std::vector<std::pair<void*, void*>>& input_mappings,
     std::vector<std::pair<void*, void*>>& output_mappings,
     CudaGraphMeta* cuda_graph_meta) {
-  mappings.clear();
+  input_mappings.clear();
+  output_mappings.clear();
 
   size_t num_nodes;
   cudaError_t ret = cudaGraphGetNodes(graph, NULL, &num_nodes);
@@ -1127,7 +1128,7 @@ bool DirectSession::RemoveH2DNodes(
         num_d2h_nodes += 1;
         host_buffer = params.dstPtr.ptr;
         device_buffer = params.srcPtr.ptr;
-
+/*
         if (std::find(output_host_address_.begin(), output_host_address_.end(),
                       host_buffer) == output_host_address_.end()) {
           // h2d node should be kept,
@@ -1139,13 +1140,14 @@ bool DirectSession::RemoveH2DNodes(
           }
           continue;
         }
-        for (auto& it : output_mappings) {
+*/        for (auto& it : output_mappings) {
           if (host_buffer == it.first) {
             LOG(ERROR) << "The captured graph not valid, contains D2H "
                           "nodes with same dst addresses.";
             return false;
           }
         }
+        LOG(INFO) << "put D2H node in output mapping, host " << host_buffer << " device " << device_buffer; 
         output_mappings.push_back(std::pair<void*, void*>(host_buffer, device_buffer));
       }
     } else {
@@ -1856,7 +1858,7 @@ Status DirectSession::RunForCapture(const RunOptions& run_options,
 }
 
 bool DirectSession::ExtractOutputMetaInfo(CudaGraphMeta* cuda_graph_meta) {
-  for (int i = 0; i < cuda_graph_meta->output_tensors_; ++i) {
+  for (int i = 0; i < cuda_graph_meta->output_tensors_.size(); ++i) {
     void* host_buffer = nullptr;
     Tensor* tensor = &(cuda_graph_meta->output_tensors_[i]);
     if (tensor->dtype() == DT_HALF) {
@@ -1877,9 +1879,9 @@ bool DirectSession::ExtractOutputMetaInfo(CudaGraphMeta* cuda_graph_meta) {
 
     CudaGraphOutputInfo info;
     bool found = false;
-    info.shape_ = tensor.shape();
-    info.dtype_ = tensor.dtype();
-    info.ele_num_per_dim0_ = tensor.NumElements() / tensor.dim_size(0);
+    info.shape_ = tensor->shape();
+    info.dtype_ = tensor->dtype();
+    info.ele_num_per_dim0_ = tensor->NumElements() / tensor->dim_size(0);
     for (int j = 0; j < cuda_graph_meta->output_dst_src_mappping_.size(); ++j) {
       if (host_buffer == cuda_graph_meta->output_dst_src_mappping_[j].first) {
         found = true;

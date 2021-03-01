@@ -104,7 +104,7 @@ bool CopyOutputTensorContent(const CudaGraphOutputInfo& meta_output_info,
                              Tensor* opTensor,
                              size_t batch_offset, size_t batch_size,
                              cudaStream_t stream) {
-  if (meta_output_info->dtype_ != opTensor->dtype()) {
+  if (meta_output_info.dtype_ != opTensor->dtype()) {
     return false;
   }
 
@@ -136,7 +136,7 @@ bool CopyOutputTensorContent(const CudaGraphOutputInfo& meta_output_info,
 
   size_t num_bytes = ele_size * copy_eles;
   // stream use tensorflow
-  if (cudaMemcpyAsync(op_buffer, meta_output_info->device_buffer_, num_bytes, cudaMemcpyDeviceToDevice, stream) != cudaSuccess) {
+  if (cudaMemcpyAsync(op_buffer, meta_output_info.device_buffer_, num_bytes, cudaMemcpyDeviceToDevice, stream) != cudaSuccess) {
     LOG(ERROR) << "Copy tensor context from meta to op output failed";
     return false;
   }
