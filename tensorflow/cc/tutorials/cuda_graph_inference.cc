@@ -461,6 +461,11 @@ Status Test(GraphDef & graph_def,
     tensor::PrintTensorData(output_tensors_cg[0]); 
     LOG(INFO) << "TF results: ";
     tensor::PrintTensorData(output_tensors_tf[0]); 
+
+    bool equal = tensor::CheckTensorEquality(output_tensors_cg[0], output_tensors_tf[0]);
+    if (equal) {
+        LOG(INFO) << "check equality successed.";
+    }
     return Status();
 }
 

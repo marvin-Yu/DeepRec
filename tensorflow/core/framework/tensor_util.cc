@@ -29,6 +29,8 @@ limitations under the License.
 namespace tensorflow {
 namespace tensor {
 
+static const float EPSILON = 0.0001;
+
 Tensor DeepCopy(const Tensor& other) {
   Tensor tmp = Tensor(other.dtype(), other.shape());
   DeepCopy(other, &tmp);
@@ -97,6 +99,50 @@ void PrintTensorData(const Tensor& t) {
     tensor_string << value << ",";
   }
   LOG(INFO) << tensor_string.str();
+}
+
+bool CheckTensorEquality(const Tensor& a, const Tensor& b) {
+  if (a.dtype() != b.dtype()) {
+    LOG(ERROR) << "Tensor type not equal, tensor a is " << a.dtype() 
+               << " tensor b is " << b.dtype();
+    return false;
+  }
+  if (a.dtype() != DT_FLOAT && a.dtype() != DT_INT32) {
+    LOG(ERROR) << "Check Tensor Equality: Unsupported data type " << a.dtype();
+    return false;
+  }
+  if (a.NumElements() != b.NumElements()) {
+        LOG(ERROR) << "Tensor num elememts not equal, tensor a is " << a.NumElements() 
+                   << " tensor b is " << b.NumElements();
+    return false;
+  }
+
+  if (a.dtype() == DT_FLOAT) {
+    const int* a_data = a.flat<int>().data();
+    const int* b_data = b.flat<int>().data();
+
+    for (int i = 0; i < a.NumElements(); ++i) {
+      if (a_data[i] != b_data[i]) {
+        LOG(ERROR) << "Tensor content not equal, index " << i 
+                   << " tensor a is " << a_data[i]
+                   << " tensor b is " << b_data[i];
+        return false;
+      }
+    }
+  } else {
+    const int* a_data = a.flat<int>().data();
+    const int* b_data = b.flat<int>().data();
+
+    for (int i = 0; i < a.NumElements(); ++i) {
+      if (fabs(a_data[i] - b_data[i]) > EPSILON) {
+        LOG(ERROR) << "Tensor content not equal, index " << i 
+                   << " tensor a is " << a_data[i]
+                   << " tensor b is " << b_data[i];
+        return false;
+      }
+    }  
+  }
+  return true;
 }
 
 Status Concat(const gtl::ArraySlice<Tensor>& tensors, Tensor* result) {

@@ -69,6 +69,9 @@ Status Split(const Tensor& tensor, const gtl::ArraySlice<int64>& sizes,
 // Print to log
 void PrintTensorData(const Tensor& t);
 
+// Compare two tensor content
+bool CheckTensorEquality(const Tensor& a, const Tensor& b);
+
 namespace internal {
 void SetTensorProtoShape(std::vector<size_t> shape,
                          TensorShapeProto* shape_proto);

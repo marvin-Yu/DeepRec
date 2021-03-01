@@ -1128,19 +1128,7 @@ bool DirectSession::RemoveH2DNodes(
         num_d2h_nodes += 1;
         host_buffer = params.dstPtr.ptr;
         device_buffer = params.srcPtr.ptr;
-/*
-        if (std::find(output_host_address_.begin(), output_host_address_.end(),
-                      host_buffer) == output_host_address_.end()) {
-          // h2d node should be kept,
-          // make sure it's in tensor_holder
-          if (!tensor_holder->HostContains(host_buffer)) {
-            LOG(ERROR) << "The captured graph not valid, contains "
-                          "dst(host) tensors not reserved.";
-            return false;
-          }
-          continue;
-        }
-*/        for (auto& it : output_mappings) {
+        for (auto& it : output_mappings) {
           if (host_buffer == it.first) {
             LOG(ERROR) << "The captured graph not valid, contains D2H "
                           "nodes with same dst addresses.";
@@ -1810,7 +1798,7 @@ Status DirectSession::RunForCapture(const RunOptions& run_options,
                                  cuda_graph_meta));
 
   // Receive outputs.
-  std::vector<Tensor>* outputs = &(cuda_graph_meta->output_tensors_);
+  std::vector<Tensor> outputs;
   if (outputs) {
     std::vector<Tensor> sorted_outputs;
     const Status s = call_frame.ConsumeRetvals(
@@ -1836,52 +1824,53 @@ Status DirectSession::RunForCapture(const RunOptions& run_options,
         }
       }
     }
-    outputs->clear();
+    outputs.clear();
     size_t output_size = 0;
-    outputs->reserve(sorted_outputs.size());
+    outputs.reserve(sorted_outputs.size());
     for (int i = 0; i < output_tensor_names.size(); ++i) {
       const string& output_name = output_tensor_names[i];
       if (first_indices.empty() || first_indices[i] == i) {
-        outputs->emplace_back(
+        outputs.emplace_back(
             std::move(sorted_outputs[executors_and_keys
                                          ->output_name_to_index[output_name]]));
       } else {
-        outputs->push_back((*outputs)[first_indices[i]]);
+        outputs.push_back((*outputs)[first_indices[i]]);
       }
-      output_size += outputs->back().AllocatedBytes();
+      output_size += outputs.back().AllocatedBytes();
     }
-    ExtractOutputMetaInfo(cuda_graph_meta);
+    ExtractOutputMetaInfo(output, cuda_graph_meta);
     metrics::RecordGraphOutputTensors(output_size);
   }
 
   return Status::OK();
 }
 
-bool DirectSession::ExtractOutputMetaInfo(CudaGraphMeta* cuda_graph_meta) {
-  for (int i = 0; i < cuda_graph_meta->output_tensors_.size(); ++i) {
+bool DirectSession::ExtractOutputMetaInfo(std::vector<Tensor>& outputs, 
+                                          CudaGraphMeta* cuda_graph_meta) {
+  for (int i = 0; i < outputs.size(); ++i) {
     void* host_buffer = nullptr;
-    Tensor* tensor = &(cuda_graph_meta->output_tensors_[i]);
-    if (tensor->dtype() == DT_HALF) {
-      host_buffer = reinterpret_cast<void*>(tensor->flat<Eigen::half>().data());
-    } else if (tensor->dtype() == DT_FLOAT) {
-      host_buffer = reinterpret_cast<void*>(tensor->flat<float>().data());
-    } else if (tensor->dtype() == DT_INT32) {
-      host_buffer = reinterpret_cast<void*>(tensor->flat<int>().data());
-    } else if (tensor->dtype() == DT_BOOL) {
-      host_buffer = reinterpret_cast<void*>(tensor->flat<bool>().data());
-    } else if (tensor->dtype() == DT_INT64) {
-      host_buffer = reinterpret_cast<void*>(tensor->flat<int64>().data());
+    Tensor& tensor = outputs[i];
+    if (tensor.dtype() == DT_HALF) {
+      host_buffer = reinterpret_cast<void*>(tensor.flat<Eigen::half>().data());
+    } else if (tensor.dtype() == DT_FLOAT) {
+      host_buffer = reinterpret_cast<void*>(tensor.flat<float>().data());
+    } else if (tensor.dtype() == DT_INT32) {
+      host_buffer = reinterpret_cast<void*>(tensor.flat<int>().data());
+    } else if (tensor.dtype() == DT_BOOL) {
+      host_buffer = reinterpret_cast<void*>(tensor.flat<bool>().data());
+    } else if (tensor.dtype() == DT_INT64) {
+      host_buffer = reinterpret_cast<void*>(tensor.flat<int64>().data());
     } else {
       LOG(ERROR) << "Unsupported data type "
-                 << tensor->dtype();  // todo: if callback, return meta
+                 << tensor.dtype();  // todo: if callback, return meta
       return false;
     }
 
     CudaGraphOutputInfo info;
     bool found = false;
-    info.shape_ = tensor->shape();
-    info.dtype_ = tensor->dtype();
-    info.ele_num_per_dim0_ = tensor->NumElements() / tensor->dim_size(0);
+    info.shape_ = tensor.shape();
+    info.dtype_ = tensor.dtype();
+    info.ele_num_per_dim0_ = tensor.NumElements() / tensor.dim_size(0);
     for (int j = 0; j < cuda_graph_meta->output_dst_src_mappping_.size(); ++j) {
       if (host_buffer == cuda_graph_meta->output_dst_src_mappping_[j].first) {
         found = true;
@@ -1894,7 +1883,6 @@ bool DirectSession::ExtractOutputMetaInfo(CudaGraphMeta* cuda_graph_meta) {
     }
     cuda_graph_meta->output_infos_.emplace_back(info);
   }
-  cuda_graph_meta->output_tensors_.clear();
   return true;
 }
 

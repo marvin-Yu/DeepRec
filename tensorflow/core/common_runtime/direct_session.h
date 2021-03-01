@@ -182,7 +182,7 @@ class DirectSession : public Session {
                       std::vector<std::pair<void*, void*>>& output_mappings,
                       CudaGraphMeta* cuda_graph_meta);
 
-  bool ExtractOutputMetaInfo(CudaGraphMeta* cuda_graph_meta);
+  bool ExtractOutputMetaInfo(std::vector<Tensor>& outputs, CudaGraphMeta* cuda_graph_meta);
 
   size_t num_output_tensors_;
 
