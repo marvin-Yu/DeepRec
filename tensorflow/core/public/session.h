@@ -128,7 +128,8 @@ class Session {
                      const std::vector<string>& output_tensor_names,
                      const std::vector<string>& target_node_names,
                      CudaGraphMeta* cuda_graph_meta) {
-    return Run(inputs, output_tensor_names, target_node_names, &(cuda_graph_meta->output_tensors_)); 
+    std::vector<Tensor> outputs;
+    return Run(inputs, output_tensor_names, target_node_names, &outputs); 
   };
   virtual Status RunForCapture(const RunOptions& run_options,
                      const std::vector<std::pair<string, Tensor> >& inputs,
@@ -136,7 +137,8 @@ class Session {
                      const std::vector<string>& target_node_names,
                      RunMetadata* run_metadata,
                      CudaGraphMeta* cuda_graph_meta) {
-    return Run(run_options, inputs, output_tensor_names, target_node_names, &(cuda_graph_meta->output_tensors_), run_metadata);
+    std::vector<Tensor> outputs;
+    return Run(run_options, inputs, output_tensor_names, target_node_names, &outputs, run_metadata);
   };
   virtual bool SupportsCudaGraph() { return false; }
   virtual cudaStream_t  EnableGraphCapture() {return nullptr;} 

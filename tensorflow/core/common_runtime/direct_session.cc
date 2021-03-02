@@ -1799,7 +1799,7 @@ Status DirectSession::RunForCapture(const RunOptions& run_options,
 
   // Receive outputs.
   std::vector<Tensor> outputs;
-  if (outputs) {
+  if (true) {
     std::vector<Tensor> sorted_outputs;
     const Status s = call_frame.ConsumeRetvals(
         &sorted_outputs, /* allow_dead_tensors = */ false);
@@ -1834,14 +1834,13 @@ Status DirectSession::RunForCapture(const RunOptions& run_options,
             std::move(sorted_outputs[executors_and_keys
                                          ->output_name_to_index[output_name]]));
       } else {
-        outputs.push_back((*outputs)[first_indices[i]]);
+        outputs.push_back(outputs[first_indices[i]]);
       }
       output_size += outputs.back().AllocatedBytes();
     }
-    ExtractOutputMetaInfo(output, cuda_graph_meta);
+    ExtractOutputMetaInfo(outputs, cuda_graph_meta);
     metrics::RecordGraphOutputTensors(output_size);
   }
-
   return Status::OK();
 }
 

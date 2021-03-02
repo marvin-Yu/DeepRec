@@ -168,15 +168,15 @@ void RandomInitialize(Tensor& t)
     if(t.dtype() == DT_HALF){
         __half * data = reinterpret_cast<__half*>(t.flat<Eigen::half>().data());
         for(int i = 0; i < num_elements; i ++){
-     //       float value = static_cast<float>(rand() % 101 - 50) / 100.0f;
-            float value = 0.1;
+            float value = static_cast<float>(rand() % 101 - 50) / 100.0f;
+  //          float value = 0.1;
             data[i] = __float2half(value);
         }
     }else if(t.dtype() == DT_FLOAT){
         float * data = t.flat<float>().data();
         for(int i =0; i < num_elements; i ++){
-       //     float value = static_cast<float>(rand() % 101 - 50) / 100.0f;
-            float value = 0.1;
+            float value = static_cast<float>(rand() % 101 - 50) / 100.0f;
+  //          float value = 0.1;
             data[i] = value;
         }
     }else if(t.dtype() == DT_INT32){
@@ -440,6 +440,11 @@ Status Test(GraphDef & graph_def,
     }
 
     // Prepare inputs
+    //
+  for (int i = 0; i < 1000; i++) {
+     if(i % 100 == 0) {
+      LOG(INFO) << "Round " << i;
+   }
     std::vector<Tensor> input_tensors;
     GenerateInputs(graph_def, input_names, input_tensors, batch_size);
     InputsMap input_map; // input map for Normal TF run
@@ -456,16 +461,21 @@ Status Test(GraphDef & graph_def,
     TF_CHECK_OK(session_tf->Create(graph_def));
     std::vector<Tensor> output_tensors_tf;
     TF_CHECK_OK(session_tf->Run(input_map, output_names, {}, &output_tensors_tf));
-
+/*
     LOG(INFO) << "CG results: ";
     tensor::PrintTensorData(output_tensors_cg[0]); 
     LOG(INFO) << "TF results: ";
     tensor::PrintTensorData(output_tensors_tf[0]); 
-
+*/
     bool equal = tensor::CheckTensorEquality(output_tensors_cg[0], output_tensors_tf[0]);
-    if (equal) {
-        LOG(INFO) << "check equality successed.";
+    if (!equal) {
+        LOG(INFO) << "check equality failed " << i;
+    LOG(INFO) << "CG results: ";
+    tensor::PrintTensorData(output_tensors_cg[0]);
+    LOG(INFO) << "TF results: ";
+    tensor::PrintTensorData(output_tensors_tf[0]);
     }
+  }
     return Status();
 }
 

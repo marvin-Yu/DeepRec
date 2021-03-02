@@ -117,7 +117,7 @@ bool CheckTensorEquality(const Tensor& a, const Tensor& b) {
     return false;
   }
 
-  if (a.dtype() == DT_FLOAT) {
+  if (a.dtype() == DT_INT32) {
     const int* a_data = a.flat<int>().data();
     const int* b_data = b.flat<int>().data();
 
@@ -130,8 +130,8 @@ bool CheckTensorEquality(const Tensor& a, const Tensor& b) {
       }
     }
   } else {
-    const int* a_data = a.flat<int>().data();
-    const int* b_data = b.flat<int>().data();
+    const float* a_data = a.flat<float>().data();
+    const float* b_data = b.flat<float>().data();
 
     for (int i = 0; i < a.NumElements(); ++i) {
       if (fabs(a_data[i] - b_data[i]) > EPSILON) {
