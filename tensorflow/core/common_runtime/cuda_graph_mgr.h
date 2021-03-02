@@ -23,10 +23,7 @@
 namespace tensorflow {
 
 typedef std::vector<std::pair<std::string, Tensor>> InputsMap;
-typedef std::unordered_map<int, std::vector<CudaGraphMeta*>> BatchGraphMetaMap;
-typedef std::unordered_map<int, 
-            std::pair<std::shared_ptr<std::mutex>, 
-                std::shared_ptr<std::condition_variable>>> BatchMetaLockMap;
+typedef std::unordered_map<int, std::vector<CudaGraphMeta>> BatchGraphMetaMap;
 
 class CudaGraphMgr {
 public:
@@ -38,7 +35,8 @@ public:
                           const std::vector<std::string>& input_node_names,
                           const std::vector<std::string>& output_node_names,
                           const std::vector<int>& batch_size);
-  Status GetCudagraphMeta(const std::string& cudagrpah_name, 
+  Status GetCudagraphMeta(const int req_id,
+                          const std::string& cudagrpah_name, 
                           const int bucket,
                           CudaGraphMeta*& meta);
   Status ReturnCudaGraphMeta(CudaGraphMeta* meta);
@@ -88,7 +86,6 @@ private:
   // devide all graph name into different group, support 
   // manage all cudagraph instances for certain graph
   std::unordered_map<std::string, std::unordered_set<std::string>> graphname_group_map_;
-  std::unordered_map<std::string, BatchMetaLockMap> meta_pool_lock_;
   std::vector<cudaStream_t> streams_;
   // stream and cuda graph instance count, each instance corresponds to one stream
   int num_stream_;

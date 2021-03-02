@@ -441,8 +441,8 @@ Status Test(GraphDef & graph_def,
 
     // Prepare inputs
     //
-  for (int i = 0; i < 1000; i++) {
-     if(i % 100 == 0) {
+  for (int i = 0; i < 100; i++) {
+     if(i % 10 == 0) {
       LOG(INFO) << "Round " << i;
    }
     std::vector<Tensor> input_tensors;

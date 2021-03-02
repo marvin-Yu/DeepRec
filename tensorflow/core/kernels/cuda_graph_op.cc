@@ -263,6 +263,8 @@ void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx, DoneCallback done,
     }
   }
 
+  std::lock_guard<std::mutex> lock(meta->mutex_);
+
   for (int i = 0; i < feed_names_.size(); ++i) {
     const Tensor& input = ctx->input(i);
     size_t dim0 = input.dim_size(0);

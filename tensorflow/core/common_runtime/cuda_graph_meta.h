@@ -38,6 +38,8 @@ typedef struct CudaGraphMeta {
   std::vector<CudaGraphOutputInfo> output_infos_;
   std::string graph_name_;
   int batch_size_;
+  // mutex for ensure launch cudagraph atomic
+  std::mutex mutex_;
 
 CudaGraphMeta(const std::string& graph_name, int batch_size) :
     graph_name_(graph_name),

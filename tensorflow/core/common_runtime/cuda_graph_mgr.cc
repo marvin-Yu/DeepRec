@@ -304,9 +304,6 @@ void CudaGraphMgr::RegisterCudaGraphGroup(const std::string& group_name,
 // not thread safe!
 void CudaGraphMgr::DestoryAllCudaGraphResource() {
   LOG(INFO) << "begin destory all cuda graph resource";
-  // step1. clear lock
-  meta_pool_lock_.clear();
-
   // step2. clear group info
   graphname_group_map_.clear();
 
@@ -444,16 +441,6 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
         meta_check = meta;
       }
     }
-    // add pool lock
-    if (meta_pool_lock_.find(graph_name) == meta_pool_lock_.end()) {
-      LOG(INFO) << "find " << graph_name << " in lock map failed, insert";
-      meta_pool_lock_.emplace(graph_name, BatchMetaLockMap());
-    }
-    if (meta_pool_lock_[graph_name].find(batch_size[i]) == meta_pool_lock_[graph_name].end()) {
-      meta_pool_lock_[graph_name].emplace(batch_size[i], 
-          std::make_pair(std::make_shared<std::mutex>(), 
-                         std::make_shared<std::condition_variable>()));
-    }  
   }
   // turn off graph capture mode
   session->DisableGraphCapture();
@@ -462,71 +449,30 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
   return Status::OK();
 }
 
-Status CudaGraphMgr::GetCudagraphMeta(const std::string& cudagraph_name, 
+Status CudaGraphMgr::GetCudagraphMeta(const int req_id,
+                                      const std::string& cudagraph_name, 
                                       const int bucket,
                                       CudaGraphMeta*& meta) {
-  if (meta_pool_lock_.find(cudagraph_name) == meta_pool_lock_.end()) {
+  if (graphname_batch_metas_map_.find(cudagraph_name) == graphname_batch_metas_map_.end()) {
     return errors::Internal("Cuda graph instance with name ", cudagraph_name, " not fount.");
-  } else if (meta_pool_lock_[cudagraph_name].find(bucket) == meta_pool_lock_[cudagraph_name].end()) {
+  } else if (graphname_batch_metas_map_[cudagraph_name].find(bucket) == graphname_batch_metas_map_[cudagraph_name].end()) {
     return errors::Internal("Cuda graph intannce with name ", 
                             cudagraph_name, " and batch size ", 
                             bucket, " not found");
   }
-
-  std::shared_ptr<std::mutex> mutex = meta_pool_lock_[cudagraph_name][bucket].first;
-  std::shared_ptr<std::condition_variable> cv = meta_pool_lock_[cudagraph_name][bucket].second;
   std::vector<CudaGraphMeta*>& metas = graphname_batch_metas_map_[cudagraph_name][bucket];
-
-  std::unique_lock<std::mutex> lock(*mutex);
-  if (metas.size() > 0) {
-    meta = metas[metas.size() - 1];
-    metas.pop_back();
-    return Status::OK();
-  } else {
-    while(metas.size() == 0) {
-      cv->wait(lock);
-    }
-    meta = metas[metas.size() - 1];
-    metas.pop_back();
-    return Status::OK();
-  }
+  meta = metas[req_id % num_meta_instance_];
+  return Status::OK();
 }
 
 Status CudaGraphMgr::ReturnCudaGraphMeta(CudaGraphMeta* meta) {
-  const std::string& graph_name = meta->graph_name_;
-  const int bucket = meta->batch_size_;
-  if (meta_pool_lock_.find(graph_name) == meta_pool_lock_.end()) {
-    LOG(ERROR) << "Cuda graph instance with name " << graph_name << " not fount, delete it.";
-    delete meta;
-    return Status::OK();
-  } else if (meta_pool_lock_[graph_name].find(bucket) == meta_pool_lock_[graph_name].end()) {
-    LOG(ERROR) << "Cuda graph intannce with name " << graph_name << " and batch size " 
-               << bucket << " not found";
-    delete meta;
-    return Status::OK();
-  }
-
-  std::shared_ptr<std::mutex> mutex = meta_pool_lock_[graph_name][bucket].first;
-  std::shared_ptr<std::condition_variable> cv = meta_pool_lock_[graph_name][bucket].second;
-  std::vector<CudaGraphMeta*>& metas = graphname_batch_metas_map_[graph_name][bucket];
-
-  std::unique_lock<std::mutex> lock(*mutex);
-  metas.push_back(meta);
-  if (metas.size() == 1) {
-    cv->notify_one();
-  }
+  // do nothing
   return Status::OK();
 }
 
 // todo: make sure thread safety!
 bool CudaGraphMgr::DestoryCudaGraphResource(const std::string& subgraph_name) {
   bool delete_meta = false;
-  auto lock_iter = meta_pool_lock_.find(subgraph_name);
-  if (lock_iter != meta_pool_lock_.end()) {
-    BatchMetaLockMap& lock_map = lock_iter->second;
-    lock_map.clear();
-    meta_pool_lock_.erase(lock_iter);
-  }
 
   auto iter = graphname_batch_metas_map_.find(subgraph_name);
   if (iter != graphname_batch_metas_map_.end()) {
