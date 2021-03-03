@@ -4941,6 +4941,7 @@ tf_kernel_library(
         "//tensorflow/core:core_cpu",
         "//tensorflow/core:cuda_graph_mgr",
         "//tensorflow/core:cuda_graph_op_op_lib",
+        "//tensorflow/stream_executor/cuda:cuda_stream"
     ],
 )
 

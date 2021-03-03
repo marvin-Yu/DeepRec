@@ -16,6 +16,8 @@
 #include "tensorflow/core/framework/tensor_util.h"
 #include "tensorflow/core/platform/macros.h"
 #include "tensorflow/core/lib/core/threadpool.h"
+#include "tensorflow/stream_executor/gpu/gpu_stream.h"
+#include "tensorflow/stream_executor/stream.h"
 #include "tensorflow/tools/traffic/traffic.h"
 
 namespace tensorflow {
@@ -135,7 +137,6 @@ bool CopyOutputTensorContent(const CudaGraphOutputInfo& meta_output_info,
   }
 
   size_t num_bytes = ele_size * copy_eles;
-  // stream use tensorflow
   if (cudaMemcpyAsync(op_buffer, meta_output_info.device_buffer_, num_bytes, cudaMemcpyDeviceToDevice, stream) != cudaSuccess) {
     LOG(ERROR) << "Copy tensor context from meta to op output failed";
     return false;
@@ -247,7 +248,7 @@ void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx, DoneCallback done,
   CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
   OP_REQUIRES_OK_ASYNC_WITH_ARGS(ctx, mgr.GetCudaStream(req_id, stream), 
           CopyRetAndReturnMetaWhenFail, slice_args); 
-  OP_REQUIRES_OK_ASYNC_WITH_ARGS(ctx, mgr.GetCudagraphMeta(graph_name_, *upper_iter, meta), 
+  OP_REQUIRES_OK_ASYNC_WITH_ARGS(ctx, mgr.GetCudagraphMeta(req_id, graph_name_, *upper_iter, meta), 
           CopyRetAndReturnMetaWhenFail, slice_args);
   slice_args->meta_ = meta;
 
@@ -264,7 +265,6 @@ void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx, DoneCallback done,
   }
 
   std::lock_guard<std::mutex> lock(meta->mutex_);
-
   for (int i = 0; i < feed_names_.size(); ++i) {
     const Tensor& input = ctx->input(i);
     size_t dim0 = input.dim_size(0);
@@ -303,21 +303,19 @@ void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx, DoneCallback done,
         cudaMemcpyDeviceToDevice, stream) == cudaSuccess, 
         errors::Internal("CudaMemCpy to ", i, " st tensor failed, device addr: ", device_buffer),
         CopyRetAndReturnMetaWhenFail, slice_args);
-  }
+ }
 
   // run cuda graph instance
   cudaError_t ret = cudaGraphLaunch(meta->cuda_graph_instance_, stream);
   OP_REQUIRES_ASYNC_WITH_ARGS(ctx, ret == cudaSuccess, 
         errors::Internal("cudagraph launch faild: ", ret), 
         CopyRetAndReturnMetaWhenFail, slice_args);
-
   for (int i = 0; i < meta->output_infos_.size(); ++i) {
     OP_REQUIRES_ASYNC_WITH_ARGS(ctx, 
         CopyOutputTensorContent(meta->output_infos_[i], args->output_tensors_[i], begin, batch_size, stream),
         errors::Internal("cudagraph copy output content failed"),
         CopyRetAndReturnMetaWhenFail, slice_args);
   }
-
   ret = cudaStreamAddCallback(stream, CudaGraphCallback, (void *)(slice_args), 0); 
   OP_REQUIRES_ASYNC_WITH_ARGS(ctx, ret == cudaSuccess, 
         errors::Internal("Add cuda callback failed: ", ret), 
@@ -337,6 +335,23 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
   OP_REQUIRES_ASYNC(ctx, !empty_bucket_,
               errors::Internal("buckets for cuda graph is empty, check config."), done);
 
+  // get compute stream and wait
+  cudaStream_t* tf_raw_compute_stream = reinterpret_cast<cudaStream_t*>(ctx->op_device_context()->stream()->implementation()->GpuStreamMemberHack());
+  OP_REQUIRES_ASYNC(ctx, tf_raw_compute_stream != nullptr,
+              errors::Internal("get gpu compute stream failed."), done);
+  cudaEvent_t event;
+  cudaError_t ret = cudaEventCreateWithFlags(&event, cudaEventBlockingSync);
+  OP_REQUIRES_ASYNC(ctx, ret == cudaSuccess,
+              errors::Internal("create event failed, ", cudaGetErrorString(ret)), done);
+  ret = cudaEventRecord(event, *tf_raw_compute_stream);
+  OP_REQUIRES_ASYNC(ctx, ret == cudaSuccess,
+              errors::Internal("record event failed, ", cudaGetErrorString(ret)), done);
+  ret = cudaEventSynchronize(event);
+  OP_REQUIRES_ASYNC(ctx, ret == cudaSuccess,
+              errors::Internal("synchronize event failed.", cudaGetErrorString(ret)), done);
+  ret = cudaEventDestroy(event);
+  OP_REQUIRES_ASYNC(ctx, ret == cudaSuccess,
+              errors::Internal("destory event failed.", cudaGetErrorString(ret)), done);
 
   int req_id = ctx->step_id(); // rtp will set session id as step id.
   const Tensor& input_0 = ctx->input(0);
@@ -357,7 +372,6 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
     end += slice_size;
   }
   end = batch_size;
-
   ComputeAsyncSlice(ctx, done, begin, end, batch_size, req_id + slice_num, args, slice_num - 1);
   return;
 }

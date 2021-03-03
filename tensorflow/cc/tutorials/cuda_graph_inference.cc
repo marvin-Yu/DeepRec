@@ -134,9 +134,7 @@ TensorShape getNodeShape(const GraphDef & graph_def, const std::string name, int
                 
                 if( d == 0 && dim_size == -1){
                     int new_size = batch_size;
-                    
                     // assume the first dimension is batch size, note that it may not be true for some models.
-                    LOG(INFO) << "change batch size from: " << dim_size << " to " << new_size << std::endl;
                     dim_size = new_size;
                 }
                 tensorShape.AddDim(dim_size);
@@ -367,7 +365,7 @@ void PrepareSessionOptionForDarvin(SessionOptions& options, bool cg_enable = fal
     SubgraphDescription* subgraph = options.config.mutable_graph_options()
                                         ->mutable_optimizer_options()
                                         ->add_subgraph_descriptions();
-    subgraph->add_cuda_graph_batch_sizes(4);
+    subgraph->add_cuda_graph_batch_sizes(2);
     subgraph->set_subgraph_name("main_darwin");
     subgraph->add_output_node_names("p4p_Main_Score_Network/hiddenlayer_4/hiddenlayer_4/LeakyRelu");   
 
@@ -439,6 +437,11 @@ Status Test(GraphDef & graph_def,
       }
     }
 
+    SessionOptions options_tf;
+    PrepareSessionOptionForDarvin(options_tf, false);
+    std::unique_ptr<Session> session_tf(NewSession(options_tf));
+    TF_CHECK_OK(session_tf->Create(graph_def));
+
     // Prepare inputs
     //
   for (int i = 0; i < 100; i++) {
@@ -455,10 +458,6 @@ Status Test(GraphDef & graph_def,
     std::vector<Tensor> output_tensors_cg;
     TF_CHECK_OK(session->Run(input_map, output_names, {}, &output_tensors_cg));
 
-    SessionOptions options_tf;
-    PrepareSessionOptionForDarvin(options_tf, false);
-    std::unique_ptr<Session> session_tf(NewSession(options_tf));
-    TF_CHECK_OK(session_tf->Create(graph_def));
     std::vector<Tensor> output_tensors_tf;
     TF_CHECK_OK(session_tf->Run(input_map, output_names, {}, &output_tensors_tf));
 /*
