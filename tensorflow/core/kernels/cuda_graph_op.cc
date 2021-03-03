@@ -38,7 +38,7 @@ typedef struct CudaGraphCbArgs {
       ctx_(ctx),
       waiting_slice_num_(slice_num),
       done_(done),
-      qqpre_event_(pre_event) {
+      pre_event_(pre_event) {
     single_slice_ = (slice_num == 1);
     output_tensors_.reserve(output_num);
     has_failed_slice_ = false;
@@ -163,7 +163,7 @@ void CopyRetAndReturnMetaWhenFail(CudaGraphCbSliceArgs* args) {
 
   // if all slice finished
   args->cb_args_->done_();
-  cudaEventDestroy(args->pre_event_);
+  cudaEventDestroy(args->cb_args_->pre_event_);
   delete args->cb_args_;
   delete args;
   return;
@@ -184,7 +184,7 @@ void CopyRetAndReturnMeta(CudaGraphCbSliceArgs* args) {
 
   // if all slice finished
   args->cb_args_->done_();
-  cudaEventDestroy(args->pre_event_);
+  cudaEventDestroy(args->cb_args_->pre_event_);
   delete args->cb_args_;
   delete args;
   return;
@@ -220,8 +220,7 @@ CudaGraphOp::CudaGraphOp(OpKernelConstruction* ctx) : AsyncOpKernel(ctx)  {
 void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx, DoneCallback done,
                                     size_t begin, size_t end,
                                     size_t origin_batch_size, int req_id,
-                                    CudaGraphCbArgs* args, int slice_idx,
-                                    cudaEvent_t event) {
+                                    CudaGraphCbArgs* args, int slice_idx) {
   int batch_size = end - begin;
   CudaGraphCbSliceArgs* slice_args = new CudaGraphCbSliceArgs(args);
   if (args->has_failed_slice_) {
@@ -263,7 +262,7 @@ void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx, DoneCallback done,
   std::lock_guard<std::mutex> lock(meta->mutex_);
   // need wait event
   if (slice_idx < stream_num_) {
-    cudaError_t ret = cudaStreamWaitEvent(stream, event);
+    cudaError_t ret = cudaStreamWaitEvent(stream, args->pre_event_, 0);
     OP_REQUIRES_ASYNC_WITH_ARGS(ctx, ret == cudaSuccess,
               errors::Internal("synchronize event failed.", cudaGetErrorString(ret)), 
               CopyRetAndReturnMetaWhenFail, slice_args);
