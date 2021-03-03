@@ -51,10 +51,12 @@ public:
 
   Status GetCudaStream(int req_id, cudaStream_t& stream);
 
+  int GetStreamNum() { return num_stream_; };
+
 private:
   CudaGraphMgr(/* args */) { 
     Init();  
-    InitTraffic();
+  //  InitTraffic();
   };
   ~CudaGraphMgr();
 
