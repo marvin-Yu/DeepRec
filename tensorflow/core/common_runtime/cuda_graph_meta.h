@@ -38,17 +38,20 @@ typedef struct CudaGraphMeta {
   std::vector<CudaGraphOutputInfo> output_infos_;
   std::string graph_name_;
   int batch_size_;
+  std::vector<int> input_dim0_;
   // mutex for ensure launch cudagraph atomic
   std::mutex mutex_;
 
-CudaGraphMeta(const std::string& graph_name, int batch_size) :
+CudaGraphMeta(const std::string& graph_name, int batch_size, const std::vector<int> dim0) :
     graph_name_(graph_name),
-    batch_size_(batch_size) {};
+    batch_size_(batch_size),
+    input_dim0_(dim0) {};
 
 ~CudaGraphMeta() {
   cudaGraphExecDestroy(cuda_graph_instance_);
   cudaGraphDestroy(cuda_graph_);
   src_dst_mapping_.clear();
+  input_dim0_.clear();
   output_dst_src_mappping_.clear();
   output_infos_.clear();
 }

@@ -29,6 +29,7 @@
 
 static const int NUM_INSTANCE_DEFAULT = 3;
 static const int NUM_STREAM_DEFAULT = 3;
+static const float RESERVE_GPUMEM_RATIO_DEFAULT = 0.3;
 static const size_t CHUNK_SIZE = 256 * 1024 * 1024;
 static const size_t MAX_RESERVE_CHUNK = 16;
 static const std::string DEFAULT_GROUP = "_DEFAULT_";
@@ -184,10 +185,33 @@ Status CudaGraphMgr::GetCudaStream(int req_id, cudaStream_t& stream) {
   return Status::OK();
 }
 
+void CudaGraphMgr::ReserveGpuMem(BaseGPUDevice* device) {
+  if (gpu_mem_reserved_) {
+    return;
+  } 
+
+  float reserve_gpu_mem_ratio = RESERVE_GPUMEM_RATIO_DEFAULT;
+  char* reserve_gpumem_ratio_var = getenv("TF_CUDA_GRAPH_GPUMEM_RATIO");
+  if (reserve_gpumem_ratio_var == NULL) {
+    LOG(INFO) << "Environment Variable TF_CUDA_GRAPH_INSTANCE_NUM not set, use default " << RESERVE_GPUMEM_RATIO_DEFAULT;
+  } else {
+    reserve_gpu_mem_ratio = atof(reserve_gpumem_ratio_var);
+    if (reserve_gpu_mem_ratio < 0.0001 || reserve_gpu_mem_ratio > 0.999) {
+      LOG(INFO) << "Environment Variable TF_CUDA_GRAPH_INSTANCE_NUM invalid " << reserve_gpumem_ratio_var 
+                << " use default " << RESERVE_GPUMEM_RATIO_DEFAULT;
+      reserve_gpu_mem_ratio = RESERVE_GPUMEM_RATIO_DEFAULT;
+    }
+  }
+
+  int64_t mem_limit = device->attributes().memory_limit();
+  LOG(INFO) << "GPU memory limit is " << mem_limit;
+  return;
+}
+
 void CudaGraphMgr::GenerateInputs(const GraphDef& graph_def, const std::vector<string>& input_names,
                     std::vector<Tensor>& input_tensors, int batch_size) {
   input_tensors.clear();
-  for (int i = 0; i < input_names.size(); i++) {
+  for (int i = 0; i < input_names.size(); ++i) {
     auto tensorshape = getNodeShape(graph_def, input_names[i], batch_size);
     auto tensortype = getNodeType(graph_def, input_names[i]);
 
@@ -197,6 +221,16 @@ void CudaGraphMgr::GenerateInputs(const GraphDef& graph_def, const std::vector<s
 
     input_tensors.push_back(t);
   }
+}
+
+void CudaGraphMgr::GetInputDim0(const GraphDef& graph_def, const std::vector<string>& input_names,
+                    std::vector<int>& input_dim0) {
+  input_dim0.clear();
+  for (int i = 0; i < input_names.size(); ++i) {
+    TensorShape tensorshape = getNodeShape(graph_def, input_names[i], batch_size);
+    input_dim0.emplace_back(tensorshape.dim(0));
+  }
+  return;
 }
 
 void CudaGraphMgr::FillInputsMap(InputsMap& inputs_map, const std::vector<std::string>& input_names,
@@ -363,7 +397,6 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
   std::unique_ptr<Session> session(NewSession(options));
   TF_CHECK_OK(session->CreateForCapture(graph_def));
 
-//  std::string graph_name = group_name + origin_graph_name;
   std::string graph_name = origin_graph_name; 
 
   const DeviceMgr* device_manager;
@@ -418,6 +451,9 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
                   "Get stream for graph capturing failed.");
   }
 
+  std::vector<int> dim0;
+  GetInputDim0(graph_def, input_node_names, dim0);
+
   CudaGraphMeta* meta_check = nullptr;
   for (int i = 0; i < batch_size.size(); ++i) {
     if (graphname_batch_metas_map_.find(graph_name) == graphname_batch_metas_map_.end()) {
@@ -434,7 +470,7 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
     FillInputsMap(inputs_cuda_graph, input_node_names, input_tensors_cuda_graph);
     
     for (int j = 0; j < num_meta_instance_; j++) {
-      CudaGraphMeta* meta = new CudaGraphMeta(graph_name, batch_size[i]);
+      CudaGraphMeta* meta = new CudaGraphMeta(graph_name, batch_size[i], dim0);
       batch_meta_map[batch_size[i]].push_back(meta);
       TF_CHECK_OK(session->RunForCapture(inputs_cuda_graph, output_node_names, {}, meta));
       if (meta_check == nullptr) {

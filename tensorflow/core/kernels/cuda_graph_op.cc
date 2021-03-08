@@ -269,11 +269,16 @@ void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx, DoneCallback done,
   }
 
   for (int i = 0; i < feed_names_.size(); ++i) {
+    int origin_dim0 = meta->input_dim0_[i];
     const Tensor& input = ctx->input(i);
     size_t dim0 = input.dim_size(0);
     size_t num_elements = input.NumElements();
     size_t ele_num_per_dim0 = num_elements / dim0;
-    int copy_offset =  ele_num_per_dim0 * begin;
+    // if origin_dim0 is above 0, means input with fixed batch, do not slice
+    int copy_offset = 0;
+    if (origin_dim0 <= 0) {
+      copy_offset = ele_num_per_dim0 * begin;
+    }
 
     const void* host_buffer;
     size_t ele_size = 1;
@@ -300,7 +305,15 @@ void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx, DoneCallback done,
       return;
     }
 
-    size_t num_bytes = ele_num_per_dim0 * ele_size * batch_size;
+    // if origin_dim0 is above 0, means input with fixed batch, do not slice
+    size_t num_bytes = 0;
+    if (origin_dim0 > 0) {
+      size_t real_batch = std::min(origin_dim0, dim0);
+      num_bytes = ele_num_per_dim0 * ele_size * real_batch;
+    } else {
+      num_bytes = ele_num_per_dim0 * ele_size * batch_size;
+    }
+
     void* device_buffer = meta->src_dst_mapping_[i].second;
     OP_REQUIRES_ASYNC_WITH_ARGS(ctx, cudaMemcpyAsync(device_buffer, host_buffer, num_bytes,
         cudaMemcpyDeviceToDevice, stream) == cudaSuccess, 

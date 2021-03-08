@@ -63,15 +63,19 @@ private:
   void Init();
   void InitTraffic();
 
+  void ReserveGpuMem(BaseGPUDevice* device);
+
   // assistant functions for capturing
+  void GetInputDim0(const GraphDef& graph_def, const std::vector<string>& input_names,
+                    std::vector<int>& input_dim0);
   void GenerateInputs(const GraphDef& graph_def, const std::vector<string>& input_names,
-                    std::vector<Tensor>& input_tensors, int batch_size);
+                      std::vector<Tensor>& input_tensors, int batch_size);
   void FillInputsMap(InputsMap& inputs_map, const std::vector<std::string>& input_names,
-                   std::vector<Tensor>& input_tensors);
+                     std::vector<Tensor>& input_tensors);
   void CheckCudaGraphScore(const GraphDef& graph_def,
-                          CudaGraphMeta* meta,
-                          const std::vector<std::string>& input_node_names,
-                          const std::vector<std::string>& output_node_names);
+                           CudaGraphMeta* meta,
+                           const std::vector<std::string>& input_node_names,
+                           const std::vector<std::string>& output_node_names);
   static void LaunchGraphInMeta(CudaGraphMeta* meta, cudaStream_t* stream);
 
   bool DestoryCudaGraphResource(const std::string& subgraph_name);
@@ -92,6 +96,9 @@ private:
   // stream and cuda graph instance count, each instance corresponds to one stream
   int num_stream_;
   int num_meta_instance_;
+  // reserve gpu mem flag and its mutex
+  bool gpu_mem_reserved_;
+
   Allocator* host_allocator_;
 };
 
