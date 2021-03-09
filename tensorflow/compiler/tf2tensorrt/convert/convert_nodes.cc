@@ -1134,7 +1134,7 @@ Status TrtNodeValidator::IsTensorRTCandidate(const Node* node, const std::unorde
     return errors::Unimplemented("Device type ", tmp_device, " is not supported.");
   }
   LOG(INFO) << "GPU node: " << node->name();
-  if (!target_nodes.empty() && target_nodes.find(node->name()) == target_nodes.end()) {
+  if (/* !target_nodes.empty() && */ target_nodes.find(node->name()) == target_nodes.end()) {
     return errors::Unimplemented("Node(", node->name(), ") is not in convert_ranges.");
   }
 
