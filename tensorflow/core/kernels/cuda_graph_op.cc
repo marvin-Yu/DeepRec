@@ -308,7 +308,7 @@ void CudaGraphOp::ComputeAsyncSlice(OpKernelContext* ctx, DoneCallback done,
     // if origin_dim0 is above 0, means input with fixed batch, do not slice
     size_t num_bytes = 0;
     if (origin_dim0 > 0) {
-      size_t real_batch = std::min(origin_dim0, dim0);
+      size_t real_batch = std::min((size_t)origin_dim0, dim0);
       num_bytes = ele_num_per_dim0 * ele_size * real_batch;
     } else {
       num_bytes = ele_num_per_dim0 * ele_size * batch_size;

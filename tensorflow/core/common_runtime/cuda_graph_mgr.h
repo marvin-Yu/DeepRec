@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "tensorflow/core/common_runtime/cuda_graph_meta.h"
+#include "tensorflow/core/common_runtime/gpu/gpu_device.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/platform/macros.h"
 #include "tensorflow/core/public/session.h"

@@ -127,6 +127,7 @@ void RandomInitialize(Tensor& t) {
 }
 
 void CudaGraphMgr::Init() {
+  gpu_mem_reserved_ = false;
   host_allocator_ = nullptr;
   
   char* stream_num_var = getenv("TF_CUDA_GRAPH_STREAM_NUM");
@@ -190,6 +191,7 @@ void CudaGraphMgr::ReserveGpuMem(BaseGPUDevice* device) {
     return;
   } 
 
+  gpu_mem_reserved_ = true;
   float reserve_gpu_mem_ratio = RESERVE_GPUMEM_RATIO_DEFAULT;
   char* reserve_gpumem_ratio_var = getenv("TF_CUDA_GRAPH_GPUMEM_RATIO");
   if (reserve_gpumem_ratio_var == NULL) {
@@ -204,7 +206,11 @@ void CudaGraphMgr::ReserveGpuMem(BaseGPUDevice* device) {
   }
 
   int64_t mem_limit = device->attributes().memory_limit();
-  LOG(INFO) << "GPU memory limit is " << mem_limit;
+  int reserve_block = mem_limit * reserve_gpu_mem_ratio / CHUNK_SIZE;
+  LOG(INFO) << "GPU memory limit is " << mem_limit << ", reserve block num " << reserve_block;
+  if (!device->ReserveGPUMemChunks(CHUNK_SIZE, reserve_block)) {
+    LOG(ERROR) << "Reserve chunk failed, request chunk num " << reserve_block; 
+  }
   return;
 }
 
@@ -227,8 +233,27 @@ void CudaGraphMgr::GetInputDim0(const GraphDef& graph_def, const std::vector<str
                     std::vector<int>& input_dim0) {
   input_dim0.clear();
   for (int i = 0; i < input_names.size(); ++i) {
-    TensorShape tensorshape = getNodeShape(graph_def, input_names[i], batch_size);
-    input_dim0.emplace_back(tensorshape.dim(0));
+    bool found = false;
+    for (int j = 0; j < graph_def.node_size(); ++j) {
+      auto n = graph_def.node(j);
+      if (n.name() == input_names[i]) { 
+        found = true;   
+        auto shape = n.attr().at("shape").shape();
+        int dims = shape.dim_size();
+        if (dims > 0) {
+          LOG(INFO) << "add dim0 " << shape.dim(0).size() << " for input " << i;
+          input_dim0.emplace_back(shape.dim(0).size());
+        } else {
+          LOG(INFO) << "add dim0 0 for const input " << i;
+          input_dim0.emplace_back(0);
+        }
+        break; 
+      }
+    }
+    if (!found) {
+      LOG(INFO) << "add dim0 0 for not found input " << i;
+      input_dim0.emplace_back(0);
+    }
   }
   return;
 }
@@ -436,10 +461,7 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
   for (auto * d : devices){
     if(d->attributes().device_type() == "GPU"){
       auto gpu = dynamic_cast<BaseGPUDevice*>(d);
-      int reserve_chunk_num = std::min(MAX_RESERVE_CHUNK, batch_size.size() * num_meta_instance_);
-      if (!gpu->ReserveGPUMemChunks(CHUNK_SIZE, reserve_chunk_num)) {
-        LOG(ERROR) << "Reserve chunk failed, request chunk num " << reserve_chunk_num; 
-      }
+      ReserveGpuMem(gpu);
     }
   }
 
