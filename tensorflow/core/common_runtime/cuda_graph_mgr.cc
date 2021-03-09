@@ -186,34 +186,6 @@ Status CudaGraphMgr::GetCudaStream(int req_id, cudaStream_t& stream) {
   return Status::OK();
 }
 
-void CudaGraphMgr::ReserveGpuMem(BaseGPUDevice* device) {
-  if (gpu_mem_reserved_) {
-    return;
-  } 
-
-  gpu_mem_reserved_ = true;
-  float reserve_gpu_mem_ratio = RESERVE_GPUMEM_RATIO_DEFAULT;
-  char* reserve_gpumem_ratio_var = getenv("TF_CUDA_GRAPH_GPUMEM_RATIO");
-  if (reserve_gpumem_ratio_var == NULL) {
-    LOG(INFO) << "Environment Variable TF_CUDA_GRAPH_INSTANCE_NUM not set, use default " << RESERVE_GPUMEM_RATIO_DEFAULT;
-  } else {
-    reserve_gpu_mem_ratio = atof(reserve_gpumem_ratio_var);
-    if (reserve_gpu_mem_ratio < 0.0001 || reserve_gpu_mem_ratio > 0.999) {
-      LOG(INFO) << "Environment Variable TF_CUDA_GRAPH_INSTANCE_NUM invalid " << reserve_gpumem_ratio_var 
-                << " use default " << RESERVE_GPUMEM_RATIO_DEFAULT;
-      reserve_gpu_mem_ratio = RESERVE_GPUMEM_RATIO_DEFAULT;
-    }
-  }
-
-  int64_t mem_limit = device->attributes().memory_limit();
-  int reserve_block = mem_limit * reserve_gpu_mem_ratio / CHUNK_SIZE;
-  LOG(INFO) << "GPU memory limit is " << mem_limit << ", reserve block num " << reserve_block;
-  if (!device->ReserveGPUMemChunks(CHUNK_SIZE, reserve_block)) {
-    LOG(ERROR) << "Reserve chunk failed, request chunk num " << reserve_block; 
-  }
-  return;
-}
-
 void CudaGraphMgr::GenerateInputs(const GraphDef& graph_def, const std::vector<string>& input_names,
                     std::vector<Tensor>& input_tensors, int batch_size) {
   input_tensors.clear();
@@ -437,7 +409,44 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
       }
     }
   }
-  // First session run, init needed resources
+
+  // reserve gpu mem
+  if (!gpu_mem_reserved_) {
+      // reserve
+    for (auto * d : devices){
+      if(d->attributes().device_type() == "GPU"){
+        auto gpu = dynamic_cast<BaseGPUDevice*>(d);
+        gpu_mem_reserved_ = true;
+        float reserve_gpu_mem_ratio = RESERVE_GPUMEM_RATIO_DEFAULT;
+        char* reserve_gpumem_ratio_var = getenv("TF_CUDA_GRAPH_GPUMEM_RATIO");
+        if (reserve_gpumem_ratio_var == NULL) {
+          LOG(INFO) << "Environment Variable TF_CUDA_GRAPH_INSTANCE_NUM not "
+                       "set, use default "
+                    << RESERVE_GPUMEM_RATIO_DEFAULT;
+        } else {
+          reserve_gpu_mem_ratio = atof(reserve_gpumem_ratio_var);
+          if (reserve_gpu_mem_ratio < 0.0001 || reserve_gpu_mem_ratio > 0.999) {
+            LOG(INFO)
+                << "Environment Variable TF_CUDA_GRAPH_INSTANCE_NUM invalid "
+                << reserve_gpumem_ratio_var << " use default "
+                << RESERVE_GPUMEM_RATIO_DEFAULT;
+            reserve_gpu_mem_ratio = RESERVE_GPUMEM_RATIO_DEFAULT;
+          }
+        }
+
+        int64_t mem_limit = gpu->attributes().memory_limit();
+        int reserve_block = mem_limit * reserve_gpu_mem_ratio / CHUNK_SIZE;
+        LOG(INFO) << "GPU memory limit is " << mem_limit
+                  << ", reserve block num " << reserve_block;
+        if (!gpu->ReserveGPUMemChunks(CHUNK_SIZE, reserve_block)) {
+          LOG(ERROR) << "Reserve chunk failed, request chunk num "
+                     << reserve_block;
+        }
+      }
+    }
+  }
+
+  // First session run, init needed resources by normal tf run
   for (int i = 0; i < batch_size.size(); ++i) {
     int warm_batch = batch_size[i];
     std::vector<Tensor> input_tensors_tf;
@@ -451,20 +460,13 @@ Status CudaGraphMgr::CaptureCudagraph(const GraphDef& graph_def,
     }
   }
 
+  // destory existed meta with same key (update)
   bool destoried = DestoryCudaGraphResource(graph_name);
   if (destoried) {
     LOG(INFO) << "Old cuda graph resources for " << graph_name << " destoried";
   }
+
   // capture the cuda graph
-
-  // reserve
-  for (auto * d : devices){
-    if(d->attributes().device_type() == "GPU"){
-      auto gpu = dynamic_cast<BaseGPUDevice*>(d);
-      ReserveGpuMem(gpu);
-    }
-  }
-
   assert(session->SupportsCudaGraph());
   cudaStream_t stream = session->EnableGraphCapture();
   LOG(INFO) << "capturing on stream -- " << stream;

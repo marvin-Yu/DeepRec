@@ -15,7 +15,6 @@
 #include <vector>
 
 #include "tensorflow/core/common_runtime/cuda_graph_meta.h"
-#include "tensorflow/core/common_runtime/gpu/gpu_device.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/platform/macros.h"
 #include "tensorflow/core/public/session.h"
@@ -63,8 +62,6 @@ private:
 
   void Init();
   void InitTraffic();
-
-  void ReserveGpuMem(BaseGPUDevice* device);
 
   // assistant functions for capturing
   void GetInputDim0(const GraphDef& graph_def, const std::vector<string>& input_names,
