@@ -27,7 +27,7 @@ namespace {
 //  - Is this the right number of threads?
 //  - Should EventMgrs be shared between GPUDevices on a multi-GPU machine?
 // RTP modified kNumThreads to 8. original is 2.
-static const int kNumThreads = 8;
+static const int kNumThreads = 2;
 }  // namespace
 
 namespace gpu_event_mgr {

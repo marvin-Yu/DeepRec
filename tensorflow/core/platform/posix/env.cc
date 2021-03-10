@@ -59,6 +59,8 @@ class StdThread : public Thread {
       : thread_(fn) {
     mutex_lock l(name_mutex);
     GetThreadNameRegistry().emplace(thread_.get_id(), name);
+    auto handle = thread_.native_handle();
+    pthread_setname_np(handle, name.c_str());
   }
 
   ~StdThread() override {
