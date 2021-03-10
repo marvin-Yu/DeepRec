@@ -97,6 +97,7 @@ extern "C" {
 
 typedef struct TF_ProfStats {
   unsigned long long flops;
+  unsigned long long tao_op_calls;
 } TF_ProfStats;
 
 TF_CAPI_EXPORT extern TF_Buffer* TF_ReadGraphDefFromFile(

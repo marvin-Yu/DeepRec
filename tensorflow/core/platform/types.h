@@ -39,6 +39,7 @@ namespace tensorflow {
 //[PROF-STATS]
 struct ProfStats {
   std::atomic<uint64> flops;
+  uint64 tao_op_calls = 0;
   ProfStats() {flops = 0;}
 };
 

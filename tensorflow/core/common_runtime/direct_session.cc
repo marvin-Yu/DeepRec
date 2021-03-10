@@ -621,7 +621,7 @@ Status DirectSession::RunInternal(
   } else {
     args.prof_stats = nullptr;
   }
-  
+
   const bool do_trace = (run_options.trace_level() > RunOptions::NO_TRACE);
 
   bool update_cost_model = false;
@@ -802,6 +802,7 @@ Status DirectSession::RunInternal(
   //[PROF-STATS]
   if (enable_prof_stats_ && run_metadata) {
     run_metadata->mutable_prof_stats()->set_flops(prof_stats.flops);
+    run_metadata->mutable_prof_stats()->set_tao_op_calls(prof_stats.tao_op_calls);
   }
 
   // If requested via RunOptions, output the partition graphs.
@@ -1126,7 +1127,7 @@ void DirectSession::RunAsync(const RunOptions& run_options,
     DONE_WITH_STATUS(s);
   }
 
-  const int64 step_id = run_options.has_run_id() ? 
+  const int64 step_id = run_options.has_run_id() ?
                         run_options.run_id().value() : step_id_counter_.fetch_add(1);
 
   if (LogMemory::IsEnabled()) {
@@ -1196,7 +1197,7 @@ Status DirectSession::Run(const RunOptions& run_options,
     return s;
   }
 
-  const int64 step_id = run_options.has_run_id() ? 
+  const int64 step_id = run_options.has_run_id() ?
                         run_options.run_id().value() : step_id_counter_.fetch_add(1);
   //const int64 step_id = step_id_counter_.fetch_add(1);
 
