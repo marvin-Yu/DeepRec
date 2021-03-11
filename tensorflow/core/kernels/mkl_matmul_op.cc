@@ -156,8 +156,8 @@ class MklMatMulOp : public OpKernel {
     VLOG(2) << "MKL DNN SGEMM called";
 #ifdef ENABLE_DNNL_THREADPOOL
     MklDnnThreadPool eigen_tp(ctx);
-    sgemm(char_transa, char_transb, m, n, k, alpha, a, lda, b, ldb, beta, c,
-          ldc, &eigen_tp);
+    dnnl::threadpool_interop::sgemm(char_transa, char_transb, m, n, k, alpha, a,
+                                    lda, b, ldb, beta, c, ldc, &eigen_tp);
 #else
     dnnl_sgemm(char_transa, char_transb, m, n, k, alpha, a, lda, b, ldb, beta,
                c, ldc);
