@@ -43,13 +43,6 @@ class MklMatMulOp : public OpKernel {
   explicit MklMatMulOp(OpKernelConstruction* ctx) : OpKernel(ctx) {
     OP_REQUIRES_OK(ctx, ctx->GetAttr("transpose_a", &transpose_a_));
     OP_REQUIRES_OK(ctx, ctx->GetAttr("transpose_b", &transpose_b_));
-    string _onednn_fpmath_mode = "";
-    string _dnnl_fpmath_mode = "";
-    OP_REQUIRES_OK(ctx, ReadStringFromEnvVar("ONEDNN_DEFAULT_FPMATH_MODE",
-                                                "", &_onednn_fpmath_mode));
-    OP_REQUIRES_OK(ctx, ReadStringFromEnvVar("DNNL_DEFAULT_FPMATH_MODE",
-                                                "", &_dnnl_fpmath_mode));
-    FPMATH_MODE = _onednn_fpmath_mode != "" | _dnnl_fpmath_mode != "";
   }
 
   void Compute(OpKernelContext* ctx) override {
@@ -109,7 +102,6 @@ class MklMatMulOp : public OpKernel {
  private:
   bool transpose_a_;
   bool transpose_b_;
-  bool FPMATH_MODE;
   // --------------------------------------------------------------------------
   //
   // @brief Matrix-Matrix Multiplication with FP32 tensors, a, b, c using CBLAS
@@ -163,26 +155,9 @@ class MklMatMulOp : public OpKernel {
     char char_transb = transb ? 'T' : 'N';
     VLOG(2) << "MKL DNN SGEMM called";
 #ifdef ENABLE_DNNL_THREADPOOL
-    // With threadpool , the runtime overhead is comparable to the kernel
-    // execution for small kernel sizes. For such sizes, it may be better to run
-    // the kernel single threaded. Here we are coming up with a cost model based
-    // on L1 sizes. If we find that matrices are small enough, we will execute
-    // single threaded. This may need tuning.
-    if (FPMATH_MODE){
-      dnnl_gemm<float>(char_transa, char_transb, m, n, k,
-                        alpha, a, lda, b, ldb, beta, c, ldc, ctx);
-      return;
-    }
-    if (ExecuteSingleThreadedGemm(m, n, k)) {
-      // For now, call single-threaded gemm.
-      MklDnnThreadPool eigen_tp(ctx, 1);
-      sgemm(char_transa, char_transb, m, n, k, alpha, a, lda, b, ldb,
-                    beta, c, ldc, &eigen_tp);
-    } else {
-      MklDnnThreadPool eigen_tp(ctx);
-      sgemm(char_transa, char_transb, m, n, k, alpha, a, lda, b, ldb,
-                    beta, c, ldc, &eigen_tp);
-    }
+    MklDnnThreadPool eigen_tp(ctx);
+    dnnl::threadpool_interop::sgemm(char_transa, char_transb, m, n, k, alpha, a,
+                                    lda, b, ldb, beta, c, ldc, &eigen_tp);
 #else
     dnnl_sgemm(char_transa, char_transb, m, n, k, alpha, a, lda, b, ldb, beta,
                c, ldc);
