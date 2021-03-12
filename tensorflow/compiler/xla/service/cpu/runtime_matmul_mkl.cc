@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 #include "tensorflow/core/platform/logging.h"
-#ifdef INTEL_MKL_MATMUL
+#if defined(INTEL_MKL) || defined(INTEL_MKL_GEMM_ONLY)
 #include "tensorflow/compiler/xla/service/cpu/runtime_matmul_mkl.h"
 #include "third_party/intel_mkl_ml/include/mkl_cblas.h"
 #include "third_party/intel_mkl_ml/include/mkl_service.h"
@@ -137,4 +137,4 @@ __xla_cpu_runtime_MKLSingleThreadedMatMulF64(const void* run_options_ptr,
   // Set thread number back to the previous number.
   mkl_set_num_threads_local(prev_num_threads);
 }
-#endif  // INTEL_MKL_MATMUL
+#endif  // INTEL_MKL_GEMM_ONLY || INTEL_MKL

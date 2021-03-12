@@ -61,7 +61,6 @@ mkdir -p .%{_prefix}/tensorflow/lib
 cp $OLDPWD/../tensorflow/c/*.h .%{_prefix}/tensorflow/include/tensorflow/c/
 cp -r $OLDPWD/../tensorflow/c/eager .%{_prefix}/tensorflow/include/tensorflow/c/
 cp -a $OLDPWD/../bazel-bin/tensorflow/libtensorflow.so* .%{_prefix}/tensorflow/lib/
-cp -a $OLDPWD/../rpm/.dep_create/var/home/a/mklml/lib/libmklml_intel.so .%{_prefix}/tensorflow/lib/
 
 %files
 %defattr(-,ads,users)

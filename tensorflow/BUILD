@@ -30,6 +30,7 @@ load(
 load(
     "//third_party/mkl:build_defs.bzl",
     "if_mkl_ml",
+    "if_mkl_gemm_only",
 )
 
 package(
