@@ -112,8 +112,6 @@ def if_mkl_gemm_only(if_true, if_false = []):
     """
     return select({
         str(Label("//third_party/mkl:build_with_mkl_gemm_only")): if_true,
-        str(Label("//third_party/mkl_dnn:build_with_mkl_dnn_only")): if_false,
-        str(Label("//third_party/mkl:build_with_mkl")): if_true,
         "//conditions:default": if_false,
     })
 
