@@ -326,10 +326,8 @@ Status PerformStaticShapeInferenceBeforeEncapsulation(Graph* g) {
   for (auto n : g->nodes()) {
     if ((n->type_string() == "_Arg") &&
         (n->attrs().Find("_output_shapes") != nullptr)) {
-      LOG(INFO) << n->DebugString();
       InferredShape arg_shape;
       const auto& output_shape = n->attrs().Find("_output_shapes")->shape();
-      LOG(INFO) << output_shape.ShortDebugString();
       arg_shape.shape = PartialTensorShape(output_shape);
       int index;
       TF_RETURN_IF_ERROR(GetNodeAttr(n->attrs(), "index", &index));

@@ -126,8 +126,7 @@ static bool DoGemmWithAlgorithm(
   int64 num_cols_needed = output_matrix.num_cols;
   if (before_padding != 0 && after_padding != 0) {
     if (num_cols_needed == after_padding) {
-      num_cols_needed = CeilOfRatio(int64(before_padding),
-                                    int64(8));  // make it multiple of 8
+      num_cols_needed = (before_padding + 7) / 8 * 8;  // make it multiple of 8
       if (num_cols_needed >
           output_matrix.num_cols) {  // in case of out-of-bound, i.e.
                                      // before_padding==1, after_padding==2
