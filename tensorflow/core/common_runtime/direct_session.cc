@@ -38,8 +38,8 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/scoped_allocator_mgr.h"
 #include "tensorflow/core/common_runtime/step_stats_collector.h"
 #include "tensorflow/core/framework/function.h"
-#include "tensorflow/core/framework/graph.pb_text.h"
 #include "tensorflow/core/framework/graph.pb.h"
+#include "tensorflow/core/framework/graph.pb_text.h"
 #include "tensorflow/core/framework/graph_def_util.h"
 #include "tensorflow/core/framework/log_memory.h"
 #include "tensorflow/core/framework/logging.h"
@@ -312,13 +312,12 @@ DirectSession::DirectSession(const SessionOptions& options,
       factory_(factory),
       cancellation_manager_(new CancellationManager()),
       operation_timeout_in_ms_(options_.config.operation_timeout_in_ms()) {
-
-  const bool force_run_in_caller_thread = 
-    options_.config.force_run_in_caller_thread();
+  const bool force_run_in_caller_thread =
+      options_.config.force_run_in_caller_thread();
 
   const int thread_pool_size =
       options_.config.session_inter_op_thread_pool_size();
-  
+
   if (thread_pool_size > 0) {
     for (int i = 0; i < thread_pool_size; ++i) {
       thread::ThreadPool* pool = nullptr;
@@ -355,20 +354,18 @@ DirectSession::DirectSession(const SessionOptions& options,
     LOG(ERROR) << status.error_message();
   }
 
-  status =
-    ReadBoolFromEnvVar("TF_ENABLE_GEMM_DYNAMIC_BATCHSIZE", false, &gemm_dynamic_batchsize_);
+  status = ReadBoolFromEnvVar("TF_ENABLE_GEMM_DYNAMIC_BATCHSIZE", true,
+                              &gemm_dynamic_batchsize_);
   if (!status.ok()) {
     LOG(ERROR) << status.error_message();
   }
 
-  status =
-    ReadBoolFromEnvVar("ENABLE_PROF_STATS", true, &enable_prof_stats_);
+  status = ReadBoolFromEnvVar("ENABLE_PROF_STATS", true, &enable_prof_stats_);
   if (!status.ok()) {
     LOG(ERROR) << status.error_message();
   }
 
   session_handle_ = "direct";
-//      strings::StrCat("direct", strings::FpToString(random::New64()));
   int devices_added = 0;
   if (options.config.log_device_placement()) {
     const string mapping_str = device_mgr_->DeviceMappingString();
@@ -481,8 +478,8 @@ struct CallbackFrame {
     delete call_frame;
     delete run_state;
   }
-  FunctionCallFrame *call_frame;
-  DirectSession::RunState *run_state;
+  FunctionCallFrame* call_frame;
+  DirectSession::RunState* run_state;
   DirectSession::ExecutorsAndKeys* executors_and_keys;
   CancellationManager step_cancellation_manager;
   CancellationToken cancellation_token;
@@ -802,7 +799,8 @@ Status DirectSession::RunInternal(
   //[PROF-STATS]
   if (enable_prof_stats_ && run_metadata) {
     run_metadata->mutable_prof_stats()->set_flops(prof_stats.flops);
-    run_metadata->mutable_prof_stats()->set_tao_op_calls(prof_stats.tao_op_calls);
+    run_metadata->mutable_prof_stats()->set_tao_op_calls(
+        prof_stats.tao_op_calls);
   }
 
   // If requested via RunOptions, output the partition graphs.
@@ -820,29 +818,28 @@ Status DirectSession::RunInternal(
   return Status::OK();
 }
 
-#define TF_DONE_RETURN_IF_ERROR(s) do {         \
-        if (!(s).ok()) {                        \
-            done((s));                          \
-            return;                             \
-        }                                       \
-    } while (0)
+#define TF_DONE_RETURN_IF_ERROR(s) \
+  do {                             \
+    if (!(s).ok()) {               \
+      done((s));                   \
+      return;                      \
+    }                              \
+  } while (0)
 
-#define DONE_WITH_STATUS(s) do {            \
-    done(s);                                \
-    return;                                 \
-  } while(0)
+#define DONE_WITH_STATUS(s) \
+  do {                      \
+    done(s);                \
+    return;                 \
+  } while (0)
 
 void DirectSession::RunInternalAsync(
     int64 step_id, const RunOptions& run_options,
     CallFrameInterface* call_frame, ExecutorsAndKeys* executors_and_keys,
     RunMetadata* run_metadata,
     const thread::ThreadPoolOptions& threadpool_options,
-    const NamedTensorList& inputs,
-    const std::vector<string>& output_names,
-    const std::vector<string>& target_nodes,
-    std::vector<Tensor>* outputs,
-    CallbackFrame* frame,
-    StatusCallback done) {
+    const NamedTensorList& inputs, const std::vector<string>& output_names,
+    const std::vector<string>& target_nodes, std::vector<Tensor>* outputs,
+    CallbackFrame* frame, StatusCallback done) {
   const uint64 start_time_usecs = options_.env->NowMicros();
   const int64 executor_step_count = executors_and_keys->step_count.fetch_add(1);
   frame->run_state = new RunState(step_id, &devices_);
@@ -870,7 +867,7 @@ void DirectSession::RunInternalAsync(
       // matches what came out of GraphExecutionState::BuildGraph().
       if (run_options.experimental().collective_graph_key() !=
           executors_and_keys->collective_graph_key) {
-         DONE_WITH_STATUS(errors::Internal(
+        DONE_WITH_STATUS(errors::Internal(
             "collective_graph_key in RunOptions ",
             run_options.experimental().collective_graph_key(),
             " should match collective_graph_key from optimized graph ",
@@ -896,16 +893,17 @@ void DirectSession::RunInternalAsync(
   // Start parallel Executors.
   const size_t num_executors = executors_and_keys->items.size();
   ExecutorBarrier* barrier = new ExecutorBarrier(
-      num_executors, run_state.rendez, [this, &run_state, done, run_options,
-      inputs, output_names, target_nodes,
-      outputs, run_metadata, frame, start_time_usecs](const Status& ret) {
+      num_executors, run_state.rendez,
+      [this, &run_state, done, run_options, inputs, output_names, target_nodes,
+       outputs, run_metadata, frame, start_time_usecs](const Status& ret) {
         {
           mutex_lock l(run_state.mu_);
           run_state.status.Update(ret);
         }
         run_state.executors_done.Notify();
-        auto s = this->AfterRunAsync(run_options, inputs, output_names, target_nodes,
-            outputs, frame, run_metadata, start_time_usecs);
+        auto s =
+            this->AfterRunAsync(run_options, inputs, output_names, target_nodes,
+                                outputs, frame, run_metadata, start_time_usecs);
         done(s);
       });
 
@@ -956,7 +954,7 @@ void DirectSession::RunInternalAsync(
           static_cast<int32>(thread_pools_.size())) {
     run_state.executors_done.Notify();
     delete barrier;
-	DONE_WITH_STATUS(errors::InvalidArgument("Invalid inter_op_thread_pool"));
+    DONE_WITH_STATUS(errors::InvalidArgument("Invalid inter_op_thread_pool"));
   }
 
   // Register this step with session's cancellation manager, so that
@@ -964,7 +962,7 @@ void DirectSession::RunInternalAsync(
   const CancellationToken cancellation_token =
       cancellation_manager_->get_cancellation_token();
   frame->cancellation_token = cancellation_token;
-  auto &step_cancellation_manager = frame->step_cancellation_manager;
+  auto& step_cancellation_manager = frame->step_cancellation_manager;
   const bool already_cancelled = !cancellation_manager_->RegisterCallback(
       cancellation_token, [&step_cancellation_manager]() {
         step_cancellation_manager.StartCancel();
@@ -975,7 +973,7 @@ void DirectSession::RunInternalAsync(
     // block on this notification.
     run_state.executors_done.Notify();
     delete barrier;
-	DONE_WITH_STATUS(errors::Cancelled("Run call was cancelled"));
+    DONE_WITH_STATUS(errors::Cancelled("Run call was cancelled"));
   }
 
   // Use std::unique_ptr to ensure garbage collection
@@ -1054,9 +1052,7 @@ void DirectSession::RunAsync(const RunOptions& run_options,
                              const std::vector<string>& output_names,
                              const std::vector<string>& target_nodes,
                              std::vector<Tensor>* outputs,
-                             RunMetadata* run_metadata,
-                             StatusCallback done)
-{
+                             RunMetadata* run_metadata, StatusCallback done) {
   auto frame = new CallbackFrame;
   StatusCallback new_done = [frame, done](const Status& ret) {
     delete frame;
@@ -1067,13 +1063,12 @@ void DirectSession::RunAsync(const RunOptions& run_options,
 }
 
 void DirectSession::RunAsync(const RunOptions& run_options,
-                          const NamedTensorList& inputs,
-                          const std::vector<string>& output_names,
-                          const std::vector<string>& target_nodes,
-                          std::vector<Tensor>* outputs,
-                          RunMetadata* run_metadata,
-                          CallbackFrame* frame,
-                          StatusCallback done) {
+                             const NamedTensorList& inputs,
+                             const std::vector<string>& output_names,
+                             const std::vector<string>& target_nodes,
+                             std::vector<Tensor>* outputs,
+                             RunMetadata* run_metadata, CallbackFrame* frame,
+                             StatusCallback done) {
   TF_DONE_RETURN_IF_ERROR(CheckNotClosed());
   TF_DONE_RETURN_IF_ERROR(CheckGraphCreated("Run()"));
   direct_session_runs->GetCell()->IncrementBy(1);
@@ -1094,9 +1089,9 @@ void DirectSession::RunAsync(const RunOptions& run_options,
   run_state_args.collective_graph_key =
       run_options.experimental().collective_graph_key();
 
-  TF_DONE_RETURN_IF_ERROR(GetOrCreateExecutors(input_tensor_names, output_names,
-                                          target_nodes, &executors_and_keys,
-                                          &run_state_args));
+  TF_DONE_RETURN_IF_ERROR(
+      GetOrCreateExecutors(input_tensor_names, output_names, target_nodes,
+                           &executors_and_keys, &run_state_args));
   {
     mutex_lock l(collective_graph_key_lock_);
     collective_graph_key_ = executors_and_keys->collective_graph_key;
@@ -1106,7 +1101,7 @@ void DirectSession::RunAsync(const RunOptions& run_options,
   // Configure a call frame for the step, which we use to feed and
   // fetch values to and from the executors.
   frame->call_frame = new FunctionCallFrame(executors_and_keys->input_types,
-                               executors_and_keys->output_types);
+                                            executors_and_keys->output_types);
   auto& call_frame = *(frame->call_frame);
   gtl::InlinedVector<Tensor, 4> feed_args(inputs.size());
   for (const auto& it : inputs) {
@@ -1127,17 +1122,17 @@ void DirectSession::RunAsync(const RunOptions& run_options,
     DONE_WITH_STATUS(s);
   }
 
-  const int64 step_id = run_options.has_run_id() ?
-                        run_options.run_id().value() : step_id_counter_.fetch_add(1);
+  const int64 step_id = run_options.has_run_id()
+                            ? run_options.run_id().value()
+                            : step_id_counter_.fetch_add(1);
 
   if (LogMemory::IsEnabled()) {
     LogMemory::RecordStep(step_id, run_state_args.handle);
   }
 
-  RunInternalAsync(step_id, run_options, &call_frame,
-      executors_and_keys, run_metadata,
-      thread::ThreadPoolOptions(), inputs,
-      output_names, target_nodes, outputs, frame, done);
+  RunInternalAsync(step_id, run_options, &call_frame, executors_and_keys,
+                   run_metadata, thread::ThreadPoolOptions(), inputs,
+                   output_names, target_nodes, outputs, frame, done);
 }
 
 Status DirectSession::Run(const RunOptions& run_options,
@@ -1197,9 +1192,9 @@ Status DirectSession::Run(const RunOptions& run_options,
     return s;
   }
 
-  const int64 step_id = run_options.has_run_id() ?
-                        run_options.run_id().value() : step_id_counter_.fetch_add(1);
-  //const int64 step_id = step_id_counter_.fetch_add(1);
+  const int64 step_id = run_options.has_run_id()
+                            ? run_options.run_id().value()
+                            : step_id_counter_.fetch_add(1);
 
   if (LogMemory::IsEnabled()) {
     LogMemory::RecordStep(step_id, run_state_args.handle);
@@ -1255,15 +1250,12 @@ Status DirectSession::Run(const RunOptions& run_options,
   return Status::OK();
 }
 
-Status DirectSession::AfterRunAsync(const ::tensorflow::RunOptions& run_options,
-                                    const NamedTensorList& inputs,
-                                    const std::vector<string>& output_names,
-                                    const std::vector<string>& target_nodes,
-                                    std::vector<Tensor> *outputs,
-                                    CallbackFrame* frame,
-                                    RunMetadata* run_metadata,
-									uint64 start_time_usecs) {
-  auto &run_state = *(frame->run_state);
+Status DirectSession::AfterRunAsync(
+    const ::tensorflow::RunOptions& run_options, const NamedTensorList& inputs,
+    const std::vector<string>& output_names,
+    const std::vector<string>& target_nodes, std::vector<Tensor>* outputs,
+    CallbackFrame* frame, RunMetadata* run_metadata, uint64 start_time_usecs) {
+  auto& run_state = *(frame->run_state);
   if (!cancellation_manager_->DeregisterCallback(frame->cancellation_token)) {
     // The step has been cancelled: make sure we don't attempt to receive the
     // outputs as this would make it block forever.
@@ -1341,7 +1333,8 @@ Status DirectSession::AfterRunAsync(const ::tensorflow::RunOptions& run_options,
       return s;
     }
     const bool unique_outputs =
-        output_names.size() == frame->executors_and_keys->output_name_to_index.size();
+        output_names.size() ==
+        frame->executors_and_keys->output_name_to_index.size();
     // first_indices[i] = j implies that j is the smallest value for which
     // output_names[i] == output_names[j].
     std::vector<int> first_indices;
@@ -1831,7 +1824,7 @@ Status DirectSession::CreateExecutors(
       return Status::OK();
     };
 
-	params.node_outputs_cb = node_outputs_callback_;
+    params.node_outputs_cb = node_outputs_callback_;
     optimizer.Optimize(lib, options_.env, device, &partition_graph,
                        /*shape_map=*/nullptr);
 
@@ -2080,7 +2073,6 @@ Status DirectSession::CreateGraphs(
   // Partition the graph across devices.
   PartitionOptions popts;
   popts.node_to_loc = [](const Node* node) {
-    auto& st = node->assigned_device_name();
     return node->assigned_device_name();
   };
   popts.new_name = [this](const string& prefix) {
@@ -2332,11 +2324,10 @@ class DirectSession::RunCallableCallFrame : public CallFrameInterface {
 ::tensorflow::Status DirectSession::RunCallable(
     CallableHandle handle, const std::vector<Tensor>& feed_tensors,
     std::vector<Tensor>* fetch_tensors, RunMetadata* run_metadata,
-    uint64_t before_padding,
-    uint64_t after_padding) {
+    uint64_t before_padding, uint64_t after_padding) {
   return RunCallable(handle, feed_tensors, fetch_tensors, run_metadata,
-                     thread::ThreadPoolOptions(),
-                     before_padding, after_padding);
+                     thread::ThreadPoolOptions(), before_padding,
+                     after_padding);
 }
 
 ::tensorflow::Status DirectSession::RunCallable(

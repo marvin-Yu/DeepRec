@@ -105,6 +105,7 @@ class DynamicDimensionInferenceVisitor : public DfsHloVisitorWithDefault {
   // value and index in the shape. This is a helper function to handle trivial
   // instructions like elementwise operations.
   Status PassThroughDynamicDimension(HloInstruction*);
+  Status PassBatchDimDynamic(HloInstruction* hlo);
 
   // The dynamic parameter bindings of this computation.
   const DynamicParameterBinding& param_bindings_;
@@ -213,6 +214,10 @@ Status DynamicDimensionInferenceVisitor::HandlePad(HloInstruction* hlo) {
 }
 
 Status DynamicDimensionInferenceVisitor::HandleReduce(HloInstruction* hlo) {
+  auto reduce_op = Cast<HloReduceInstruction>(hlo);
+  if (reduce_op->dimensions(0) != 0) {
+    TF_RETURN_IF_ERROR(PassBatchDimDynamic(reduce_op));
+  }
   return ForEachOperandDynamicDimension(
       hlo, [&](HloInstruction* operand, ShapeIndex index, int64 dimension,
                int64 operand_index, HloInstruction* dynamic_size,
@@ -263,6 +268,7 @@ Status DynamicDimensionInferenceVisitor::HandleReduce(HloInstruction* hlo) {
 }
 
 Status DynamicDimensionInferenceVisitor::HandleDot(HloInstruction* hlo) {
+  TF_RETURN_IF_ERROR(PassBatchDimDynamic(hlo));
   return ForEachOperandDynamicDimension(
       hlo, [&](HloInstruction* operand, ShapeIndex operand_shape_index,
                int64 operand_dimension, int64 operand_index,
@@ -392,6 +398,10 @@ Status DynamicDimensionInferenceVisitor::HandleConvolution(
 
 Status DynamicDimensionInferenceVisitor::HandleConcatenate(
     HloInstruction* hlo) {
+  auto concat_op = Cast<HloConcatenateInstruction>(hlo);
+  if (concat_op->concatenate_dimension() != 0) {
+    TF_RETURN_IF_ERROR(PassBatchDimDynamic(hlo));
+  }
   return ForEachOperandDynamicDimension(
       hlo, [&](HloInstruction* operand, ShapeIndex index, int64 dimension,
                int64 operand_index, HloInstruction* dynamic_size,
@@ -423,6 +433,7 @@ Status DynamicDimensionInferenceVisitor::HandleGetDimensionSize(
 
 Status DynamicDimensionInferenceVisitor::PassThroughDynamicDimension(
     HloInstruction* hlo) {
+  TF_RETURN_IF_ERROR(PassBatchDimDynamic(hlo));
   return ForEachOperandDynamicDimension(
       hlo, [&](HloInstruction* operand, ShapeIndex index, int64 dimension,
                int64 operand_index, HloInstruction* dynamic_size,
@@ -431,6 +442,19 @@ Status DynamicDimensionInferenceVisitor::PassThroughDynamicDimension(
                                 constraint);
         return Status::OK();
       });
+}
+
+Status DynamicDimensionInferenceVisitor::PassBatchDimDynamic(
+    HloInstruction* hlo) {
+  for (auto& operand : hlo->operands()) {
+    if (operand->shape().is_batch_dim_dynamic()) {
+      hlo->mutable_shape()->set_batch_dim_dynamic(true);
+      VLOG(2) << "batch_dim_dynamic is true for instruction: "
+              << hlo->ToString();
+      break;
+    }
+  }
+  return Status::OK();
 }
 
 Status DynamicDimensionInferenceVisitor::HandleElementwiseUnary(

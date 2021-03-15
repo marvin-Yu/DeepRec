@@ -407,6 +407,7 @@ string XlaCompiler::Argument::HumanString() const {
                   " shape=", ShapeHumanString());
   absl::StrAppend(
       &common, " is_same_data_across_replicas=", is_same_data_across_replicas);
+  absl::StrAppend(&common, " batch_dim_dynamic=", batch_dim_dynamic);
   switch (kind) {
     case kInvalid:
       return "invalid";
@@ -618,24 +619,52 @@ Status XlaCompiler::CompileFunction(
 
   const FunctionBody* fbody;
   TF_RETURN_IF_ERROR(FindFunctionBody(fn_name_attrs, &fbody));
+  bool has_input_args_info = fbody->fdef.attr().count("input_args_info") > 0;
+  auto attr_value = fbody->fdef.attr().at("input_args_info");
 
   TF_RETURN_WITH_CONTEXT_IF_ERROR(
       CheckSignature(fbody->arg_types, args),
       "Signature check failure while compiling: ", fn_name_attrs.name());
 
+  // Set batch_dim_dynamic if input_args_info has dynamic shape info
+  auto append_dynamic_info = [&](XlaCompiler::Argument& arg,
+                                 const std::string& node_name) {
+    if (!attr_value.has_func()) {
+      return;
+    }
+    auto name_attr_list = attr_value.func();
+    if (name_attr_list.name() != "shape_info") {
+      return;
+    }
+    for (auto iter : name_attr_list.attr()) {
+      auto shape = PartialTensorShape(iter.second.shape());
+      if (iter.first == absl::AsciiStrToLower(node_name) &&
+          shape.dim_size(0) == -1) {
+        arg.batch_dim_dynamic = true;
+        VLOG(2) << "set batch_dim_dynamic true for arg: "
+                << absl::AsciiStrToLower(node_name);
+      }
+    }
+  };
+
   // Set shapes for _Arg nodes. They are useful for constant folding (e.g. an
   // Xla op requires a compile-time constant input, and that input is shape of
   // an _Arg node.
-  for (int i = 0; i < args.size(); i++) {
+  std::vector<XlaCompiler::Argument> new_args(args.begin(), args.end());
+  for (int i = 0; i < new_args.size(); i++) {
     // Skip resource variables and tensor lists.
     DataType dtype;
     TF_RETURN_IF_ERROR(GetNodeAttr(fbody->arg_nodes[i]->def(), "T", &dtype));
     if (dtype == DT_RESOURCE || dtype == DT_VARIANT) {
       continue;
     }
+    if (has_input_args_info &&
+        new_args[i].kind == XlaCompiler::Argument::kParameter) {
+      append_dynamic_info(new_args[i], fbody->arg_nodes[i]->name());
+    }
 
-    if (absl::holds_alternative<xla::Shape>(args[i].shape)) {
-      xla::Shape xla_shape = absl::get<xla::Shape>(args[i].shape);
+    if (absl::holds_alternative<xla::Shape>(new_args[i].shape)) {
+      xla::Shape xla_shape = absl::get<xla::Shape>(new_args[i].shape);
       TensorShape tensor_shape;
       if (XLAShapeToTensorShape(xla_shape, &tensor_shape).ok()) {
         fbody->arg_nodes[i]->ClearAttr("_output_shapes");
@@ -643,7 +672,7 @@ Status XlaCompiler::CompileFunction(
                                      std::vector<TensorShape>{tensor_shape});
       }
     } else {
-      TensorShape tensor_shape = absl::get<TensorShape>(args[i].shape);
+      TensorShape tensor_shape = absl::get<TensorShape>(new_args[i].shape);
       fbody->arg_nodes[i]->ClearAttr("_output_shapes");
       fbody->arg_nodes[i]->AddAttr("_output_shapes",
                                    std::vector<TensorShape>{tensor_shape});
@@ -689,8 +718,8 @@ Status XlaCompiler::CompileFunction(
   }
 
   VLOG(1) << "====================================================";
-  TF_RETURN_IF_ERROR(
-      CompileGraph(options, function_id, std::move(graph), args, {}, result));
+  TF_RETURN_IF_ERROR(CompileGraph(options, function_id, std::move(graph),
+                                  new_args, {}, result));
   VLOG(1) << "====================================================";
 
   cache_[{function_id, arg_vector}] = *result;
@@ -723,6 +752,12 @@ Status XlaCompiler::XLAShapeForArgument(const XlaCompiler::Argument& arg,
           TF_RETURN_IF_ERROR(TensorShapeToXLAShape(
               arg.type, absl::get<TensorShape>(arg.shape), xla_shape));
         }
+      }
+      if (arg.batch_dim_dynamic) {
+        xla_shape->set_batch_dim_dynamic(true);
+//        xla_shape->set_dynamic_dimension(0,true);
+        VLOG(2) << "set dynamic shape for: " << arg.name
+                << xla_shape->DebugString();
       }
       return Status::OK();
     }

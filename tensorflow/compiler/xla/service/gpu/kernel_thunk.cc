@@ -27,6 +27,7 @@ limitations under the License.
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/stream_executor_no_cuda.h"
+#include "tensorflow/core/util/env_var.h"
 #include "tensorflow/stream_executor/device_memory.h"
 #include "tensorflow/stream_executor/kernel.h"
 
@@ -80,7 +81,16 @@ Status KernelThunk::ExecuteOnStream(const ExecuteParams& params) {
     auto it = kernel_cache_.find(executor);
     CHECK(it != kernel_cache_.end())
         << "Initialize() not called for StreamExecutor " << executor;
-    launch_dimensions = launch_dimensions_;
+    bool dynamic_batch = false;
+    auto status = tensorflow::ReadBoolFromEnvVar("ENABLE_KERNEL_DYNAMIC", false,
+                                                 &dynamic_batch);
+    if (launch_dimensions_.IsBatchDimDynamic() &&
+        params.before_padding < params.after_padding && dynamic_batch) {
+      launch_dimensions = CalculateDynamicLaunchDimensions(
+          params.before_padding, params.after_padding, launch_dimensions_);
+    } else {
+      launch_dimensions = launch_dimensions_;
+    }
     kernel = it->second.get();
   }
 

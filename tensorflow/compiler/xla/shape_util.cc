@@ -443,6 +443,9 @@ ShapeUtil::MakeShapeWithDescendingLayoutAndSamePhysicalLayout(
     return text;
   }
   std::vector<string> dim_elements;
+  if (shape.is_batch_dim_dynamic()) {
+    dim_elements.emplace_back("(-1)");
+  }
   for (int i = 0; i < shape.dimensions_size(); ++i) {
     if (shape.is_dynamic_dimension(i)) {
       dim_elements.push_back(StrCat("<=", shape.dimensions(i)));
@@ -468,6 +471,9 @@ ShapeUtil::MakeShapeWithDescendingLayoutAndSamePhysicalLayout(
   }
   string result = StrCat(
       primitive_util::LowercasePrimitiveTypeName(shape.element_type()), "[");
+  if (shape.is_batch_dim_dynamic()) {
+    StrAppend(&result, "(-1)");
+  }
   for (int i = 0; i < shape.dimensions().size(); i++) {
     StrAppend(&result, (i > 0) ? "," : "",
               shape.is_dynamic_dimension(i) ? "<=" : "", shape.dimensions(i));
