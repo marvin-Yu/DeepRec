@@ -309,8 +309,10 @@ bool MaybeLoadPtxFromFile(const HloModule* module, std::string* ptx) {
     std::ifstream ifs(matched_filename, std::ifstream::in);
     *ptx = std::string(std::istreambuf_iterator<char>(ifs),
                        std::istreambuf_iterator<char>());
-    CHECK(!ptx->empty()) << "Empty or non existing PTX file: "
-                         << matched_filename;
+    if (ptx->empty()) {
+      LOG(WARNING) << "Empty or non existing PTX file:" << matched_filename;
+      return false;
+    }
     return true;
   }
   return false;
