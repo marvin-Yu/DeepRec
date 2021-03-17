@@ -41,6 +41,9 @@ build:mkl --define=build_with_mkl=true --define=enable_mkl=true
 build:mkl --define=tensorflow_mkldnn_contraction_kernel=0
 build:mkl -c opt
 
+# Only Use mkl gemm for xla.
+build:mkl_gemm_only --define=build_with_mkl_gemm_only=true
+
 # This config option is used to enable MKL-DNN open source library only,
 # without depending on MKL binary version.
 build:mkl_open_source_only --define=build_with_mkl_dnn_only=true

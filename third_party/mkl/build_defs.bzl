@@ -5,6 +5,7 @@ if_mkl is a conditional to check if we are building with MKL.
 if_mkl_ml is a conditional to check if we are building with MKL-ML.
 if_mkl_ml_only is a conditional to check for MKL-ML-only (no MKL-DNN) mode.
 if_mkl_lnx_x64 is a conditional to check for MKL
+if_mkl_gemm_only is a conditional to check only use mkl gemm.
 if_enable_mkl is a conditional to check if building with MKL and MKL is enabled.
 
 mkl_repository is a repository rule for creating MKL repository rule that can
@@ -96,6 +97,25 @@ def if_enable_mkl(if_true, if_false = []):
         "//conditions:default": if_false,
     })
 
+def if_mkl_gemm_only(if_true, if_false = []):
+    """Shorthand for select()'ing on whether we're building with Intel MKL GEMM only.
+
+     The Following two condition is equal to if_mkl_ml
+     Beacuase mkl_ml and mkl_gemm_only both use mkl libs
+
+    Args:
+      if_true: expression to evaluate if building with Intel MKL GEMM only.
+      if_false: expression to evaluate if building without MKL, or with MKL-DNN.
+
+    Returns:
+      a select evaluating to either if_true or if_false as appropriate.
+    """
+    return select({
+        str(Label("//third_party/mkl:build_with_mkl_gemm_only")): if_true,
+        str(Label("//third_party/mkl:enable_mkl")): if_true,
+        "//conditions:default": if_false,
+    })
+
 def mkl_deps():
     """Shorthand for select() to pull in the correct set of MKL library deps.
 
@@ -109,6 +129,7 @@ def mkl_deps():
         str(Label("//third_party/mkl_dnn:build_with_mkl_dnn_only")): ["@mkl_dnn"],
         str(Label("//third_party/mkl_dnn:build_with_mkl_dnn_v1_only")): ["@mkl_dnn_v1//:mkl_dnn"],
         str(Label("//third_party/mkl:build_with_mkl_ml_only")): ["//third_party/mkl:intel_binary_blob"],
+        str(Label("//third_party/mkl:build_with_mkl_gemm_only")): ["//third_party/mkl:intel_binary_blob"],
         str(Label("//third_party/mkl:build_with_mkl")): [
             "//third_party/mkl:intel_binary_blob",
             "@mkl_dnn",
