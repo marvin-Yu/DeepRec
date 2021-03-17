@@ -33,6 +33,13 @@ Alimama alogserver for display ads
 %prep
 
 %build
+
+# down load bazel cache file from oss
+wget http://211619.oss-cn-hangzhou-zmf.aliyuncs.com/public/tf_115_cache.tgz\
+  && mkdir -p /home/admin/.cache/bazel/_bazel_admin/ \
+  && tar -zxvf cache_115_rc1.tgz -C /home/admin/.cache/bazel/_bazel_admin/\
+  && rm -rf cache_115_rc1.tgz
+
 WORK_DIR=$OLDPWD/../
 cd $WORK_DIR
 export TEST_TMPDIR=/home/admin/.cache/bazel/
