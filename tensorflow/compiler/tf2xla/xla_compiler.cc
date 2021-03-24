@@ -407,7 +407,7 @@ string XlaCompiler::Argument::HumanString() const {
                   " shape=", ShapeHumanString());
   absl::StrAppend(
       &common, " is_same_data_across_replicas=", is_same_data_across_replicas);
-  absl::StrAppend(&common, " batch_dim_dynamic=", batch_dim_dynamic);
+  absl::StrAppend(&common, " dynamic_batch_dim=", dynamic_batch_dim);
   switch (kind) {
     case kInvalid:
       return "invalid";
@@ -638,11 +638,18 @@ Status XlaCompiler::CompileFunction(
     }
     for (auto iter : name_attr_list.attr()) {
       auto shape = PartialTensorShape(iter.second.shape());
-      if (iter.first == absl::AsciiStrToLower(node_name) &&
-          shape.dim_size(0) == -1) {
-        arg.batch_dim_dynamic = true;
-        VLOG(2) << "set batch_dim_dynamic true for arg: "
-                << absl::AsciiStrToLower(node_name);
+      if (iter.first == absl::AsciiStrToLower(node_name)) {
+        std::vector<int64> dynamic_dims;
+        for (int64 i = 0; i < shape.dims(); i++) {
+          if (shape.dim_size(i) == -1) {
+            dynamic_dims.push_back(i);
+          }
+        }
+        if (dynamic_dims.size() == 1) {
+          arg.dynamic_batch_dim = dynamic_dims[0];
+          VLOG(2) << "set dynamic_batch_dim " << dynamic_dims[0]
+                  << " for arg: " << absl::AsciiStrToLower(node_name);
+        }
       }
     }
   };
@@ -753,11 +760,12 @@ Status XlaCompiler::XLAShapeForArgument(const XlaCompiler::Argument& arg,
               arg.type, absl::get<TensorShape>(arg.shape), xla_shape));
         }
       }
-      if (arg.batch_dim_dynamic) {
+      if (arg.dynamic_batch_dim != -1) {
         xla_shape->set_batch_dim_dynamic(true);
-//        xla_shape->set_dynamic_dimension(0,true);
-        VLOG(2) << "set dynamic shape for: " << arg.name
-                << xla_shape->DebugString();
+        xla_shape->set_dynamic_batch_dim(arg.dynamic_batch_dim);
+        VLOG(2) << absl::StrFormat(
+            "set xla_shape's dynamic_batch_dim %d for %s, shape: %s",
+            arg.dynamic_batch_dim, arg.name, xla_shape->ToString());
       }
       return Status::OK();
     }

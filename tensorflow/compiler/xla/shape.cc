@@ -54,13 +54,19 @@ Shape::Shape(const ShapeProto& shape_proto) {
     *mutable_layout() = Layout::CreateFromProto(shape_proto.layout());
   }
   batch_dim_dynamic_ = shape_proto.is_batch_dim_dynamic();
+  if (batch_dim_dynamic_) {
+    dynamic_batch_dim_ = shape_proto.dynamic_batch_dim();
+  }
 }
 
 ShapeProto Shape::ToProto() const {
   ShapeProto proto;
   proto.set_element_type(element_type_);
   proto.mutable_dimensions()->Reserve(dimensions_size());
-  proto.set_is_batch_dim_dynamic(is_batch_dim_dynamic());
+  proto.set_is_batch_dim_dynamic(batch_dim_dynamic_);
+  if (batch_dim_dynamic_) {
+    proto.set_dynamic_batch_dim(dynamic_batch_dim_);
+  }
   for (const int64 dimension : dimensions()) {
     proto.add_dimensions(dimension);
   }

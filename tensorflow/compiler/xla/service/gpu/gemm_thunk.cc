@@ -126,7 +126,7 @@ static bool DoGemmWithAlgorithm(
   int64 num_cols_needed = output_matrix.num_cols;
   if (before_padding != 0 && after_padding != 0) {
     if (num_cols_needed == after_padding) {
-      num_cols_needed = (before_padding + 7) / 8 * 8;  // make it multiple of 8
+      num_cols_needed = before_padding;
       if (num_cols_needed >
           output_matrix.num_cols) {  // in case of out-of-bound, i.e.
                                      // before_padding==1, after_padding==2
@@ -210,23 +210,24 @@ Status RunGemm(const HloInstruction *gemm,
   const Shape &lhs_shape = lhs->shape();
   const Shape &rhs_shape = rhs->shape();
 
-  // check batch_dim_dynamic.
-  if (!lhs_shape.is_batch_dim_dynamic() ||
-      !output_shape.is_batch_dim_dynamic() ||
-      rhs_shape.is_batch_dim_dynamic()) {
-    VLOG(2) << absl::StrFormat(
-        "Invalid batch_dim_dynamic: lhs_shape : %s, rhs_shape: %s, "
-        "output_shape : %s.",
-        lhs_shape.DebugString(), rhs_shape.DebugString(),
-        output_shape.DebugString());
-    before_padding = 0;
-    after_padding = 0;
-  }
-
   const DotDimensionNumbers &dim_nums = backend_config.dot_dimension_numbers();
   CHECK_EQ(dim_nums.lhs_batch_dimensions_size(),
            dim_nums.rhs_batch_dimensions_size());
   CHECK_EQ(dim_nums.lhs_batch_dimensions_size() + 2, output_shape.rank());
+
+  // check batch_dim_dynamic.
+  if (!(output_shape.is_batch_dim_dynamic() &&
+        output_shape.get_dynamic_batch_dim() == 0 &&
+        dim_nums.lhs_batch_dimensions().empty())) {
+    VLOG(2) << absl::StrFormat(
+        "Don't support batch_dim_dynamic: lhs_shape : %s, rhs_shape: %s, "
+        "output_shape : %s.",
+        lhs_shape.ToString(), rhs_shape.ToString(), output_shape.ToString());
+    before_padding = 0;
+    after_padding = 0;
+  } else {
+    VLOG(2) << "Enable gemm dynamic on instruction: " << gemm->ToString();
+  }
 
   int64 row_dim = dim_nums.lhs_batch_dimensions_size();
   int64 col_dim = dim_nums.lhs_batch_dimensions_size() + 1;

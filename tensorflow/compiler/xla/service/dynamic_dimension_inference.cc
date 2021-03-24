@@ -268,7 +268,36 @@ Status DynamicDimensionInferenceVisitor::HandleReduce(HloInstruction* hlo) {
 }
 
 Status DynamicDimensionInferenceVisitor::HandleDot(HloInstruction* hlo) {
-  TF_RETURN_IF_ERROR(PassBatchDimDynamic(hlo));
+  auto dot_op = Cast<HloDotInstruction>(hlo);
+  auto lhs = dot_op->operand(0);
+  if (lhs->shape().is_batch_dim_dynamic()) {
+    bool dynamic_in_contract = false;
+    for (auto dim :
+         dot_op->dot_dimension_numbers().lhs_contracting_dimensions()) {
+      if (lhs->shape().get_dynamic_batch_dim() == dim) {
+        dynamic_in_contract = true;
+      }
+    }
+    if (dot_op->dot_dimension_numbers().lhs_batch_dimensions_size() > 0) {
+      bool dynamic_in_batch = false;
+      for (auto dim : dot_op->dot_dimension_numbers().lhs_batch_dimensions()) {
+        if (lhs->shape().get_dynamic_batch_dim() == dim) {
+          dynamic_in_batch = true;
+        }
+      }
+      if (!dynamic_in_contract && !dynamic_in_batch) {
+        dot_op->mutable_shape()->set_batch_dim_dynamic(true);
+        dot_op->mutable_shape()->set_dynamic_batch_dim(
+            lhs->shape().get_dynamic_batch_dim());
+      }
+    } else {
+      if (!dynamic_in_contract) {
+        dot_op->mutable_shape()->set_batch_dim_dynamic(true);
+        dot_op->mutable_shape()->set_dynamic_batch_dim(
+            lhs->shape().get_dynamic_batch_dim());
+      }
+    }
+  }
   return ForEachOperandDynamicDimension(
       hlo, [&](HloInstruction* operand, ShapeIndex operand_shape_index,
                int64 operand_dimension, int64 operand_index,
@@ -449,7 +478,9 @@ Status DynamicDimensionInferenceVisitor::PassBatchDimDynamic(
   for (auto& operand : hlo->operands()) {
     if (operand->shape().is_batch_dim_dynamic()) {
       hlo->mutable_shape()->set_batch_dim_dynamic(true);
-      VLOG(2) << "batch_dim_dynamic is true for instruction: "
+      hlo->mutable_shape()->set_dynamic_batch_dim(
+          operand->shape().get_dynamic_batch_dim());
+      VLOG(2) << "set batch_dim_dynamic is true for instruction: "
               << hlo->ToString();
       break;
     }
@@ -472,6 +503,16 @@ Status DynamicDimensionInferenceVisitor::HandleElementwiseBinary(
 }
 
 Status DynamicDimensionInferenceVisitor::HandleReshape(HloInstruction* hlo) {
+  auto operand_shape = hlo->operand(0)->shape();
+  auto hlo_shape = hlo->shape();
+  if (operand_shape.is_batch_dim_dynamic()) {
+    auto dim = operand_shape.get_dynamic_batch_dim();
+    if (dim == 0 &&
+        operand_shape.dimensions(dim) == hlo_shape.dimensions(dim)) {
+      hlo->mutable_shape()->set_batch_dim_dynamic(true);
+      hlo->mutable_shape()->set_dynamic_batch_dim(dim);
+    }
+  }
   return ForEachOperandDynamicDimension(
       hlo, [&](HloInstruction* operand, ShapeIndex index, int64 dimension,
                int64 operand_index, HloInstruction* dynamic_size,
@@ -739,6 +780,15 @@ Status DynamicDimensionInferenceVisitor::HandleSelectAndScatter(
 }
 
 Status DynamicDimensionInferenceVisitor::HandleSlice(HloInstruction* hlo) {
+  auto operand_shape = hlo->operand(0)->shape();
+  auto hlo_shape = hlo->shape();
+  if (operand_shape.is_batch_dim_dynamic()) {
+    auto dim = operand_shape.get_dynamic_batch_dim();
+    if (operand_shape.dimensions(dim) == hlo_shape.dimensions(dim)) {
+      hlo->mutable_shape()->set_batch_dim_dynamic(true);
+      hlo->mutable_shape()->set_dynamic_batch_dim(dim);
+    }
+  }
   return ForEachOperandDynamicDimension(
       hlo, [&](HloInstruction* operand, ShapeIndex /*index*/, int64 dimension,
                int64 /*operand_index*/, HloInstruction* dynamic_size,
@@ -804,6 +854,16 @@ Status DynamicDimensionInferenceVisitor::HandleDynamicUpdateSlice(
 }
 
 Status DynamicDimensionInferenceVisitor::HandleGather(HloInstruction* hlo) {
+  auto operand_shape = hlo->operand(0)->shape();
+  auto hlo_shape = hlo->shape();
+  if (operand_shape.is_batch_dim_dynamic()) {
+    auto dim = operand_shape.get_dynamic_batch_dim();
+    if (dim == 0 &&
+        operand_shape.dimensions(dim) == hlo_shape.dimensions(dim)) {
+      hlo->mutable_shape()->set_batch_dim_dynamic(true);
+      hlo->mutable_shape()->set_dynamic_batch_dim(dim);
+    }
+  }
   return ForEachOperandDynamicDimension(
       hlo, [&](HloInstruction* /*operand*/, ShapeIndex /*index*/,
                int64 input_dynamic_dimension, int64 operand_index,

@@ -25,6 +25,7 @@ limitations under the License.
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_replace.h"
 #include "absl/types/optional.h"
 #include "tensorflow/compiler/jit/encapsulate_util.h"
 #include "tensorflow/compiler/jit/flags.h"
@@ -486,9 +487,20 @@ Status Encapsulator::Subgraph::RecordArg(
           src_node->attrs().Find("_output_shapes")->shape();
       builder.Attr("_output_shapes", PartialTensorShape(output_shape));
       VLOG(2) << "Adding _output_shapes info to node: "
-              << absl::StrCat(src_node->name(), "_", src_slot, "_arg");
+                << absl::StrCat(src_node->name(), "_", src_slot, "_arg");
       VLOG(2) << "Shape info: " << output_shape.DebugString();
+    } else if (src_node->attrs().Find("_xla_inferred_shapes") != nullptr) {
+      std::vector<PartialTensorShape> output_shapes;
+      TF_CHECK_OK(GetNodeAttr(src_node->attrs(), "_xla_inferred_shapes",
+                              &output_shapes));
+      if (output_shapes.size() == 1) {
+        builder.Attr("_output_shapes", output_shapes[0]);
+        VLOG(2) << "Adding _xla_inferred_shapes info to node: "
+                  << absl::StrCat(src_node->name(), "_", src_slot, "_arg");
+        VLOG(2) << "Shape info: " << output_shapes[0].DebugString();
+      }
     }
+
     Status s = builder.Finalize(&arg_def);
     if (!s.ok()) return s;
 
@@ -578,7 +590,8 @@ Status Encapsulator::Subgraph::AddShapeToFunctionDef(Graph& graph,
   *arg_shape->mutable_name() = "shape_info";
   for (auto& input_arg : fdef->signature().input_arg()) {
     for (auto n : graph.nodes()) {
-      if (absl::AsciiStrToLower(n->name()) == input_arg.name() &&
+      if (absl::StrReplaceAll(absl::AsciiStrToLower(n->name()),
+                              {{"-", "_"}, {"/", "_"}}) == input_arg.name() &&
           n->attrs().Find("_output_shapes") != nullptr) {
         *(*arg_shape->mutable_attr())[input_arg.name()].mutable_shape() =
             n->attrs().Find("_output_shapes")->shape();

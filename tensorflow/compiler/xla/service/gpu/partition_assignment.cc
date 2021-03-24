@@ -99,7 +99,7 @@ LaunchDimensions CalculateLaunchDimensions(
       "block) = ceil(%d/%d) = %d",
       num_elements, threads_per_block, block_count);
 
-  if (shape.is_batch_dim_dynamic()) {
+  if (shape.is_batch_dim_dynamic() && shape.get_dynamic_batch_dim() == 0) {
     return LaunchDimensions(block_count, threads_per_block, true);
   } else {
     return LaunchDimensions(block_count, threads_per_block);
