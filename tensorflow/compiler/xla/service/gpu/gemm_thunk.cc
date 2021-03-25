@@ -215,20 +215,6 @@ Status RunGemm(const HloInstruction *gemm,
            dim_nums.rhs_batch_dimensions_size());
   CHECK_EQ(dim_nums.lhs_batch_dimensions_size() + 2, output_shape.rank());
 
-  // check batch_dim_dynamic.
-  if (!(output_shape.is_batch_dim_dynamic() &&
-        output_shape.get_dynamic_batch_dim() == 0 &&
-        dim_nums.lhs_batch_dimensions().empty())) {
-    VLOG(2) << absl::StrFormat(
-        "Don't support batch_dim_dynamic: lhs_shape : %s, rhs_shape: %s, "
-        "output_shape : %s.",
-        lhs_shape.ToString(), rhs_shape.ToString(), output_shape.ToString());
-    before_padding = 0;
-    after_padding = 0;
-  } else {
-    VLOG(2) << "Enable gemm dynamic on instruction: " << gemm->ToString();
-  }
-
   int64 row_dim = dim_nums.lhs_batch_dimensions_size();
   int64 col_dim = dim_nums.lhs_batch_dimensions_size() + 1;
 
@@ -245,6 +231,25 @@ Status RunGemm(const HloInstruction *gemm,
   for (const auto *shape : {&lhs_shape, &rhs_shape, &output_shape}) {
     CHECK_LT(shape->layout().minor_to_major(row_dim), 2);
     CHECK_LT(shape->layout().minor_to_major(col_dim), 2);
+  }
+
+  // check batch_dim_dynamic.
+  if (output_shape.is_batch_dim_dynamic()) {
+    if (dim_nums.lhs_batch_dimensions_size() == 1 &&
+        output_shape.get_dynamic_batch_dim() == 1) {
+      VLOG(2) << "Enable batched gemm dynamic on instruction: "
+              << gemm->ToString();
+    } else if (dim_nums.lhs_batch_dimensions().empty() &&
+               output_shape.get_dynamic_batch_dim() == 0) {
+      VLOG(2) << "Enable gemm dynamic on instruction: " << gemm->ToString();
+    } else {
+      VLOG(2) << absl::StrFormat(
+          "Don't support batch_dim_dynamic: lhs_shape : %s, rhs_shape: %s, "
+          "output_shape : %s.",
+          lhs_shape.ToString(), rhs_shape.ToString(), output_shape.ToString());
+      before_padding = 0;
+      after_padding = 0;
+    }
   }
 
   // BLAS gemm reduces rows of LHS and columns of RHS. The Dot operator between
