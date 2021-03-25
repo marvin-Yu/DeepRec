@@ -36,7 +36,7 @@ Alimama alogserver for display ads
 
 # down load bazel cache file from oss
 rm -rf /home/admin/.cache/bazel/_bazel_admin/
-wget http://211619.oss-cn-hangzhou-zmf.aliyuncs.com/public/tf_115_cache.tgz\
+wget -q http://211619.oss-cn-hangzhou-zmf.aliyuncs.com/public/tf_115_cache.tgz\
   && mkdir -p /home/admin/.cache/bazel/_bazel_admin/ \
   && tar -zxvf tf_115_cache.tgz -C /home/admin/.cache/bazel/_bazel_admin/\
   && rm -rf tf_115_cache.tgz
