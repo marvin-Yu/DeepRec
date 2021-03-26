@@ -84,7 +84,7 @@ Status KernelThunk::ExecuteOnStream(const ExecuteParams& params) {
     bool dynamic_batch = false;
     auto status = tensorflow::ReadBoolFromEnvVar("ENABLE_KERNEL_DYNAMIC", false,
                                                  &dynamic_batch);
-    if (launch_dimensions_.IsBatchDimDynamic() &&
+    if (launch_dimensions_.IsBatchDimDynamic() && params.before_padding > 0 &&
         params.before_padding < params.after_padding && dynamic_batch) {
       launch_dimensions = CalculateDynamicLaunchDimensions(
           params.before_padding, params.after_padding, launch_dimensions_);
@@ -105,9 +105,19 @@ Status KernelThunk::ExecuteOnStream(const ExecuteParams& params) {
   }
   auto op_profiler =
       params.profiler->MakeScopedInstructionProfiler(hlo_instruction());
-  return ExecuteKernelOnStream(*kernel, buffer_args,
-                               launch_dimensions.threads_per_block(),
-                               launch_dimensions.block_count(), params.stream);
+  auto s = ExecuteKernelOnStream(
+      *kernel, buffer_args, launch_dimensions.threads_per_block(),
+      launch_dimensions.block_count(), params.stream);
+  if (!s.ok()) {
+    LOG(ERROR) << absl::StrFormat(
+        "Failed launching kernel %s, before_padding: %d, after_padding: %d, "
+        "blocks: %d, threads: %d, dynamic: %d",
+        kernel->name(), params.before_padding, params.after_padding,
+        launch_dimensions_.block_count(),
+        launch_dimensions_.threads_per_block(),
+        launch_dimensions_.IsBatchDimDynamic());
+  }
+  return s;
 }
 
 }  // namespace gpu
