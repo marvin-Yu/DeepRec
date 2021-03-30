@@ -51,33 +51,34 @@ class GroupedTopK : public OpKernel {
   void Compute(OpKernelContext* context) override {
     //output[dst_idx[i]:dst_idx[i+1]) = topk of input[src_idx[i]:src_idx[i+1])
     const Tensor & input_tensor = context->input(0);
-    const T* input = input_tensor.flat_inner_dims<T>().data();
+    const auto& input = input_tensor.flat_inner_dims<T>();
+
     int k = context->input(1).scalar<int>()();
 
     const Tensor & splits_tensor = context->input(2);
-    const int* splits = splits_tensor.vec<int>().data();
+    const auto& splits = splits_tensor.vec<int>();
 
     //TODO: remove this check if k >=3 implemented
     OP_REQUIRES(context, 0 < k && k <= 2, 
                 errors::InvalidArgument("only 0 < k <= 2 support, but k=", k));
 
-    int batch_size = input_tensor.dim_size(0);
-    int input_len = input_tensor.dim_size(1);
-    int num_group = splits_tensor.dim_size(0);
+    int batch_size = input.dimension(0);
+    int input_len = input.dimension(1);
+    int num_group = splits.dimension(0);
 
     Tensor src_idx_tensor, dst_idx_tensor;
     OP_REQUIRES_OK(context, context->allocate_temp(DT_INT32, splits_tensor.shape(), &src_idx_tensor));
     OP_REQUIRES_OK(context, context->allocate_temp(DT_INT32, splits_tensor.shape(), &dst_idx_tensor));
-    auto src_idx = src_idx_tensor.vec<int>().data();
-    auto dst_idx = dst_idx_tensor.vec<int>().data();
+    auto src_idx = src_idx_tensor.vec<int>();
+    auto dst_idx = dst_idx_tensor.vec<int>();
 
     //TODO: [opt]calculate only once if splits is constant
     // maybe in a seperate kernel
     int sum = 0, output_len = 0;
     for (int i = 0; i < num_group; ++i) {
-      src_idx[i] = sum;
-      dst_idx[i] = output_len;
-      int len = splits[i];
+      src_idx(i) = sum;
+      dst_idx(i) = output_len;
+      int len = splits(i);
       sum += len;
       output_len += std::min(k, len);
     }
@@ -91,17 +92,17 @@ class GroupedTopK : public OpKernel {
     Tensor *value_output, *index_output;
     OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &value_output));
     OP_REQUIRES_OK(context, context->allocate_output(1, output_shape, &index_output));
-    auto value = value_output->flat_inner_dims<T>().data();
-    auto index = index_output->flat_inner_dims<int>().data();
+    auto value = value_output->flat_inner_dims<T>();
+    auto index = index_output->flat_inner_dims<int>();
 
     //TODO: parallelize this calculation
     for (int b=0; b < batch_size; ++b) {
-      const T* v = input + b*input_len;
-      T* val = value + b*output_len;
-      int* idx = index + b*output_len;
+      const T* v = input.data() + b*input_len;
+      T* val = value.data() + b*output_len;
+      int* idx = index.data() + b*output_len;
       for (int i = 0; i < num_group; ++i) {
-        safe_topk_with_offset(v, k, /*offset=*/src_idx[i], /*len=*/splits[i],
-                              /*val=*/val + dst_idx[i], /*idx=*/idx + dst_idx[i]);
+        safe_topk_with_offset(v, k, /*offset=*/src_idx(i), /*len=*/splits(i),
+                              /*val=*/val + dst_idx(i), /*idx=*/idx + dst_idx(i));
       }
     }
   };
