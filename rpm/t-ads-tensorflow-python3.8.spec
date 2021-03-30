@@ -2,9 +2,10 @@
 # http://twiki.corp.alimama.com/twiki/bin/view/Alimm_OPS/RPM #
 # http://www.rpm.org/max-rpm/ch-rpm-inside.html              #
 ##############################################################
-Name: %(echo t-ads-tensorflow-cc-lib${SUFFIX})
-Packager:wenqi.gwq
-Version:1.15.15
+Name: %(echo t-ads-tensorflow-python3.8${SUFFIX})
+Packager:jinluyang.jly
+Version:1.15.0
+Requires: python
 # if you want get version number from outside, use like this
 Release:%(echo $RELEASE)%{?dist}
 
@@ -14,7 +15,7 @@ Release:%(echo $RELEASE)%{?dist}
 
 # if you want use the parameter of rpm_create on build time,
 # uncomment below
-Summary:tensorflow cc library
+Summary:tensorflow python3.8 wheel
 
 URL: http://gitlab.alibaba-inc.com/TargetAdvertising/tensorflow
 Group: alimama
@@ -58,9 +59,7 @@ export LD_LIBRARY_PATH="/usr/local/cuda-10.1/lib64:/usr/local/cuda-10.1/extras/C
 sh build_whl.sh
 
 %install
-echo y| pip uninstall tensorflow
-
-pip install --user ~/tensorflow_pkg/tensorflow-1.15.0rc1-cp38-cp38-linux_x86_64.whl
+cp -r ~/tensorflow_pkg/* .%{_prefix}/
 
 
 %files
@@ -70,5 +69,12 @@ pip install --user ~/tensorflow_pkg/tensorflow-1.15.0rc1-cp38-cp38-linux_x86_64.
 %post
 echo "Now ldconfig..."
 /sbin/ldconfig
+#it cannot find pip
+#echo y| pip uninstall tensorflow
+#pip install --user %{_prefix}/tensorflow-1.15.0rc1-cp38-cp38-linux_x86_64.whl
+echo "numpy need to be <= 1.18.0 when using bfloat because numpy ABI has changed"
+echo ".whl is at /home/a , use below command to pip install"
+echo "echo y| pip uninstall tensorflow"
+echo "pip install --user tensorflow-1.15.0*.whl"
 
 %changelog
