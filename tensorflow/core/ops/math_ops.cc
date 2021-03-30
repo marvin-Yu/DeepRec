@@ -438,6 +438,21 @@ REGISTER_OP("BlazeGRU")
       return Status::OK();
     });
 
+
+REGISTER_OP("GroupedTopK")
+    .Input("x: T")              //[..., input_len]
+    .Output("value: T")         //[..., output_len]
+    .Output("index: int32")
+    .Attr("T: {half, float, double}")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      shape_inference::ShapeHandle output;
+      TF_RETURN_IF_ERROR(
+          c->ReplaceDim(c->input(0), -1, c->UnknownDim(), &output));
+      c->set_output(0, output);
+      return Status::OK();
+    });
+
+
 /* values N * (scences, unit_size)
  * coords N * (scences, 2)
  * output_shape (2, ) [user's sessions, max scenes in one session]
