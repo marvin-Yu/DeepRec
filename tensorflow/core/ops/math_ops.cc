@@ -440,10 +440,13 @@ REGISTER_OP("BlazeGRU")
 
 
 REGISTER_OP("GroupedTopK")
-    .Input("x: T")              //[..., input_len]
+    .Input("input: T")              //[..., input_len]
+    .Input("k: Tindices")          //scaler
+    .Input("splits: Tindices")     //[num_group]
     .Output("value: T")         //[..., output_len]
-    .Output("index: int32")
+    .Output("index: Tindices")
     .Attr("T: {half, float, double}")
+    .Attr("Tindices: {int32}")
     .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
       shape_inference::ShapeHandle output;
       TF_RETURN_IF_ERROR(
