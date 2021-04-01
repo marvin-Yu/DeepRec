@@ -2099,24 +2099,35 @@ Status ExecutorState::ProcessOutputs(const NodeItem& item, OpKernelContext* ctx,
                     if (!s.ok()) {
                       LOG(WARNING) << s.ToString();
                     } else {
-                      auto info = traced_infos_->traced_tensor_infos->mutable_name_tensors()->Add();
-                      info->set_name(tensor_name);
-                      dst_ptr->AsProtoField(info->mutable_tensor());
+                      auto info = traced_infos_->SafeAddTensorInfo();
+                      if (info) {
+                        info->set_name(tensor_name);
+                        dst_ptr->AsProtoField(info->mutable_tensor());
+                      } else {
+                        VLOG(0) << "error info nullptr";
+                      }
                     }
                     delete dst_ptr;
                   });
               } else {
-                auto info = traced_infos_->traced_tensor_infos->mutable_name_tensors()->Add();
-                info->set_name(tensor_name);
-                TensorProto tp;
-                val.tensor->AsProtoField(&tp);
-                *(info->mutable_tensor()) = tp;
- //               val.tensor->AsProtoField(info->mutable_tensor());
+                auto info = traced_infos_->SafeAddTensorInfo();
+                if (info) {
+                  info->set_name(tensor_name);
+                  val.tensor->AsProtoField(info->mutable_tensor());
+                } else {
+                  VLOG(0) << "error info nullptr";
+                }
               }
             } else {
-              TensorProto proto;
-              proto.set_dtype(dtype);
-              val.tensor->shape().AsProto(proto.mutable_tensor_shape());
+              auto info = traced_infos_->SafeAddTensorInfo();
+              if (info) {
+                info->set_name(tensor_name);
+                auto proto = info->mutable_tensor();
+                proto->set_dtype(dtype);
+                val.tensor->shape().AsProto(proto->mutable_tensor_shape());
+              } else {
+                VLOG(0) << "error info nullptr";
+              }
             }
           }
         } 

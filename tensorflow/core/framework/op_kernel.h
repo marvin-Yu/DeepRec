@@ -1942,6 +1942,14 @@ struct UserTracedInfos {
     }
   }
 
+  NamedTensorProto* SafeAddTensorInfo() {
+    mutex_lock l(tensor_info_mu_);
+    if (traced_tensor_infos) {
+      return traced_tensor_infos->mutable_name_tensors()->Add();
+    }
+    return nullptr;
+  }
+
   std::unique_ptr<ProfStats> prof_stats;
   //blaze input & output tensors
   std::unique_ptr<TracedTensors> traced_tensors;
@@ -1950,6 +1958,7 @@ struct UserTracedInfos {
   bool enable_prof_stats;
   bool enable_trace_tensors;
   bool enable_trace_tensor_infos;
+  mutex tensor_info_mu_;
 };
 }  // namespace tensorflow
 
