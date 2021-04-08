@@ -95,16 +95,26 @@ class GroupedTopK : public OpKernel {
     auto value = value_output->flat_inner_dims<T>();
     auto index = index_output->flat_inner_dims<int>();
 
-    //TODO: parallelize this calculation
-    for (int b=0; b < batch_size; ++b) {
-      const T* v = input.data() + b*input_len;
-      T* val = value.data() + b*output_len;
-      int* idx = index.data() + b*output_len;
-      for (int i = 0; i < num_group; ++i) {
-        safe_topk_with_offset(v, k, /*offset=*/src_idx(i), /*len=*/splits(i),
-                              /*val=*/val + dst_idx(i), /*idx=*/idx + dst_idx(i));
+    std::function<void(int64, int64)> shard = [&](int64 begin, int64 end) {
+      for (int i = begin; i < end; ++i) {
+        int offset = src_idx(i);
+        int len = splits(i);
+        for (int b=0; b < batch_size; ++b) {
+          const T* v = input.data() + b*input_len;
+          T* val = value.data() + b*output_len;
+          int* idx = index.data() + b*output_len;
+          safe_topk_with_offset(v, k, offset, len,
+                                /*val=*/val + dst_idx(i), /*idx=*/idx + dst_idx(i));
+        }
       }
     }
+
+    const DeviceBase::CpuWorkerThreads* worker_threads = context->device()->tensorflow_cpu_worker_threads();
+    int num_threads = worker_threads->num_threads;
+    const thread::ThreadPool* thread_pool = worker_thread->workers;
+    int block_size = (input_len + num_threads - 1) / num_thread;
+    thread_pool->TransformRangeConcurrently(block_size, num_group, shard);
+
   };
 };
 
