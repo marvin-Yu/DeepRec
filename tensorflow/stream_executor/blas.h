@@ -191,44 +191,6 @@ class AlgorithmConfig {
   AlgorithmType algorithm_;
 };
 
-struct IBlasLtMatmulPlan {
-  // Returns the data type of the A and B (input) matrices.
-  virtual DataType ab_type() const = 0;
-  // Returns the data type of the C (input/output) matrix.
-  virtual DataType c_type() const = 0;
-  virtual ~IBlasLtMatmulPlan() {}
-};
-
-struct IBlasLtMatmulAlgorithm {
-  virtual ~IBlasLtMatmulAlgorithm() {}
-  // Returns the index of the algorithm within the list returned by
-  // GetBlasLtMatmulAlgorithms.
-  virtual AlgorithmType index() const = 0;
-  // Returns the workspace size required by the algorithm in bytes.
-  virtual size_t workspace_size() const = 0;
-};
-
-// Parameters for the CreateBlasLtMatmulPlan method.
-struct BlasLtMatmulPlanParams {
-  DataType ab_type;
-  DataType c_type;
-  ComputationType computation_type;
-  PointerMode pointer_mode;
-  Epilogue epilogue;
-  Transpose transa;
-  Transpose transb;
-  uint64 m;
-  uint64 n;
-  uint64 k;
-  int64 lda;
-  int64 ldb;
-  int64 ldc;
-  int batch_count = 1;
-  int64 stride_a = 0;
-  int64 stride_b = 0;
-  int64 stride_c = 0;
-};
-
 // BLAS support interface -- this can be derived from a GPU executor when the
 // underlying platform has an BLAS library implementation available. See
 // StreamExecutor::AsBlas().
@@ -1485,72 +1447,7 @@ class BlasSupport {
                           const DeviceMemory<std::complex<double>>& a, int lda,
                           DeviceMemory<std::complex<double>>* b, int ldb) = 0;
 
-  // Creates a backend-specific plan object for a blaslt matmul operation, which
-  // can then be passed to DoBlasLtMatmul(). When possible, plans should be
-  // created once and reused for multiple calls to DoBlasLtMatmul().
-  virtual port::StatusOr<std::unique_ptr<blas::IBlasLtMatmulPlan>>
-  CreateBlasLtMatmulPlan(const blas::BlasLtMatmulPlanParams& params) = 0;
-
-  // Gets a list of supported algorithms for DoBlasLtMatmul. The algorithms are
-  // returned in the order of increasing estimated compute time according to an
-  // internal heuristic. The first returned algorithm can be used as the default
-  // algorithm if no autotuning is to be performed.
-  virtual port::StatusOr<
-      std::vector<std::unique_ptr<blas::IBlasLtMatmulAlgorithm>>>
-  GetBlasLtMatmulAlgorithms(const blas::IBlasLtMatmulPlan* plan,
-                            size_t max_workspace_size,
-                            int max_algorithm_count) = 0;
-
-  // Executes a blaslt matmul operation on the stream. If output_profile_result
-  // is not nullptr, the operation is profiled, error messages are
-  // suppressed, and output_profile_result->algorithm() is set to
-  // algorithm->index(). If epilogue was set to kBias or kBiasThenReLU when
-  // creating the plan, the bias argument here must refer to a valid device
-  // vector of length equal to the number of rows in matrix c. If epilogue was
-  // set to any other value then the bias argument here must be null. The bias
-  // vector is broadcast across the batch dimension.
-  // Note that the data types of a and b (c and bias) must match the ab_type
-  // (c_type) with which the plan was created, and the data types of alpha and
-  // beta must match the data type of c.
-  virtual bool DoBlasLtMatmul(
-      Stream* stream, const blas::IBlasLtMatmulPlan* plan,
-      const HostOrDeviceScalar<void>& alpha, DeviceMemoryBase a,
-      DeviceMemoryBase b, const HostOrDeviceScalar<void>& beta,
-      DeviceMemoryBase c, ScratchAllocator* scratch_allocator,
-      const blas::IBlasLtMatmulAlgorithm* algorithm, DeviceMemoryBase bias,
-      blas::ProfileResult* output_profile_result) = 0;
-
-  template <typename ABType, typename CType>
-  bool DoBlasLtMatmul(Stream* stream, const blas::IBlasLtMatmulPlan* plan,
-                      const HostOrDeviceScalar<CType>& alpha,
-                      const DeviceMemory<ABType>& a,
-                      const DeviceMemory<ABType>& b,
-                      const HostOrDeviceScalar<CType>& beta,
-                      DeviceMemory<CType>* c,
-                      ScratchAllocator* scratch_allocator,
-                      const blas::IBlasLtMatmulAlgorithm* algorithm,
-                      const DeviceMemory<CType>& bias = {},
-                      blas::ProfileResult* output_profile_result = nullptr) {
-    constexpr blas::DataType ab_type = blas::ToDataType<ABType>::value;
-    if (ab_type != plan->ab_type()) {
-      VLOG(2) << "DoBlasLtMatmul returning false because a and b type does "
-                 "not match plan: expected "
-              << plan->ab_type() << ", got " << ab_type;
-      return false;
-    }
-    constexpr blas::DataType c_type = blas::ToDataType<CType>::value;
-    if (c_type != plan->c_type()) {
-      VLOG(2) << "DoBlasLtMatmul returning false because c type does "
-                 "not match plan: expected "
-              << plan->c_type() << ", got " << c_type;
-      return false;
-    }
-    return DoBlasLtMatmul(stream, plan, alpha, a, b, beta, *c,
-                          scratch_allocator, algorithm, bias,
-                          output_profile_result);
-  }
-
-  virtual port::Status GetVersion(std::string* version) = 0;
+  virtual port::Status GetVersion(string *version) = 0;
 
  protected:
   BlasSupport() {}
@@ -2395,24 +2292,12 @@ class BlasSupport {
   bool DoBlasTrsm(Stream* stream, blas::Side side, blas::UpperLower uplo,      \
                   blas::Transpose transa, blas::Diagonal diag, uint64 m,       \
                   uint64 n, std::complex<double> alpha,                        \
-                  const DeviceMemory<std::complex<double>>& a, int lda,        \
-                  DeviceMemory<std::complex<double>>* b, int ldb) override;    \
-  port::StatusOr<std::unique_ptr<blas::IBlasLtMatmulPlan>>                     \
-  CreateBlasLtMatmulPlan(const blas::BlasLtMatmulPlanParams& params) override; \
-  port::StatusOr<std::vector<std::unique_ptr<blas::IBlasLtMatmulAlgorithm>>>   \
-  GetBlasLtMatmulAlgorithms(const blas::IBlasLtMatmulPlan* plan,               \
-                            size_t max_workspace_size,                         \
-                            int max_algorithm_count) override;                 \
-  bool DoBlasLtMatmul(                                                         \
-      Stream* stream, const blas::IBlasLtMatmulPlan* plan,                     \
-      const HostOrDeviceScalar<void>& alpha, DeviceMemoryBase a,               \
-      DeviceMemoryBase b, const HostOrDeviceScalar<void>& beta,                \
-      DeviceMemoryBase c, ScratchAllocator* scratch_allocator,                 \
-      const blas::IBlasLtMatmulAlgorithm* algorithm, DeviceMemoryBase bias,    \
-      blas::ProfileResult* output_profile_result) override;                    \
-  port::Status GetVersion(string* version) override;
+                  const DeviceMemory<std::complex<double>> &a, int lda,        \
+                  DeviceMemory<std::complex<double>> *b, int ldb) override;    \
+  port::Status GetVersion(string *version) override;
 
 }  // namespace blas
 }  // namespace stream_executor
 
 #endif  // TENSORFLOW_STREAM_EXECUTOR_BLAS_H_
+
