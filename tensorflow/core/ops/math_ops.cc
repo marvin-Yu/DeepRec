@@ -439,12 +439,29 @@ REGISTER_OP("BlazeGRU")
     });
 
 
-REGISTER_OP("GroupedTopK")
-    .Input("input: T")              //[..., input_len]
+REGISTER_OP("GTopK")
+    .Input("input: T")             //[..., input_len]
     .Input("k: Tindices")          //scaler
     .Input("splits: Tindices")     //[num_group]
-    .Output("value: T")         //[..., output_len]
-    .Output("index: Tindices")
+    .Output("value: T")            //[..., output_len]
+    .Output("index: Tindices")     //[..., output_len]
+    .Attr("T: {half, float, double}")
+    .Attr("Tindices: {int32}")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      shape_inference::ShapeHandle output;
+      TF_RETURN_IF_ERROR(
+          c->ReplaceDim(c->input(0), -1, c->UnknownDim(), &output));
+      c->set_output(0, output);
+      return Status::OK();
+    });
+
+REGISTER_OP("IdxGTopK")
+    .Input("input: T")              //[..., input_len]
+    .Input("k: Tindices")           //scaler
+    .Input("src_idx: Tindices")     //[num_group+1]
+    .Input("dst_idx: Tindices")     //[num_group+1]
+    .Output("value: T")             //[..., output_len]
+    .Output("index: Tindices")      //[..., output_len]
     .Attr("T: {half, float, double}")
     .Attr("Tindices: {int32}")
     .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {

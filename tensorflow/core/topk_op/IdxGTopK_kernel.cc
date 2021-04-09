@@ -1,6 +1,5 @@
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/util/work_sharder.h"
-#include "tensorflow/core/topk_op/util.h"
 #include <algorithm>
 
 using namespace tensorflow;
@@ -12,11 +11,13 @@ using GPUDevice = Eigen::GpuDevice;
 // template parameter <T> is the datatype of the tensors.
 
 //Impl of grouped topk algorithm
-//The third input splits is a vector containing length of each group.
+//The 3rd input shows the input idx range for each group, in form [a0, a1, ..., an)
+//The 4th input shows the output idx range for each group, in form [0, b1, ..., bn)
+
 template <typename Device, typename T>
-class GTopK : public OpKernel {
+class IdxGTopK : public OpKernel {
  public:
-  explicit GTopK(OpKernelConstruction* context) : OpKernel(context) {}
+  explicit IdxGTopK(OpKernelConstruction* context) : OpKernel(context) {}
 
   void Compute(OpKernelContext* context) override {
     //output[dst_idx[i]:dst_idx[i+1]) = topk of input[src_idx[i]:src_idx[i+1])
@@ -25,37 +26,29 @@ class GTopK : public OpKernel {
 
     int k = context->input(1).scalar<int>()();
 
-    const Tensor & splits_tensor = context->input(2);
-    const auto& splits = splits_tensor.vec<int>();
+    const Tensor & src_idx_tensor = context->input(2);
+    const auto& src_idx = splits_tensor.vec<int>();
+    const Tensor & dst_idx_tensor = context->input(3);
+    const auto& dst_idx = splits_tensor.vec<int>();
 
     //TODO: remove this check if k >=3 implemented
     OP_REQUIRES(context, 0 < k && k <= 2, 
                 errors::InvalidArgument("only 0 < k <= 2 supported, but k=", k));
+    OP_REQUIRES(context, src_idx.dimension(0) == dst_idx.dimension(0), 
+                errors::InvalidArgument("src_idx and dst_idx must equal, but ", 
+                                        src_idx.dimension(0), "!=", dst_idx.dimension(0)));
 
     int batch_size = input.dimension(0);
     int input_len = input.dimension(1);
-    int num_group = splits.dimension(0);
+    int num_group = dst_idx.dimension(0)-1;
+    int output_len = dst_idx(num_group);
 
-    Tensor src_idx_tensor, dst_idx_tensor;
-    OP_REQUIRES_OK(context, context->allocate_temp(DT_INT32, splits_tensor.shape(), &src_idx_tensor));
-    OP_REQUIRES_OK(context, context->allocate_temp(DT_INT32, splits_tensor.shape(), &dst_idx_tensor));
-    auto src_idx = src_idx_tensor.vec<int>();
-    auto dst_idx = dst_idx_tensor.vec<int>();
+    OP_REQUIRES(context, dst_idx(0) == 0, 
+                errors::InvalidArgument("dst_idx(0) shall be 0, but is ", dst_idx(0)));
+    OP_REQUIRES(context, output_len <= k * num_group, 
+                errors::InvalidArgument("output_len(",output_len,") > k(",k,") * num_group(",num_group,"), ",
+                                        "invalid inputs"));
 
-    //TODO: [opt]calculate only once if splits is constant
-    // maybe in a seperate kernel
-    int sum = 0, output_len = 0;
-    for (int i = 0; i < num_group; ++i) {
-      src_idx(i) = sum;
-      dst_idx(i) = output_len;
-      int len = splits(i);
-      sum += len;
-      output_len += std::min(k, len);
-    }
-
-    OP_REQUIRES(context, sum == input_len, 
-                errors::InvalidArgument("sum of splits do NOT match size of input: ", sum ,"!=", input_len));
-    
     //Allocate Output
     TensorShape output_shape = input_tensor.shape();
     output_shape.set_dim(output_shape.dims()-1, output_len);
@@ -68,7 +61,7 @@ class GTopK : public OpKernel {
     std::function<void(int64, int64)> shard = [&](int64 begin, int64 end) {
       for (int i = begin; i < end; ++i) {
         int head = src_idx(i);
-        int tail = head + splits(i);
+        int tail = src_idx(i+1);
         for (int b=0; b < batch_size; ++b) {
           const T* v = input.data() + b*input_len;
           T* val = value.data() + b*output_len;
@@ -91,8 +84,8 @@ class GTopK : public OpKernel {
 // Register the CPU kernels.
 #define REGISTER_CPU(T)                                           \
   REGISTER_KERNEL_BUILDER(                                        \
-      Name("GTopK").Device(DEVICE_CPU).TypeConstraint<T>("T"), \
-      GTopK<CPUDevice, T>);
+      Name("IdxGTopK").Device(DEVICE_CPU).TypeConstraint<T>("T"), \
+      IdxGTopK<CPUDevice, T>);
 REGISTER_CPU(double);
 REGISTER_CPU(float);
 REGISTER_CPU(Eigen::half);
