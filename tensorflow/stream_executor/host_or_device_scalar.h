@@ -54,4 +54,3 @@ class HostOrDeviceScalar {
 
 }  // namespace stream_executor
 #endif  // TENSORFLOW_STREAM_EXECUTOR_HOST_OR_DEVICE_SCALAR_H_
-

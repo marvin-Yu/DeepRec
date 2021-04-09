@@ -3484,4 +3484,3 @@ void initialize_cublas() {
 
 REGISTER_MODULE_INITIALIZER(register_cublas,
                             { stream_executor::initialize_cublas(); });
-

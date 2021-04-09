@@ -30,7 +30,7 @@ limitations under the License.
 #include "third_party/gpus/cuda/include/cublas_v2.h"
 #include "third_party/gpus/cuda/include/cuda.h"
 
-typedef struct cublasContext* cublasHandle_t;
+typedef struct cublasContext *cublasHandle_t;
 
 namespace stream_executor {
 
@@ -55,7 +55,7 @@ class GpuExecutor;
 // Thread-safe post-initialization.
 class CUDABlas : public blas::BlasSupport {
  public:
-  explicit CUDABlas(GpuExecutor* parent);
+  explicit CUDABlas(GpuExecutor *parent);
 
   // Allocates a cuBLAS handle.
   bool Init();
@@ -71,10 +71,10 @@ class CUDABlas : public blas::BlasSupport {
   // cuBLAS is stateful, and only be associated with one stream (in order to
   // enqueue dispatch) at a given time. As a result, this generally must be
   // invoked before calling into cuBLAS.
-  bool SetStream(Stream* stream) EXCLUSIVE_LOCKS_REQUIRED(mu_);
+  bool SetStream(Stream *stream) EXCLUSIVE_LOCKS_REQUIRED(mu_);
 
   // Returns the underlying CUDA stream.
-  cudaStream_t CUDAStream(Stream* stream);
+  cudaStream_t CUDAStream(Stream *stream);
 
   // A helper function that calls the real cuBLAS function together with error
   // handling.
@@ -87,21 +87,21 @@ class CUDABlas : public blas::BlasSupport {
   // err_on_failure:     Whether to print an error if the cublas function fails.
   // args:               Arguments of cuBLAS function.
   template <typename FuncT, typename... Args>
-  bool DoBlasInternalImpl(FuncT cublas_func, Stream* stream,
+  bool DoBlasInternalImpl(FuncT cublas_func, Stream *stream,
                           bool pointer_mode_host, bool err_on_failure,
                           cublasMath_t math_type, Args... args);
   template <typename... Args>
-  bool DoBlasInternalImplcublasGemmEx(Stream* stream, bool pointer_mode_host,
+  bool DoBlasInternalImplcublasGemmEx(Stream *stream, bool pointer_mode_host,
                                       bool err_on_failure,
                                       cublasMath_t math_type, Args... args);
   template <typename... Args>
-  bool DoBlasInternalImplcublasGemmBatchedEx(Stream* stream,
+  bool DoBlasInternalImplcublasGemmBatchedEx(Stream *stream,
                                              bool pointer_mode_host,
                                              bool err_on_failure,
                                              cublasMath_t math_type,
                                              Args... args);
   template <typename... Args>
-  bool DoBlasInternalImplcublasGemmStridedBatchedEx(Stream* stream,
+  bool DoBlasInternalImplcublasGemmStridedBatchedEx(Stream *stream,
                                                     bool pointer_mode_host,
                                                     bool err_on_failure,
                                                     cublasMath_t math_type,
@@ -110,7 +110,7 @@ class CUDABlas : public blas::BlasSupport {
   // Convenience functions that call DoBlasInternalImpl with err_on_failure=true
   // and math_type=CUBLAS_DEFAULT_MATH.
   template <typename FuncT, typename... Args>
-  bool DoBlasInternal(FuncT cublas_func, Stream* stream, bool pointer_mode_host,
+  bool DoBlasInternal(FuncT cublas_func, Stream *stream, bool pointer_mode_host,
                       Args... args) {
     return DoBlasInternalImpl(cublas_func, stream, pointer_mode_host,
                               /*err_on_failure=*/true, CUBLAS_DEFAULT_MATH,
@@ -121,53 +121,53 @@ class CUDABlas : public blas::BlasSupport {
   // types.
   template <typename T, typename Scalar, typename FuncT>
   port::Status DoBlasGemmBatchedInternal(
-      FuncT cublas_func, Stream* stream, blas::Transpose transa,
+      FuncT cublas_func, Stream *stream, blas::Transpose transa,
       blas::Transpose transb, uint64 m, uint64 n, uint64 k, Scalar alpha,
-      const port::ArraySlice<DeviceMemory<T>*>& a_array, int lda,
-      const port::ArraySlice<DeviceMemory<T>*>& b_array, int ldb, Scalar beta,
-      const port::ArraySlice<DeviceMemory<T>*>& c_array, int ldc,
-      int batch_count, ScratchAllocator* scratch_allocator);
+      const port::ArraySlice<DeviceMemory<T> *> &a_array, int lda,
+      const port::ArraySlice<DeviceMemory<T> *> &b_array, int ldb, Scalar beta,
+      const port::ArraySlice<DeviceMemory<T> *> &c_array, int ldc,
+      int batch_count, ScratchAllocator *scratch_allocator);
 
   template <typename T, typename Scalar, typename FuncT>
   port::Status DoBlasGemmBatchedInternal(
-      FuncT cublas_func, Stream* stream, blas::Transpose transa,
+      FuncT cublas_func, Stream *stream, blas::Transpose transa,
       blas::Transpose transb, uint64 m, uint64 n, uint64 k, Scalar alpha,
-      const T** a_array, int lda, const T** b_array, int ldb, Scalar beta,
-      T** c_array, int ldc, int batch_count);
+      const T **a_array, int lda, const T **b_array, int ldb, Scalar beta,
+      T **c_array, int ldc, int batch_count);
 
   // Helper function for implementing DoBlasGemmWithAlgorithm.
   template <typename InT, typename OutT, typename CompT>
   bool DoBlasGemmWithAlgorithmImpl(
-      Stream* stream, blas::Transpose transa, blas::Transpose transb, uint64 m,
-      uint64 n, uint64 k, const HostOrDeviceScalar<CompT>& alpha,
-      const DeviceMemory<InT>& a, int lda, const DeviceMemory<InT>& b, int ldb,
-      const HostOrDeviceScalar<CompT>& beta, DeviceMemory<OutT>* c, int ldc,
+      Stream *stream, blas::Transpose transa, blas::Transpose transb, uint64 m,
+      uint64 n, uint64 k, const HostOrDeviceScalar<CompT> &alpha,
+      const DeviceMemory<InT> &a, int lda, const DeviceMemory<InT> &b, int ldb,
+      const HostOrDeviceScalar<CompT> &beta, DeviceMemory<OutT> *c, int ldc,
       blas::ComputationType computation_type, blas::AlgorithmType algorithm,
-      blas::ProfileResult* output_profile_result);
+      blas::ProfileResult *output_profile_result);
 
   // Helper function for implementing DoBlasGemmWithProfiling.
   template <typename T, typename ParamType>
   bool DoBlasGemmWithProfilingImpl(
-      Stream* stream, blas::Transpose transa, blas::Transpose transb, uint64 m,
-      uint64 n, uint64 k, const ParamType& alpha, const DeviceMemory<T>& a,
-      int lda, const DeviceMemory<T>& b, int ldb, const ParamType& beta,
-      DeviceMemory<T>* c, int ldc, blas::ProfileResult* output_profile_result);
+      Stream *stream, blas::Transpose transa, blas::Transpose transb, uint64 m,
+      uint64 n, uint64 k, const ParamType &alpha, const DeviceMemory<T> &a,
+      int lda, const DeviceMemory<T> &b, int ldb, const ParamType &beta,
+      DeviceMemory<T> *c, int ldc, blas::ProfileResult *output_profile_result);
 
   // Helper function for implementing DoBlasGemvWithProfiling.
   template <typename T>
-  bool DoBlasGemvWithProfilingImpl(Stream* stream, blas::Transpose trans,
-                                   uint64 m, uint64 n, const T& alpha,
-                                   const DeviceMemory<T>& a, int lda,
-                                   const DeviceMemory<T>& x, int incx,
-                                   const T& beta, DeviceMemory<T>* y, int incy,
-                                   blas::ProfileResult* output_profile_result);
+  bool DoBlasGemvWithProfilingImpl(Stream *stream, blas::Transpose trans,
+                                   uint64 m, uint64 n, const T &alpha,
+                                   const DeviceMemory<T> &a, int lda,
+                                   const DeviceMemory<T> &x, int incx,
+                                   const T &beta, DeviceMemory<T> *y, int incy,
+                                   blas::ProfileResult *output_profile_result);
 
   // Guards the cuBLAS handle for this device.
   absl::Mutex mu_;
 
   // GpuExecutor which instantiated this CUDABlas.
   // Immutable post-initialization.
-  GpuExecutor* parent_;
+  GpuExecutor *parent_;
 
   // cuBLAS library handle on the device.
   cublasHandle_t blas_ GUARDED_BY(mu_);
@@ -184,4 +184,3 @@ class CUDABlas : public blas::BlasSupport {
 }  // namespace stream_executor
 
 #endif  // TENSORFLOW_STREAM_EXECUTOR_CUDA_CUDA_BLAS_H_
-
