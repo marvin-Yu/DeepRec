@@ -1,5 +1,6 @@
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/util/work_sharder.h"
+#include "tensorflow/core/topk_op/util.h"
 #include <algorithm>
 
 using namespace tensorflow;
@@ -27,9 +28,9 @@ class IdxGTopK : public OpKernel {
     int k = context->input(1).scalar<int>()();
 
     const Tensor & src_idx_tensor = context->input(2);
-    const auto& src_idx = splits_tensor.vec<int>();
+    const auto& src_idx = src_idx_tensor.vec<int>();
     const Tensor & dst_idx_tensor = context->input(3);
-    const auto& dst_idx = splits_tensor.vec<int>();
+    const auto& dst_idx = dst_idx_tensor.vec<int>();
 
     //TODO: remove this check if k >=3 implemented
     OP_REQUIRES(context, 0 < k && k <= 2, 

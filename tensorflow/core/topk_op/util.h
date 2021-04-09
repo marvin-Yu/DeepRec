@@ -3,8 +3,8 @@
 //find topk in index range [head, tail), output to val_v & idx_v
 // safe if len < k
 template <typename T>
-void safe_topk_with_offset(const T* v, int k, int head, int tail, 
-                           T* val_v, int* idx_v){
+void safe_topk_in_range(const T* v, int k, int head, int tail, 
+                        T* val_v, int* idx_v) {
   int len = tail - head;
   if (len <= k) {
     for (int i = head; i < tail; ++i) {
