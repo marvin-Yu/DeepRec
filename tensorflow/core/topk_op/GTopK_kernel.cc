@@ -1,5 +1,4 @@
 #include "tensorflow/core/framework/op_kernel.h"
-#include "tensorflow/core/lib/core/threadpool.h"
 #include "tensorflow/core/util/work_sharder.h"
 #include <algorithm>
 
@@ -113,13 +112,9 @@ class GroupedTopK : public OpKernel {
 
     const DeviceBase::CpuWorkerThreads* worker_threads = context->device()->tensorflow_cpu_worker_threads();
     int num_threads = worker_threads->num_threads;
-    
-    int block_size = (input_len + num_threads - 1) / num_threads;
-    worker_threads->workers->TransformRangeConcurrently(block_size, num_group, shard);
-    
-    //int avg_group_len = input_len / num_group;
-    //int64 kCostPerGroup = 4*avg_group_len*batchsize;
-    //Shard(num_threads, worker_threads->workers, num_group, kCostPerGroup, shard);
+    int avg_group_len = input_len / num_group;
+    int64 kCostPerGroup = 4 * avg_group_len * batch_size;
+    Shard(num_threads, worker_threads->workers, num_group, kCostPerGroup, shard);
   };
 };
 
