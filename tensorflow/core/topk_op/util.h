@@ -7,9 +7,9 @@ void safe_topk_in_range(const T* v, int k, int head, int tail,
                         T* val_v, int* idx_v) {
   int len = tail - head;
   if (len <= k) {
-    for (int i = head; i < tail; ++i) {
-      idx_v[i] = i;
-      val_v[i] = v[i];
+    for (int i = 0; i < len; ++i) {
+      idx_v[i] = head + i;
+      val_v[i] = v[idx_v[i]];
     }
     return;
   }
