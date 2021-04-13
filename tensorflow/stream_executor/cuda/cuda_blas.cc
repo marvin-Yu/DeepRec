@@ -191,8 +191,6 @@ class ScopedCublasMathMode {
       LOG(ERROR) << "failed to get old cublas math mode: " << ToString(ret);
       return ok_ = false;
     }
-    LOG(INFO) << "old cublas math mode: " << old_mode_;
-    LOG(INFO) << "new cublas math mode: " << new_mode;
 
     ret = cublasSetMathMode(handle_, new_mode);
     if (ret != CUBLAS_STATUS_SUCCESS) {
@@ -571,7 +569,8 @@ bool CUDABlas::DoBlasInternalImpl(FuncT cublas_func, Stream *stream,
   }
   cublasStatus_t ret = cublas_func(blas_, args...);
   if ((err_on_failure || VLOG_IS_ON(3)) && ret != CUBLAS_STATUS_SUCCESS) {
-    LOG(ERROR) << "failed to run cuBLAS routine: " << ToString(ret);
+    LOG(ERROR) << "DoBlasInternalImpl: failed to run cuBLAS routine: "
+               << ToString(ret);
     std::stringstream ss;
     PrintArgs(ss, 0, args...);
     LOG(ERROR) << "cuBLAS args: ";
@@ -615,7 +614,9 @@ bool CUDABlas::DoBlasInternalImplcublasGemmEx(Stream *stream,
   }
   cublasStatus_t ret = cublasGemmEx(blas_, args...);
   if ((err_on_failure || VLOG_IS_ON(3)) && ret != CUBLAS_STATUS_SUCCESS) {
-    LOG(ERROR) << "failed to run cuBLAS routine: " << ToString(ret);
+    LOG(ERROR)
+        << "DoBlasInternalImplcublasGemmEx: failed to run cuBLAS routine: "
+        << ToString(ret);
     std::stringstream ss;
     PrintArgs(ss, 0, args...);
     LOG(ERROR) << "cuBLAS args: ";
@@ -659,7 +660,9 @@ bool CUDABlas::DoBlasInternalImplcublasGemmBatchedEx(Stream *stream,
   }
   cublasStatus_t ret = cublasGemmBatchedEx(blas_, args...);
   if ((err_on_failure || VLOG_IS_ON(3)) && ret != CUBLAS_STATUS_SUCCESS) {
-    LOG(ERROR) << "failed to run cuBLAS routine: " << ToString(ret);
+    LOG(ERROR) << "DoBlasInternalImplcublasGemmBatchedEx: failed to run cuBLAS "
+                  "routine: "
+               << ToString(ret);
     std::stringstream ss;
     PrintArgs(ss, 0, args...);
     LOG(ERROR) << "cuBLAS args: ";
@@ -701,7 +704,9 @@ bool CUDABlas::DoBlasInternalImplcublasGemmStridedBatchedEx(
   }
   cublasStatus_t ret = cublasGemmStridedBatchedEx(blas_, args...);
   if ((err_on_failure || VLOG_IS_ON(3)) && ret != CUBLAS_STATUS_SUCCESS) {
-    LOG(ERROR) << "failed to run cuBLAS routine: " << ToString(ret);
+    LOG(ERROR) << "DoBlasInternalImplcublasGemmStridedBatchedEx: failed to run "
+                  "cuBLAS routine: "
+               << ToString(ret);
     std::stringstream ss;
     PrintArgs(ss, 0, args...);
     LOG(ERROR) << "cuBLAS args: ";
@@ -1972,7 +1977,7 @@ bool CUDABlas::DoBlasGemm(Stream *stream, blas::Transpose transa,
       true /* = err_on_failure= */, math_type, CUDABlasTranspose(transa),
       CUDABlasTranspose(transb), m, n, k, &alpha, GpuMemory(a),
       SE_CUDA_DATA_HALF, lda, GpuMemory(b), SE_CUDA_DATA_HALF, ldb, &beta,
-      GpuMemoryMutable(c), SE_CUDA_DATA_HALF, ldc);
+      GpuMemoryMutable(c), CUDA_R_32F, ldc);
 
 #else
   LOG(ERROR) << "fp16 sgemm is not implemented in this cuBLAS version "
