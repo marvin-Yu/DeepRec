@@ -2,8 +2,8 @@
 # http://twiki.corp.alimama.com/twiki/bin/view/Alimm_OPS/RPM #
 # http://www.rpm.org/max-rpm/ch-rpm-inside.html              #
 ##############################################################
-Name: %(echo t-ads-tensorflow-cc-lib${SUFFIX})
-Packager:wenqi.gwq
+Name: %(echo t-ads-tensorflow-cc-cuda11-lib${SUFFIX})
+Packager:xianjie.qxj
 Version:1.15.0
 # if you want get version number from outside, use like this
 Release:%(echo $RELEASE)%{?dist}
