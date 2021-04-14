@@ -12,4 +12,11 @@ tf_kernel_library(
       "IdxGTopK_kernel.cc",
     ],
     visibility = ["//visibility:public"],
+    deps = [
+        "//tensorflow/core/kernels:eigen_helpers",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "@com_google_absl//absl/base",
+        "@com_google_absl//absl/strings",
+     ],
 )
