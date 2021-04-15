@@ -1916,23 +1916,14 @@ bool CUDABlas::DoBlasGemm(Stream *stream, blas::Transpose transa,
 #else
   cublasMath_t math_type = CUBLAS_DEFAULT_MATH;
 #endif
-  int cc_major, cc_minor;
-  if (stream->parent()->GetDeviceDescription().cuda_compute_capability(
-          &cc_major, &cc_minor) &&
-      cc_major >= 5) {
-    cublasGemmAlgo_t algo =
-        (cc_major >= 7 ? CUBLAS_GEMM_DFALT_TENSOR_OP : CUBLAS_GEMM_DFALT);
-    return DoBlasInternalImplcublasGemmEx(
-        stream, true /* = pointer_mode_host */, true /* = err_on_failure= */,
-        math_type, CUDABlasTranspose(transa), CUDABlasTranspose(transb), m, n,
-        k, &alpha, GpuMemory(a), SE_CUDA_DATA_HALF, lda, GpuMemory(b),
-        SE_CUDA_DATA_HALF, ldb, &beta, GpuMemoryMutable(c), SE_CUDA_DATA_HALF,
-        ldc, CUBLAS_COMPUTE_16F, algo);
-  } else {
-    LOG(ERROR) << "Get cuda_compute_capability error or "
-                  "cuda_compute_capability is lower than 5.0";
-    return false;
-  }
+
+  return DoBlasInternalImpl(
+      cublasSgemmEx, stream, true /* = pointer_mode_host */,
+      true /* = err_on_failure= */, math_type, CUDABlasTranspose(transa),
+      CUDABlasTranspose(transb), m, n, k, &alpha, GpuMemory(a),
+      SE_CUDA_DATA_HALF, lda, GpuMemory(b), SE_CUDA_DATA_HALF, ldb, &beta,
+      GpuMemoryMutable(c), SE_CUDA_DATA_HALF, ldc);
+
 #else
   LOG(ERROR) << "fp16 sgemm is not implemented in this cuBLAS version "
              << "(need at least CUDA 7.5)";
@@ -2967,7 +2958,7 @@ bool CUDABlas::DoBlasGemmStridedBatched(
         math_type, CUDABlasTranspose(transa), CUDABlasTranspose(transb), m, n,
         k, &alpha, GpuMemory(a), CUDA_R_16F, lda, stride_a, GpuMemory(b),
         CUDA_R_16F, ldb, stride_b, &beta, GpuMemoryMutable(c), CUDA_R_16F, ldc,
-        stride_c, batch_count, CUBLAS_COMPUTE_16F, algo);
+        stride_c, batch_count, CUDA_R_32F, algo);
     if (ok) {
       return true;
     }
