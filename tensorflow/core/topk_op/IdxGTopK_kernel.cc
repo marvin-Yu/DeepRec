@@ -44,6 +44,15 @@ class IdxGTopK : public OpKernel {
     int num_group = dst_idx.dimension(0)-1;
     int output_len = dst_idx(num_group);
 
+    if (VLOG_IS_ON(1)) {
+      LOG(INFO) << "IdxGTopK: k=" << k
+                << ", batch_size=" << batch_size
+                << ", input_len=" << input_len
+                << ", num_group=" << num_group
+                << ", output_len=" << output_len;
+    }
+
+
     OP_REQUIRES(context, dst_idx(0) == 0, 
                 errors::InvalidArgument("dst_idx(0) shall be 0, but is ", dst_idx(0)));
     OP_REQUIRES(context, output_len <= k * num_group, 

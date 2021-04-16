@@ -55,7 +55,15 @@ class GTopK : public OpKernel {
 
     OP_REQUIRES(context, sum == input_len, 
                 errors::InvalidArgument("sum of splits do NOT match size of input: ", sum ,"!=", input_len));
-    
+
+    if (VLOG_IS_ON(1)) {
+      LOG(INFO) << "GTopK: k=" << k
+                << ", batch_size=" << batch_size
+                << ", input_len=" << input_len
+                << ", num_group=" << num_group
+                << ", output_len=" << output_len;
+    }
+ 
     //Allocate Output
     TensorShape output_shape = input_tensor.shape();
     output_shape.set_dim(output_shape.dims()-1, output_len);
