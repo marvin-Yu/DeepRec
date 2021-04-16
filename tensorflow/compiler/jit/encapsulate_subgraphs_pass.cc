@@ -25,7 +25,9 @@ limitations under the License.
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_replace.h"
 #include "absl/types/optional.h"
+#include "tensorflow/compiler/jit/encapsulate_util.h"
 #include "tensorflow/compiler/jit/flags.h"
 #include "tensorflow/compiler/jit/graphcycles/graphcycles.h"
 #include "tensorflow/compiler/jit/mark_for_compilation_pass.h"
@@ -203,6 +205,7 @@ class Encapsulator {
                             bool reuse_existing_functions,
                             FunctionLibraryDefinition* library);
 
+    Status AddShapeToFunctionDef(Graph& graph, FunctionDef* fdef);
     // Adds the function call node to graph_out.
     Status AddFunctionCallNode(
         const std::unordered_map<const Node*, Node*>& node_images,
@@ -329,8 +332,7 @@ class Encapsulator {
   // subgraph boundary it is a slot on the output of a call node, otherwise it
   // is a slot on a node in the output graph.
   int FindOutputSlotOfEdgeSrc(const string& src_func_id,
-                              const string& dst_func_id,
-                              const Edge* edge);
+                              const string& dst_func_id, const Edge* edge);
 
   // Finds the image of an edge destination in the output graph. If the edge
   // crosses a subgraph boundary it is the input of a call node, otherwise it is
@@ -344,8 +346,7 @@ class Encapsulator {
   // subgraph boundary it is a slot on the input of a call node, otherwise it is
   // a slot on a node in the output graph.
   int FindOutputSlotOfEdgeDst(const string& src_func_id,
-                              const string& dst_func_id,
-                              const Edge* edge);
+                              const string& dst_func_id, const Edge* edge);
 
   // Copies a single edge to the output graph. The edge is either entirely
   // within the output graph, or crosses into or out of a compiled subgraph.
@@ -481,6 +482,25 @@ Status Encapsulator::Subgraph::RecordArg(
     DataType dtype = edge->dst()->input_type(edge->dst_input());
     builder.Attr("T", dtype);
     builder.Attr("index", arg_index);
+    if (src_node->attrs().Find("_output_shapes") != nullptr) {
+      const auto& output_shape =
+          src_node->attrs().Find("_output_shapes")->shape();
+      builder.Attr("_output_shapes", PartialTensorShape(output_shape));
+      VLOG(2) << "Adding _output_shapes info to node: "
+                << absl::StrCat(src_node->name(), "_", src_slot, "_arg");
+      VLOG(2) << "Shape info: " << output_shape.DebugString();
+    } else if (src_node->attrs().Find("_xla_inferred_shapes") != nullptr) {
+      std::vector<PartialTensorShape> output_shapes;
+      TF_CHECK_OK(GetNodeAttr(src_node->attrs(), "_xla_inferred_shapes",
+                              &output_shapes));
+      if (output_shapes.size() == 1) {
+        builder.Attr("_output_shapes", output_shapes[0]);
+        VLOG(2) << "Adding _xla_inferred_shapes info to node: "
+                  << absl::StrCat(src_node->name(), "_", src_slot, "_arg");
+        VLOG(2) << "Shape info: " << output_shapes[0].DebugString();
+      }
+    }
+
     Status s = builder.Finalize(&arg_def);
     if (!s.ok()) return s;
 
@@ -562,6 +582,26 @@ void Encapsulator::Subgraph::ConnectSequencerToCallNode(Graph* graph_out) {
   }
 }
 
+Status Encapsulator::Subgraph::AddShapeToFunctionDef(Graph& graph,
+                                                     FunctionDef* fdef) {
+  auto fdef_attr = fdef->mutable_attr();
+  AttrValue attr_value;
+  auto arg_shape = attr_value.mutable_func();
+  *arg_shape->mutable_name() = "shape_info";
+  for (auto& input_arg : fdef->signature().input_arg()) {
+    for (auto n : graph.nodes()) {
+      if (absl::StrReplaceAll(absl::AsciiStrToLower(n->name()),
+                              {{"-", "_"}, {"/", "_"}}) == input_arg.name() &&
+          n->attrs().Find("_output_shapes") != nullptr) {
+        *(*arg_shape->mutable_attr())[input_arg.name()].mutable_shape() =
+            n->attrs().Find("_output_shapes")->shape();
+      }
+    }
+  }
+  (*fdef_attr)["input_args_info"] = attr_value;
+  return Status::OK();
+}
+
 Status Encapsulator::Subgraph::BuildFunctionDef(
     const string& name_in, const RewriteSubgraphFn& rewrite_subgraph_fn,
     bool reuse_existing_functions, FunctionLibraryDefinition* library) {
@@ -622,6 +662,7 @@ Status Encapsulator::Subgraph::BuildFunctionDef(
   std::vector<ControlFlowInfo> dummy;
   TF_RETURN_IF_ERROR(BuildControlFlowInfo(graph_.get(), &dummy));
   TF_RETURN_IF_ERROR(GraphToFunctionDef(*graph_, name, lookup, &fdef));
+  TF_RETURN_IF_ERROR(AddShapeToFunctionDef(*graph_, &fdef));
 
   if (VLOG_IS_ON(1)) {
     VLOG(2) << "Build function def " << name;
@@ -899,9 +940,9 @@ int Encapsulator::FindOutputSlotOfEdgeDst(const string& src_func_id,
                                           const Edge* edge) {
   if (IsInSubgraph(dst_func_id)) {
     const Subgraph& dst_subgraph = subgraphs_.at(dst_func_id);
-      // 'dst' is in a subgraph and 'src' is a regular node in the output
-      // graph. Use the corresponding call input instead.
-      return dst_subgraph.GetArgIndexForEdge(edge);
+    // 'dst' is in a subgraph and 'src' is a regular node in the output
+    // graph. Use the corresponding call input instead.
+    return dst_subgraph.GetArgIndexForEdge(edge);
   } else {
     // The destination of the edge is in the output graph so use the regular
     // edge slot.
@@ -1112,8 +1153,7 @@ Status EncapsulateSubgraphsInFunctions(
     string group_attribute, const Graph& graph_in,
     const RewriteSubgraphFn& rewrite_subgraph_fn, bool reuse_existing_functions,
     std::unique_ptr<Graph>* graph_out, FunctionLibraryDefinition* library) {
-  Encapsulator encapsulator(std::move(group_attribute),
-                            &graph_in);
+  Encapsulator encapsulator(std::move(group_attribute), &graph_in);
   TF_RETURN_IF_ERROR(encapsulator.SplitIntoSubgraphs(library));
 
   TF_RETURN_IF_ERROR(encapsulator.BuildFunctionDefs(
@@ -1167,6 +1207,12 @@ Status EncapsulateSubgraphsPass::Run(
                     options.flib_def);
   }
 
+  Status s =
+      PerformStaticShapeInferenceBeforeEncapsulation(options.graph->get());
+  if (VLOG_IS_ON(1)) {
+    DumpGraphToFile("encapsulate_subgraphs_before_addshape", **options.graph,
+                    options.flib_def);
+  }
   std::unique_ptr<Graph> graph_out;
   FunctionLibraryDefinition* const library = options.flib_def;
 

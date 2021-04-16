@@ -36,14 +36,25 @@ class LaunchDimensions {
  public:
   // The default constructor creates a launch dimension that indicate
   // single-threaded execution.
-  LaunchDimensions() : block_count_(1), threads_per_block_(1) {}
+  LaunchDimensions()
+      : block_count_(1), threads_per_block_(1), batch_dim_dynamic_(false) {}
 
   LaunchDimensions(int64 block_count, int64 threads_per_block)
-      : block_count_(block_count), threads_per_block_(threads_per_block) {}
+      : block_count_(block_count),
+        threads_per_block_(threads_per_block),
+        batch_dim_dynamic_(false) {}
+
+  LaunchDimensions(int64 block_count, int64 threads_per_block,
+                   bool batch_dim_dynamic)
+      : block_count_(block_count),
+        threads_per_block_(threads_per_block),
+        batch_dim_dynamic_(batch_dim_dynamic) {}
 
   bool IsSinglethreaded() const {
     return block_count_ == 1 && threads_per_block_ == 1;
   }
+
+  bool IsBatchDimDynamic() const { return batch_dim_dynamic_; }
 
   int64 block_count() const { return block_count_; }
   int64 threads_per_block() const { return threads_per_block_; }
@@ -52,6 +63,7 @@ class LaunchDimensions {
  private:
   int64 block_count_;
   int64 threads_per_block_;
+  bool batch_dim_dynamic_;
 };
 
 std::ostream& operator<<(std::ostream& out,
@@ -63,6 +75,10 @@ int64 ThreadsPerBlockLimit(const se::DeviceDescription& device_desc);
 LaunchDimensions CalculateLaunchDimensions(
     const Shape& shape, const se::DeviceDescription& device_desc,
     int unroll_factor = 1);
+
+LaunchDimensions CalculateDynamicLaunchDimensions(
+    const int64 before_padding, const int64 after_padding,
+    const LaunchDimensions& dimensions);
 
 }  // namespace gpu
 }  // namespace xla
