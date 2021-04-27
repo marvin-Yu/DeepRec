@@ -472,6 +472,21 @@ REGISTER_OP("IdxGTopK")
       return Status::OK();
     });
 
+REGISTER_OP("BlazeTopK")
+    .Input("input: T")              //[..., input_len]
+    .Input("k: Tindices")           //scaler
+    .Output("value: T")             //[..., k]
+    .Output("index: Tindices")      //[..., k]
+    .Attr("T: {half, float, double}")
+    .Attr("Tindices: {int32}")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      shape_inference::ShapeHandle output;
+      TF_RETURN_IF_ERROR(
+          c->ReplaceDim(c->input(0), -1, c->UnknownDim(), &output));
+      c->set_output(0, output);
+      return Status::OK();
+    });
+
 
 /* values N * (scences, unit_size)
  * coords N * (scences, 2)

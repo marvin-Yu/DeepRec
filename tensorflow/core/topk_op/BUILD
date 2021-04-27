@@ -10,6 +10,7 @@ tf_kernel_library(
       "util.h",
       "GTopK_kernel.cc",
       "IdxGTopK_kernel.cc",
+      "BlazeTopK_kernel.cc",
     ],
     visibility = ["//visibility:public"],
     deps = [
