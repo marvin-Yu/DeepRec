@@ -293,4 +293,13 @@ REGISTER_OP("FakeParam")
       return Status::OK();
     });
 
+REGISTER_OP("BlazeGeneralMap")
+    .Input("key: Tin")
+    .Output("output: Tout")
+    .Attr("Tin: {int32, int64} = DT_INT64")
+    .Attr("Tout:{int32, int64} = DT_INT32")
+    .Attr("keys: list(string) >= 0")
+    .Attr("values: list(string) >= 0")
+    .Attr("default_val: int >= 0")
+    .SetShapeFn(shape_inference::UnchangedShape);
 }  // end namespace tensorflow
