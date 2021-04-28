@@ -33,7 +33,7 @@ class BlazeTopK : public OpKernel {
                 errors::InvalidArgument("require: k <= input_len, but", k ," > ", input_len));
 
     int sampling_num = std::max(1000, k);
-    float ration = (float)k / input_len;
+    float ratio = (float)k / input_len;
     int idx0 = std::ceil(ratio*sampling_num) * 2;
 
     //Allocate Output
@@ -52,10 +52,10 @@ class BlazeTopK : public OpKernel {
 
       for (int batch = begin; batch < end; ++batch) {
         
-        T* input_v = input.date() + batch * input_len;
-        std::vector<T> sample(input_v, input_v+sample_num);
+        const T* input_v = input.data() + batch * input_len;
+        std::vector<T> sample(input_v, input_v+sampling_num);
         std::sort(sample.begin(), sample.end(), 
-                  [](int a, int b) { return a > b; });
+                  [](T a, T b) { return a > b; });
 
         int idx = idx0 - 1;
         do {
@@ -73,18 +73,18 @@ class BlazeTopK : public OpKernel {
                           [&input_v](int a, int b) { return input_v[a] > input_v[b]; });
 
         //copy candidate to ouput buffer
-        value_v = value.data() + batch * k;
-        index_v = index.data() + batch * k;
+        T* value_v = value.data() + batch * k;
+        int* index_v = index.data() + batch * k;
         for (int i = 0; i < k; ++i) {
           index_v[i] = candidate_idx[i];
-          value_v[i] = v_input[index_v[i]];
+          value_v[i] = input_v[index_v[i]];
         }
       }
     };
 
     const DeviceBase::CpuWorkerThreads* worker_threads = context->device()->tensorflow_cpu_worker_threads();
     int64 kCostPerBatch = 3*sampling_num*std::log(sampling_num) + 6*k*std::log(k) + 3*input_len;
-    Shard(worker_threads->num_threads, worker_threads->workers, num_group, kCostPerBatch, shard);
+    Shard(worker_threads->num_threads, worker_threads->workers, batch_size, kCostPerBatch, shard);
   };
 };
 
