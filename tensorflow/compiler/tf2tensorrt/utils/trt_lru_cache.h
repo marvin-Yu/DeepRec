@@ -125,8 +125,18 @@ struct VectorTensorShapeHasher {
 #if GOOGLE_CUDA
 #if GOOGLE_TENSORRT
 
+
+static const int context_num_per_trt_engine = 4;
+
 struct EngineContext {
   EngineContext() {}  // Creates an empty context.
+  EngineContext(
+      TrtUniquePtrType<nvinfer1::ICudaEngine>&& input_cuda_engine)
+      : cuda_engine(std::move(input_cuda_engine)) {
+        for (int i = 0; i < context_num_per_trt_engine; i++) {
+          execution_contexts.emplace_back(TrtUniquePtrType<nvinfer1::IExecutionContext>(cuda_engine->createExecutionContext()));
+        }
+      }
   EngineContext(
       TrtUniquePtrType<nvinfer1::ICudaEngine>&& input_cuda_engine,
       TrtUniquePtrType<nvinfer1::IExecutionContext>&& input_execution_context)
@@ -137,6 +147,9 @@ struct EngineContext {
   TrtUniquePtrType<nvinfer1::ICudaEngine> cuda_engine;
   TrtUniquePtrType<nvinfer1::IExecutionContext> execution_context
       GUARDED_BY(mu);
+
+  mutex mus[context_num_per_trt_engine];
+  std::vector<TrtUniquePtrType<nvinfer1::IExecutionContext>> execution_contexts;
 };
 
 // Contains the context required to build the calibration data.

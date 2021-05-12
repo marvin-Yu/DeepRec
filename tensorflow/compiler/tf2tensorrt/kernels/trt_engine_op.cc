@@ -627,9 +627,10 @@ bool TRTEngineOp::ExecuteTrtEngine(OpKernelContext* ctx,
 
   // nvinfer1::IExecutionContext::enqueue is not thread safe and we need a mutex
   // for it.
-  mutex_lock lock(engine_context->mu);
+  int trt_idx = ctx->step_id() % context_num_per_trt_engine;
+  mutex_lock lock(engine_context->mus[trt_idx]);
   // TODO(jie): trt enqueue does not return error
-  auto ret = engine_context->execution_context->enqueue(num_batch, &buffers[0],
+  auto ret = engine_context->execution_contexts[trt_idx]->enqueue(num_batch, &buffers[0],
                                                         *stream, nullptr);
   if (!ret) {
     LOG(WARNING) << "Failed to enqueue batch for TRT engine: " << name();
@@ -703,11 +704,15 @@ StatusOr<EngineContext*> TRTEngineOp::GetEngine(
     }
     // TODO(laigd): here we assume engine_input_shapes matches the actual input
     // shapes of the engine, we should verify that.
+    /*
     cache.emplace(engine_input_shapes,
                   absl::make_unique<EngineContext>(
                       std::move(static_engine),
                       TrtUniquePtrType<nvinfer1::IExecutionContext>(
                           raw_static_engine->createExecutionContext())));
+    */
+    cache.emplace(engine_input_shapes,
+                  absl::make_unique<EngineContext>(std::move(static_engine)));
     // Runtime is safe to delete after engine creation
     VLOG(1) << "Size of serialized TRT engine: "
             << serialized_segment_.capacity();
@@ -753,11 +758,15 @@ StatusOr<EngineContext*> TRTEngineOp::GetEngine(
       cache.emplace(engine_input_shapes, absl::make_unique<EngineContext>());
       return &empty_context;
     }
+    /*
     TrtUniquePtrType<nvinfer1::IExecutionContext> exec_context(
         engine->createExecutionContext());
     cache.emplace(engine_input_shapes,
                   absl::make_unique<EngineContext>(std::move(engine),
                                                    std::move(exec_context)));
+    */
+    cache.emplace(engine_input_shapes,
+                  absl::make_unique<EngineContext>(std::move(engine)));
     VLOG(1) << "Added new engine to cache of " << name()
             << ". Cache size: " << cache.size();
   }
@@ -842,11 +851,15 @@ Status TRTEngineOp::AllocateCalibrationResources(
       // dump it out during conversion for TF 2.0.
       mutex_lock lock(this->engine_mutex_);
       this->calibrator_ = std::move(cres->calibrator_);
+      /*
       TrtUniquePtrType<nvinfer1::IExecutionContext> exec_context(
           cres->engine_->createExecutionContext());
       cache_res->cache_.emplace(
           shapes, absl::make_unique<EngineContext>(std::move(cres->engine_),
                                                    std::move(exec_context)));
+      */
+      cache_res->cache_.emplace(
+          shapes, absl::make_unique<EngineContext>(std::move(cres->engine_)));
     }
 
     VLOG(1) << "Calibration loop terminated " << this->name();
