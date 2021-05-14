@@ -660,6 +660,10 @@ message RunOptions {
   RunId run_id = 9;
 
   bool record_flop_count = 109;
+
+  bool emb_merge_dumplicate = 110;
+  float emb_merge_dumplicate_threshold = 111;
+
   reserved 4;
 }
 
