@@ -160,7 +160,8 @@ class DirectSession : public Session {
       const std::vector<string>& target_nodes,
       std::vector<Tensor>* outputs,
       RunMetadata* run_metadata,
-      StatusCallback done) override;
+      StatusCallback done,
+      std::atomic<int64_t>* flops = nullptr) override;
 
   void RunAsync(const RunOptions& run_options,
       const NamedTensorList& inputs,
@@ -169,7 +170,8 @@ class DirectSession : public Session {
       std::vector<Tensor>* outputs,
       RunMetadata* run_metadata,
       CallbackFrame* frame,
-      StatusCallback done);
+      StatusCallback done,
+      std::atomic<int64_t>* flops = nullptr) override;
 
 
  private:
@@ -337,7 +339,8 @@ class DirectSession : public Session {
       const std::vector<string>& target_nodes,
       std::vector<Tensor>* outputs,
       CallbackFrame* frame,
-      StatusCallback done);
+      StatusCallback done,
+      std::atomic<int64_t>* flops = nullptr);
 
   ::tensorflow::Status AfterRunAsync(const ::tensorflow::RunOptions& run_options,
        const NamedTensorList& inputs,

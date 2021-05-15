@@ -612,6 +612,14 @@ class OpKernelContext {
   // TrackingAllocator
   typedef std::pair<Allocator*, TrackingAllocator*> WrappedAllocator;
 
+  int64_t get_flops() {
+    return _flops;
+  }
+
+  void set_flops(int64_t flops) {
+    _flops = flops;
+  }
+
   TensorHolder * tensor_holder = nullptr;
   
   // TODO(zhifengc): Do some cleanup of Params.
@@ -1376,6 +1384,8 @@ class OpKernelContext {
       temp_tensor_buffer_and_size_ GUARDED_BY(stats_mu_);
   std::unique_ptr<gtl::InlinedVector<int64, 2>> persistent_alloc_ids_
       GUARDED_BY(stats_mu_);
+
+  int64_t _flops = 0;
 
   TF_DISALLOW_COPY_AND_ASSIGN(OpKernelContext);
 };

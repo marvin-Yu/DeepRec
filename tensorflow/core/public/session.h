@@ -18,6 +18,7 @@ limitations under the License.
 
 #include <string>
 #include <vector>
+#include <atomic>
 
 #include "tensorflow/core/common_runtime/cuda_graph_meta.h"
 #include "tensorflow/core/framework/device_attributes.pb.h"
@@ -176,7 +177,8 @@ class Session {
                 const std::vector<string>& target_nodes,
                 std::vector<Tensor> *outputs,
                 RunMetadata* run_metadata,
-                StatusCallback done) {}
+                StatusCallback done,
+                std::atomic<int64_t>* flops = nullptr) {}
 
   /// \brief Implementations which support `RunOptions`.
   //

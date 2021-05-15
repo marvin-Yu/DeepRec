@@ -56,7 +56,8 @@ REGISTER_OP("TRTEngineOp")
     .Attr("fixed_input_size: bool = true")
     .Attr("input_shapes: list(shape) = []")
     .Attr("output_shapes: list(shape) = []")
-    .Attr("static_engine: bool = true");
+    .Attr("static_engine: bool = true")
+    .Attr("_flops: int64 = 0");
 }  // namespace tensorflow
 
 #endif  // GOOGLE_TENSORRT

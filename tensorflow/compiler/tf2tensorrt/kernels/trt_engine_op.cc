@@ -167,6 +167,8 @@ class TRTEngineOp : public AsyncOpKernel {
   // If true, create calibration graph for INT8 mode. Otherwise, we are using
   // user-provided quantization ranges.
   bool use_calibration_;
+
+  int64 flops_;
 };
 
 #define TYPECASE(dt, X, Y)                                    \
@@ -289,6 +291,7 @@ TRTEngineOp::TRTEngineOp(OpKernelConstruction* context)
   }
   OP_REQUIRES_OK(context, context->GetAttr("max_cached_engines_count",
                                            &max_cached_engines_));
+  OP_REQUIRES_OK(context, context->GetAttr("_flops", &flops_);
 }
 
 void TRTEngineOp::ExecuteNativeSegment(OpKernelContext* ctx,
@@ -520,6 +523,9 @@ bool TRTEngineOp::ExecuteTrtEngine(OpKernelContext* ctx,
   const int num_batch = ctx->input(0).shape().dim_size(0);
   const int num_binding = ctx->num_inputs() + ctx->num_outputs();
 
+  // Get and Set Flops
+  ctx->set_flops(flops_ * num_batch);
+
   std::vector<void*> buffers(num_binding);
 
   for (int i = 0; i < ctx->num_inputs(); i++) {
@@ -740,10 +746,11 @@ StatusOr<EngineContext*> TRTEngineOp::GetEngine(
 
     // Up to this point, calibrator_ can never be empty, since otherwise it
     // means calibration_mode_ is true and this path won't get executed.
+    int64_t total_flops = 0; // Get Flops
     auto status = convert::ConvertGraphDefToEngine(
         segment_graph_, precision_mode_, batch_size, workspace_size_,
         partial_shapes, &logger, allocator, calibrator_.get(), &engine,
-        use_calibration_, &convert_successfully);
+        use_calibration_, &convert_successfully, &total_flops);
     if (!status.ok()) {
       LOG(WARNING) << "Engine creation for " << name() << " failed. "
                    << "The native segment will be used instead. "
@@ -753,11 +760,17 @@ StatusOr<EngineContext*> TRTEngineOp::GetEngine(
       cache.emplace(engine_input_shapes, absl::make_unique<EngineContext>());
       return &empty_context;
     }
+
     TrtUniquePtrType<nvinfer1::IExecutionContext> exec_context(
         engine->createExecutionContext());
     cache.emplace(engine_input_shapes,
                   absl::make_unique<EngineContext>(std::move(engine),
                                                    std::move(exec_context)));
+    // Get Flops:
+    if (flops_ != total_flops) {
+      flops_ = total_flops;
+    }
+
     VLOG(1) << "Added new engine to cache of " << name()
             << ". Cache size: " << cache.size();
   }
