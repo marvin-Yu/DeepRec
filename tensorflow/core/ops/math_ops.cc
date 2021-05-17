@@ -487,6 +487,14 @@ REGISTER_OP("BlazeTopK")
       return Status::OK();
     });
 
+REGISTER_OP("GetChildren")
+    .Input("nodes: int32")
+    .Input("tree: int32")
+    .Output("children: int32")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      c->set_output(0, c->MakeShape({c->UnknownDim()}));
+      return Status::OK();
+    });
 
 /* values N * (scences, unit_size)
  * coords N * (scences, 2)
