@@ -1853,7 +1853,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
           const bool completed =
               NodeDone(s, state->item->node, ready, stats, nullptr);
           // Get Flops:
-          auto flops = stats->ctx.get_flops();
+          auto flops = state->ctx.get_flops();
           UpdateFlops(flops);
 
           delete state;

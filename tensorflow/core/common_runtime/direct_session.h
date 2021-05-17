@@ -171,7 +171,7 @@ class DirectSession : public Session {
       RunMetadata* run_metadata,
       CallbackFrame* frame,
       StatusCallback done,
-      std::atomic<int64_t>* flops = nullptr) override;
+      std::atomic<int64_t>* flops = nullptr);
 
 
  private:
