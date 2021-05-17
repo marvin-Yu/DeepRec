@@ -17,7 +17,7 @@ class GetChildren_ParentIndicator: public OpKernel {
   void Compute(OpKernelContext* context) override {
     //a list of nodes whose children will be returned
     const Tensor & nodes_tensor = context->input(0);
-    const auto& nodes = input_tensor.vec<int>();
+    const auto& nodes = nodes_tensor.vec<int>();
 
     //an indicator showing the parent of each node, must be monotonically increasing
     // e.g. a tree such as
@@ -26,14 +26,14 @@ class GetChildren_ParentIndicator: public OpKernel {
     // 5 6 7  8 9  10  11 12
     // , gives  -1, 0, 0, 0, 0, 1, 1, 1, 2, 2, 3, 4, 4, ...
     const Tensor & tree_tensor = context->input(1);
-    const auto& tree = input_tensor.vec<int>();
+    const auto& tree = tree_tensor.vec<int>();
 
     int num_nodes = nodes.dimension(0);
     std::vector<int> parents(nodes.data(), nodes.data()+num_nodes);
     std::sort(parents.begin(), parents.end());
 
     int avg_node_degree = 1024;
-    std::vecotr<int> children;
+    std::vector<int> children;
     children.reserve(num_nodes*avg_node_degree);
 
     int child_node = 0;
@@ -49,11 +49,11 @@ class GetChildren_ParentIndicator: public OpKernel {
  
     //Allocate Output
     TensorShape output_shape({children.size()});
-    Tensor *output;
-    OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &value_output));
-    auto output = value_output->vec<int>();
+    Tensor *output_tensor;
+    OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output_tensor));
+    auto output = output_tensor->vec<int>();
 
-    std::copy(children.begin(), children.end(), ouput.data());
+    std::copy(children.begin(), children.end(), output.data());
   };
 };
 
@@ -64,7 +64,7 @@ class GetChildren_SplitIndicator: public OpKernel {
   void Compute(OpKernelContext* context) override {
     //a list of nodes whose children will be returned
     const Tensor & nodes_tensor = context->input(0);
-    const auto& nodes = input_tensor.vec<int>();
+    const auto& nodes = nodes_tensor.vec<int>();
 
     //an indicator showing the splits of level order traversal of a complete tree
     // e.g. a tree such as
@@ -74,32 +74,32 @@ class GetChildren_SplitIndicator: public OpKernel {
     // , whose level order traversal is  0 | 1 2 3 4 | 5 6 7 ; 8 9 ; 10 ; 11 12 | ...
     // will be represented as  1, 5, 8, 10, 11, 13 ..., such that [a_i, a_i+i) is the children of i-th node 
     const Tensor & tree_tensor = context->input(1);
-    const auto& tree = input_tensor.vec<int>();
+    const auto& tree = tree_tensor.vec<int>();
 
     int num_nodes = nodes.dimension(0);
     int num_children = 0;
     for (int i = 0; i < num_nodes; ++i) {
-      int node = nodes[i];
+      int node = nodes(i);
       num_children += tree(node+1) - tree(node);
     }
     
-    std::vecotr<int> children;
+    std::vector<int> children;
     children.reserve(num_children);
 
     for (int i = 0; i < num_nodes; ++i) {
-      int node = nodes[i];
-      for (int j = tree(node), j < tree(node); ++j) {
+      int node = nodes(i);
+      for (int j = tree(node); j < tree(node); ++j) {
         children.push_back(j);
       }
     }
  
     //Allocate Output
     TensorShape output_shape({children.size()});
-    Tensor *output;
-    OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &value_output));
-    auto output = value_output->vec<int>();
+    Tensor *output_tensor;
+    OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output_tensor));
+    auto output = output_tensor->vec<int>();
 
-    std::copy(children.begin(), children.end(), ouput.data());
+    std::copy(children.begin(), children.end(), output.data());
   };
 };
 
