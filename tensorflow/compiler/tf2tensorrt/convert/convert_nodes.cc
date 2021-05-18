@@ -4771,7 +4771,7 @@ Status ConvertMatMulHelper(OpConverterParams* params,
   //  no batch size in dims
   int64_t flops = 1;
   flops *= tensor_a->getDimensions().d[0] * tensor_b->getDimensions().d[0];
-  params->flops = flops;
+  params->flops = flops * 2;
 
   return Status::OK();
 }

@@ -481,7 +481,11 @@ class MatMulOp : public OpKernel {
 
     // Add Flops:
     //  W[B*M] X[M*N] - > B * M * N 
-    ctx->set_flops(a.dim_size(a_dim_remaining) * b.dim_size(b_dim_remaining) * a.dim_size(1 - a_dim_remaining));
+    auto flops = a.dim_size(a_dim_remaining)
+      * b.dim_size(b_dim_remaining)
+      * a.dim_size(1 - a_dim_remaining)
+      * 2;
+    ctx->set_flops(flops);
 
     if (out->NumElements() == 0) {
       // If a has shape [0, x] or b has shape [x, 0], the output shape

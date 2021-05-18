@@ -1520,7 +1520,7 @@ void DirectSession::RunAsync(const RunOptions& run_options,
     done(ret);
   };
   RunAsync(run_options, inputs, output_names, target_nodes, outputs,
-           run_metadata, frame, new_done);
+           run_metadata, frame, new_done, flops);
 }
 
 void DirectSession::RunAsync(const RunOptions& run_options,
