@@ -66,13 +66,19 @@ class GetChildren_SplitIndicator: public OpKernel {
     const Tensor & nodes_tensor = context->input(0);
     const auto& nodes = nodes_tensor.vec<int>();
 
-    //an indicator showing the splits of level order traversal of a complete tree
+    // an indicator showing the splits of level order traversal of a complete tree
     // e.g. a tree such as
     // 0
     // 1      2    3   4      
     // 5 6 7  8 9  10  11 12
     // , whose level order traversal is  0 | 1 2 3 4 | 5 6 7 ; 8 9 ; 10 ; 11 12 | ...
-    // will be represented as  1, 5, 8, 10, 11, 13 ..., such that [a_i, a_i+i) is the children of i-th node 
+    // will be represented as  1, 5, 8, 10, 11, 13 ..., such that [a_i, a_i+i) is the children of i-th node
+    // it also represents a bunch of trees (a forest, or start from mid layer), e.g.
+    // 0         1         2
+    // 3     4   5         6      7   8
+    // 9 10  11  12 13 14  15 16  17  18 19 20
+    // represents as  3, 5, 6, 9, 11, 12, 15, 17, 18, 21
+    // thous we know that the "first layer" (roots of trees) is [0,3)=0, 1, 2, since the first element is 3.
     const Tensor & tree_tensor = context->input(1);
     const auto& tree = tree_tensor.vec<int>();
 
