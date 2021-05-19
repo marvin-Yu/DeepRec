@@ -146,7 +146,7 @@ class FirstLevel_SplitIndicator: public OpKernel {
     int num_nodes = tree(0);
  
     //Allocate Output
-    TensorShape output_shape({children.size()});
+    TensorShape output_shape({num_nodes});
     Tensor *output_tensor;
     OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output_tensor));
     auto output = output_tensor->vec<int>();
