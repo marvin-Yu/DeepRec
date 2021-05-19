@@ -94,7 +94,7 @@ class GetChildren_SplitIndicator: public OpKernel {
 
     for (int i = 0; i < num_nodes; ++i) {
       int node = nodes(i);
-      for (int j = tree(node); j < tree(node); ++j) {
+      for (int j = tree(node); j < tree(node+1); ++j) {
         children.push_back(j);
       }
     }
