@@ -7,8 +7,6 @@ using namespace tensorflow;
 using CPUDevice = Eigen::ThreadPoolDevice;
 using GPUDevice = Eigen::GpuDevice;
 
-// OpKernel definition.
-// template parameter <T> is the datatype of the tensors.
 
 class GetChildren_ParentIndicator: public OpKernel {
  public:
@@ -16,8 +14,7 @@ class GetChildren_ParentIndicator: public OpKernel {
 
   void Compute(OpKernelContext* context) override {
     //a list of nodes whose children will be returned
-    const Tensor & nodes_tensor = context->input(0);
-    const auto& nodes = nodes_tensor.vec<int>();
+    const auto& nodes = context->input(0).vec<int>();
 
     //an indicator showing the parent of each node, must be monotonically increasing
     // e.g. a tree such as
@@ -25,8 +22,7 @@ class GetChildren_ParentIndicator: public OpKernel {
     // 1      2    3   4      
     // 5 6 7  8 9  10  11 12
     // , gives  -1, 0, 0, 0, 0, 1, 1, 1, 2, 2, 3, 4, 4, ...
-    const Tensor & tree_tensor = context->input(1);
-    const auto& tree = tree_tensor.vec<int>();
+    const auto& tree = context->input(1).vec<int>();
 
     int num_nodes = nodes.dimension(0);
     std::vector<int> parents(nodes.data(), nodes.data()+num_nodes);
@@ -57,14 +53,46 @@ class GetChildren_ParentIndicator: public OpKernel {
   };
 };
 
+class FirstLevel_ParentIndicator: public OpKernel {
+ public:
+  explicit FirstLevel_ParentIndicator(OpKernelConstruction* context) : OpKernel(context) {}
+
+  void Compute(OpKernelContext* context) override {
+    const auto& tree = context->input(0).vec<int>();
+
+    int avg_node_degree = 1024;
+    std::vector<int> first_level;
+    first_level.reserve(avg_node_degree);
+
+    for (int i = 0; i < tree.dimension(0); ++i) {
+      if (tree(i) < 0) {
+        first_level.push_back(i);
+      } else {
+        break;
+      }
+    }
+ 
+    //Allocate Output
+    TensorShape output_shape({first_level.size()});
+    Tensor *output_tensor;
+    OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output_tensor));
+    auto output = output_tensor->vec<int>();
+
+    std::copy(first_level.begin(), first_level.end(), output.data());
+  };
+};
+
+
+
+
+
 class GetChildren_SplitIndicator: public OpKernel {
  public:
   explicit GetChildren_SplitIndicator(OpKernelConstruction* context) : OpKernel(context) {}
 
   void Compute(OpKernelContext* context) override {
     //a list of nodes whose children will be returned
-    const Tensor & nodes_tensor = context->input(0);
-    const auto& nodes = nodes_tensor.vec<int>();
+    const auto& nodes = context->input(0).vec<int>();
 
     // an indicator showing the splits of level order traversal of a complete tree
     // e.g. a tree such as
@@ -78,9 +106,8 @@ class GetChildren_SplitIndicator: public OpKernel {
     // 3     4   5         6      7   8
     // 9 10  11  12 13 14  15 16  17  18 19 20
     // represents as  3, 5, 6, 9, 11, 12, 15, 17, 18, 21
-    // thous we know that the "first layer" (roots of trees) is [0,3)=0, 1, 2, since the first element is 3.
-    const Tensor & tree_tensor = context->input(1);
-    const auto& tree = tree_tensor.vec<int>();
+    // thous we know that the "first level" (roots of trees) is [0,3)=0, 1, 2, since the first element is 3.
+    const auto& tree = context->input(1).vec<int>();
 
     int num_nodes = nodes.dimension(0);
     int num_children = 0;
@@ -109,4 +136,26 @@ class GetChildren_SplitIndicator: public OpKernel {
   };
 };
 
+class FirstLevel_SplitIndicator: public OpKernel {
+ public:
+  explicit FirstLevel_SplitIndicator(OpKernelConstruction* context) : OpKernel(context) {}
+
+  void Compute(OpKernelContext* context) override {
+    const auto& tree = context->input(0).vec<int>();
+
+    int num_nodes = tree(0);
+ 
+    //Allocate Output
+    TensorShape output_shape({children.size()});
+    Tensor *output_tensor;
+    OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output_tensor));
+    auto output = output_tensor->vec<int>();
+
+    for (int i = 0; i < num_nodes; ++i) {
+      output(i) = i;
+    }
+  };
+};
+
 REGISTER_KERNEL_BUILDER(Name("GetChildren").Device(DEVICE_CPU), GetChildren_SplitIndicator);
+REGISTER_KERNEL_BUILDER(Name("FirstLevel").Device(DEVICE_CPU), FirstLevel_SplitIndicator);
