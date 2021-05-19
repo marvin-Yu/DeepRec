@@ -2,9 +2,9 @@
 #python ./configure.py
 declare -a targets=("//tensorflow:libtensorflow_framework.so"
                     "//tensorflow:libtensorflow_cc.so")
-declare -a install_targets=("libtensorflow_framework.so"
+declare -a install_targets=("libtensorflow_framework.so.1.15.0"
                             "libtensorflow_framework.so.1"
-                            "libtensorflow_framework.so.1.15.0"
+                            "libtensorflow_framework.so"
                             "libtensorflow_cc.so.1.15.0"
                             "libtensorflow_cc.so.1"
                             "libtensorflow_cc.so")
