@@ -291,7 +291,7 @@ TRTEngineOp::TRTEngineOp(OpKernelConstruction* context)
   }
   OP_REQUIRES_OK(context, context->GetAttr("max_cached_engines_count",
                                            &max_cached_engines_));
-  OP_REQUIRES_OK(context, context->GetAttr("_flops", &flops_);
+  OP_REQUIRES_OK(context, context->GetAttr("_flops", &flops_));
 }
 
 void TRTEngineOp::ExecuteNativeSegment(OpKernelContext* ctx,
