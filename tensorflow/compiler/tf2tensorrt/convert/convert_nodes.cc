@@ -4676,7 +4676,6 @@ Status ConvertFullyConnectedHelper(OpConverterParams* params,
   int64_t flops = 1;
   flops *= input_dim.d[0] * noutput;
   params->flops = flops;
-
   params->outputs->push_back(TRT_TensorOrWeights(output_tensor));
   return Status::OK();
 }
@@ -4770,9 +4769,8 @@ Status ConvertMatMulHelper(OpConverterParams* params,
   // Get Flops For MatrixMultiply:
   //  no batch size in dims
   int64_t flops = 1;
-  flops *= tensor_a->getDimensions().d[0] * tensor_b->getDimensions().d[0];
+  flops *= tensor_a->getDimensions().d[0] * tensor_b->getDimensions().d[1]; // N,  N * L
   params->flops = flops * 2;
-
   return Status::OK();
 }
 
