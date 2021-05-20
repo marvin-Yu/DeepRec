@@ -438,6 +438,24 @@ REGISTER_OP("BlazeGRU")
       return Status::OK();
     });
 
+
+REGISTER_OP("GroupedTopK")
+    .Input("input: T")              //[..., input_len]
+    .Input("k: Tindices")          //scaler
+    .Input("splits: Tindices")     //[num_group]
+    .Output("value: T")         //[..., output_len]
+    .Output("index: Tindices")
+    .Attr("T: {half, float, double}")
+    .Attr("Tindices: {int32}")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      shape_inference::ShapeHandle output;
+      TF_RETURN_IF_ERROR(
+          c->ReplaceDim(c->input(0), -1, c->UnknownDim(), &output));
+      c->set_output(0, output);
+      return Status::OK();
+    });
+
+
 /* values N * (scences, unit_size)
  * coords N * (scences, 2)
  * output_shape (2, ) [user's sessions, max scenes in one session]
