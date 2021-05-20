@@ -8,6 +8,18 @@ using CPUDevice = Eigen::ThreadPoolDevice;
 using GPUDevice = Eigen::GpuDevice;
 
 
+// ===============================================
+// ParentIndicator
+// an indicator showing the parent of each node, must be monotonically increasing
+// e.g. a tree such as
+// 0
+// 1      2    3   4
+// 5 6 7  8 9  10  11 12
+// , gives  -1, 0, 0, 0, 0, 1, 1, 1, 2, 2, 3, 4, 4
+// ================================================
+
+const int avg_node_degree = 1024;
+
 class GetChildren_ParentIndicator: public OpKernel {
  public:
   explicit GetChildren_ParentIndicator(OpKernelConstruction* context) : OpKernel(context) {}
@@ -15,31 +27,26 @@ class GetChildren_ParentIndicator: public OpKernel {
   void Compute(OpKernelContext* context) override {
     //a list of nodes whose children will be returned
     const auto& nodes = context->input(0).vec<int>();
-
-    //an indicator showing the parent of each node, must be monotonically increasing
-    // e.g. a tree such as
-    // 0
-    // 1      2    3   4      
-    // 5 6 7  8 9  10  11 12
-    // , gives  -1, 0, 0, 0, 0, 1, 1, 1, 2, 2, 3, 4, 4, ...
     const auto& tree = context->input(1).vec<int>();
 
     int num_nodes = nodes.dimension(0);
+    int tree_size = tree.dimension(0);
     std::vector<int> parents(nodes.data(), nodes.data()+num_nodes);
     std::sort(parents.begin(), parents.end());
 
-    int avg_node_degree = 1024;
     std::vector<int> children;
     children.reserve(num_nodes*avg_node_degree);
 
-    int child_node = 0;
+    int child = 0;
     for (int i = 0; i < parents.size(); ++i) {
       int parent = parents[i];
-      while (tree(child_node) <= parent) {
-        if (tree(child_node) == parent) {
-          children.push_back(child_node);
+      OP_REQUIRES(context, 0 <= parent && parent < tree_size,
+                  errors::InvalidArgument("tree_size is ", tree_size, "but input node is ", parent));
+      while (tree(child) <= parent) {
+        if (tree(child) == parent) {
+          children.push_back(child);
         }
-        child_node++;
+        child++;
       }
     }
  
@@ -60,7 +67,6 @@ class FirstLevel_ParentIndicator: public OpKernel {
   void Compute(OpKernelContext* context) override {
     const auto& tree = context->input(0).vec<int>();
 
-    int avg_node_degree = 1024;
     std::vector<int> first_level;
     first_level.reserve(avg_node_degree);
 
@@ -83,79 +89,91 @@ class FirstLevel_ParentIndicator: public OpKernel {
 };
 
 
+// ================================
+// RangeIndicator
+// an indicator showing the splits of level order traversal of a complete tree
+// e.g. a tree such as
+// 0
+// 1      2    3   4      
+// 5 6 7  8 9  10  11 12
+// , whose level order traversal is  0 | 1 2 3 4 | 5 6 7 ; 8 9 ; 10 ; 11 12 | ...
+// will be represented as  1, 5, 8, 10, 11, 13 ..., such that [a_i, a_i+i) is the children of i-th node
+// it also represents a bunch of trees (a forest, or start from mid layer), e.g.
+// 0         1         2
+// 3     4   5         6      7   8
+// 9 10  11  12 13 14  15 16  17  18 19 20
+// represents as  3, 5, 6, 9, 11, 12, 15, 17, 18, 21
+// thous we know that the "first level" (roots of trees) is [0,3)=0, 1, 2, since the first element is 3.
+// =================================
 
 
-
-class GetChildren_SplitIndicator: public OpKernel {
+class GetChildren_RangeIndicator: public OpKernel {
  public:
-  explicit GetChildren_SplitIndicator(OpKernelConstruction* context) : OpKernel(context) {}
+  explicit GetChildren_RangeIndicator(OpKernelConstruction* context) : OpKernel(context) {}
 
   void Compute(OpKernelContext* context) override {
     //a list of nodes whose children will be returned
     const auto& nodes = context->input(0).vec<int>();
-
-    // an indicator showing the splits of level order traversal of a complete tree
-    // e.g. a tree such as
-    // 0
-    // 1      2    3   4      
-    // 5 6 7  8 9  10  11 12
-    // , whose level order traversal is  0 | 1 2 3 4 | 5 6 7 ; 8 9 ; 10 ; 11 12 | ...
-    // will be represented as  1, 5, 8, 10, 11, 13 ..., such that [a_i, a_i+i) is the children of i-th node
-    // it also represents a bunch of trees (a forest, or start from mid layer), e.g.
-    // 0         1         2
-    // 3     4   5         6      7   8
-    // 9 10  11  12 13 14  15 16  17  18 19 20
-    // represents as  3, 5, 6, 9, 11, 12, 15, 17, 18, 21
-    // thous we know that the "first level" (roots of trees) is [0,3)=0, 1, 2, since the first element is 3.
     const auto& tree = context->input(1).vec<int>();
 
     int num_nodes = nodes.dimension(0);
+    int num_ranges = tree.dimension(0)-1;
+    int tree_size = tree(num_ranges);
+
     int num_children = 0;
     for (int i = 0; i < num_nodes; ++i) {
       int node = nodes(i);
+      OP_REQUIRES(context, 0 <= node && node < tree_size, 
+                  errors::InvalidArgument("tree_size is ", tree_size, "but input node is ", node ));
+      if (node >= num_ranges) {
+        continue;
+      }
       num_children += tree(node+1) - tree(node);
     }
-    
-    std::vector<int> children;
-    children.reserve(num_children);
 
-    for (int i = 0; i < num_nodes; ++i) {
-      int node = nodes(i);
-      for (int j = tree(node); j < tree(node+1); ++j) {
-        children.push_back(j);
-      }
-    }
- 
     //Allocate Output
-    TensorShape output_shape({children.size()});
+    TensorShape output_shape({num_children});
     Tensor *output_tensor;
     OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output_tensor));
     auto output = output_tensor->vec<int>();
 
-    std::copy(children.begin(), children.end(), output.data());
+    int idx = 0;
+    for (int i = 0; i < num_nodes; ++i) {
+      int node = nodes(i);
+      if (node >= num_ranges) {
+        continue;
+      }
+      for (int j = tree(node); j < tree(node+1); ++j) {
+        output(idx) = j;
+        ++idx;
+      }
+    }
+    OP_REQUIRES(context, idx == num_children,
+                errors::InvalidArgument("number of found children mismatch the pre counted number"));
+ 
   };
 };
 
-class FirstLevel_SplitIndicator: public OpKernel {
+class FirstLevel_RangeIndicator: public OpKernel {
  public:
-  explicit FirstLevel_SplitIndicator(OpKernelConstruction* context) : OpKernel(context) {}
+  explicit FirstLevel_RangeIndicator(OpKernelConstruction* context) : OpKernel(context) {}
 
   void Compute(OpKernelContext* context) override {
     const auto& tree = context->input(0).vec<int>();
 
-    int num_nodes = tree(0);
+    int first_level_size = tree(0);
  
     //Allocate Output
-    TensorShape output_shape({num_nodes});
+    TensorShape output_shape({first_level_size});
     Tensor *output_tensor;
     OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output_tensor));
     auto output = output_tensor->vec<int>();
 
-    for (int i = 0; i < num_nodes; ++i) {
+    for (int i = 0; i < first_level_size; ++i) {
       output(i) = i;
     }
   };
 };
 
-REGISTER_KERNEL_BUILDER(Name("GetChildren").Device(DEVICE_CPU), GetChildren_SplitIndicator);
-REGISTER_KERNEL_BUILDER(Name("FirstLevel").Device(DEVICE_CPU), FirstLevel_SplitIndicator);
+REGISTER_KERNEL_BUILDER(Name("GetChildren").Device(DEVICE_CPU), GetChildren_RangeIndicator);
+REGISTER_KERNEL_BUILDER(Name("FirstLevel").Device(DEVICE_CPU), FirstLevel_RangeIndicator);
