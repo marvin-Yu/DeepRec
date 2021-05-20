@@ -41,7 +41,7 @@ class GetChildren_ParentIndicator: public OpKernel {
     for (int i = 0; i < parents.size(); ++i) {
       int parent = parents[i];
       OP_REQUIRES(context, 0 <= parent && parent < tree_size,
-                  errors::InvalidArgument("tree_size is ", tree_size, "but input node is ", parent));
+                  errors::InvalidArgument("tree_size is ", tree_size, ", but input node is ", parent));
       while (tree(child) <= parent) {
         if (tree(child) == parent) {
           children.push_back(child);
@@ -124,7 +124,7 @@ class GetChildren_RangeIndicator: public OpKernel {
     for (int i = 0; i < num_nodes; ++i) {
       int node = nodes(i);
       OP_REQUIRES(context, 0 <= node && node < tree_size, 
-                  errors::InvalidArgument("tree_size is ", tree_size, "but input node is ", node ));
+                  errors::InvalidArgument("tree_size is ", tree_size, ", but input node is ", node ));
       if (node >= num_ranges) {
         continue;
       }
