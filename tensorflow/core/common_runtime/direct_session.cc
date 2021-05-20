@@ -1299,7 +1299,8 @@ void DirectSession::RunInternalAsync(
     const std::vector<string>& target_nodes,
     std::vector<Tensor>* outputs,
     CallbackFrame* frame,
-    StatusCallback done) {
+    StatusCallback done,
+    std::atomic<int64_t>* flops) {
   const uint64 start_time_usecs = options_.env->NowMicros();
   const int64 executor_step_count = executors_and_keys->step_count.fetch_add(1);
   frame->run_state = new RunState(step_id, &devices_);
@@ -1380,6 +1381,7 @@ void DirectSession::RunInternalAsync(
   args.step_container = &run_state.step_container;
   args.sync_on_finish = sync_on_finish_;
   args.user_intra_op_threadpool = threadpool_options.intra_op_threadpool;
+  args.flops = flops;
 
   const bool do_trace = (run_options.trace_level() > RunOptions::NO_TRACE);
 
@@ -1510,15 +1512,15 @@ void DirectSession::RunAsync(const RunOptions& run_options,
                              const std::vector<string>& target_nodes,
                              std::vector<Tensor>* outputs,
                              RunMetadata* run_metadata,
-                             StatusCallback done)
-{
+                             StatusCallback done,
+                             std::atomic<int64_t>* flops) {
   auto frame = new CallbackFrame;
   StatusCallback new_done = [frame, done](const Status& ret) {
     delete frame;
     done(ret);
   };
   RunAsync(run_options, inputs, output_names, target_nodes, outputs,
-           run_metadata, frame, new_done);
+           run_metadata, frame, new_done, flops);
 }
 
 void DirectSession::RunAsync(const RunOptions& run_options,
@@ -1528,7 +1530,8 @@ void DirectSession::RunAsync(const RunOptions& run_options,
                           std::vector<Tensor>* outputs,
                           RunMetadata* run_metadata,
                           CallbackFrame* frame,
-                          StatusCallback done) {
+                          StatusCallback done,
+                          std::atomic<int64_t>* flops) {
   TF_DONE_RETURN_IF_ERROR(CheckNotClosed());
   TF_DONE_RETURN_IF_ERROR(CheckGraphCreated("Run()"));
   direct_session_runs->GetCell()->IncrementBy(1);
@@ -1592,7 +1595,7 @@ void DirectSession::RunAsync(const RunOptions& run_options,
   RunInternalAsync(step_id, run_options, &call_frame,
       executors_and_keys, run_metadata,
       thread::ThreadPoolOptions(), inputs,
-      output_names, target_nodes, outputs, frame, done);
+      output_names, target_nodes, outputs, frame, done, flops);
 }
 
 Status DirectSession::Run(const RunOptions& run_options,

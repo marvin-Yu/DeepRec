@@ -424,7 +424,8 @@ Status CreateTRTNode(const ConversionParams& params,
         max_batch_size, info.max_workspace_size_bytes, input_shapes,
         &trt_logger, alloc, /*calibrator=*/nullptr, &engine,
         info.use_calibration,
-        /*convert_successfully=*/nullptr));
+        /*convert_successfully=*/nullptr,
+        &(params.total_flops)));
     TrtUniquePtrType<nvinfer1::IHostMemory> engine_data(engine->serialize());
     segment_string = string(static_cast<const char*>(engine_data->data()),
                             engine_data->size());
@@ -461,6 +462,7 @@ Status CreateTRTNode(const ConversionParams& params,
           .Attr("precision_mode", prec_string)
           .Attr("use_calibration", info.use_calibration)
           .Attr("OutT", out_types)
+          //.Attr("_flops", int64(params.total_flops)) // huasha.lqf add and del ...
           .Finalize(&trt_node);
   if (!status.ok()) {
     LOG(ERROR) << "Node construction failed with" << status;

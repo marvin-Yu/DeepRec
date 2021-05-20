@@ -16,6 +16,7 @@ limitations under the License.
 #ifndef TENSORFLOW_CORE_COMMON_RUNTIME_EXECUTOR_H_
 #define TENSORFLOW_CORE_COMMON_RUNTIME_EXECUTOR_H_
 
+#include <atomic>
 #include "tensorflow/core/common_runtime/device.h"
 #include "tensorflow/core/common_runtime/rendezvous_mgr.h"
 #include "tensorflow/core/framework/rendezvous.h"
@@ -117,6 +118,7 @@ class Executor {
                                  const Tensor* tensor, const bool is_ref,
                                  OpKernelContext* ctx)>
         NodeOutputsCallback;
+    std::atomic<int64_t>* flops = nullptr;
   };
 
   typedef std::function<void(const Status&)> DoneCallback;

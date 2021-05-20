@@ -48,6 +48,7 @@ struct ConversionParams {
   int max_cached_engines = 1;
   bool use_calibration = true;
   std::vector<string> convert_ranges;
+  mutable int64_t total_flops = 0;
 };
 
 // Method to call from optimization pass

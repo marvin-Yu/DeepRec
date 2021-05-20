@@ -264,6 +264,8 @@ Status TRTOptimizationPass::Optimize(grappler::Cluster* cluster,
   cp.use_calibration = use_calibration_;
   cp.convert_ranges = convert_ranges_;
   auto status = ConvertAfterShapes(cp);
+  // Get Flops:
+  auto total_flops = cp.total_flops;
   VLOG(1) << "Returning from " << name_;
   return status;
 }
