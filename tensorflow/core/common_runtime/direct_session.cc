@@ -1844,9 +1844,18 @@ Status DirectSession::CreateExecutors(
     item->executor = nullptr;
     item->device = device;
     auto executor_type = options_.config.experimental().executor_type();
-    LOG(INFO) << "Executor type: " << executor_type;
-    TF_RETURN_IF_ERROR(NewExecutor(
-        executor_type, params, std::move(partition_graph), &item->executor));
+    auto status = NewExecutor(executor_type, params, std::move(partition_graph), &item->executor);
+    if (!status.ok()) {
+      // Fallback to create default executor
+      if (executor_type != "DEFAULT") {
+        LOG(WARNING) << "Try to create " << executor_type << " executor failed. "
+                     << "Fallback to create default executor.";
+        TF_RETURN_IF_ERROR(NewExecutor(
+            "DEFAULT", params, std::move(partition_graph), &item->executor));
+      } else {
+        return status;
+      }
+    }
   }
 
   // Cache the mapping from input/output names to graph elements to
