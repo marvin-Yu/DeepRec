@@ -1,5 +1,6 @@
 #include "tensorflow/core/framework/op_kernel.h"
 #include <vector>
+#include <unordered_set>
 #include <algorithm>
 
 using namespace tensorflow;
@@ -57,6 +58,43 @@ class GetChildren_ParentIndicator: public OpKernel {
     auto output = output_tensor->vec<int>();
 
     std::copy(children.begin(), children.end(), output.data());
+  };
+};
+
+class GetParents_ParentIndicator: public OpKernel {
+ public:
+  explicit GetParents_ParentIndicator(OpKernelConstruction* context) : OpKernel(context) {}
+
+  void Compute(OpKernelContext* context) override {
+    //a list of nodes whose parents will be returned
+    const auto& nodes = context->input(0).vec<int>();
+    const auto& tree = context->input(1).vec<int>();
+
+    int num_nodes = nodes.dimension(0);
+    int tree_size = tree.dimension(0);
+
+    std::unordered_set<int> parents;
+    parents.reserve(num_nodes);
+
+    for (int i = 0; i < num_nodes; ++i) {
+      int child = nodes(i);
+      OP_REQUIRES(context, 0 <= child && child < tree_size,
+                  errors::InvalidArgument("tree_size is ", tree_size, ", but input node is ", child));
+      int parent = tree(child);
+      if (parent < 0) {
+        // the node is already root
+        continue;
+      }
+      parents.insert(parent);
+    }
+
+    //Allocate Output
+    TensorShape output_shape({parents.size()});
+    Tensor *output_tensor;
+    OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output_tensor));
+    auto output = output_tensor->vec<int>();
+
+    std::copy(parents.begin(), parents.end(), output.data());
   };
 };
 
@@ -150,7 +188,54 @@ class GetChildren_RangeIndicator: public OpKernel {
     }
     OP_REQUIRES(context, idx == num_children,
                 errors::InvalidArgument("number of found children mismatch the pre counted number"));
- 
+  };
+};
+
+class GetParents_RangeIndicator: public OpKernel {
+ public:
+  explicit GetParents_RangeIndicator(OpKernelConstruction* context) : OpKernel(context) {}
+
+  void Compute(OpKernelContext* context) override {
+    //a list of nodes whose children will be returned
+    const auto& nodes = context->input(0).vec<int>();
+    const auto& tree = context->input(1).vec<int>();
+
+    int num_nodes = nodes.dimension(0);
+    int num_ranges = tree.dimension(0)-1;
+    int tree_size = tree(num_ranges);
+
+    std::vector<int> sorted_nodes(nodes.data(), nodes.data()+num_nodes);
+    std::sort(sorted_nodes.begin(), sorted_nodes.end());
+
+    std::vector<int> parents;
+    parents.reserve(num_nodes);
+
+    int i = 0, j = 0;
+    while (sorted_nodes[i] < tree(0)) ++i; //skip nodes in first level, which are roots
+    while (true) {
+      if (i >= num_nodes) break;
+      if (j >= num_ranges) break;
+      int node = sorted_nodes[i];
+      OP_REQUIRES(context, 0 <= node && node < tree_size,
+                  errors::InvalidArgument("tree_size is ", tree_size, ", but input node is ", node ));
+      // move range s.t. range covers node
+      while (tree(j+1) <= node) ++j;
+      int range_begin = tree(j);
+      int range_end = tree(j+1);
+      OP_REQUIRES(context, range_begin <= node && node < range_end,
+                  errors::InvalidArgument("node ", node, " NOT in range [",range_begin,",",range_end,")."));
+      parents.push_back(j);
+      // move node s.t. node exceeds range
+      while (sorted_nodes[i] < range_end) ++i;
+    }
+
+    //Allocate Output
+    TensorShape output_shape({parents.size()});
+    Tensor *output_tensor;
+    OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output_tensor));
+    auto output = output_tensor->vec<int>();
+
+    std::copy(parents.begin(), parents.end(), output.data());
   };
 };
 
