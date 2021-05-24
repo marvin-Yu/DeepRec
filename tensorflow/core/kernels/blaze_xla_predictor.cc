@@ -127,6 +127,7 @@ Status BlazeXlaPredictor::InitXlaWarmup() {
 }
 
 Status BlazeXlaPredictor::Warmup() {
+  warmuped_ = false;
   return Status::OK();
 }
 
@@ -143,6 +144,8 @@ Status BlazeXlaPredictor::Warmup(OpKernelContext* ctx) {
     return errors::Internal("Cannot infer inputs' batchsize");
   }
   for (auto bs : batch_sizes_) {
+    VLOG(0) << "begin warmup " << bs;
+    auto start_us = Env::Default()->NowMicros();
     int pad_to_batchsize = bs;
 
     VLOG(1) << "batchsize = " << batchsize
@@ -163,7 +166,8 @@ Status BlazeXlaPredictor::Warmup(OpKernelContext* ctx) {
     if (!status.ok()) {
       return status;
     }
-    VLOG(0) << "batch " <<  pad_to_batchsize << " has warmuped";
+    auto end_us = Env::Default()->NowMicros();
+    VLOG(0) << "batch " <<  pad_to_batchsize << " has warmuped; const us: " << (end_us - start_us);
   }
 }
 
@@ -298,6 +302,7 @@ void BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
   // Infer inputs' batchsize
 
   if (TF_PREDICT_FALSE(!warmuped_)) {
+    VLOG(0) << "Begin warmup";
     mutex_lock l(warmup_mu_);
     Warmup(ctx);
     warmuped_ = true;
