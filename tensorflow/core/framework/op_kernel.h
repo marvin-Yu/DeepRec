@@ -1898,6 +1898,7 @@ struct UserTracedInfos {
     if (run_metadata) {
       if (prof_stats) {
         //ToDo done prof_stas
+        prof_stats->flops = run_metadata->prof_stats().flops();
         prof_stats->blaze_latency_ms = run_metadata->prof_stats().blaze_latency_ms();
       }
       if (traced_tensors) {

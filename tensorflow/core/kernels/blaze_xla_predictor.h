@@ -29,18 +29,21 @@ class BlazeXlaPredictor : public BlazePredictor {
                         int batchsize, int pad_to_batchsize,
                         std::vector<Tensor>& outputs, OpKernelContext* ctx);
   int InferBatchSize(const std::vector<Tensor>& tensors);
+
+  int AddNewBatchSize(int padded_size);
   
   Status InitXlaWarmup();
   Status Warmup() override;
+  Status Warmup(OpKernelContext* ctx);
   Status CheckShape(const TensorShapeProto& shape);
 
   std::vector<int32> batch_sizes_;
   std::vector<bool> skip_padding_;
   NodeMap node_map_;
-
-  bool infered_shapes_;
-  std::vector<TensorShape> output_shapes_;
-  std::mutex shape_mu_;
+  
+  bool warmuped_;
+  mutex warmup_mu_;
+  mutex batch_size_mu_;
 };
 }
 #endif

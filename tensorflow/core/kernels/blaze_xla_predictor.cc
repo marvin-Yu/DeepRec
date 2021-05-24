@@ -127,79 +127,44 @@ Status BlazeXlaPredictor::InitXlaWarmup() {
 }
 
 Status BlazeXlaPredictor::Warmup() {
-  // not safe
-  /*
-  string ptx_cache_dir;
-  ReadStringFromEnvVar("TF_XLA_PTX_CACHE_DIR", "",
-                                   &ptx_cache_dir);
-  if (ptx_cache_dir.empty()) {
-    LOG(ERROR) << "BlazeXla warmup must set TF_XLA_PTX_CACHE_DIR in env";
-    return errors::Internal("env TF_XLA_PTX_CACHE_DIR not set");
-  }
-
-  std::vector<std::pair<std::string, TensorShapeProto>> name_shapes;
-  for (const auto& name : input_names_) {
-    auto iter = node_map_.find(name);
-    if (iter == node_map_.end()) {
-      return errors::Internal("node ", name ," not found in graph");
-    }
-
-    TensorShapeProto shape;
-    auto st = GetNodeAttr(iter->second, kShape, &shape);
-    if (!st.ok()) {
-      std::vector<TensorShapeProto> output_shape;
-      TF_RETURN_IF_ERROR(GetNodeAttr(iter->second, kOutputShape, &output_shape));
-      if (output_shape.size() != 1) {
-        return errors::Internal(kOutputShape, " shape !=1");
-      }
-      shape = output_shape[0];
-    }
-    name_shapes.push_back(std::make_pair(name, shape));
-  }
-
-  std::vector<std::pair<std::string, Tensor>> inputs;
-  std::vector<Tensor> callable_inputs;
-  for (int batch : batch_sizes_) {
-    inputs.clear();
-    callable_inputs.clear();
-    for (int i = 0; i < name_shapes.size(); ++i) {
-      const auto& name_shape = name_shapes[i];
-      auto shape = name_shape.second;
-      //fix me : i donot know how to set -1 dim
-      if (shape.dim_size() > 0 && shape.dim(0).size() == -1) {
-        shape.mutable_dim(0)->set_size(batch);
-      }
-      auto st = CheckShape(shape);
-      if (!st.ok()) {
-        LOG(ERROR) << name_shape.first << " tensor shape invalid " <<
-            shape.DebugString();
-        return st;
-      }
-      Tensor input(input_types_[i], shape);
-      void* add = GetTensorAddress(&input);
-      if (!add) {
-        return errors::Internal("not supported input type ", name_shape.first);
-      }
-      std::memset(add, 0, GetTensorSize(&input));
-      inputs.push_back(std::make_pair(name_shape.first, input));
-      if (ctx_) {
-        Tensor tensor;
-        ctx_->allocate_temp(input_types_[i], shape, &tensor);
-        callable_inputs.push_back(tensor);
-      }
-    }
-    std::vector<Tensor> outputs;
-    if (!ctx_) {
-      LOG(INFO) << "warmup using directsession run";
-      TF_RETURN_IF_ERROR(session_->Run(inputs, output_names_, {}, &outputs));
-    } else {
-      LOG(INFO) << "warmup using directsession runcallable";
-      TF_RETURN_IF_ERROR(session_->RunCallable(
-              handle_, callable_inputs, &outputs, nullptr));
-    }
-    LOG(INFO) << "Batchsize " << batch << " has warmuped";
-  } */
   return Status::OK();
+}
+
+Status BlazeXlaPredictor::Warmup(OpKernelContext* ctx) {
+  int num_inputs = ctx->num_inputs();
+  std::vector<Tensor> inputs;
+  inputs.reserve(num_inputs);
+  for (int i = 0; i < num_inputs; ++i) {
+    inputs.push_back(ctx->input(i));
+  }
+
+  int batchsize = InferBatchSize(inputs);
+  if (batchsize == -1) {
+    return errors::Internal("Cannot infer inputs' batchsize");
+  }
+  for (auto bs : batch_sizes_) {
+    int pad_to_batchsize = bs;
+
+    VLOG(1) << "batchsize = " << batchsize
+        << ", pad_to_batchsize = " << pad_to_batchsize;
+
+    // Pad inputs
+    std::vector<Tensor> padded_inputs(num_inputs);
+    Status status = PadToStatic(inputs, &padded_inputs,
+                                batchsize, pad_to_batchsize, ctx);
+    if (!status.ok()) {
+      return status;
+    }
+
+    // Call SessionRun
+    std::vector<Tensor> padded_outputs;
+    status = session_->RunCallable(
+        handle_, padded_inputs, &padded_outputs, nullptr);
+    if (!status.ok()) {
+      return status;
+    }
+    VLOG(0) << "batch " <<  pad_to_batchsize << " has warmuped";
+  }
 }
 
 Status BlazeXlaPredictor::CheckShape(const TensorShapeProto& shape) {
@@ -331,6 +296,13 @@ Status BlazeXlaPredictor::SliceToDynamic(const std::vector<Tensor>& padded_outpu
 
 void BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
   // Infer inputs' batchsize
+
+  if (TF_PREDICT_FALSE(!warmuped_)) {
+    mutex_lock l(warmup_mu_);
+    Warmup(ctx);
+    warmuped_ = true;
+  }
+
   int num_inputs = ctx->num_inputs();
   std::vector<Tensor> inputs;
   inputs.reserve(num_inputs);
@@ -345,11 +317,18 @@ void BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
   }
 
   int pad_to_batchsize = batchsize;
+  bool found_bs = false;
   for (int n : batch_sizes_) {
     if (n >= batchsize) {
       pad_to_batchsize = n;
+      found_bs = true;
       break;
     }
+  }
+
+  if (TF_PREDICT_FALSE(!found_bs)) {
+    mutex_lock l(batch_size_mu_);
+    pad_to_batchsize = AddNewBatchSize(batchsize);
   }
 
   VLOG(1) << "batchsize = " << batchsize
@@ -398,6 +377,7 @@ void BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
       OP_REQUIRES_OK(ctx, session_->RunCallable(
               handle_, inputs, &outputs, &metadata));
       ctx->prof_stats()->flops += metadata.prof_stats().flops();
+      ctx->traced_infos()->prof_stats->flops += metadata.prof_stats().flops();
     } else {
       OP_REQUIRES_OK(ctx, session_->RunCallable(
               handle_, inputs, &outputs, nullptr));
@@ -407,5 +387,20 @@ void BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
     }
   }
   return;
+}
+
+int BlazeXlaPredictor::AddNewBatchSize(int padded_size) {
+  int last_size = batch_sizes_[batch_sizes_.size() - 1];
+  if (padded_size <= last_size) {
+    return last_size;
+  }
+
+  int add_size = last_size;
+  while(add_size < padded_size) {
+    add_size += last_size;
+  }
+
+  batch_sizes_.push_back(add_size);
+  return add_size;
 }
 }
