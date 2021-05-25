@@ -496,6 +496,15 @@ REGISTER_OP("GetChildren")
       return Status::OK();
     });
 
+REGISTER_OP("GetParents")
+    .Input("nodes: int32")
+    .Input("tree: int32")
+    .Output("parents: int32")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      c->set_output(0, c->MakeShape({c->UnknownDim()}));
+      return Status::OK();
+    });
+
 REGISTER_OP("FirstLevel")
     .Input("tree: int32")
     .Output("first_level: int32")

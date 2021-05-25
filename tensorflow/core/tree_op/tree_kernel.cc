@@ -73,28 +73,21 @@ class GetParents_ParentIndicator: public OpKernel {
     int num_nodes = nodes.dimension(0);
     int tree_size = tree.dimension(0);
 
-    std::unordered_set<int> parents;
-    parents.reserve(num_nodes);
-
-    for (int i = 0; i < num_nodes; ++i) {
-      int child = nodes(i);
-      OP_REQUIRES(context, 0 <= child && child < tree_size,
-                  errors::InvalidArgument("tree_size is ", tree_size, ", but input node is ", child));
-      int parent = tree(child);
-      if (parent < 0) {
-        // the node is already root
-        continue;
-      }
-      parents.insert(parent);
-    }
-
     //Allocate Output
-    TensorShape output_shape({parents.size()});
+    TensorShape output_shape({num_nodes});
     Tensor *output_tensor;
     OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output_tensor));
     auto output = output_tensor->vec<int>();
 
-    std::copy(parents.begin(), parents.end(), output.data());
+    for (int i = 0; i < num_nodes; ++i) {
+      int node = nodes(i);
+      OP_REQUIRES(context, 0 <= node && node < tree_size,
+                  errors::InvalidArgument("tree_size is ", tree_size, ", but input node is ", node));
+      int parent = tree(node);
+      OP_REQUIRES(context, parent >= 0,
+                  errors::InvalidArgument("the node ", node, " is already root."));
+      output(i) = parent;
+    }
   };
 };
 
@@ -204,38 +197,36 @@ class GetParents_RangeIndicator: public OpKernel {
     int num_ranges = tree.dimension(0)-1;
     int tree_size = tree(num_ranges);
 
-    std::vector<int> sorted_nodes(nodes.data(), nodes.data()+num_nodes);
-    std::sort(sorted_nodes.begin(), sorted_nodes.end());
-
-    std::vector<int> parents;
-    parents.reserve(num_nodes);
-
-    int i = 0, j = 0;
-    while (sorted_nodes[i] < tree(0)) ++i; //skip nodes in first level, which are roots
-    while (true) {
-      if (i >= num_nodes) break;
-      if (j >= num_ranges) break;
-      int node = sorted_nodes[i];
-      OP_REQUIRES(context, 0 <= node && node < tree_size,
-                  errors::InvalidArgument("tree_size is ", tree_size, ", but input node is ", node ));
-      // move range s.t. range covers node
-      while (tree(j+1) <= node) ++j;
-      int range_begin = tree(j);
-      int range_end = tree(j+1);
-      OP_REQUIRES(context, range_begin <= node && node < range_end,
-                  errors::InvalidArgument("node ", node, " NOT in range [",range_begin,",",range_end,")."));
-      parents.push_back(j);
-      // move node s.t. node exceeds range
-      while (sorted_nodes[i] < range_end) ++i;
-    }
+    std::vector<int> sorted_idx(num_nodes);
+    std::iota(sorted_idx.begin(), sorted_idx.end(), 0);
+    std::sort(sorted_idx.begin(), sorted_idx.end(),
+              [&nodes](int a, int b){return nodes(a) < nodes(b);});
 
     //Allocate Output
-    TensorShape output_shape({parents.size()});
+    TensorShape output_shape({num_nodes});
     Tensor *output_tensor;
     OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output_tensor));
     auto output = output_tensor->vec<int>();
 
-    std::copy(parents.begin(), parents.end(), output.data());
+    for (int i = 0; i < num_nodes; ++i) {
+      LOG(INFO) << sorted_idx[i] << ":" << nodes(sorted_idx[i]);
+    }
+
+    int parent = 0;
+    for (int i = 0; i < num_nodes; ++i) {
+      int node_idx = sorted_idx[i];
+      int node = nodes(node_idx);
+      OP_REQUIRES(context, 0 <= node && node < tree_size,
+                  errors::InvalidArgument("tree_size is ", tree_size, ", but input node is ", node ));
+      while (tree(parent+1) <= node)
+        parent += 1;
+      int range_begin = tree(parent);
+      int range_end = tree(parent+1);
+      OP_REQUIRES(context, range_begin <= node && node < range_end,
+                  errors::InvalidArgument("Node", node, "is NOT child of Node", parent,
+                                          ":range[", range_begin, ",", range_end, "), which could be root already"));
+      output(node_idx) = parent;
+    }
   };
 };
 
@@ -261,4 +252,5 @@ class FirstLevel_RangeIndicator: public OpKernel {
 };
 
 REGISTER_KERNEL_BUILDER(Name("GetChildren").Device(DEVICE_CPU), GetChildren_RangeIndicator);
+REGISTER_KERNEL_BUILDER(Name("GetParents").Device(DEVICE_CPU), GetParents_RangeIndicator);
 REGISTER_KERNEL_BUILDER(Name("FirstLevel").Device(DEVICE_CPU), FirstLevel_RangeIndicator);
