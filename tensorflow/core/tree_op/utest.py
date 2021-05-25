@@ -23,11 +23,26 @@ sess = tf.Session()
 with sess.as_default():
 
   nodes = tf.first_level(tree)
-  print(nodes.eval())
+  nodes = nodes.eval()
+  print(nodes)
+  
   nodes = tf.get_children(nodes, tree)
-  print(nodes.eval())
+  nodes = nodes.eval()
+  print(nodes)
+ 
   nodes = tf.get_children(nodes, tree)
-  print(nodes.eval())
-  nodes = tf.get_children(nodes, tree)
-  print(nodes.eval())
+  nodes = nodes.eval()
+  print(nodes)
+ 
+  nodes = tf.get_parents(nodes, tree)
+  nodes = nodes.eval()
+  print(nodes)
+ 
+  nodes = tf.get_parents(nodes, tree)
+  nodes = nodes.eval()
+  print(nodes)
+
+  nodes = tf.get_parents([19, 11, 14, 9, 20, 15, 8, 5], tree) #[8, 4, 5, 3, 8, 6, 2, 1]
+  nodes = nodes.eval()
+  print(nodes)
 

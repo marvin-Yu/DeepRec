@@ -223,7 +223,7 @@ class GetParents_RangeIndicator: public OpKernel {
       int range_begin = tree(parent);
       int range_end = tree(parent+1);
       OP_REQUIRES(context, range_begin <= node && node < range_end,
-                  errors::InvalidArgument("Node", node, "is NOT child of Node", parent,
+                  errors::InvalidArgument("Node", node, " is NOT child of Node", parent,
                                           ":range[", range_begin, ",", range_end, "), which could be root already"));
       output(node_idx) = parent;
     }
