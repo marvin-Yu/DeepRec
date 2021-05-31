@@ -169,6 +169,7 @@ Status BlazeXlaPredictor::Warmup(OpKernelContext* ctx) {
     auto end_us = Env::Default()->NowMicros();
     VLOG(0) << "batch " <<  pad_to_batchsize << " has warmuped; const us: " << (end_us - start_us);
   }
+  return Status::OK();
 }
 
 Status BlazeXlaPredictor::CheckShape(const TensorShapeProto& shape) {

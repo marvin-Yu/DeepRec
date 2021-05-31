@@ -2078,52 +2078,41 @@ Status ExecutorState::ProcessOutputs(const NodeItem& item, OpKernelContext* ctx,
             auto device = impl_->params_.device;
             const auto &alloc_attrs = item.output_attrs()[i];
             string name = device->name();
-            if (DataTypeIsInteger(dtype)) {
-              if (name.find("GPU:") != string::npos &&
-                  !alloc_attrs.on_host())
-              {
-                auto device_info = device->tensorflow_gpu_device_info();
-                if (!device_context) {
-                  device_context = device_info->default_context;
-                }
-                auto ptr = item.node;
-                auto dst_ptr = new Tensor(val.tensor->dtype(), val.tensor->shape());
-                CopyTensor::CopyToHost(val.tensor,
-                  device, dst_ptr, device_context,
-                  [this, dst_ptr, tensor_name, ptr](Status s) {
-                    if (!s.ok()) {
-                      LOG(WARNING) << s.ToString();
-                    } else {
-                      auto info = traced_infos_->SafeAddTensorInfo();
-                      if (info) {
-                        info->set_name(tensor_name);
-                        dst_ptr->AsProtoField(info->mutable_tensor());
-                      } else {
-                        VLOG(0) << "error info nullptr";
-                      }
-                    }
-                    delete dst_ptr;
-                  });
-              } else {
-                auto info = traced_infos_->SafeAddTensorInfo();
-                if (info) {
-                  info->set_name(tensor_name);
-                  val.tensor->AsProtoField(info->mutable_tensor());
-                } else {
-                  VLOG(0) << "error info nullptr";
-                }
+            if (name.find("GPU:") != string::npos &&
+                !alloc_attrs.on_host())
+            {
+              auto device_info = device->tensorflow_gpu_device_info();
+              if (!device_context) {
+                device_context = device_info->default_context;
               }
+              auto ptr = item.node;
+              auto dst_ptr = new Tensor(val.tensor->dtype(), val.tensor->shape());
+              CopyTensor::CopyToHost(val.tensor,
+                device, dst_ptr, device_context,
+                [this, dst_ptr, tensor_name, ptr](Status s) {
+                  if (!s.ok()) {
+                    LOG(WARNING) << s.ToString();
+                  } else {
+                    auto info = traced_infos_->SafeAddTensorInfo();
+                    if (info) {
+                      info->set_name(tensor_name);
+                      dst_ptr->AsProtoField(info->mutable_tensor());
+                    } else {
+                      VLOG(0) << "error info nullptr";
+                    }
+                  }
+                  delete dst_ptr;
+                });
             } else {
               auto info = traced_infos_->SafeAddTensorInfo();
               if (info) {
                 info->set_name(tensor_name);
-                auto proto = info->mutable_tensor();
-                proto->set_dtype(dtype);
-                val.tensor->shape().AsProto(proto->mutable_tensor_shape());
+                val.tensor->AsProtoField(info->mutable_tensor());
               } else {
                 VLOG(0) << "error info nullptr";
               }
             }
+           // } 
           }
         } 
         if (stats && val.tensor->IsInitialized()) {

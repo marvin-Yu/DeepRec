@@ -812,7 +812,7 @@ Status DirectSession::RunInternal(
   }
 
   if (args.traced_infos) {
-    args.traced_infos->MergeTo(run_metadata);
+    args.traced_infos->MergeTo(run_metadata, args.real_prof_stats);
   }
 
   // If requested via RunOptions, output the partition graphs.
@@ -920,7 +920,7 @@ void DirectSession::RunInternalAsync(
       auto s = this->AfterRunAsync(run_options, output_names, target_nodes,
                                    outputs, frame, run_metadata, start_time_usecs);
       if (args->traced_infos) {
-        args->traced_infos->MergeTo(run_metadata);
+        args->traced_infos->MergeTo(run_metadata, args->real_prof_stats);
       }
       //fixme: move above
       if (run_metadata && args->enable_prof_stats) {

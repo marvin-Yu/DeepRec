@@ -1918,7 +1918,7 @@ struct UserTracedInfos {
     }
   }
 
-  void MergeTo(RunMetadata* run_metadata) {
+  void MergeTo(RunMetadata* run_metadata, const ProfStats& stats) {
     if (run_metadata) {
       if (prof_stats) {
         //Todo done flops monitor
@@ -1930,7 +1930,7 @@ struct UserTracedInfos {
         {
           auto metrics = run_metadata->mutable_blaze_metrics()->Add();
           metrics->set_key("blaze_flops");
-          metrics->set_value(prof_stats->flops);
+          metrics->set_value(stats.flops);
         }
       }
       if (traced_tensors) {
