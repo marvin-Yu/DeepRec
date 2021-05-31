@@ -99,7 +99,7 @@ class GTopK : public OpKernel {
 // Register the CPU kernels.
 #define REGISTER_CPU(T)                                           \
   REGISTER_KERNEL_BUILDER(                                        \
-      Name("GTopK").Device(DEVICE_CPU).TypeConstraint<T>("T"), \
+      Name("GroupedTopK").Device(DEVICE_CPU).TypeConstraint<T>("T"), \
       GTopK<CPUDevice, T>);
 REGISTER_CPU(double);
 REGISTER_CPU(float);

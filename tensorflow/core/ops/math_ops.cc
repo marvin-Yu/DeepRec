@@ -439,7 +439,7 @@ REGISTER_OP("BlazeGRU")
     });
 
 
-REGISTER_OP("GTopK")
+REGISTER_OP("GroupedTopK")
     .Input("input: T")             //[..., input_len]
     .Input("k: Tindices")          //scaler
     .Input("splits: Tindices")     //[num_group]
