@@ -90,23 +90,6 @@ class CUDABlas : public blas::BlasSupport {
   bool DoBlasInternalImpl(FuncT cublas_func, Stream *stream,
                           bool pointer_mode_host, bool err_on_failure,
                           cublasMath_t math_type, Args... args);
-  template <typename... Args>
-  bool DoBlasInternalImplcublasGemmEx(Stream *stream, bool pointer_mode_host,
-                                      bool err_on_failure,
-                                      cublasMath_t math_type, Args... args);
-  template <typename... Args>
-  bool DoBlasInternalImplcublasGemmBatchedEx(Stream *stream,
-                                             bool pointer_mode_host,
-                                             bool err_on_failure,
-                                             cublasMath_t math_type,
-                                             Args... args);
-  template <typename... Args>
-  bool DoBlasInternalImplcublasGemmStridedBatchedEx(Stream *stream,
-                                                    bool pointer_mode_host,
-                                                    bool err_on_failure,
-                                                    cublasMath_t math_type,
-                                                    Args... args);
-
   // Convenience functions that call DoBlasInternalImpl with err_on_failure=true
   // and math_type=CUBLAS_DEFAULT_MATH.
   template <typename FuncT, typename... Args>

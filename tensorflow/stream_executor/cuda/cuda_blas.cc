@@ -579,142 +579,6 @@ bool CUDABlas::DoBlasInternalImpl(FuncT cublas_func, Stream *stream,
   return ret == CUBLAS_STATUS_SUCCESS;
 }
 
-template <typename... Args>
-bool CUDABlas::DoBlasInternalImplcublasGemmEx(Stream *stream,
-                                              bool pointer_mode_host,
-                                              bool err_on_failure,
-                                              cublasMath_t math_type,
-                                              Args... args) {
-  absl::MutexLock lock(&mu_);
-
-  CHECK(blas_ != nullptr);
-  if (!SetStream(stream)) {
-    return false;
-  }
-
-#if CUDA_VERSION >= 9000
-  ScopedCublasMathMode math_mode{blas_};
-#if CUBLAS_VER_MAJOR >= 11
-  if (math_type == CUBLAS_TF32_TENSOR_OP_MATH &&
-      tensorflow::tensor_float_32_execution_enabled()) {
-#else
-  if (math_type == CUBLAS_TENSOR_OP_MATH) {
-#endif
-    if (!math_mode.Init(math_type)) {
-      return false;
-    }
-  }
-#endif
-
-  gpu::ScopedActivateExecutorContext sac{parent_};
-  ScopedCublasPointerMode pointer_mode{blas_};
-  if (!pointer_mode.Init(pointer_mode_host ? CUBLAS_POINTER_MODE_HOST
-                                           : CUBLAS_POINTER_MODE_DEVICE)) {
-    return false;
-  }
-  cublasStatus_t ret = cublasGemmEx(blas_, args...);
-  if ((err_on_failure || VLOG_IS_ON(3)) && ret != CUBLAS_STATUS_SUCCESS) {
-    LOG(ERROR)
-        << "DoBlasInternalImplcublasGemmEx: failed to run cuBLAS routine: "
-        << ToString(ret);
-    std::stringstream ss;
-    PrintArgs(ss, 0, args...);
-    LOG(ERROR) << "cuBLAS args: ";
-    LOG(ERROR) << ss.str();
-  }
-  return ret == CUBLAS_STATUS_SUCCESS;
-}
-
-template <typename... Args>
-bool CUDABlas::DoBlasInternalImplcublasGemmBatchedEx(Stream *stream,
-                                                     bool pointer_mode_host,
-                                                     bool err_on_failure,
-                                                     cublasMath_t math_type,
-                                                     Args... args) {
-  absl::MutexLock lock(&mu_);
-
-  CHECK(blas_ != nullptr);
-  if (!SetStream(stream)) {
-    return false;
-  }
-
-#if CUDA_VERSION >= 9000
-  ScopedCublasMathMode math_mode{blas_};
-#if CUBLAS_VER_MAJOR >= 11
-  if (math_type == CUBLAS_TF32_TENSOR_OP_MATH &&
-      tensorflow::tensor_float_32_execution_enabled()) {
-#else
-  if (math_type == CUBLAS_TENSOR_OP_MATH) {
-#endif
-    if (!math_mode.Init(math_type)) {
-      return false;
-    }
-  }
-#endif
-
-  gpu::ScopedActivateExecutorContext sac{parent_};
-  ScopedCublasPointerMode pointer_mode{blas_};
-  if (!pointer_mode.Init(pointer_mode_host ? CUBLAS_POINTER_MODE_HOST
-                                           : CUBLAS_POINTER_MODE_DEVICE)) {
-    return false;
-  }
-  cublasStatus_t ret = cublasGemmBatchedEx(blas_, args...);
-  if ((err_on_failure || VLOG_IS_ON(3)) && ret != CUBLAS_STATUS_SUCCESS) {
-    LOG(ERROR) << "DoBlasInternalImplcublasGemmBatchedEx: failed to run cuBLAS "
-                  "routine: "
-               << ToString(ret);
-    std::stringstream ss;
-    PrintArgs(ss, 0, args...);
-    LOG(ERROR) << "cuBLAS args: ";
-    LOG(ERROR) << ss.str();
-  }
-  return ret == CUBLAS_STATUS_SUCCESS;
-}
-
-template <typename... Args>
-bool CUDABlas::DoBlasInternalImplcublasGemmStridedBatchedEx(
-    Stream *stream, bool pointer_mode_host, bool err_on_failure,
-    cublasMath_t math_type, Args... args) {
-  absl::MutexLock lock(&mu_);
-
-  CHECK(blas_ != nullptr);
-  if (!SetStream(stream)) {
-    return false;
-  }
-
-#if CUDA_VERSION >= 9000
-  ScopedCublasMathMode math_mode{blas_};
-#if CUBLAS_VER_MAJOR >= 11
-  if (math_type == CUBLAS_TF32_TENSOR_OP_MATH &&
-      tensorflow::tensor_float_32_execution_enabled()) {
-#else
-  if (math_type == CUBLAS_TENSOR_OP_MATH) {
-#endif
-    if (!math_mode.Init(math_type)) {
-      return false;
-    }
-  }
-#endif
-
-  gpu::ScopedActivateExecutorContext sac{parent_};
-  ScopedCublasPointerMode pointer_mode{blas_};
-  if (!pointer_mode.Init(pointer_mode_host ? CUBLAS_POINTER_MODE_HOST
-                                           : CUBLAS_POINTER_MODE_DEVICE)) {
-    return false;
-  }
-  cublasStatus_t ret = cublasGemmStridedBatchedEx(blas_, args...);
-  if ((err_on_failure || VLOG_IS_ON(3)) && ret != CUBLAS_STATUS_SUCCESS) {
-    LOG(ERROR) << "DoBlasInternalImplcublasGemmStridedBatchedEx: failed to run "
-                  "cuBLAS routine: "
-               << ToString(ret);
-    std::stringstream ss;
-    PrintArgs(ss, 0, args...);
-    LOG(ERROR) << "cuBLAS args: ";
-    LOG(ERROR) << ss.str();
-  }
-  return ret == CUBLAS_STATUS_SUCCESS;
-}
-
 bool CUDABlas::DoBlasAsum(Stream *stream, uint64 elem_count,
                           const DeviceMemory<float> &x, int incx,
                           DeviceMemory<float> *result) {
@@ -2356,8 +2220,14 @@ bool CUDABlas::DoBlasGemmWithAlgorithmImpl(
   // If 'alpha' and 'beta' are host scalars and CompT is Eigen::half, we
   // essentially reinterpet_cast to __half, which is safe because Eigen::half
   // inherits from __half.
-  bool result = DoBlasInternalImplcublasGemmEx(
-      stream,
+
+  cublasStatus_t (*gemm)(cublasHandle_t, cublasOperation_t, cublasOperation_t,
+                         int, int, int, const void *, const void *,
+                         cudaDataType, int, const void *, cudaDataType, int,
+                         const void *, void *, cudaDataType, int, cudaDataType,
+                         cublasGemmAlgo_t) = cublasGemmEx;
+  bool result = DoBlasInternalImpl(
+      gemm, stream,
       /* pointer_mode_host = */ !alpha.is_pointer(), /*err_on_failure=*/false,
       math_type, CUDABlasTranspose(transa), CUDABlasTranspose(transb), m, n, k,
       alpha.is_pointer() ? GpuMemory(alpha.pointer()) : &alpha.value(),
@@ -2686,11 +2556,18 @@ port::Status CUDABlas::DoBlasGemmBatchedInternal(
     void **c_void_ptrs =
         reinterpret_cast<void **>(const_cast<CUDA_T **>(GpuMemory(c)));
     bool ok;
-    ok = DoBlasInternalImplcublasGemmBatchedEx(
-        stream, true /* = pointer_mode_host */, true /* = err_on_failure */,
-        math_type, CUDABlasTranspose(transa), CUDABlasTranspose(transb), m, n,
-        k, &alpha, a_void_ptrs, data_type, lda, b_void_ptrs, data_type, ldb,
-        &beta, c_void_ptrs, data_type, ldc, batch_count, compute_type, algo);
+    cublasStatus_t (*gemm)(cublasHandle_t, cublasOperation_t, cublasOperation_t,
+                           int, int, int, const void *, const void *const[],
+                           cudaDataType, int, const void *const[], cudaDataType,
+                           int, const void *, void *const[], cudaDataType, int,
+                           int, cudaDataType, cublasGemmAlgo_t) =
+        cublasGemmBatchedEx;
+    ok = DoBlasInternalImpl(
+        gemm, stream, true /* = pointer_mode_host */,
+        true /* = err_on_failure */, math_type, CUDABlasTranspose(transa),
+        CUDABlasTranspose(transb), m, n, k, &alpha, a_void_ptrs, data_type, lda,
+        b_void_ptrs, data_type, ldb, &beta, c_void_ptrs, data_type, ldc,
+        batch_count, compute_type, algo);
     if (ok) {
       return port::Status::OK();
     }
@@ -2953,12 +2830,19 @@ bool CUDABlas::DoBlasGemmStridedBatched(
 #else
     cublasMath_t math_type = CUBLAS_DEFAULT_MATH;
 #endif
-    bool ok = DoBlasInternalImplcublasGemmStridedBatchedEx(
-        stream, true /* = pointer_mode_host */, true /* = err_on_failure */,
-        math_type, CUDABlasTranspose(transa), CUDABlasTranspose(transb), m, n,
-        k, &alpha, GpuMemory(a), CUDA_R_16F, lda, stride_a, GpuMemory(b),
-        CUDA_R_16F, ldb, stride_b, &beta, GpuMemoryMutable(c), CUDA_R_16F, ldc,
-        stride_c, batch_count, CUDA_R_32F, algo);
+    cublasStatus_t (*bgemm)(
+        cublasHandle_t, cublasOperation_t, cublasOperation_t, int, int, int,
+        const void *, const void *, cudaDataType, int, long long int,
+        const void *, cudaDataType, int, long long int, const void *, void *,
+        cudaDataType, int, long long int, int, cudaDataType,
+        cublasGemmAlgo_t algo) = cublasGemmStridedBatchedEx;
+    bool ok = DoBlasInternalImpl(
+        bgemm, stream, true /* = pointer_mode_host */,
+        true /* = err_on_failure */, math_type, CUDABlasTranspose(transa),
+        CUDABlasTranspose(transb), m, n, k, &alpha, GpuMemory(a), CUDA_R_16F,
+        lda, stride_a, GpuMemory(b), CUDA_R_16F, ldb, stride_b, &beta,
+        GpuMemoryMutable(c), CUDA_R_16F, ldc, stride_c, batch_count, CUDA_R_32F,
+        algo);
     if (ok) {
       return true;
     }

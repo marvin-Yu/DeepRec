@@ -551,13 +551,13 @@ def find_lib(repository_ctx, paths, check_soname = True):
     for path in [repository_ctx.path(path) for path in paths]:
         if not path.exists:
             continue
-#        if check_soname and objdump != None and not _is_windows(repository_ctx):
-#            output = repository_ctx.execute([objdump, "-p", str(path)]).stdout
-#            output = [line for line in output.splitlines() if "SONAME" in line]
-#            sonames = [line.strip().split(" ")[-1] for line in output]
-#            if not any([soname == path.basename for soname in sonames]):
-#                mismatches.append(str(path))
-#                continue
+        if check_soname and objdump != None and not _is_windows(repository_ctx):
+            output = repository_ctx.execute([objdump, "-p", str(path)]).stdout
+            output = [line for line in output.splitlines() if "SONAME" in line]
+            sonames = [line.strip().split(" ")[-1] for line in output]
+            if not any([soname == path.basename for soname in sonames]):
+                mismatches.append(str(path))
+                continue
         return path
     if mismatches:
         auto_configure_fail(
@@ -651,14 +651,14 @@ def _find_libs(repository_ctx, cuda_config):
             repository_ctx,
             cpu_value,
             cuda_config.config["cuda_library_dir"],
-            cuda_config.cuda_version,
+            cuda_config.cudart_version,
         ),
         "cudart_static": _find_cuda_lib(
             "cudart_static",
             repository_ctx,
             cpu_value,
             cuda_config.config["cuda_library_dir"],
-            cuda_config.cuda_version,
+            cuda_config.cudart_version,
             static = True,
         ),
         "cublas": _find_cuda_lib(
@@ -1354,15 +1354,15 @@ def _create_local_cuda_repository(repository_ctx):
         repository_ctx,
         "cuda:cuda_config.h",
         {
-            "%{cuda_version}": "",
-            "%{cudart_version}": "",
-            "%{cublas_version}": "",
-            "%{cusolver_version}": "",
-            "%{curand_version}": "",
-            "%{cufft_version}": "",
-            "%{cusparse_version}": "",
-            "%{cudnn_version}": "",
-            "%{cuda_toolkit_path}": "",
+            "%{cuda_version}": cuda_config.cuda_version,
+            "%{cudart_version}": cuda_config.cudart_version,
+            "%{cublas_version}": cuda_config.cublas_version,
+            "%{cusolver_version}": cuda_config.cusolver_version,
+            "%{curand_version}": cuda_config.curand_version,
+            "%{cufft_version}": cuda_config.cufft_version,
+            "%{cusparse_version}": cuda_config.cusparse_version,
+            "%{cudnn_version}": cuda_config.cudnn_version,
+            "%{cuda_toolkit_path}": cuda_config.cuda_toolkit_path,
         },
         "cuda/cuda/cuda_config.h",
     )
