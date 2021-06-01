@@ -2649,11 +2649,18 @@ port::Status CUDABlas::DoBlasGemmBatchedInternal(
     cudaDataType_t compute_type =
         (data_type == CUDA_R_16F ? CUDA_R_32F : data_type);
     bool ok;
-    ok = DoBlasInternalImplcublasGemmBatchedEx(
-        stream, true /* = pointer_mode_host */, true /* = err_on_failure */,
-        math_type, CUDABlasTranspose(transa), CUDABlasTranspose(transb), m, n,
-        k, &alpha, a_void_ptrs, data_type, lda, b_void_ptrs, data_type, ldb,
-        &beta, c_void_ptrs, data_type, ldc, batch_count, compute_type, algo);
+    cublasStatus_t (*gemm)(cublasHandle_t, cublasOperation_t, cublasOperation_t,
+                           int, int, int, const void *, const void *const[],
+                           cudaDataType, int, const void *const[], cudaDataType,
+                           int, const void *, void *const[], cudaDataType, int,
+                           int, cudaDataType, cublasGemmAlgo_t) =
+        cublasGemmBatchedEx;
+    ok = DoBlasInternalImpl(
+        gemm, stream, true /* = pointer_mode_host */,
+        true /* = err_on_failure */, math_type, CUDABlasTranspose(transa),
+        CUDABlasTranspose(transb), m, n, k, &alpha, a_void_ptrs, data_type, lda,
+        b_void_ptrs, data_type, ldb, &beta, c_void_ptrs, data_type, ldc,
+        batch_count, compute_type, algo);
     if (ok) {
       return port::Status::OK();
     }
@@ -2890,8 +2897,14 @@ bool CUDABlas::DoBlasGemmStridedBatched(
 #else
     cublasMath_t math_type = CUBLAS_DEFAULT_MATH;
 #endif
-    bool ok = DoBlasInternalImplcublasGemmStridedBatchedEx(
-        stream, true /* = pointer_mode_host */, true /* = err_on_failure */,
+    cublasStatus_t (*bgemm)(
+        cublasHandle_t, cublasOperation_t, cublasOperation_t, int, int, int,
+        const void *, const void *, cudaDataType, int, long long int,
+        const void *, cudaDataType, int, long long int, const void *, void *,
+        cudaDataType, int, long long int, int, cudaDataType,
+        cublasGemmAlgo_t algo) = cublasGemmStridedBatchedEx;
+    bool ok = DoBlasInternalImpl(
+        bgemm, stream, true /* = pointer_mode_host */, true /* = err_on_failure */,
         math_type, CUDABlasTranspose(transa), CUDABlasTranspose(transb), m, n,
         k, &alpha, GpuMemory(a), CUDA_R_16F, lda, stride_a, GpuMemory(b),
         CUDA_R_16F, ldb, stride_b, &beta, GpuMemoryMutable(c), CUDA_R_32F, ldc,
