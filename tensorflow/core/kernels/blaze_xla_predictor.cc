@@ -132,6 +132,9 @@ Status BlazeXlaPredictor::Warmup() {
 }
 
 Status BlazeXlaPredictor::Warmup(OpKernelContext* ctx) {
+  if (warmuped_) {
+    return Status::OK();
+  }
   int num_inputs = ctx->num_inputs();
   std::vector<Tensor> inputs;
   inputs.reserve(num_inputs);
@@ -143,6 +146,14 @@ Status BlazeXlaPredictor::Warmup(OpKernelContext* ctx) {
   if (batchsize == -1) {
     return errors::Internal("Cannot infer inputs' batchsize");
   }
+  auto max_bs = batch_sizes_[batch_sizes_.size() - 1];
+  std::vector<Tensor> padded_inputs(num_inputs);
+  Status status = PadToStatic(inputs, &padded_inputs,
+                              batchsize, max_bs, ctx);
+  if (!status.ok()) {
+    return status;
+  }
+
   for (auto bs : batch_sizes_) {
     VLOG(0) << "begin warmup " << bs;
     auto start_us = Env::Default()->NowMicros();
@@ -152,17 +163,22 @@ Status BlazeXlaPredictor::Warmup(OpKernelContext* ctx) {
         << ", pad_to_batchsize = " << pad_to_batchsize;
 
     // Pad inputs
-    std::vector<Tensor> padded_inputs(num_inputs);
-    Status status = PadToStatic(inputs, &padded_inputs,
-                                batchsize, pad_to_batchsize, ctx);
-    if (!status.ok()) {
-      return status;
+    std::vector<Tensor> sliced_inputs;
+    sliced_inputs.reserve(num_inputs);
+    for (int i = 0; i < padded_inputs.size(); ++i) {
+      const TensorShape& shape = inputs[i].shape();
+      int64 first_dim = shape.dim_size(0);
+      first_dim = (first_dim == 1) ? 1 : bs;
+      if (first_dim == 1 || skip_padding_[i]) {
+        sliced_inputs.push_back(padded_inputs[i]);;
+      } else {
+        sliced_inputs.push_back(padded_inputs[i].Slice(0, bs));
+      }
     }
-
     // Call SessionRun
     std::vector<Tensor> padded_outputs;
     status = session_->RunCallable(
-        handle_, padded_inputs, &padded_outputs, nullptr);
+        handle_, sliced_inputs, &padded_outputs, nullptr);
     if (!status.ok()) {
       return status;
     }
@@ -219,7 +235,7 @@ Status BlazeXlaPredictor::PadToStatic(const std::vector<Tensor>& inputs,
     AllocatorAttributes alloc_attrs;
     alloc_attrs.set_on_host(ctx->input_memory_type(i) == HOST_MEMORY);
     TensorShape pad_to_shape;
-    TensorShape shape = inputs[i].shape();
+    const TensorShape& shape = inputs[i].shape();
     pad_to_shape = shape;
     int64 first_dim = shape.dim_size(0);
     first_dim = (first_dim == 1)? 1 : pad_to_batchsize;
@@ -305,7 +321,7 @@ void BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
   if (TF_PREDICT_FALSE(!warmuped_)) {
     VLOG(0) << "Begin warmup";
     mutex_lock l(warmup_mu_);
-    Warmup(ctx);
+    OP_REQUIRES_OK(ctx, Warmup(ctx));
     warmuped_ = true;
   }
 
