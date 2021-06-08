@@ -5,12 +5,9 @@ load(
 )
 
 tf_kernel_library(
-    name = "topk_op",
+    name = "tree_op",
     srcs = [
-      "util.h",
-      "GTopK_kernel.cc",
-      "IdxGTopK_kernel.cc",
-      "BlazeTopK_kernel.cc",
+      "tree_kernel.cc",
     ],
     visibility = ["//visibility:public"],
     deps = [
