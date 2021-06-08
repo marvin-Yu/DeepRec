@@ -507,7 +507,7 @@ Status DynamicDimensionInferenceVisitor::HandleReshape(HloInstruction* hlo) {
   auto hlo_shape = hlo->shape();
   if (operand_shape.is_batch_dim_dynamic()) {
     auto dim = operand_shape.get_dynamic_batch_dim();
-    if (dim == 0 &&
+    if (dim == 0 && hlo_shape.dimensions_size() > dim &&
         operand_shape.dimensions(dim) == hlo_shape.dimensions(dim)) {
       hlo->mutable_shape()->set_batch_dim_dynamic(true);
       hlo->mutable_shape()->set_dynamic_batch_dim(dim);
@@ -784,7 +784,8 @@ Status DynamicDimensionInferenceVisitor::HandleSlice(HloInstruction* hlo) {
   auto hlo_shape = hlo->shape();
   if (operand_shape.is_batch_dim_dynamic()) {
     auto dim = operand_shape.get_dynamic_batch_dim();
-    if (operand_shape.dimensions(dim) == hlo_shape.dimensions(dim)) {
+    if (hlo_shape.dimensions_size() > dim &&
+        operand_shape.dimensions(dim) == hlo_shape.dimensions(dim)) {
       hlo->mutable_shape()->set_batch_dim_dynamic(true);
       hlo->mutable_shape()->set_dynamic_batch_dim(dim);
     }
@@ -858,7 +859,7 @@ Status DynamicDimensionInferenceVisitor::HandleGather(HloInstruction* hlo) {
   auto hlo_shape = hlo->shape();
   if (operand_shape.is_batch_dim_dynamic()) {
     auto dim = operand_shape.get_dynamic_batch_dim();
-    if (dim == 0 &&
+    if (dim == 0 && hlo_shape.dimensions_size() > dim &&
         operand_shape.dimensions(dim) == hlo_shape.dimensions(dim)) {
       hlo->mutable_shape()->set_batch_dim_dynamic(true);
       hlo->mutable_shape()->set_dynamic_batch_dim(dim);
