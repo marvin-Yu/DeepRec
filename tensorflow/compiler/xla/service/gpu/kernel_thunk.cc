@@ -82,7 +82,7 @@ Status KernelThunk::ExecuteOnStream(const ExecuteParams& params) {
     CHECK(it != kernel_cache_.end())
         << "Initialize() not called for StreamExecutor " << executor;
     bool dynamic_batch = false;
-    auto status = tensorflow::ReadBoolFromEnvVar("ENABLE_KERNEL_DYNAMIC", true,
+    auto status = tensorflow::ReadBoolFromEnvVar("ENABLE_KERNEL_DYNAMIC", false,
                                                  &dynamic_batch);
     if (launch_dimensions_.IsBatchDimDynamic() && params.before_padding > 0 &&
         params.before_padding < params.after_padding && dynamic_batch) {
