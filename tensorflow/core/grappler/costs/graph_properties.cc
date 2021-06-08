@@ -1662,9 +1662,6 @@ class SymbolicShapeRefiner {
   }
 
   Status InferShapes(const NodeDef& node, NodeContext* c) {
-    if (node.op() == "HgEngine" || node.op() == "HgDequant") {
-      return Status::OK();
-    }
     // Infer the shapes of output tensors.
     if (!c->op_data || c->op_data->shape_inference_fn == nullptr ||
         !c->inference_context->Run(c->op_data->shape_inference_fn).ok()) {
