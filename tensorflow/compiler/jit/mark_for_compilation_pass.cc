@@ -1272,6 +1272,10 @@ bool MarkForCompilationPassImpl::CompilationDisallowedByXlaCompileAttr(
     VLOG(1) << "XLA ignore const op " << node->name() << ";  node type: " << node->type_string();
     return true;
   }
+  if (node->type_string() == "Cumsum") {
+    VLOG(1) << "XLA ignore Cumsum op " << node->name();
+    return true;
+  }
 
   status = flib_def_->GetAttr(*node, kXlaCompileAttr, &compile);
   if (status.ok()) {
