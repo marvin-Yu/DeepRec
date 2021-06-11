@@ -550,6 +550,11 @@ message ConfigProto {
   BlazeKernelOptions blaze_options = 112;
   bool is_blaze = 113;
   // Next: 17
+
+  // if enable_xla_auto_padding, we will add pad and slice for every cluster
+  // so that xla behaives like dynamic padding
+  bool enable_xla_auto_padding = 120;
+  int32 xla_padding_type = 121;
 }
 
 // Options for a single Run() call.
@@ -671,6 +676,7 @@ message RunMetadata {
   message ProfStats {
     uint64 flops = 1;
     float blaze_latency_ms = 2;
+    uint64 tao_op_calls = 3;
   }
 
   message BlazeMetrics {
