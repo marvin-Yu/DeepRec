@@ -1,4 +1,4 @@
-#export TEST_TMPDIR=
+export TEST_TMPDIR=
 #python ./configure.py
 export CUDA_TOOLKIT_PATH=/usr/local/cuda/
 export TF_CUDA_VERSION=10.1
@@ -29,20 +29,26 @@ dep_create rpm/t-ads-tensorflow-cc-lib.deps
 cp .dep_create/var/home/a/mklml/lib/* $EXTERNAL_DIR/usr/local/lib64/
 
 declare -a targets=("//tensorflow:libtensorflow_framework.so"
-                    "//tensorflow:libtensorflow_cc.so")
-declare -a install_targets=("libtensorflow_framework.so"
-                            "libtensorflow_framework.so.1"
-                            "libtensorflow_cc.so.1"
-                            "libtensorflow_cc.so")
+                    "//tensorflow:libtensorflow_cc.so"
+                    "//tensorflow/core:test"
+                    "//tensorflow/core:testlib"
+                    "//tensorflow/core/kernels:ops_testutil"
+)
+declare -a install_targets=("tensorflow/libtensorflow_framework.so"
+                            "tensorflow/libtensorflow_framework.so.1"
+                            "tensorflow/libtensorflow_cc.so.1"
+                            "tensorflow/libtensorflow_cc.so"
+                            "tensorflow/core/libtest.so"
+                            "tensorflow/core/libtestlib.so"
+                            "tensorflow/core/kernels/libops_testutil.so"
+)
 if [ ! -f ".tf_configure.bazelrc" ]; then
     python ./configure.py
 fi
 ## now loop through the above array
 for target in "${targets[@]}"
 do
-#    bazel build --copt=-DTILE_VECTORIZE_AVX512 --copt=-mavx2 -c opt --copt -g --config=cuda  --copt -mfpmath=both --copt -mfma --copt -msse4.2 --copt -mavx512f --copt -D_GLIBCXX_USE_CXX11_ABI=0 $target
-bazel build --copt=-mavx2 -c opt --copt -g --config=cuda --copt -mfpmath=both --copt -mfma --copt -msse4.2 --copt -D_GLIBCXX_USE_CXX11_ABI=0 --copt -DGOOGLE_CUDA=1  $target
-#    bazel build --define framework_shared_object=false --config=cuda -c opt --copt -g --copt -mavx2 --copt -mfma --copt -DRTP_PLATFORM --copt -D_GLIBCXX_USE_CXX11_ABI=0 --copt -DGOOGLE_CUDA=1 --copt -fno-canonical-system-headers $target
+    bazel build --copt=-mavx2 --config=cuda --copt -mfpmath=both --copt -mfma --copt -msse4.2 --copt -D_GLIBCXX_USE_CXX11_ABI=0 --copt -DGOOGLE_CUDA=1  $target
 done
 
 EXTERNAL_DIR="../_external"
@@ -58,7 +64,7 @@ for target in "${install_targets[@]}"
 do
     IFS='/' read -ra path <<< "$target"
     rm $EXTERNAL_DIR/usr/local/lib64/${path[-1]} -f
-    cp bazel-bin/tensorflow/$target $EXTERNAL_DIR/usr/local/lib64/
+    cp -f bazel-bin/$target $EXTERNAL_DIR/usr/local/lib64/
 done
 
 # copy header
@@ -99,9 +105,9 @@ ABSL_DIR=$BAZEL_EXTERNAL_DIR"com_google_absl/absl/"
 rm $HEADER_DIR/absl -rf
 cp -r $ABSL_DIR $HEADER_DIR/absl
 
-DITING_DIR=$BAZEL_EXTERNAL_DIR"diting_repo/sdk/include/diting/"
-rm $HEADER_DIR/diting -rf
-cp -r $DITING_DIR $HEADER_DIR/diting
+#DITING_DIR=$BAZEL_EXTERNAL_DIR"diting_repo/sdk/include/diting/"
+#rm $HEADER_DIR/diting -rf
+#cp -r $DITING_DIR $HEADER_DIR/diting
 
 
 FARMHASH=$BAZEL_EXTERNAL_DIR"farmhash_archive/src/farmhash.h"
