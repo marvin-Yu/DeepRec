@@ -56,10 +56,10 @@ env PYTHON_BIN_PATH=/usr/local/python3/bin/python \
     LD_LIBRARY_PATH="/usr/local/cuda-10.1/lib64:/usr/local/cuda-10.1/extras/CUPTI/lib64/:" \
     TF_SET_ANDROID_WORKSPACE=0 ./configure
 export LD_LIBRARY_PATH="/usr/local/cuda-10.1/lib64:/usr/local/cuda-10.1/extras/CUPTI/lib64/:"
-sh build_whl.sh
+sh build_pip.sh
 
 %install
-cp -r ~/tensorflow_pkg/* .%{_prefix}/
+cp -r /tmp/tensorflow_pkg/* .%{_prefix}/
 
 
 %files
