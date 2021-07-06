@@ -71,7 +71,10 @@ __global__ void GRUPrepare(unsigned int* finished, const int round) {
 __device__ void check_readiness(bool* ready, int iter, unsigned int* counter,
                                 unsigned int count) {
   if (threadIdx.x == 0) {
-    *ready = iter == 0 || atomicAdd(counter, 0) == count;
+      if (iter == 0)
+          *ready = 1;
+      else
+          *ready = (atomicAdd(&counter[iter - 1], 0) == count);
   }
   __syncthreads();
 }
@@ -221,7 +224,7 @@ __global__ void GRUKernel(const float* x, const float* h2h,
   extern __shared__ float vals[];
   __shared__ bool ready[1];
   for (int iter = 0; iter < round;) {
-    check_readiness(ready, iter, &finished[iter - 1], gridDim.x);
+    check_readiness(ready, iter, finished, gridDim.x);
     if (!ready[0]) {
       continue;
     }
