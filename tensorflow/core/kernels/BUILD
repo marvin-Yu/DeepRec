@@ -4996,6 +4996,7 @@ tf_kernel_library(
 cc_library(
     name = "sparse",
     deps = [
+        "blaze_general_map",
         ":deserialize_sparse_string_op",
         ":deserialize_sparse_variant_op",
         ":serialize_sparse_op",
@@ -5049,6 +5050,12 @@ tf_kernel_library(
     name = "sparse_fill_empty_rows_op",
     prefix = "sparse_fill_empty_rows_op",
     deps = SPARSE_DEPS,
+)
+
+tf_kernel_library(
+    name = "blaze_general_map",
+    prefix = "blaze_general_map",
+    deps = PARSING_DEPS,
 )
 
 tf_kernel_library(
