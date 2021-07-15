@@ -353,7 +353,7 @@ bool MaybeLoadCubinFromFile(string cubin_fullpath, std::vector<uint8>* cubin) {
                         cubin_fullpath, &cubin_string));
             if (ok.ok()) {
               std::vector<uint8> cubin_vector(cubin_string.begin(), cubin_string.end());
-              cubin = &cubin_vector;
+              *cubin = std::move(cubin_vector);
               return true;
             } else {
               VLOG(0) << "read cubin file error, fallback to assemble ptx";
@@ -467,6 +467,7 @@ NVPTXCompiler::CompileTargetBinary(const HloModule* module,
         DumpCubinToFileInDir(cubin_cache_dir, cubin_filename, cubin);
     }
   }
+  VLOG(5) << "maybe load cubin size:" << cubin.size();
 
   return std::pair<std::string, std::vector<uint8>>(std::move(ptx),
                                                     std::move(cubin));
@@ -517,7 +518,7 @@ std::vector<uint8> NVPTXCompiler::CompilePtx(
 std::vector<uint8> NVPTXCompiler::CompilePtxOrGetCachedResult(
     se::StreamExecutor* stream_exec, const string& ptx, int cc_major,
     int cc_minor, const HloModuleConfig& hlo_module_config) {
-  XLA_SCOPED_LOGGING_TIMER_LEVEL("NVPTXCompiler::CompilePtxOrGetCachedResult", 1);
+  XLA_SCOPED_LOGGING_TIMER("NVPTXCompiler::CompilePtxOrGetCachedResult");
   tensorflow::profiler::TraceMe activity(
       "PTX->CUBIN", tensorflow::profiler::TraceMeLevel::kInfo);
 

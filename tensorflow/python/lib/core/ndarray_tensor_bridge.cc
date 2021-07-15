@@ -86,7 +86,7 @@ PyTypeObject TensorReleaserType = {
     0,                                /* tp_itemsize */
     /* methods */
     TensorReleaser_dealloc,      /* tp_dealloc */
-    NULL,                        /* tp_print */
+    0,                           /* tp_print, see commit  3a48a5c1541daa1fc*/
     nullptr,                     /* tp_getattr */
     nullptr,                     /* tp_setattr */
     nullptr,                     /* tp_compare */
