@@ -250,7 +250,9 @@ void WarnIfBadDriverJITVersion() {
 }
 
 static string ptx_cache_dir;
+static string cubin_cache_dir;
 static tensorflow::mutex ptx_cache_mutex;
+static tensorflow::mutex cubin_cache_mutex;
 
 static void InitPtxCacheDir() {
   static absl::once_flag init_once;
@@ -263,6 +265,27 @@ static void InitPtxCacheDir() {
                 << "once for the lifetime of the process.";
     } else {
       LOG(INFO) << "Cache XLA PTXs in " << ptx_cache_dir << ". "
+                << "This line is logged at most "
+                << "once for the lifetime of the process.";
+    }
+  });
+}
+
+// this env var is suggested to be used together with "TF_XLA_PTX_CACHE_DIR"
+// to reduce compile time, because PTXs would be used in the return value of
+// function CompileTargetBinary, and would be used in AddCudaPtxInMemory,
+// we cannot skip the process of getting PTXs.
+static void InitCubinCacheDir() {
+  static absl::once_flag init_once;
+  absl::call_once(init_once, [] {
+    tensorflow::ReadStringFromEnvVar("TF_XLA_CUBIN_CACHE_DIR", "",
+                                     &cubin_cache_dir);
+    if (cubin_cache_dir.empty()) {
+      LOG(INFO) << "Will not cache XLA CUBINs. "
+                << "This line is logged at most "
+                << "once for the lifetime of the process.";
+    } else {
+      LOG(INFO) << "Cache XLA CUBINs in " << cubin_cache_dir << ". "
                 << "This line is logged at most "
                 << "once for the lifetime of the process.";
     }
@@ -318,6 +341,29 @@ bool MaybeLoadPtxFromFile(const HloModule* module, std::string* ptx) {
   return false;
 }
 
+// Try to load CUBIN from files defined in the FLAGS. If successful, return true.
+bool MaybeLoadCubinFromFile(string cubin_fullpath, std::vector<uint8>* cubin) {
+    if (!cubin_cache_dir.empty()) {
+        auto env = tensorflow::Env::Default();
+        tensorflow::mutex_lock lock(cubin_cache_mutex);
+        if (env->FileExists(cubin_fullpath).ok()) {
+            VLOG(0) << "RunBackend() - Will load cubin from file: " << cubin_fullpath;
+            string cubin_string;
+            Status ok = (tensorflow::ReadFileToString(tensorflow::Env::Default(),
+                        cubin_fullpath, &cubin_string));
+            if (ok.ok()) {
+              std::vector<uint8> cubin_vector(cubin_string.begin(), cubin_string.end());
+              *cubin = std::move(cubin_vector);
+              return true;
+            } else {
+              VLOG(0) << "read cubin file error, fallback to assemble ptx";
+            }
+        }
+    }
+    return false;
+
+}
+
 }  // namespace
 
 NVPTXCompiler::NVPTXCompiler()
@@ -364,6 +410,15 @@ NVPTXCompiler::CompileTargetBinary(const HloModule* module,
   VLOG(2) << "Libdevice dir = " << libdevice_dir << "\n";
 
   InitPtxCacheDir();
+  InitCubinCacheDir();
+
+  uint64 key;
+  HloPrintOptions options;
+  if (!ptx_cache_dir.empty() || !cubin_cache_dir.empty()) {
+      options.set_print_cluster_id(false);
+      options.set_print_metadata(false);
+      key = tensorflow::Hash64(module->ToString(options));
+  }
 
   string ptx;
   if (!MaybeLoadPtxFromFile(module, &ptx)) {
@@ -373,10 +428,6 @@ NVPTXCompiler::CompileTargetBinary(const HloModule* module,
         ptx, nvptx::CompileToPtx(llvm_module, gpu_version, module->config(),
                                  libdevice_dir));
     if (!ptx_cache_dir.empty()) {
-      HloPrintOptions options;
-      options.set_print_cluster_id(false);
-      options.set_print_metadata(false);
-      uint64 key = tensorflow::Hash64(module->ToString(options));
       string ptx_filename = std::to_string(key) + ".ptx";
       string hlo_filename = std::to_string(key) + ".hlomodule";
       string ptx_fullpath = ptx_cache_dir + "/" + ptx_filename;
@@ -402,9 +453,21 @@ NVPTXCompiler::CompileTargetBinary(const HloModule* module,
     DumpToFileInDirOrStdout(*module, "ptx", ptx);
   }
 
-  std::vector<uint8> cubin =
-      CompilePtxOrGetCachedResult(stream_exec, ptx, compute_capability.first,
-                                  compute_capability.second, module->config());
+  std::vector<uint8> cubin;
+  string cubin_filename = std::to_string(key) + ".cubin";
+  string cubin_fullpath = cubin_cache_dir + "/" + cubin_filename;
+  auto env = tensorflow::Env::Default();
+  if (!MaybeLoadCubinFromFile(cubin_fullpath, &cubin)) {
+    cubin =
+        CompilePtxOrGetCachedResult(stream_exec, ptx, compute_capability.first,
+                                    compute_capability.second, module->config());
+    if ((!cubin_cache_dir.empty()) && (!env->FileExists(cubin_fullpath).ok())) {
+        tensorflow::mutex_lock lock(cubin_cache_mutex);
+        VLOG(0) << "Dump " << cubin_filename << " to " << cubin_cache_dir;
+        DumpCubinToFileInDir(cubin_cache_dir, cubin_filename, cubin);
+    }
+  }
+  VLOG(5) << "maybe load cubin size:" << cubin.size();
 
   return std::pair<std::string, std::vector<uint8>>(std::move(ptx),
                                                     std::move(cubin));
