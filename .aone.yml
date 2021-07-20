@@ -3,7 +3,7 @@ t-ads-tensorflow-c-lib:
     DOCKER: reg.docker.alibaba-inc.com/blaze/tensorflow-base:1.15
 t-ads-tensorflow-cc-lib:
   pkgpara:
-    DOCKER: reg.docker.alibaba-inc.com/blaze/tensorflow-base:1.15.002.cuda101
+    DOCKER: reg.docker.alibaba-inc.com/blaze/tensorflow-base:1.15
 t-ads-tensorflow-cc-cuda11-lib:
   pkgpara:
     DOCKER: reg.docker.alibaba-inc.com/blaze/tensorflow-base:1.15.001.cuda112
