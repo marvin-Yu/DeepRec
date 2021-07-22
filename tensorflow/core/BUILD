@@ -63,6 +63,7 @@
 # //tensorflow/tensorflow.bzl) will include the necessary symbols in binary
 # build targets.
 
+load("@flatbuffers//:build_defs.bzl", "flatbuffer_library_public")
 load(
     "//tensorflow:tensorflow.bzl",
     "cc_header_only_library",
@@ -843,6 +844,28 @@ cc_library(
     ],
 )
 
+flatbuffer_library_public(
+    name = "fbs_tensor",
+    srcs = ["framework/fbs_tensor.fbs"],
+    outs = ["framework/fbs_tensor_generated.h"],
+    language_flag = "-c",
+)
+
+filegroup(
+    name = "fbs_tensor_includes",
+    srcs = ["framework/fbs_tensor.fbs"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "fbs_tensor_h",
+    hdrs = ["framework/fbs_tensor_generated.h"],
+    deps = [
+        "@flatbuffers//:flatbuffers",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 # This build rule (along with :framework_internal, :lib, and :lib_internal)
 # purposefully omits the definitions of many declared symbols, which are
 # included in //tensorflow:libtensorflow_framework.so. Using tf_cc_test and tf_cc_binary
@@ -956,6 +979,7 @@ tf_cuda_library(
     deps = [
         ":framework_internal",
         "@com_google_absl//absl/base",
+        ":fbs_tensor_h"
     ],
 )
 
@@ -2452,6 +2476,7 @@ cc_library(
         "//third_party/eigen3",
         "@com_google_absl//absl/base:core_headers",
         "//tensorflow/core/platform/default/build_config:platformlib",
+        ":fbs_tensor_h"
     ] + if_static([":lib_internal_impl"]),
 )
 
@@ -2499,7 +2524,8 @@ cc_library(
                "@zlib_archive//:zlib",
                "@double_conversion//:double-conversion",
                "@com_google_protobuf//:protobuf",
-           ] + tf_protos_all_impl() + tf_protos_grappler_impl() +
+               ":fbs_tensor_h"
+    ] + tf_protos_all_impl() + tf_protos_grappler_impl() +
            tf_additional_numa_deps(),
 )
 
@@ -2939,6 +2965,7 @@ tf_cuda_library(
         "//tensorflow/core/kernels:bounds_check",
         "//tensorflow/core/profiler/lib:traceme",
         "//third_party/eigen3",
+        ":fbs_tensor_h",
     ] + if_static(
         extra_deps = ["@com_google_protobuf//:protobuf"],
         otherwise = ["@com_google_protobuf//:protobuf_headers"],
