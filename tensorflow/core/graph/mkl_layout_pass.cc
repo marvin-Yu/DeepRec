@@ -1784,7 +1784,7 @@ class MklLayoutRewritePass : public GraphOptimizationPass {
     // it includes those we support.
     DataType T;
     if (!TryGetNodeAttr(n->def(), "T", &T) ||
-        !mkl_op_registry::IsMklLayoutDependentOp(csinfo_.mkl_fused_conv2d, T)) {
+        !mkl_op_registry::IsMklOp(csinfo_.mkl_fused_conv2d, T, false)) {
       return false;
     }
 
@@ -1812,8 +1812,8 @@ class MklLayoutRewritePass : public GraphOptimizationPass {
     // _FusedDepthwiseConv2DNative only if it includes those we support.
     DataType T;
     if (!TryGetNodeAttr(n->def(), "T", &T) ||
-        !mkl_op_registry::IsMklLayoutDependentOp(
-            csinfo_.mkl_fused_depthwise_conv2d, T)) {
+        !mkl_op_registry::IsMklOp(csinfo_.mkl_fused_depthwise_conv2d, T,
+                                  false)) {
       return false;
     }
 
@@ -2206,10 +2206,10 @@ void MklLayoutRewritePass::GetNodeProducingMklTensor(
   // If this is an OneDNN op, then it will create extra output for OneDNN layout.
   DataType T;
   if (TryGetNodeAttr(n->def(), "T", &T) &&
-      mkl_op_registry::IsMklLayoutDependentOp(n->type_string(), T)) {
-    // If this is an OneDNN op, then it will generate an edge that will receive
-    // OneDNN tensor from a node.
-    // output slot number for OneDNN tensor would be N+slot number of TensorFlow
+      mkl_op_registry::IsMklOp(n->type_string(), T, false)) {
+    // If this is a oneDNN op, then it will generate an edge that will receive
+    // oneDNN tensor from a node.
+    // output slot number for oneDNN tensor would be N+slot number of TensorFlow
     // tensor, where N is total number of TensorFlow tensors.
     *mkl_node = n;
     *mkl_node_output_slot =
@@ -3831,13 +3831,15 @@ MklLayoutRewritePass::CheckForQuantizedNodeRewrite(const Node* n) const {
 
   if (TryGetNodeAttr(n->def(), "Tinput", &Tinput) &&
       TryGetNodeAttr(n->def(), "Tfilter", &Tfilter) &&
-      mkl_op_registry::IsMklLayoutDependentOp(
-          mkl_op_registry::GetMklOpName(n->type_string()), Tinput, Tfilter)) {
+      // TODO(intel-tf): Do we need to include Tfilter in IsMklOp check?
+      mkl_op_registry::IsMklOp(mkl_op_registry::GetMklOpName(n->type_string()),
+                               Tinput, false)) {
     type_attrs_present = true;
   } else if (TryGetNodeAttr(n->def(), "T1", &T1) &&
              TryGetNodeAttr(n->def(), "T2", &T2) &&
-             mkl_op_registry::IsMklLayoutDependentOp(
-                 mkl_op_registry::GetMklOpName(n->type_string()), T1, T2)) {
+             // TODO(intel-tf): Do we need to include T2 in IsMklOp check?
+             mkl_op_registry::IsMklOp(
+                 mkl_op_registry::GetMklOpName(n->type_string()), T1, false)) {
     type_attrs_present = true;
   }
 
@@ -4087,7 +4089,7 @@ bool MklLayoutRewritePass::FixMklMetaDataEdges(std::unique_ptr<Graph>* g,
   // If graph node is not OneDNN node, then return.
   DataType T = DT_INVALID;
   if (!TryGetNodeAttr(n->def(), "T", &T) ||
-      !mkl_op_registry::IsMklLayoutDependentOp(n->type_string(), T)) {
+      !mkl_op_registry::IsMklOp(n->type_string(), T, false)) {
     return result;
   }
 
@@ -4112,7 +4114,7 @@ bool MklLayoutRewritePass::FixMklMetaDataEdges(std::unique_ptr<Graph>* g,
     // node, then we don't need to do anything.
     Node* e_src = e->src();
     if (TryGetNodeAttr(e_src->def(), "T", &T) &&
-        mkl_op_registry::IsMklLayoutDependentOp(e_src->type_string(), T)) {
+        mkl_op_registry::IsMklOp(e_src->type_string(), T, false)) {
       // Source node for edge 'e' is OneDNN node.
       // Destination node and destination input slot of e is node 'n' and 'idx'
       // resp.
@@ -4225,24 +4227,26 @@ bool MklLayoutRewritePass::RunPass(std::unique_ptr<Graph>* g) {
 
   DumpGraph("After running MklLayoutRewritePass(NodeMerge+Rewrite)", &**g);
 
-  order.clear();
-  GetReversePostOrder(**g, &order);  // This will give us topological sort.
-  for (Node* n : order) {
-    // If node is not an op or it cannot run on CPU device, then skip.
-    if (!n->IsOp() || !CanOpRunOnCPUDevice(n)) {
-      continue;
-    }
-    if (FixMklMetaDataEdges(g, n)) {
-      string node_name = n->name();
-      string op_name = n->type_string();
+  if (!NativeFormatEnabled()) {
+    order.clear();
+    GetReversePostOrder(**g, &order);  // This will give us topological sort.
+    for (Node* n : order) {
+      // If node is not an op or it cannot run on CPU device, then skip.
+      if (!n->IsOp() || !CanOpRunOnCPUDevice(n)) {
+        continue;
+      }
+      if (FixMklMetaDataEdges(g, n)) {
+        string node_name = n->name();
+        string op_name = n->type_string();
 
-      VLOG(1) << "MklLayoutRewritePass: fixed metadata edges for node "
-              << node_name << " with op " << op_name;
-      result = true;
+        VLOG(1) << "MklLayoutRewritePass: fixed metadata edges for node "
+                << node_name << " with op " << op_name;
+        result = true;
+      }
     }
+    DumpGraph("After running MklLayoutRewritePass(NodeMerge+Rewrite+Fixup)",
+              &**g);
   }
-  DumpGraph("After running MklLayoutRewritePass(NodeMerge+Rewrite+Fixup)",
-            &**g);
 
   return result;
 }
