@@ -356,6 +356,8 @@ class Tensor {
   /// in a compact form.
   void AsProtoField(TensorProto* proto) const;
   void AsProtoTensorContent(TensorProto* proto) const;
+  const std::shared_ptr<const flatbuffers::FlatBufferBuilder> AsFBField() const;
+  flatbuffers::Offset<fbs::TensorFB> AsFBField(flatbuffers::FlatBufferBuilder *fbb) const;
 
   /// \brief Return the tensor data as an `Eigen::Tensor` with the type and
   /// sizes of this `Tensor`.

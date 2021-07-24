@@ -28,6 +28,7 @@ limitations under the License.
 //   an decoding T[] into/from a Cord, etc.
 
 #include "tensorflow/core/framework/tensor.h"
+#include "tensorflow/core/framework/tensor_fb.h"
 
 #include "absl/strings/escaping.h"
 #include "tensorflow/core/framework/allocation_description.pb.h"
@@ -908,6 +909,162 @@ bool Tensor::FromProto(Allocator* a, const TensorProto& proto) {
                                       LogMemory::UNKNOWN_STEP_ID, *this);
   }
   return true;
+}
+
+template<typename T>
+Offset<fbs::TensorFB> ToFBField(const fbs::TensorFB* &tensor_fb, const Tensor* t,
+               Offset<fbs::TensorShapeFB> shape_offset,
+               FlatBufferBuilder &fbb, uint8 dt)
+{
+    unique_ptr<SimpleBuffer<typename FBHelper<T>::Type>> buf(
+            new SimpleBuffer<typename FBHelper<T>::Type>(cpu_allocator(), t->NumElements()));
+                    
+    typename FBHelper<T>::Type* data = (typename FBHelper<T>::Type*)buf->data();
+    std::copy_n(t->base<T>(), t->NumElements(), data);
+    auto data_vec = fbb.CreateVector(data, t->NumElements());
+    return TensorFBUtil::CreateTensorFB(fbb, fbs::DataType(dt), shape_offset, data_vec);
+}
+
+template<>
+Offset<fbs::TensorFB> ToFBField<std::string>(const fbs::TensorFB* &tensor_fb, const Tensor* t,
+               Offset<fbs::TensorShapeFB> shape_offset,
+               FlatBufferBuilder &fbb, uint8 dt)
+{
+    auto base_addr = t->base<std::string>();
+    Offset<String> offsets[t->NumElements()];
+    for (auto i = 0; i < t->NumElements(); ++i) {
+        offsets[i] = fbb.CreateString((base_addr + i)->c_str(), (base_addr + i)->size());
+    }
+    auto data_vec = fbb.CreateVector(offsets, t->NumElements());
+    return TensorFBUtil::CreateTensorFB(fbb, fbs::DataType(dt), shape_offset, data_vec);
+}
+
+template<>
+Offset<fbs::TensorFB> ToFBField<Eigen::half>(const fbs::TensorFB* &tensor_fb, const Tensor* t,
+                            Offset<fbs::TensorShapeFB> shape_offset,
+                            FlatBufferBuilder &fbb, uint8 dt)
+{
+    unique_ptr<SimpleBuffer<int32_t>> buf(new SimpleBuffer<int32_t>(cpu_allocator(), t->NumElements()));
+    int32_t* data = (int32_t*)buf->data();
+    auto base_addr = t->base<Eigen::half>();
+    for (auto i = 0; i < t->NumElements(); ++i) {
+        *(data + i) = (base_addr + i)->x;
+    }
+    auto data_vec = fbb.CreateVector(data, t->NumElements());
+    return TensorFBUtil::CreateTensorFB(fbb, fbs::DataType(dt), shape_offset, data_vec);
+}
+
+template<>
+Offset<fbs::TensorFB> ToFBField<ResourceHandle>(const fbs::TensorFB* &tensor_fb, const Tensor* t,
+               Offset<fbs::TensorShapeFB> shape_offset,
+               FlatBufferBuilder &fbb, uint8 dt)
+{
+    LOG(FATAL) << "ResourceHandle to fb not support";
+    return 0;
+}
+
+template<>
+Offset<fbs::TensorFB> ToFBField<Variant>(const fbs::TensorFB* &tensor_fb, const Tensor* t,
+               Offset<fbs::TensorShapeFB> shape_offset,
+               FlatBufferBuilder &fbb, uint8 dt)
+{
+    auto data = t->base<Variant>();
+    std::vector<flatbuffers::Offset<fbs::VariantTensorDataFB>> buf;
+    buf.reserve(t->NumElements());
+    Offset<String> offsets[t->NumElements()];
+    for (size_t i = 0; i < t->NumElements(); ++i) {
+      VariantTensorData tmp;
+      data[i].Encode(&tmp);
+      VariantTensorDataProto proto;
+      tmp.ToProto(&proto);
+      string protoStr;
+      proto.SerializeToString(&protoStr);
+      offsets[i] = fbb.CreateString(protoStr.c_str(), protoStr.size());
+    }
+    auto tensor_vec_offset = fbb.CreateVector(offsets, t->NumElements());
+    return TensorFBUtil::CreateTensorFB(fbb, fbs::DataType(dt), shape_offset, tensor_vec_offset);
+}
+
+template<>
+Offset<fbs::TensorFB> ToFBField<complex64>(const fbs::TensorFB* &tensor_fb, const Tensor* t,
+               Offset<fbs::TensorShapeFB> shape_offset,
+               FlatBufferBuilder &fbb, uint8 dt)
+{
+    unique_ptr<SimpleBuffer<float>> buf(new SimpleBuffer<float>(cpu_allocator(), 2 * t->NumElements()));
+    float* data = (float*)buf->data();
+    std::copy_n((float*)(t->base<complex64>()), 2 * t->NumElements(), data);
+    auto data_vec = fbb.CreateVector(data, 2 * t->NumElements());
+    return TensorFBUtil::CreateTensorFB(fbb, fbs::DataType(dt), shape_offset, data_vec);
+}
+
+template<>
+Offset<fbs::TensorFB> ToFBField<complex128>(const fbs::TensorFB* &tensor_fb, const Tensor* t,
+               Offset<fbs::TensorShapeFB> shape_offset,
+               FlatBufferBuilder &fbb, uint8 dt)
+{
+    unique_ptr<SimpleBuffer<double>> buf(
+            new SimpleBuffer<double>(cpu_allocator(), 2 * t->NumElements()));
+    auto data = (double*)buf->data();
+    std::copy_n((double*)(t->base<complex128>()), 2 * t->NumElements(), data);
+    auto data_vec = fbb.CreateVector(data, 2 * t->NumElements());
+    return TensorFBUtil::CreateTensorFB(fbb, fbs::DataType(dt), shape_offset, data_vec);
+}
+
+template<>
+Offset<fbs::TensorFB> ToFBField<int64>(const fbs::TensorFB* &tensor_fb, const Tensor* t,
+               Offset<fbs::TensorShapeFB> shape_offset,
+               FlatBufferBuilder &fbb, uint8 dt)
+{
+    unique_ptr<SimpleBuffer<int64>> buf(new SimpleBuffer<int64>(cpu_allocator(), t->NumElements()));
+    auto data = (int64*)buf->data();
+    std::copy_n(t->base<int64>(), t->NumElements(), data);
+    auto data_vec = fbb.CreateVector((int64_t*)(data), t->NumElements());
+    return TensorFBUtil::CreateTensorFB(fbb, fbs::DataType(dt), shape_offset, data_vec);
+}
+
+template<>
+Offset<fbs::TensorFB> ToFBField<bfloat16>(const fbs::TensorFB* &tensor_fb, const Tensor* t,
+               Offset<fbs::TensorShapeFB> shape_offset,
+               FlatBufferBuilder &fbb, uint8 dt)
+{
+    unique_ptr<SimpleBuffer<int32_t>> buf(new SimpleBuffer<int32_t>(cpu_allocator(), t->NumElements()));
+    auto data = (int32_t*)buf->data();
+    auto base_addr = t->base<bfloat16>();
+    std::copy_n((uint16*)base_addr, t->NumElements(), data);
+    auto data_vec = fbb.CreateVector(data, t->NumElements());
+    return TensorFBUtil::CreateTensorFB(fbb, fbs::DataType(dt), shape_offset, data_vec);
+}
+
+Offset<fbs::TensorFB> Tensor::AsFBField(FlatBufferBuilder *fbb) const {
+    std::vector<Offset<fbs::TensorShapeFB_::Dim>> dim_offsets;
+    for (auto dim_idx = 0; dim_idx < dims(); dim_idx++) {
+        Offset<fbs::TensorShapeFB_::Dim> dim =
+            fbs::TensorShapeFB_::CreateDim(*fbb, dim_size(dim_idx));
+        dim_offsets.push_back(dim);
+    }
+    Offset<Vector<Offset<tensorflow::fbs::TensorShapeFB_::Dim>>> dim_vec_offset =
+        fbb->CreateVector(dim_offsets);
+    Offset<fbs::TensorShapeFB> shape_offset = fbs::CreateTensorShapeFB(*fbb, dim_vec_offset);
+    const fbs::TensorFB* tensor_fb;
+    DCHECK_LT(static_cast<uint32>(dtype()), 256u);
+    Offset<fbs::TensorFB> tensor_fb_offset;
+    if (buf_) {
+        CASES(dtype(), tensor_fb_offset = ToFBField<T>(tensor_fb, this, shape_offset, *fbb,
+                        fbs::DataType(static_cast<uint8>(dtype()))));
+    } else {
+        tensor_fb_offset = fbs::CreateTensorFB(
+                *fbb, fbs::DataType(static_cast<uint8>(dtype())), shape_offset);
+    }
+    return tensor_fb_offset;
+}
+
+const std::shared_ptr<const FlatBufferBuilder> Tensor::AsFBField() const {
+    size_t flat_buffer_size = 0;
+    CASES(dtype(), flat_buffer_size = FBHelper<T>::CalFlatBufferSize(
+                    base<T>(), NumElements(), dims()));
+    unique_ptr<FlatBufferBuilder> fbb(new FlatBufferBuilder(flat_buffer_size));
+    fbb->Finish(AsFBField(fbb.get()));
+    return fbb;
 }
 
 void Tensor::AsProtoField(TensorProto* proto) const {

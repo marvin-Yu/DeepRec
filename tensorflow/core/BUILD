@@ -922,6 +922,7 @@ tf_cuda_library(
         "framework/shape_inference.h",
         "framework/stats_aggregator.h",
         "framework/tensor.h",
+        "framework/tensor_fb.h",
         "framework/tensor_shape.h",
         "framework/tensor_slice.h",
         "framework/tensor_types.h",
