@@ -342,6 +342,9 @@ class Tensor {
   /// REQUIRES: `0 <= dim0_start < dim_size(0)`
   Tensor SubSlice(int64 index) const;
 
+  bool FromFB(const fbs::TensorFB& tensorFB);
+  bool FromFB(Allocator* a, const fbs::TensorFB& tensorFB);
+
   /// \brief Parse `other` and construct the tensor.
 
   /// Returns `true` iff the parsing succeeds. If the parsing fails,

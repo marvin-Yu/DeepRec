@@ -20,6 +20,7 @@ limitations under the License.
 #include <set>
 #include <string>
 
+#include "tensorflow/core/framework/fbs_tensor_generated.h"
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
 // Disable clang-format to prevent 'FixedPoint' header from being included
 // before 'Tensor' header on which it depends.
@@ -361,10 +362,19 @@ struct DataTypeToEnum {
   static_assert(IsValidDataType<T>::value, "Specified Data Type not supported");
 };  // Specializations below
 
+
 // EnumToDataType<VALUE>::Type is the type for DataType constant VALUE, e.g.
 // EnumToDataType<DT_FLOAT>::Type is float.
-template <DataType VALUE>
-struct EnumToDataType {};  // Specializations below
+// constants for T, e.g. DataTypeToEnum<float>::v() is fbs::DataType_DT_FLOAT
+template <class T>
+struct DataTypeToFBEnum {
+    static_assert(IsValidDataType<T>::value, "Specified Data Type not supported");
+};
+
+// FBEnumToDataType<VALUE>::Type is the type for DataType constant VALUE, e.g.
+// FBEnumToDataType<fbs::DataType_DT_FLOAT>::Type is float.
+template <fbs::DataType VALUE>
+struct FBEnumToDataType {};  // Specializations below
 
 // Template specialization for both DataTypeToEnum and EnumToDataType.
 #define MATCH_TYPE_AND_ENUM(TYPE, ENUM)                 \
@@ -381,7 +391,17 @@ struct EnumToDataType {};  // Specializations below
   template <>                                           \
   struct EnumToDataType<ENUM> {                         \
     typedef TYPE Type;                                  \
-  }
+  };                                                    \
+  template <>                                           \
+  struct DataTypeToFBEnum<TYPE> {                               \
+  static fbs::DataType v() {return fbs::DataType_##ENUM;}               \
+      static constexpr fbs::DataType value = fbs::DataType_##ENUM;      \
+  };                                                            \
+  template <>                                           \
+  struct FBEnumToDataType<fbs::DataType_##ENUM> {       \
+      typedef TYPE Type;                                \
+  };                                                    \
+
 
 MATCH_TYPE_AND_ENUM(float, DT_FLOAT);
 MATCH_TYPE_AND_ENUM(double, DT_DOUBLE);
@@ -391,7 +411,7 @@ MATCH_TYPE_AND_ENUM(uint16, DT_UINT16);
 MATCH_TYPE_AND_ENUM(uint8, DT_UINT8);
 MATCH_TYPE_AND_ENUM(int16, DT_INT16);
 MATCH_TYPE_AND_ENUM(int8, DT_INT8);
-MATCH_TYPE_AND_ENUM(tstring, DT_STRING);
+MATCH_TYPE_AND_ENUM(string, DT_STRING);
 MATCH_TYPE_AND_ENUM(complex64, DT_COMPLEX64);
 MATCH_TYPE_AND_ENUM(complex128, DT_COMPLEX128);
 MATCH_TYPE_AND_ENUM(int64, DT_INT64);

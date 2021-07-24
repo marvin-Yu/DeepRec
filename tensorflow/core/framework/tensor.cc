@@ -56,6 +56,8 @@ limitations under the License.
 #include "tensorflow/core/platform/tensor_coding.h"
 #include "tensorflow/core/platform/types.h"
 
+using namespace flatbuffers;
+
 namespace tensorflow {
 
 // Allow Tensors to be stored inside Variants with automatic
@@ -646,6 +648,29 @@ void Tensor::CheckIsAlignedAndSingleElement() const {
 }
 
 Tensor::~Tensor() { UnrefIfNonNull(buf_); }
+
+bool Tensor::FromFB(const fbs::TensorFB& tensorFB) {
+    return FromFB(cpu_allocator(), tensorFB);
+}
+
+bool Tensor::FromFB(Allocator* a, const fbs::TensorFB& tensorFB) {
+  CHECK_NOTNULL(a);
+  TensorBuffer* p = nullptr;
+  if (!tensorFB.tensor_shape() || !tensorFB.tensor_shape()->dim()) return false;
+  // todo: shape
+  if (!TensorShape::IsValid(tensorFB.tensor_shape())) return false;
+  if (tensorFB.dtype() == fbs::DataType_DT_INVALID) return false;
+  TensorShape shape(tensorFB.tensor_shape());
+  const int64 N = shape.num_elements();
+  if (N > 0 && tensorFB.dtype()) {
+    FB_CASES(tensorFB.dtype(), p = FromFBField<T>(a, tensorFB, N));
+  }
+  shape_ = shape;
+  set_dtype(tensorFB.dtype());
+  UnrefIfNonNull(buf_);
+  buf_ = p;
+  return true;
+}
 
 void Tensor::CopyFromInternal(const Tensor& other, const TensorShape& shape) {
   CHECK_EQ(shape.num_elements(), other.NumElements());
