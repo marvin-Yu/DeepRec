@@ -94,7 +94,7 @@ class MklToTfConversionPass : public GraphOptimizationPass {
   // @input T Datatype to use for checking input op
   // @return true if op is OneDNN supported; false, otherwise.
   inline bool IsMklSupportedOp(const string& op_name, DataType T) const {
-    return mkl_op_registry::IsMklLayoutDependentOp(op_name, T);
+    return mkl_op_registry::IsMklOp(op_name, T, false);
   }
 
   // Is the input Op supported by OneDNN-specific layout AND
