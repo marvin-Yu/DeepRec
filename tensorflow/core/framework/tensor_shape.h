@@ -27,6 +27,7 @@ limitations under the License.
 #include "tensorflow/core/lib/gtl/inlined_vector.h"
 #include "tensorflow/core/lib/strings/str_util.h"
 #include "tensorflow/core/platform/logging.h"
+#include "tensorflow/core/framework/fbs_tensor_generated.h"
 
 namespace tensorflow {
 
@@ -131,6 +132,12 @@ class TensorShapeRep {
     buf()[13] = static_cast<uint8>(dt);
   }
 
+  void set_data_type(fbs::DataType dt) {
+    // We only have 8 bits available to store DataType, so make sure it fits
+    DCHECK_LT(static_cast<uint32>(dt), 256u);
+    buf()[13] = static_cast<uint8>(dt);
+  }
+
   // We store the number of dimensions in byte 14, and the RepTag in byte 15.
   // Bytes [0..13] vary depending on the representation.
   // A value of 255 indicates unknown rank in the PartialTensorShape case.
@@ -175,10 +182,13 @@ class TensorShapeBase : public TensorShapeRep {
   TensorShapeBase();
 
   TensorShapeBase(const TensorShapeProto& proto);
+  TensorShapeBase(const fbs::TensorShapeFB *tensorShapeFB);
 
   /// Returns `true` iff `proto` is a valid tensor shape.
   // For TensorShape, the proto shape must be fully defined.
   static bool IsValid(const TensorShapeProto& proto);
+
+  static bool IsValid(const fbs::TensorShapeFB *TensorShapeFB);
 
   /// Returns `OK` iff `proto` is a valid tensor shape, and a descriptive error
   /// status otherwise.

@@ -24,6 +24,7 @@ limitations under the License.
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
 #include "tensorflow/core/framework/numeric_types.h"
+#include "tensorflow/core/framework/resource_handle.h"
 #include "tensorflow/core/framework/type_traits.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/macros.h"
@@ -31,6 +32,8 @@ limitations under the License.
 #include "tensorflow/core/platform/types.h"
 
 namespace tensorflow {
+
+class Variant;
 
 // Attributes for a single allocation call. Different calls to the same
 // allocator could potentially have different allocation attributes.
@@ -122,6 +125,41 @@ class Allocator {
     return AllocateRaw(alignment, num_bytes);
   }
 
+  // Convenience functions to do typed allocation.  C++ constructors
+  // and destructors are invoked for complex types if necessary,
+  // depending on the concrete Allocator implementation. May return
+  // NULL if the tensor has too many elements to represent in a single
+  // allocation.
+  template <typename T>
+  T* Allocate(size_t num_elements) {
+    return Allocate<T>(num_elements, AllocationAttributes());
+  }
+
+  template <typename T>
+  T* Allocate(size_t num_elements,
+              const AllocationAttributes& allocation_attr) {
+    // TODO(jeff): Do we need to allow clients to pass in alignment
+    // requirements?
+
+    if (num_elements > (std::numeric_limits<size_t>::max() / sizeof(T))) {
+      return NULL;
+    }
+
+    void* p = AllocateRaw(kAllocatorAlignment, sizeof(T) * num_elements,
+                          allocation_attr);
+    T* typed_p = reinterpret_cast<T*>(p);
+    if (typed_p) RunCtor<T>(typed_p, num_elements);
+    return typed_p;
+  }
+
+  template <typename T>
+  void Deallocate(T* ptr, size_t num_elements) {
+    if (ptr) {
+      RunDtor<T>(ptr, num_elements);
+      DeallocateRaw(ptr);
+    }
+  }
+
   // Deallocate a block of memory pointer to by "ptr"
   // REQUIRES: "ptr" was previously returned by a call to AllocateRaw
   virtual void DeallocateRaw(void* ptr) = 0;
@@ -203,7 +241,63 @@ class Allocator {
   virtual void ClearStats() {}
 
   virtual void SetSafeFrontier(uint64 count) {}
+
+ private:
+  // No constructors or destructors are run for simple types
+  template <typename T>
+  void RunCtor(T* p, size_t n) {
+    static_assert(is_simple_type<T>::value, "T is not a simple type.");
+  }
+
+  template <typename T>
+  void RunDtor(T* p, size_t n) {}
+
+  // custom constructors and destructors that can be overridden for
+  // non-standard allocators
+
+  // Runs string's default constructor for  p[0], p[1], ..., p[n-1].
+  virtual void RunStringCtor(string* p, size_t n) {
+    for (size_t i = 0; i < n; ++p, ++i) new (p) string();
+  }
+
+  // Runs string's default destructor for  p[0], p[1], ..., p[n-1].
+  virtual void RunStringDtor(string* p, size_t n) {
+    for (size_t i = 0; i < n; ++p, ++i) p->~string();
+  }
+
+  virtual void RunResourceCtor(ResourceHandle* p, size_t n) {
+    for (size_t i = 0; i < n; ++p, ++i) new (p) ResourceHandle();
+  }
+
+  // Runs string's default destructor for  p[0], p[1], ..., p[n-1].
+  virtual void RunResourceDtor(ResourceHandle* p, size_t n) {
+    for (size_t i = 0; i < n; ++p, ++i) p->~ResourceHandle();
+  }
+
+  virtual void RunVariantCtor(Variant* p, size_t n);
+
+  virtual void RunVariantDtor(Variant* p, size_t n);
 };
+
+template <>
+inline void Allocator::RunCtor(ResourceHandle* p, size_t n) {
+  RunResourceCtor(p, n);
+}
+
+template <>
+inline void Allocator::RunDtor(ResourceHandle* p, size_t n) {
+  RunResourceDtor(p, n);
+}
+
+template <>
+inline void Allocator::RunCtor(Variant* p, size_t n) {
+  RunVariantCtor(p, n);
+}
+
+template <>
+inline void Allocator::RunDtor(Variant* p, size_t n) {
+  RunVariantDtor(p, n);
+}
 
 // An implementation of Allocator that delegates all calls to another Allocator.
 //

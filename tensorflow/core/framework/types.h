@@ -362,9 +362,11 @@ struct DataTypeToEnum {
   static_assert(IsValidDataType<T>::value, "Specified Data Type not supported");
 };  // Specializations below
 
-
 // EnumToDataType<VALUE>::Type is the type for DataType constant VALUE, e.g.
 // EnumToDataType<DT_FLOAT>::Type is float.
+template <DataType VALUE>
+struct EnumToDataType {};  // Specializations below
+
 // constants for T, e.g. DataTypeToEnum<float>::v() is fbs::DataType_DT_FLOAT
 template <class T>
 struct DataTypeToFBEnum {

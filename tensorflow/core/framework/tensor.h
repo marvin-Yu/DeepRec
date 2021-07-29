@@ -647,6 +647,7 @@ class Tensor {
   void CheckTypeAndIsAligned(DataType expected_dtype) const;
   void CheckIsAlignedAndSingleElement() const;
   void set_dtype(DataType t) { shape_.set_data_type(t); }
+  void set_dtype(fbs::DataType t) {shape_.set_data_type(t);}
 
   // TensorShape's InlineVector.
   static gtl::InlinedVector<int64, 4> ComputeFlatInnerDims(

@@ -72,6 +72,30 @@ bool TensorShapeBase<Shape>::IsValid(const TensorShapeProto& proto) {
 }
 
 template <class Shape>
+bool TensorShapeBase<Shape>::IsValid(const fbs::TensorShapeFB *TensorShapeFB) {
+  // NOTE(irving): Unfortunately, TensorShape allows parsing protos with
+  // unknown_shape() set, and it seems hard to remove this without backwards
+  // compatibility issues.
+    if (!TensorShapeFB->dim()) {
+        return false;
+    }
+    if (kIsPartial && TensorShapeFB->unknown_rank()) return TensorShapeFB->dim()->size() == 0;
+  int64 num_elements = 1;
+  if (TensorShapeFB->dim()->size() > MaxDimensions()) return false;
+  for (auto idx = 0; idx < TensorShapeFB->dim()->size(); idx++) {
+      const auto d = TensorShapeFB->dim()->Get(idx);
+    if (d->size() < (kIsPartial ? -1 : 0)) return false;
+    if (d->size() == -1) {
+      num_elements = -1;
+    } else if (!kIsPartial || num_elements >= 0) {
+      num_elements = MultiplyWithoutOverflow(num_elements, d->size());
+      if (num_elements < 0) return false;
+    }
+  }
+  return true;
+}
+
+template <class Shape>
 Status TensorShapeBase<Shape>::IsValidShape(const TensorShapeProto& proto) {
   // NOTE(irving): Unfortunately, TensorShape allows parsing protos with
   // unknown_shape() set, and it seems hard to remove this without backwards
@@ -128,6 +152,26 @@ TensorShapeBase<Shape>::TensorShapeBase(const TensorShapeProto& proto) {
     set_num_elements(1);
     for (const auto& d : proto.dim()) {
       AddDim(d.size());
+    }
+  }
+}
+
+template <class Shape>
+TensorShapeBase<Shape>::TensorShapeBase(const fbs::TensorShapeFB *tensorShapeFB) {
+  set_tag(REP16);
+  set_data_type(DT_INVALID);
+  // NOTE(irving): Unfortunately, TensorShape allows parsing protos with
+  // unknown_shape() set, and it seems hard to remove this without backwards
+  // compatibility issues.
+  if (kIsPartial && tensorShapeFB->unknown_rank()) {
+    set_ndims_byte(kUnknownRank);
+    set_num_elements(-1);
+  } else {
+    set_ndims_byte(0);
+    set_num_elements(1);
+    for (auto idx = 0; idx < tensorShapeFB->dim()->size(); idx++) {
+        auto d = tensorShapeFB->dim()->Get(idx);
+        AddDim(d->size());
     }
   }
 }

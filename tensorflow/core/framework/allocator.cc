@@ -19,6 +19,7 @@ limitations under the License.
 
 #include "tensorflow/core/framework/allocator_registry.h"
 #include "tensorflow/core/framework/tracking_allocator.h"
+#include "tensorflow/core/framework/variant.h"
 #include "tensorflow/core/lib/strings/strcat.h"
 #include "tensorflow/core/lib/strings/stringprintf.h"
 #include "tensorflow/core/platform/mem.h"
@@ -41,6 +42,22 @@ string AllocatorStats::DebugString() const {
 constexpr size_t Allocator::kAllocatorAlignment;
 
 Allocator::~Allocator() {}
+
+void RunResourceCtor(ResourceHandle* p, size_t n) {
+  for (size_t i = 0; i < n; ++p, ++i) new (p) ResourceHandle();
+}
+
+void RunResourceDtor(ResourceHandle* p, size_t n) {
+  for (size_t i = 0; i < n; ++p, ++i) p->~ResourceHandle();
+}
+
+void Allocator::RunVariantCtor(Variant* p, size_t n) {
+  for (size_t i = 0; i < n; ++p, ++i) new (p) Variant();
+}
+
+void Allocator::RunVariantDtor(Variant* p, size_t n) {
+  for (size_t i = 0; i < n; ++p, ++i) p->~Variant();
+}
 
 // If true, cpu allocator collects full stats.
 static bool cpu_allocator_collect_full_stats = false;

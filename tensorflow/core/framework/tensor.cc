@@ -124,6 +124,32 @@ class Buffer : public BufferBase {
   TF_DISALLOW_COPY_AND_ASSIGN(Buffer);
 };
 
+// Typed ref-counted buffer: T[n].
+template <typename T>
+class SimpleBuffer {
+ public:
+  SimpleBuffer(Allocator* a, int64 n)
+      : data_(a->Allocate<T>(n))
+      , elem_(n)
+      , alloc_(a)
+    {}
+
+  ~SimpleBuffer() {
+      if (data_) {
+          alloc_->Deallocate<T>(data_, elem_);
+      }
+  };
+    
+  void* data() const { return data_; }
+  size_t size() const { return sizeof(T) * elem_; }
+
+ private:
+  T* data_;
+  int64 elem_;
+  Allocator* const alloc_;
+  TF_DISALLOW_COPY_AND_ASSIGN(SimpleBuffer);
+};
+
 void LogUnexpectedSize(int64 actual, int64 expected) {
   LOG(ERROR) << "Input size was " << actual << " and expected " << expected;
 }
@@ -649,28 +675,157 @@ void Tensor::CheckIsAlignedAndSingleElement() const {
 
 Tensor::~Tensor() { UnrefIfNonNull(buf_); }
 
-bool Tensor::FromFB(const fbs::TensorFB& tensorFB) {
-    return FromFB(cpu_allocator(), tensorFB);
+template <typename T>
+TensorBuffer* FromFBField(Allocator* a, const fbs::TensorFB& in, int64 n) {
+  CHECK_GT(n, 0);
+  Buffer<T>* buf = new Buffer<T>(a, n);
+  auto data = buf->template base<T>();
+  if (data == nullptr) {
+    buf->Unref();
+    return nullptr;
+  }
+
+  const int64 in_n = FBHelper<T>::NumElements(in);
+  if (in_n <= 0) {
+    std::fill_n(data, n, T());
+  } else {
+    auto begin = FBHelper<T>::Begin(in);
+    if (n <= in_n) {
+      std::copy_n(begin, n, data);
+    } else {
+      std::copy_n(begin, in_n, data);
+      const T& last = *(data + in_n - 1);
+      std::fill_n(data + in_n, n - in_n, last);
+    }
+  }
+
+  return buf;
 }
 
-bool Tensor::FromFB(Allocator* a, const fbs::TensorFB& tensorFB) {
-  CHECK_NOTNULL(a);
-  TensorBuffer* p = nullptr;
-  if (!tensorFB.tensor_shape() || !tensorFB.tensor_shape()->dim()) return false;
-  // todo: shape
-  if (!TensorShape::IsValid(tensorFB.tensor_shape())) return false;
-  if (tensorFB.dtype() == fbs::DataType_DT_INVALID) return false;
-  TensorShape shape(tensorFB.tensor_shape());
-  const int64 N = shape.num_elements();
-  if (N > 0 && tensorFB.dtype()) {
-    FB_CASES(tensorFB.dtype(), p = FromFBField<T>(a, tensorFB, N));
-  }
-  shape_ = shape;
-  set_dtype(tensorFB.dtype());
-  UnrefIfNonNull(buf_);
-  buf_ = p;
-  return true;
+inline flatbuffers::String *getAddr(const unsigned char *base_addr, size_t i) {
+    auto offset_addr = base_addr + i * sizeof(uoffset_t);
+    auto addr = (flatbuffers::String*)(offset_addr + *((uoffset_t*)(offset_addr)));
+    return addr;
 }
+
+template <>
+TensorBuffer* FromFBField<string>(Allocator* a, const fbs::TensorFB& in, int64 n) {
+  CHECK_GT(n, 0);
+  Buffer<string>* buf = new Buffer<string>(a, n);
+  auto data = buf->template base<string>();
+  if (data == nullptr) {
+    buf->Unref();
+    return nullptr;
+  }
+
+  const int64 in_n = in.string_val()->size();
+  if (in_n <= 0) {
+    std::fill_n(data, n, string());
+  } else {
+    auto stringVal = in.string_val();
+    auto base_addr = stringVal->Data();
+    if (n <= in_n) {
+      for (auto i = 0; i < n; ++i) {
+        auto addr = getAddr(base_addr, i);
+        (data + i)->assign(addr->c_str(), addr->size());
+      }
+    } else {
+      for (auto i = 0; i < in_n; ++i) {
+        auto addr = getAddr(base_addr, i);
+          (data + i)->assign(addr->c_str(), addr->size());
+      }
+      const string& last = *(data + in_n - 1);
+      std::fill_n(data + in_n, n - in_n, last);
+    }
+  }
+
+  return buf;
+}
+
+template <>
+TensorBuffer* FromFBField<Eigen::half>(Allocator* a, const fbs::TensorFB& in, int64 n) {
+  CHECK_GT(n, 0);
+  Buffer<Eigen::half>* buf = new Buffer<Eigen::half>(a, n);
+  auto data = buf->template base<uint16>();
+  if (data == nullptr) {
+    buf->Unref();
+    return nullptr;
+  }
+
+  const int64 in_n = in.half_val()->size();
+  auto begin = (int32*)(in.half_val()->Data());
+  if (n <= in_n) {
+    std::copy_n(begin, n, data);
+  } else if (in_n > 0) {
+    std::copy_n(begin, in_n, data);
+    const uint16 last = *(data + in_n - 1);
+    std::fill_n(data + in_n, n - in_n, last);
+  } else {
+    std::fill_n(data, n, 0);
+  }
+
+  return buf;
+}
+
+template <>
+TensorBuffer* FromFBField<bfloat16>(Allocator* a, const fbs::TensorFB& in, int64 n)
+{
+  CHECK_GT(n, 0);
+  Buffer<bfloat16>* buf = new Buffer<bfloat16>(a, n);
+  uint16* data = buf->template base<uint16>();
+  if (data == nullptr) {
+    buf->Unref();
+    return nullptr;
+  }
+  const int64 in_n = in.half_val()->size();
+  auto begin = (int32*)(in.half_val()->Data());
+  if (n <= in_n) {
+    std::copy_n(begin, n, data);
+  } else if (in_n > 0) {
+    std::copy_n(begin, in_n, data);
+    const uint16 last = *(data + in_n - 1);
+    std::fill_n(data + in_n, n - in_n, last);
+  } else {
+    std::fill_n(data, n, 0);
+  }
+  return buf;
+}
+
+template <>
+TensorBuffer* FromFBField<Variant>(Allocator* a, const fbs::TensorFB& in,
+                                      int64 n) {
+  CHECK_GT(n, 0);
+  Buffer<Variant>* buf = new Buffer<Variant>(a, n);
+  Variant* data = buf->template base<Variant>();
+  if (data == nullptr) {
+    buf->Unref();
+    return nullptr;
+  }
+  const int64 in_n = FBHelper<Variant>::NumElements(in);
+  if (in_n <= 0) {
+    std::fill_n(data, n, Variant());
+  } else {
+    for (int64 i = 0; i < in_n; ++i) {
+      auto variantStr = in.variant_val()->Get(i);
+      VariantTensorDataProto proto;
+      proto.ParseFromString(variantStr->str());
+      data[i] = proto;
+      if (!DecodeUnaryVariant(&data[i])) {
+        LOG(ERROR) << "Could not decode variant with type_name: \""
+                   << data[i].TypeName()
+                   << "\".  Perhaps you forgot to register a "
+                      "decoder via REGISTER_UNARY_VARIANT_DECODE_FUNCTION?";
+        buf->Unref();
+        return nullptr;
+      }
+    }
+    for (int64 i = in_n; i < n; ++i) {
+      data[i] = Variant();
+    }
+  }
+  return buf;
+}
+
 
 void Tensor::CopyFromInternal(const Tensor& other, const TensorShape& shape) {
   CHECK_EQ(shape.num_elements(), other.NumElements());
@@ -764,6 +919,74 @@ bool Tensor::RefCountIsOne() const {
 #define CASES(TYPE_ENUM, STMTS)                                      \
   CASES_WITH_DEFAULT(TYPE_ENUM, STMTS, LOG(FATAL) << "Type not set"; \
                      , LOG(FATAL) << "Unexpected type: " << TYPE_ENUM;)
+
+#define FB_CASE(TYPE, STMTS)             \
+  case DataTypeToFBEnum<TYPE>::value: { \
+    typedef TYPE T;                   \
+    STMTS;                            \
+    break;                            \
+  }
+#define FB_CASES_WITH_DEFAULT(TYPE_ENUM, STMTS, INVALID, DEFAULT) \
+  switch (TYPE_ENUM) {                                         \
+    CASE(float, SINGLE_ARG(STMTS))                             \
+    CASE(double, SINGLE_ARG(STMTS))                            \
+    CASE(int32, SINGLE_ARG(STMTS))                             \
+    CASE(uint8, SINGLE_ARG(STMTS))                             \
+    CASE(uint16, SINGLE_ARG(STMTS))                            \
+    CASE(uint32, SINGLE_ARG(STMTS))                            \
+    CASE(uint64, SINGLE_ARG(STMTS))                            \
+    CASE(int16, SINGLE_ARG(STMTS))                             \
+    CASE(int8, SINGLE_ARG(STMTS))                              \
+    CASE(string, SINGLE_ARG(STMTS))                            \
+    CASE(complex64, SINGLE_ARG(STMTS))                         \
+    CASE(complex128, SINGLE_ARG(STMTS))                         \
+    CASE(int64, SINGLE_ARG(STMTS))                             \
+    CASE(bool, SINGLE_ARG(STMTS))                              \
+    CASE(qint8, SINGLE_ARG(STMTS))                             \
+    CASE(quint8, SINGLE_ARG(STMTS))                            \
+    CASE(qint16, SINGLE_ARG(STMTS))                            \
+    CASE(quint16, SINGLE_ARG(STMTS))                           \
+    CASE(qint32, SINGLE_ARG(STMTS))                            \
+    CASE(Eigen::half, SINGLE_ARG(STMTS))                       \
+    CASE(bfloat16, SINGLE_ARG(STMTS))                          \
+    CASE(Variant, SINGLE_ARG(STMTS))                           \
+    case DT_INVALID:                                           \
+      INVALID;                                                 \
+      break;                                                   \
+    default:                                                   \
+      DEFAULT;                                                 \
+      break;                                                   \
+  }
+// todo: may support later
+// CASE(ResourceHandle, SINGLE_ARG(STMTS))
+
+
+#define FB_CASES(TYPE_ENUM, STMTS)                                      \
+  FB_CASES_WITH_DEFAULT(TYPE_ENUM, STMTS, LOG(FATAL) << "Type not set"; \
+                     , LOG(FATAL) << "Unexpected type: " << TYPE_ENUM;)
+
+bool Tensor::FromFB(const fbs::TensorFB& tensorFB) {
+    return FromFB(cpu_allocator(), tensorFB);
+}
+
+bool Tensor::FromFB(Allocator* a, const fbs::TensorFB& tensorFB) {
+  CHECK_NOTNULL(a);
+  TensorBuffer* p = nullptr;
+  if (!tensorFB.tensor_shape() || !tensorFB.tensor_shape()->dim()) return false;
+  // todo: shape
+  if (!TensorShape::IsValid(tensorFB.tensor_shape())) return false;
+  if (tensorFB.dtype() == fbs::DataType_DT_INVALID) return false;
+  TensorShape shape(tensorFB.tensor_shape());
+  const int64 N = shape.num_elements();
+  if (N > 0 && tensorFB.dtype()) {
+    FB_CASES(tensorFB.dtype(), p = FromFBField<T>(a, tensorFB, N));
+  }
+  shape_ = shape;
+  set_dtype(tensorFB.dtype());
+  UnrefIfNonNull(buf_);
+  buf_ = p;
+  return true;
+}
 
 Tensor::Tensor(Allocator* a, DataType type, const TensorShape& shape)
     : shape_(shape), buf_(nullptr) {

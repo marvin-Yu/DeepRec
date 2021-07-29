@@ -992,6 +992,8 @@ cc_library(
         "framework/allocator.cc",
         "framework/allocator_registry.h",
         "framework/numeric_types.h",
+        "framework/resource_handle.h",
+        "framework/resource_handle.cc",
         "framework/tracking_allocator.cc",
         "framework/tracking_allocator.h",
         "framework/type_traits.h",
@@ -1006,6 +1008,8 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:optional",
         "//third_party/eigen3",
+        ":fbs_tensor_h",
+        ":framework"
     ] + if_static(extra_deps = [":allocator_registry_impl"]),
     alwayslink = 1,
 )
@@ -1030,6 +1034,7 @@ cc_library(
         "//third_party/eigen3",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:optional",
+        ":framework"
     ],
     alwayslink = 1,
 )
