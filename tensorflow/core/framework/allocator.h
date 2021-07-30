@@ -124,41 +124,6 @@ class Allocator {
     return AllocateRaw(alignment, num_bytes);
   }
 
-  // Convenience functions to do typed allocation.  C++ constructors
-  // and destructors are invoked for complex types if necessary,
-  // depending on the concrete Allocator implementation. May return
-  // NULL if the tensor has too many elements to represent in a single
-  // allocation.
-  template <typename T>
-  T* Allocate(size_t num_elements) {
-    return Allocate<T>(num_elements, AllocationAttributes());
-  }
-
-  template <typename T>
-  T* Allocate(size_t num_elements,
-              const AllocationAttributes& allocation_attr) {
-    // TODO(jeff): Do we need to allow clients to pass in alignment
-    // requirements?
-
-    if (num_elements > (std::numeric_limits<size_t>::max() / sizeof(T))) {
-      return NULL;
-    }
-
-    void* p = AllocateRaw(kAllocatorAlignment, sizeof(T) * num_elements,
-                          allocation_attr);
-    T* typed_p = reinterpret_cast<T*>(p);
-    if (typed_p) RunCtor<T>(typed_p, num_elements);
-    return typed_p;
-  }
-
-  template <typename T>
-  void Deallocate(T* ptr, size_t num_elements) {
-    if (ptr) {
-      RunDtor<T>(ptr, num_elements);
-      DeallocateRaw(ptr);
-    }
-  }
-
   // Deallocate a block of memory pointer to by "ptr"
   // REQUIRES: "ptr" was previously returned by a call to AllocateRaw
   virtual void DeallocateRaw(void* ptr) = 0;
