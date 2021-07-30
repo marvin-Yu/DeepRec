@@ -240,44 +240,7 @@ class Allocator {
   virtual void ClearStats() {}
 
   virtual void SetSafeFrontier(uint64 count) {}
-
- private:
-  // No constructors or destructors are run for simple types
-  template <typename T>
-  void RunCtor(T* p, size_t n) {
-    static_assert(is_simple_type<T>::value, "T is not a simple type.");
-  }
-
-  template <typename T>
-  void RunDtor(T* p, size_t n) {}
-
-  // custom constructors and destructors that can be overridden for
-  // non-standard allocators
-
-  // Runs string's default constructor for  p[0], p[1], ..., p[n-1].
-  virtual void RunStringCtor(string* p, size_t n) {
-    for (size_t i = 0; i < n; ++p, ++i) new (p) string();
-  }
-
-  // Runs string's default destructor for  p[0], p[1], ..., p[n-1].
-  virtual void RunStringDtor(string* p, size_t n) {
-    for (size_t i = 0; i < n; ++p, ++i) p->~string();
-  }
-
-  virtual void RunVariantCtor(Variant* p, size_t n);
-
-  virtual void RunVariantDtor(Variant* p, size_t n);
 };
-
-template <>
-inline void Allocator::RunCtor(Variant* p, size_t n) {
-  RunVariantCtor(p, n);
-}
-
-template <>
-inline void Allocator::RunDtor(Variant* p, size_t n) {
-  RunVariantDtor(p, n);
-}
 
 // An implementation of Allocator that delegates all calls to another Allocator.
 //
