@@ -112,12 +112,13 @@ cc_binary(
         "src/idl_gen_general.cpp",
         "src/idl_gen_go.cpp",
         "src/idl_gen_grpc.cpp",
-        "src/idl_gen_js.cpp",
+        "src/idl_gen_js_ts.cpp",
         "src/idl_gen_json_schema.cpp",
         "src/idl_gen_lobster.cpp",
         "src/idl_gen_lua.cpp",
         "src/idl_gen_php.cpp",
         "src/idl_gen_python.cpp",
+        "src/idl_gen_rust.cpp",
         "src/idl_gen_text.cpp",
     ],
     copts = FLATBUFFERS_COPTS,
@@ -156,12 +157,4 @@ cc_library(
     hdrs = ["runtime_cc_srcs"],
     includes = ["include"],
     linkstatic = 1,
-)
-
-# Public Python libs for the Flatbuffers library.
-filegroup(
-    name = "public_python_libs",
-    srcs = glob([
-        "python/flatbuffers/*.py",
-    ]),
 )
