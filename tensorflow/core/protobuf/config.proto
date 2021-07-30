@@ -545,6 +545,7 @@ message ConfigProto {
 
   Experimental experimental = 16;
   bool run_graph_mode = 100;
+  CudaGraphOptions cuda_graph_options = 101;
   bool force_run_in_caller_thread = 110;
   bool enable_graph_opt_place = 111;
   BlazeKernelOptions blaze_options = 112;
@@ -555,6 +556,15 @@ message ConfigProto {
   // so that xla behaives like dynamic padding
   bool enable_xla_auto_padding = 120;
   int32 xla_padding_type = 121;
+}
+
+// config for cuda graph session
+message CudaGraphOptions {
+    repeated int32 batchs = 1;
+    repeated int32 copies = 2;
+    repeated string outputs = 3;
+    bool can_use_fallback = 4;
+    bool output_on_cpu = 5;
 }
 
 // Options for a single Run() call.
