@@ -1009,7 +1009,6 @@ cc_library(
         "@com_google_absl//absl/types:optional",
         "//third_party/eigen3",
         ":fbs_tensor_h",
-        ":framework"
     ] + if_static(extra_deps = [":allocator_registry_impl"]),
     alwayslink = 1,
 )
@@ -1034,7 +1033,6 @@ cc_library(
         "//third_party/eigen3",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:optional",
-        ":framework"
     ],
     alwayslink = 1,
 )
