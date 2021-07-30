@@ -980,7 +980,7 @@ tf_cuda_library(
     deps = [
         ":framework_internal",
         "@com_google_absl//absl/base",
-        ":fbs_tensor_h"
+        "fbs_tensor_h"
     ],
 )
 
@@ -1007,7 +1007,7 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:optional",
         "//third_party/eigen3",
-        ":fbs_tensor_h",
+        "fbs_tensor_h",
     ] + if_static(extra_deps = [":allocator_registry_impl"]),
     alwayslink = 1,
 )
@@ -2479,7 +2479,7 @@ cc_library(
         "//third_party/eigen3",
         "@com_google_absl//absl/base:core_headers",
         "//tensorflow/core/platform/default/build_config:platformlib",
-        ":fbs_tensor_h"
+        "fbs_tensor_h"
     ] + if_static([":lib_internal_impl"]),
 )
 
@@ -2527,7 +2527,7 @@ cc_library(
                "@zlib_archive//:zlib",
                "@double_conversion//:double-conversion",
                "@com_google_protobuf//:protobuf",
-               ":fbs_tensor_h"
+               "fbs_tensor_h"
     ] + tf_protos_all_impl() + tf_protos_grappler_impl() +
            tf_additional_numa_deps(),
 )
@@ -2968,7 +2968,7 @@ tf_cuda_library(
         "//tensorflow/core/kernels:bounds_check",
         "//tensorflow/core/profiler/lib:traceme",
         "//third_party/eigen3",
-        ":fbs_tensor_h",
+        "fbs_tensor_h",
     ] + if_static(
         extra_deps = ["@com_google_protobuf//:protobuf"],
         otherwise = ["@com_google_protobuf//:protobuf_headers"],
