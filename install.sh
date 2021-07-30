@@ -25,8 +25,8 @@ export TF_NEED_MPI=0
 export CC_OPT_FLAGS="-march=native"
 export TF_SET_ANDROID_WORKSPACE=0
 
-dep_create rpm/t-ads-tensorflow-cc-lib.deps
-cp .dep_create/var/home/a/mklml/lib/* $EXTERNAL_DIR/usr/local/lib64/
+#dep_create rpm/t-ads-tensorflow-cc-lib.deps
+#cp .dep_create/var/home/a/mklml/lib/* $EXTERNAL_DIR/usr/local/lib64/
 
 declare -a targets=("//tensorflow:libtensorflow_framework.so"
                     "//tensorflow:libtensorflow_cc.so"
