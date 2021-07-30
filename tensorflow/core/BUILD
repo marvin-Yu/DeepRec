@@ -3418,6 +3418,18 @@ cc_library(
     deps = [":lib_internal"],
 )
 
+# This is a link-only library to provide a CudaGraphSession
+# implementation of the Session interface.
+tf_cuda_library(
+    name = "cuda_graph_session",
+    copts = tf_copts(),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":cuda_graph_session_internal",
+    ],
+    alwayslink = 1,
+)
+
 tf_cuda_library(
     name = "direct_session_internal",
     srcs = ["common_runtime/direct_session.cc"],
@@ -3461,6 +3473,32 @@ tf_cuda_library(
     ],
 )
 
+tf_cuda_library(
+    name = "cuda_graph_session_internal",
+    srcs = ["common_runtime/cuda_graph_session.cc"],
+    hdrs = [
+        "common_runtime/cuda_graph_session.h",
+        "common_runtime/direct_session.h",
+        "util/env_var.h",
+    ],
+    copts = tf_copts(),
+    deps = [
+        ":core_cpu_internal",
+        ":device_tracer",
+        ":direct_session_internal",
+        ":framework",
+        ":framework_internal",
+        ":gpu_runtime",
+        ":graph",
+        ":lib",
+        ":lib_internal",
+        ":proto_text",
+        ":protos_all_cc",
+        "//tensorflow/core/debug:debug_graph_utils",
+        "//tensorflow/core/kernels:function_ops",
+    ],
+    alwayslink = 1,
+)
 cc_library(
     name = "example_parser_configuration",
     srcs = ["example/example_parser_configuration.cc"],
