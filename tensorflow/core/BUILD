@@ -993,8 +993,6 @@ cc_library(
         "framework/allocator_registry.h",
         "framework/numeric_types.h",
         "framework/resource_handle.h",
-        "framework/variant.h",
-        "framework/variant.cc",
         "framework/tracking_allocator.cc",
         "framework/tracking_allocator.h",
         "framework/type_traits.h",
