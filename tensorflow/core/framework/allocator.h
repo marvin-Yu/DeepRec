@@ -24,7 +24,6 @@ limitations under the License.
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
 #include "tensorflow/core/framework/numeric_types.h"
-#include "tensorflow/core/framework/resource_handle.h"
 #include "tensorflow/core/framework/type_traits.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/macros.h"
@@ -265,29 +264,10 @@ class Allocator {
     for (size_t i = 0; i < n; ++p, ++i) p->~string();
   }
 
-  virtual void RunResourceCtor(ResourceHandle* p, size_t n) {
-    for (size_t i = 0; i < n; ++p, ++i) new (p) ResourceHandle();
-  }
-
-  // Runs string's default destructor for  p[0], p[1], ..., p[n-1].
-  virtual void RunResourceDtor(ResourceHandle* p, size_t n) {
-    for (size_t i = 0; i < n; ++p, ++i) p->~ResourceHandle();
-  }
-
   virtual void RunVariantCtor(Variant* p, size_t n);
 
   virtual void RunVariantDtor(Variant* p, size_t n);
 };
-
-template <>
-inline void Allocator::RunCtor(ResourceHandle* p, size_t n) {
-  RunResourceCtor(p, n);
-}
-
-template <>
-inline void Allocator::RunDtor(ResourceHandle* p, size_t n) {
-  RunResourceDtor(p, n);
-}
 
 template <>
 inline void Allocator::RunCtor(Variant* p, size_t n) {
