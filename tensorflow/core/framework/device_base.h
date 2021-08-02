@@ -139,6 +139,21 @@ class DeviceBase {
     return cpu_worker_threads_;
   }
 
+  struct IoWorkerThreads {
+    int num_threads = 0;
+    thread::ThreadPool* workers = nullptr;
+  };
+
+  // Does not take ownership.
+  void set_tensorflow_io_worker_threads(IoWorkerThreads* t) {
+    io_worker_threads_ = t;
+  }
+
+  virtual const IoWorkerThreads* tensorflow_io_worker_threads() const {
+    CHECK(io_worker_threads_ != nullptr);
+    return io_worker_threads_;
+  }
+
   // "stream" is used in special circumstances (such as the
   // constructors of Ops) where there is no available OpKernelContext.
   // "default_context" is used by OpKernelContext whenever a device does not
@@ -286,6 +301,7 @@ class DeviceBase {
   // Set by GPUs as well as by TPU devices.
   GpuDeviceInfo* gpu_device_info_ = nullptr;
   thread::ThreadPool* device_thread_pool_ = nullptr;
+  IoWorkerThreads* io_worker_threads_ = nullptr;
   std::vector<Eigen::ThreadPoolDevice*> eigen_cpu_devices_;
 #ifdef TENSORFLOW_USE_SYCL
   Eigen::SyclDevice* eigen_sycl_device_ = nullptr;
