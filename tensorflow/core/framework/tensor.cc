@@ -129,14 +129,14 @@ template <typename T>
 class SimpleBuffer {
  public:
   SimpleBuffer(Allocator* a, int64 n)
-      : data_(a->Allocate<T>(n))
+      : data_(nullptr)
       , elem_(n)
       , alloc_(a)
     {}
 
   ~SimpleBuffer() {
       if (data_) {
-          alloc_->Deallocate<T>(data_, elem_);
+          //alloc_->Deallocate<T>(data_, elem_);
       }
   };
     
