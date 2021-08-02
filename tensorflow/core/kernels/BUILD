@@ -615,6 +615,7 @@ cc_library(
         ":concat_lib_hdrs",
         ":ops_util_hdrs",
         ":split_lib_hdrs",
+        "@flatbuffers//:flatbuffers",
         "//tensorflow/core:framework_headers_lib",
         "//tensorflow/core:protos_all_cc",
         "//tensorflow/core/kernels/batching_util:periodic_function_dynamic",
