@@ -122,3 +122,4 @@ cp -r $ABSL_DIR $HEADER_DIR/absl
 cp .tf_configure.bazelrc .tf_configure.bazelrc.cuda11
 FARMHASH=$BAZEL_EXTERNAL_DIR"farmhash_archive/src/farmhash.h"
 cp $FARMHASH $HEADER_DIR
+rm -rf cuda-11.2*
