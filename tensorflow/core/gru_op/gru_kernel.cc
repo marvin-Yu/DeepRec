@@ -122,5 +122,4 @@ REGISTER_CPU(float);
       Name("BlazeGRU").Device(DEVICE_GPU).TypeConstraint<T>("T"), \
       GRUOp<GPUDevice, T>);
 REGISTER_GPU(float);
-REGISTER_GPU(Eigen::half);
 #endif  // GOOGLE_CUDA

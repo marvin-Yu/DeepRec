@@ -3692,6 +3692,8 @@ cc_library(
         ":segment_reduction_ops",
         ":sequence_ops",
         "//tensorflow/core/gru_op:gru_op",
+        "//tensorflow/core/topk_op:topk_op",
+        "//tensorflow/core/tree_op:tree_op",
         "//tensorflow/core/take_ops:take_ops",
     ],
 )

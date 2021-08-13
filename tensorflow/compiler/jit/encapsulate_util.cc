@@ -323,6 +323,18 @@ const char kXlaIsPlaceholderForArg[] = "_xla_is_placeholder_for_arg";
 Status PerformStaticShapeInferenceBeforeEncapsulation(Graph* g) {
   // Perform shape inference.
   std::map<int, InferredShape> arg_shapes;
+  for (auto n : g->nodes()) {
+    if ((n->type_string() == "_Arg") &&
+        (n->attrs().Find("_output_shapes") != nullptr)) {
+      InferredShape arg_shape;
+      const auto& output_shape = n->attrs().Find("_output_shapes")->shape();
+      arg_shape.shape = PartialTensorShape(output_shape);
+      int index;
+      TF_RETURN_IF_ERROR(GetNodeAttr(n->attrs(), "index", &index));
+      arg_shapes[index] = arg_shape;
+    }
+  }
+
   GraphShapeInfo shape_info;
   TF_RETURN_IF_ERROR(
       InferShapes(g, arg_shapes, /*fnlib_def=*/nullptr, &shape_info));

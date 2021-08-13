@@ -358,7 +358,7 @@ void TF_GetIONamesFromMetaGraphDef(
     int* noutput, char*** output_names, TF_Status* status) {
   MetaGraphDef meta_graph_def_obj;
   if (meta_graph_def == nullptr) {
-    status->status = InvalidArgument("MetaGraphDef Ptr is Null"); 
+    status->status = InvalidArgument("MetaGraphDef Ptr is Null");
     return;
   }
   if (!meta_graph_def_obj.ParseFromArray(
@@ -561,10 +561,11 @@ void TF_SessionMakeCallable(TF_Session* tf_sess, TF_CallableHandle* callable_han
 }
 
 //[PROF-STATS]
-inline void GetProfStats(TF_ProfStats* tf_prof_stats, 
+inline void GetProfStats(TF_ProfStats* tf_prof_stats,
                          const RunMetadata::ProfStats& meta_prof_stats) {
   if (tf_prof_stats) {
     tf_prof_stats->flops = meta_prof_stats.flops();
+    tf_prof_stats->tao_op_calls = meta_prof_stats.tao_op_calls();
   }
 }
 
@@ -643,7 +644,7 @@ bool TF_CudaMemAlloc(int virtual_device_id, void** gpu_ptr, size_t length) {
   return true;
 #else
   return false;
-#endif  // GOOGLE_CUDA 
+#endif  // GOOGLE_CUDA
 }
 
 bool TF_CudaMemDealloc(int virtual_device_id, void* gpu_ptr) {
@@ -655,12 +656,12 @@ bool TF_CudaMemDealloc(int virtual_device_id, void* gpu_ptr) {
   if (gpu_executor == nullptr) {
     return false;
   }
-  DeviceMemoryBase device_memory(gpu_ptr); 
+  DeviceMemoryBase device_memory(gpu_ptr);
   gpu_executor->Deallocate(&device_memory);
   return true;
 #else
   return false;
-#endif  // GOOGLE_CUDA 
+#endif  // GOOGLE_CUDA
 }
 
 bool TF_CudaMemCopyHostToDevice(int virtual_device_id, void* device_ptr, const void* host_ptr, size_t length) {
@@ -675,7 +676,7 @@ bool TF_CudaMemCopyHostToDevice(int virtual_device_id, void* device_ptr, const v
   return true;
 #else
   return false;
-#endif  // GOOGLE_CUDA 
+#endif  // GOOGLE_CUDA
 }
 
 bool TF_CudaMemCopyDeviceToHost(int virtual_device_id, void* host_ptr, const void* device_ptr, size_t length) {
@@ -697,7 +698,7 @@ bool TF_CudaMemCopyDeviceToHost(int virtual_device_id, void* host_ptr, const voi
   return true;
 #else
   return false;
-#endif  // GOOGLE_CUDA 
+#endif  // GOOGLE_CUDA
 }
 
 void TF_SetPaddingInfo(TF_Buffer* run_options, unsigned long long before_padding,

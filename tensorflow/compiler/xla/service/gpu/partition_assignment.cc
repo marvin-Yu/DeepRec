@@ -99,7 +99,35 @@ LaunchDimensions CalculateLaunchDimensions(
       "block) = ceil(%d/%d) = %d",
       num_elements, threads_per_block, block_count);
 
-  return LaunchDimensions(block_count, threads_per_block);
+  if (shape.is_batch_dim_dynamic() && shape.get_dynamic_batch_dim() == 0) {
+    return LaunchDimensions(block_count, threads_per_block, true);
+  } else {
+    return LaunchDimensions(block_count, threads_per_block);
+  }
+}
+
+LaunchDimensions CalculateDynamicLaunchDimensions(
+    const int64 before_padding, const int64 after_padding,
+    const LaunchDimensions& dimensions) {
+  int64 old_threads_count = dimensions.threads_per_block();
+  int64 old_block_count = dimensions.block_count();
+  int64 new_num_elements = CeilOfRatio(
+      old_block_count * old_threads_count * before_padding, after_padding);
+  int64 new_threads_per_block = old_threads_count;
+  int64 new_block_count = 1;
+  if (new_num_elements < new_threads_per_block) {
+    new_threads_per_block = new_num_elements;
+    VLOG(2) << "Update # of threads per block to the element count ("
+            << new_threads_per_block << ") because the latter is smaller.";
+  } else {
+    new_block_count = CeilOfRatio(new_num_elements, new_threads_per_block);
+  }
+  VLOG(2) << absl::StrFormat(
+      "Dynamic Dimension Launch: old block: %d, old threads: %d, new block: "
+      "%d, new threads: %d.",
+      old_block_count, old_threads_count, new_block_count,
+      new_threads_per_block);
+  return LaunchDimensions(new_block_count, new_threads_per_block, true);
 }
 
 }  // namespace gpu

@@ -197,13 +197,6 @@ class TridiagonalSolveOpGpuLinalg : public LinearAlgebraOp<Scalar> {
                      const Scalar* superdiag, const Scalar* diag,
                      const Scalar* subdiag, Scalar* rhs, const int num_eqs,
                      const int num_rhs) const {
-#if CUDA_VERSION < 9000
-    auto function = pivoting_ ? &CudaSparse::Gtsv<Scalar>
-                              : &CudaSparse::GtsvNoPivot<Scalar>;
-    OP_REQUIRES_OK(
-        context, (cusparse_solver.get()->*function)(
-                     num_eqs, num_rhs, subdiag, diag, superdiag, rhs, num_eqs));
-#else
     auto buffer_function = pivoting_
                                ? &CudaSparse::Gtsv2BufferSizeExt<Scalar>
                                : &CudaSparse::Gtsv2NoPivotBufferSizeExt<Scalar>;
@@ -222,7 +215,6 @@ class TridiagonalSolveOpGpuLinalg : public LinearAlgebraOp<Scalar> {
     OP_REQUIRES_OK(context, (cusparse_solver.get()->*solver_function)(
                                 num_eqs, num_rhs, subdiag, diag, superdiag, rhs,
                                 num_eqs, buffer));
-#endif  // CUDA_VERSION < 9000
   }
 
   void SolveForSizeOneOrTwo(OpKernelContext* context, const Scalar* diagonals,

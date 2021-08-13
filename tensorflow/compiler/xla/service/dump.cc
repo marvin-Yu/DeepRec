@@ -296,6 +296,27 @@ void DumpPtxToFileInDir(string dir, string filename,
   }
 }
 
+void DumpCubinToFileInDir(string dir, string filename,
+                          std::vector<uint8> cubin) {
+  tensorflow::Env* env = tensorflow::Env::Default();
+  if (!env->IsDirectory(dir).ok()) {
+    auto status = env->RecursivelyCreateDir(dir);
+    if (!status.ok() && !env->IsDirectory(dir).ok()) {
+      LOG(ERROR) << "Could not create directory " << dir
+                 << " for dumping CUBIN: " << status;
+      return;
+    }
+  }
+  string file_path =
+      tensorflow::io::JoinPath(dir, SanitizeFileName(filename));
+  string cubin_string(cubin.begin(), cubin.end());
+  auto status = tensorflow::WriteStringToFile(env, file_path, cubin_string);
+  if (!status.ok()) {
+    LOG(ERROR) << "Could not write CUBIN to " << file_path << ": "
+               << status;
+  }
+}
+
 void DumpHloModuleIfEnabled(const HloModule& module, string_view name) {
   CanonicalDebugOptions opts(module.config().debug_options());
   if (opts.should_dump_module(module.name())) {

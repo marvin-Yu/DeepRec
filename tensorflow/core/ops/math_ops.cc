@@ -438,6 +438,81 @@ REGISTER_OP("BlazeGRU")
       return Status::OK();
     });
 
+
+REGISTER_OP("GroupedTopK")
+    .Input("input: T")             //[..., input_len]
+    .Input("k: Tindices")          //scaler
+    .Input("splits: Tindices")     //[num_group]
+    .Output("value: T")            //[..., output_len]
+    .Output("index: Tindices")     //[..., output_len]
+    .Attr("T: {half, float, double}")
+    .Attr("Tindices: {int32}")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      shape_inference::ShapeHandle output;
+      TF_RETURN_IF_ERROR(
+          c->ReplaceDim(c->input(0), -1, c->UnknownDim(), &output));
+      c->set_output(0, output);
+      return Status::OK();
+    });
+
+REGISTER_OP("IdxGTopK")
+    .Input("input: T")              //[..., input_len]
+    .Input("k: Tindices")           //scaler
+    .Input("src_idx: Tindices")     //[num_group+1]
+    .Input("dst_idx: Tindices")     //[num_group+1]
+    .Output("value: T")             //[..., output_len]
+    .Output("index: Tindices")      //[..., output_len]
+    .Attr("T: {half, float, double}")
+    .Attr("Tindices: {int32}")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      shape_inference::ShapeHandle output;
+      TF_RETURN_IF_ERROR(
+          c->ReplaceDim(c->input(0), -1, c->UnknownDim(), &output));
+      c->set_output(0, output);
+      return Status::OK();
+    });
+
+REGISTER_OP("BlazeTopK")
+    .Input("input: T")              //[..., input_len]
+    .Input("k: Tindices")           //scaler
+    .Output("value: T")             //[..., k]
+    .Output("index: Tindices")      //[..., k]
+    .Attr("T: {half, float, double}")
+    .Attr("Tindices: {int32}")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      shape_inference::ShapeHandle output;
+      TF_RETURN_IF_ERROR(
+          c->ReplaceDim(c->input(0), -1, c->UnknownDim(), &output));
+      c->set_output(0, output);
+      return Status::OK();
+    });
+
+REGISTER_OP("GetChildren")
+    .Input("nodes: int32")
+    .Input("tree: int32")
+    .Output("children: int32")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      c->set_output(0, c->MakeShape({c->UnknownDim()}));
+      return Status::OK();
+    });
+
+REGISTER_OP("GetParents")
+    .Input("nodes: int32")
+    .Input("tree: int32")
+    .Output("parents: int32")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      c->set_output(0, c->MakeShape({c->UnknownDim()}));
+      return Status::OK();
+    });
+
+REGISTER_OP("FirstLevel")
+    .Input("tree: int32")
+    .Output("first_level: int32")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      c->set_output(0, c->MakeShape({c->UnknownDim()}));
+      return Status::OK();
+    });
+
 /* values N * (scences, unit_size)
  * coords N * (scences, 2)
  * output_shape (2, ) [user's sessions, max scenes in one session]

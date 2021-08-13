@@ -42,9 +42,14 @@ declare -a install_targets=("tensorflow/libtensorflow_framework.so"
                             "tensorflow/core/libtestlib.so"
                             "tensorflow/core/kernels/libops_testutil.so"
 )
-if [ ! -f ".tf_configure.bazelrc" ]; then
+if [ ! -f ".tf_configure.bazelrc.cuda10" ]; then
+    cp .tf_configure.bazelrc.cuda10 .tf_configure.bazelrc
+else
     python ./configure.py
 fi
+#if [ ! -f ".tf_configure.bazelrc" ]; then
+#    python ./configure.py
+#fi
 ## now loop through the above array
 for target in "${targets[@]}"
 do
@@ -109,6 +114,6 @@ cp -r $ABSL_DIR $HEADER_DIR/absl
 #rm $HEADER_DIR/diting -rf
 #cp -r $DITING_DIR $HEADER_DIR/diting
 
-
+cp .tf_configure.bazelrc .tf_configure.bazelrc.cuda10
 FARMHASH=$BAZEL_EXTERNAL_DIR"farmhash_archive/src/farmhash.h"
 cp $FARMHASH $HEADER_DIR
