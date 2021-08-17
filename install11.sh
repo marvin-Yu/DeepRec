@@ -3,8 +3,8 @@ EXTERNAL_DIR=$(dirname `readlink -f $0`)/../_external
 #prepare cuda-11.2
 if [ ! -d $EXTERNAL_DIR/usr/local/cuda-11.2  ]; then
     rm -rf cuda-11.2*
-    wget http://109717.oss-cn-hangzhou-zmf.aliyuncs.com/cuda-11.2.tar.gz -O cuda-11.2.tar.gz
-    tar -zxvf cuda-11.2.tar.gz
+    wget http://109717.oss-cn-hangzhou-zmf.aliyuncs.com/cuda-11.2.tar -O cuda-11.2.tar
+    tar -xvf cuda-11.2.tar
     cp -r -d cuda-11.2 $EXTERNAL_DIR/usr/local/
 fi
 #python ./configure.py
