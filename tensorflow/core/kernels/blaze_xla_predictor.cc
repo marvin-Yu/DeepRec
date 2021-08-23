@@ -319,8 +319,13 @@ void BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
   // Infer inputs' batchsize
 
   if (TF_PREDICT_FALSE(!warmuped_)) {
+    if (warmuping_) {
+      ctx->SetStatus(errors::Internal("Blaze kernel warmuping"));
+      return;
+    }
     VLOG(0) << "Begin warmup";
     mutex_lock l(warmup_mu_);
+    warmuping_ = true;
     OP_REQUIRES_OK(ctx, Warmup(ctx));
     warmuped_ = true;
   }

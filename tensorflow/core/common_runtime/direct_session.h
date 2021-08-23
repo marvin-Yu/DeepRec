@@ -398,6 +398,10 @@ class DirectSession : public Session {
   std::unordered_map<string, std::shared_ptr<ExecutorsAndKeys>> executors_
       GUARDED_BY(executor_lock_);
 
+  mutex executor_key_lock_;
+  std::unordered_map<string, mutex> creating_mutex_keys_
+      GUARDED_BY(executor_key_lock_);
+
   class RunCallableCallFrame;
   struct Callable {
     std::shared_ptr<ExecutorsAndKeys> executors_and_keys;

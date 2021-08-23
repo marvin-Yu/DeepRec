@@ -1999,6 +1999,25 @@ Status DirectSession::GetOrCreateExecutors(
     }
   }
 
+  {
+    mutex_lock l(executor_key_lock_);
+    auto it = creating_mutex_keys_.find(key);
+    if (it != creating_mutex_keys_.end()) {
+      return errors::Internal("key ", key, " is creating");
+    } else {
+      auto iter = creating_mutex_keys_.find(sorted_key);
+      if (iter != creating_mutex_keys_.end()) {
+        return errors::Internal("key ", sorted_key, " is creating");
+      }
+    }
+    {
+      mutex key_mtx;
+      creating_mutex_keys_.emplace(key, std::move(key_mtx));
+      mutex sorted_key_mtx;
+      creating_mutex_keys_.emplace(sorted_key, std::move(sorted_key_mtx));
+    }
+  }
+
   // Nothing found, so create the executors and store in the cache.
   // The executor_lock_ is intentionally released while executors are
   // being created.
@@ -2019,8 +2038,13 @@ Status DirectSession::GetOrCreateExecutors(
       ->set_collective_graph_key(run_state_args->collective_graph_key);
   std::unique_ptr<ExecutorsAndKeys> ek;
   std::unique_ptr<FunctionInfo> func_info;
-  TF_RETURN_IF_ERROR(
-      CreateExecutors(callable_options, &ek, &func_info, run_state_args));
+  auto exe_st = CreateExecutors(callable_options, &ek, &func_info, run_state_args);
+  if (!exe_st.ok()) {
+    mutex_lock l(executor_key_lock_);
+    creating_mutex_keys_.erase(key);
+    creating_mutex_keys_.erase(sorted_key);
+    TF_RETURN_IF_ERROR(exe_st);
+  }
 
   // Reacquire the lock, try to insert into the map.
   mutex_lock l(executor_lock_);
@@ -2034,7 +2058,12 @@ Status DirectSession::GetOrCreateExecutors(
   // if the user uses the same order of inputs, outputs, and targets again.
   executors_.emplace(key, insert_result.first->second);
   *executors_and_keys = insert_result.first->second.get();
-
+  
+  {
+    mutex_lock l(executor_key_lock_);
+    creating_mutex_keys_.erase(key);
+    creating_mutex_keys_.erase(sorted_key);
+  }
   return Status::OK();
 }
 

@@ -42,6 +42,7 @@ class BlazeXlaPredictor : public BlazePredictor {
   NodeMap node_map_;
   
   bool warmuped_;
+  bool warmuping_;
   mutex warmup_mu_;
   mutex batch_size_mu_;
 };
