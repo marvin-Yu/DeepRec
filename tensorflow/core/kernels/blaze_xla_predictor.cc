@@ -328,6 +328,7 @@ void BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
     warmuping_ = true;
     OP_REQUIRES_OK(ctx, Warmup(ctx));
     warmuped_ = true;
+    warmuping_ = false;
   }
 
   int num_inputs = ctx->num_inputs();
