@@ -9,7 +9,23 @@ typedef std::map<std::string, NodeDef> NodeMap;
 
 class BlazeXlaPredictor : public BlazePredictor {
  public:
-  using BlazePredictor::BlazePredictor;
+  BlazeXlaPredictor(OpKernelConstruction* ctx) : BlazePredictor(ctx) {
+    warmuped_ = false;
+    warmuping_ = false;
+  }
+
+  BlazeXlaPredictor(const std::vector<std::string>& input_names,
+                          const std::vector<std::string>& output_names,
+                          const GraphDef& graph_def, const std::string& device,
+                          const BlazeKernelOptions& options, const string& device_string,
+                          const std::vector<DataType>& input_types,
+                          OpKernelConstruction* ctx = nullptr)
+      : BlazePredictor(input_names, output_names, graph_def,
+                       device, options, device_string, input_types, ctx) {
+        warmuped_ = false;
+        warmuping_ = false;
+      }
+
   ~BlazeXlaPredictor() override {}
 
   void Compute(OpKernelContext* ctx) override;

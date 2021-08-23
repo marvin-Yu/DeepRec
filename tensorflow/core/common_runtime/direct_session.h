@@ -399,7 +399,7 @@ class DirectSession : public Session {
       GUARDED_BY(executor_lock_);
 
   mutex executor_key_lock_;
-  std::unordered_map<string, mutex> creating_mutex_keys_
+  std::unordered_set<string> creating_mutex_keys_
       GUARDED_BY(executor_key_lock_);
 
   class RunCallableCallFrame;

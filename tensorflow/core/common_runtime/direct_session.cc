@@ -2010,12 +2010,7 @@ Status DirectSession::GetOrCreateExecutors(
         return errors::Internal("key ", sorted_key, " is creating");
       }
     }
-    {
-      mutex key_mtx;
-      creating_mutex_keys_.emplace(key, std::move(key_mtx));
-      mutex sorted_key_mtx;
-      creating_mutex_keys_.emplace(sorted_key, std::move(sorted_key_mtx));
-    }
+    creating_mutex_keys_.insert({key, sorted_key});
   }
 
   // Nothing found, so create the executors and store in the cache.

@@ -36,6 +36,8 @@ class BlazeXlaOp : public OpKernel {
 
   void ComputeNormal(OpKernelContext* context);
   void ComputeBenchmark(OpKernelContext* context);
+  void ComputeNull(OpKernelContext* context);
+  int GetBatchSizeUnsafe(OpKernelContext* context);
 
   DeviceType device_type_;
   std::vector<std::string> input_names_;
@@ -170,6 +172,12 @@ void BlazeXlaOp::ComputeBenchmark(OpKernelContext* ctx) {
   }
 }
 
+void BlazeXlaOp::ComputeNull(OpKernelContext* context) {
+  auto batch_size = GetBatchSizeUnsafe(context);
+  Tensor *output;
+  context->allocate_output(0, {batch_size, 2}, &output);
+}
+
 void BlazeXlaOp::Compute(OpKernelContext* ctx) {
   switch(blaze_run_options_.run_mode()) {
     case BlazeKernelOptions::DEFAULT: {
@@ -178,6 +186,10 @@ void BlazeXlaOp::Compute(OpKernelContext* ctx) {
     }
     case BlazeKernelOptions::BENCHMARK: {
       ComputeBenchmark(ctx);
+      break;
+    }
+    case BlazeKernelOptions::SKIP: {
+      ComputeNull(ctx);
       break;
     }
     default: {
@@ -242,6 +254,17 @@ void BlazeXlaOp::CopyTensor(MemoryType mtype, OpKernelContext* ctx,
     name_tensor->set_name(name);
     tensor.AsProtoField(name_tensor->mutable_tensor());
   }
+}
+
+//unsafe func to infer batchsize, just for testing
+int BlazeXlaOp::GetBatchSizeUnsafe(OpKernelContext* context) {
+  for (int i = 0; i < context->num_inputs(); ++i) {
+    const auto& shape = context->input(i).shape();
+    if (shape.dims() != 0 && shape.dim_size(0) != 1) {
+      return shape.dim_size(0);
+    }
+  }
+  return 1;
 }
 
 REGISTER_KERNEL_BUILDER(Name("BlazeXlaOp").Device(DEVICE_CPU), BlazeXlaOp);
