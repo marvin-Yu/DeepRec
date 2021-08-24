@@ -13,18 +13,48 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 #include "tensorflow/core/common_runtime/copy_tensor.h"
+#include "tensorflow/core/lib/core/threadpool.h"
 #include "tensorflow/core/kernels/benchmark_helper.h"
 #include "tensorflow/core/kernels/blaze_predictor.h"
 #include "tensorflow/core/kernels/blaze_xla_predictor.h"
 #include "tensorflow/compiler/jit/flags.h"
 
 namespace tensorflow {
-class BlazeXlaOp : public OpKernel {
+class Semaphore {
+public:
+  explicit Semaphore(int count = 0) : count_(count) {
+  }
+
+  void Signal() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    ++count_;
+    cv_.notify_one();
+  }
+
+  void Wait() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    cv_.wait(lock, [=] { return count_ > 0; });
+    --count_;
+  }
+
+private:
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  int count_;
+};
+
+struct QueuedValue {
+  OpKernelContext* context;
+  DoneCallback done;
+  uint64 start_time;
+};
+
+class BlazeXlaOp : public AsyncOpKernel {
  public:
   explicit BlazeXlaOp(OpKernelConstruction* context);
   ~BlazeXlaOp() {}
 
-  void Compute(OpKernelContext* context) override;
+  void ComputeAsync(OpKernelContext* context, DoneCallback done) override;
 
   Status ParseRunOptions(BlazeKernelOptions& run_options);
  private:
@@ -34,9 +64,9 @@ class BlazeXlaOp : public OpKernel {
   void CopyTensor(MemoryType, OpKernelContext* ctx,
                   const string& name, const Tensor& tensor);
 
-  void ComputeNormal(OpKernelContext* context);
-  void ComputeBenchmark(OpKernelContext* context);
-  void ComputeNull(OpKernelContext* context);
+  void ComputeNormal(OpKernelContext* context, const DoneCallback& done);
+  void ComputeBenchmark(OpKernelContext* context, const DoneCallback& done);
+  void ComputeNull(OpKernelContext* context, const DoneCallback& done);
   int GetBatchSizeUnsafe(OpKernelContext* context);
 
   DeviceType device_type_;
@@ -56,6 +86,13 @@ class BlazeXlaOp : public OpKernel {
   mutex tracing_mu_;
   mutex benchmark_mu_;
   std::atomic<int> benchmark_counter_;
+
+  tensorflow::thread::ThreadPool pool_;
+  Semaphore spe_;
+  std::atomic<int> tmp_;
+  int max_count_ = 5;
+  mutex queue_mutex_;
+  std::queue<QueuedValue> queue_ GUARDED_BY(queue_mutex_); 
 };
 
 void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
@@ -92,7 +129,8 @@ void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
 }
 
 BlazeXlaOp::BlazeXlaOp(OpKernelConstruction* context)
-    : OpKernel(context), device_type_(context->device_type().type()) {
+    : AsyncOpKernel(context), device_type_(context->device_type().type()),
+    pool_(tensorflow::Env::Default(), "blaze_thread", 4), spe_(4) {
   OP_REQUIRES_OK(context, context->GetAttr("input_names", &input_names_));
   OP_REQUIRES_OK(context, context->GetAttr("output_names", &output_names_));
   OP_REQUIRES_OK(context, context->GetAttr("graph_def", &graph_def_path_));
@@ -105,6 +143,7 @@ BlazeXlaOp::BlazeXlaOp(OpKernelConstruction* context)
   OP_REQUIRES_OK(context, predictor_->InitSession());
   env_ = Env::Default();
   benchmark_counter_ = 0;
+  tmp_.store(0);
 }
 
 Status BlazeXlaOp::ParseAttr() {
@@ -133,27 +172,39 @@ Status BlazeXlaOp::ParseAttr() {
   return Status::OK();
 }
 
-void BlazeXlaOp::ComputeNormal(OpKernelContext* ctx) {
-  if (!ctx->traced_infos()) {
-    predictor_->Compute(ctx);
-  } else {
-    auto start_ns = env_->NowNanos();
-    predictor_->Compute(ctx);
-    auto end_ns = env_->NowNanos();
-    if (ctx->traced_infos()->enable_prof_stats) {
-      ctx->traced_infos()->prof_stats->blaze_latency_ms = ((end_ns - start_ns) / 1000000.0f);
-    }
+void BlazeXlaOp::ComputeNormal(OpKernelContext* ctx, const DoneCallback& done) {
+  pool_.Schedule([this, ctx, done] {
+    
+    auto start = env_->NowMicros();
+  //  spe_.Wait();
+//  OP_REQUIRES_ASYNC(ctx, end - start <= 5000,
+//                    errors::Internal("blaze wait too long ", end - start),
+//                    done);
+    if (!ctx->traced_infos()) {
+      predictor_->Compute(ctx);
+    } else {
+      auto start_ns = env_->NowNanos();
+      predictor_->Compute(ctx);
+      auto end_ns = env_->NowNanos();
+      if (ctx->traced_infos()->enable_prof_stats) {
+        ctx->traced_infos()->prof_stats->blaze_latency_ms = ((end_ns - start_ns) / 1000000.0f);
+      }
 
-    if (ctx->traced_infos()->enable_trace_tensors) {
-      TraceTensors(ctx);
+      if (ctx->traced_infos()->enable_trace_tensors) {
+        TraceTensors(ctx);
+      }
     }
-  }
+  //  spe_.Signal();
+    auto end = env_->NowMicros();
+    VLOG(0) << "blaze using " << end - start;
+    done();
+  });
 }
 
-void BlazeXlaOp::ComputeBenchmark(OpKernelContext* ctx) {
+void BlazeXlaOp::ComputeBenchmark(OpKernelContext* ctx, const DoneCallback& done) {
   if (benchmark_counter_ < 200) {
     // out from warmup
-    ComputeNormal(ctx);
+    ComputeNormal(ctx, done);
     ++benchmark_counter_;
   } else {
     auto& helper = BenchmarkHelper::GetInstance();
@@ -170,30 +221,32 @@ void BlazeXlaOp::ComputeBenchmark(OpKernelContext* ctx) {
       }
     }
   }
+  done();
 }
 
-void BlazeXlaOp::ComputeNull(OpKernelContext* context) {
+void BlazeXlaOp::ComputeNull(OpKernelContext* context, const DoneCallback& done) {
   auto batch_size = GetBatchSizeUnsafe(context);
   Tensor *output;
   context->allocate_output(0, {batch_size, 2}, &output);
+  done();
 }
 
-void BlazeXlaOp::Compute(OpKernelContext* ctx) {
+void BlazeXlaOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
   switch(blaze_run_options_.run_mode()) {
     case BlazeKernelOptions::DEFAULT: {
-      ComputeNormal(ctx);
+      ComputeNormal(ctx, std::move(done));
       break;
     }
     case BlazeKernelOptions::BENCHMARK: {
-      ComputeBenchmark(ctx);
+      ComputeBenchmark(ctx, std::move(done));
       break;
     }
     case BlazeKernelOptions::SKIP: {
-      ComputeNull(ctx);
+      ComputeNull(ctx, std::move(done));
       break;
     }
     default: {
-      ComputeNormal(ctx);
+      ComputeNormal(ctx, std::move(done));
     }
   }
 }
