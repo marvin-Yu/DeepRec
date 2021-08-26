@@ -17,38 +17,10 @@ limitations under the License.
 #include "tensorflow/core/kernels/benchmark_helper.h"
 #include "tensorflow/core/kernels/blaze_predictor.h"
 #include "tensorflow/core/kernels/blaze_xla_predictor.h"
+#include "tensorflow/core/util/env_var.h"
 #include "tensorflow/compiler/jit/flags.h"
 
 namespace tensorflow {
-class Semaphore {
-public:
-  explicit Semaphore(int count = 0) : count_(count) {
-  }
-
-  void Signal() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    ++count_;
-    cv_.notify_one();
-  }
-
-  void Wait() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    cv_.wait(lock, [=] { return count_ > 0; });
-    --count_;
-  }
-
-private:
-  std::mutex mutex_;
-  std::condition_variable cv_;
-  int count_;
-};
-
-struct QueuedValue {
-  OpKernelContext* context;
-  DoneCallback done;
-  uint64 start_time;
-};
-
 class BlazeXlaOp : public AsyncOpKernel {
  public:
   explicit BlazeXlaOp(OpKernelConstruction* context);
@@ -86,14 +58,20 @@ class BlazeXlaOp : public AsyncOpKernel {
   mutex tracing_mu_;
   mutex benchmark_mu_;
   std::atomic<int> benchmark_counter_;
+  int wait_ns_;
 
-  tensorflow::thread::ThreadPool pool_;
-  Semaphore spe_;
-  std::atomic<int> tmp_;
-  int max_count_ = 5;
-  mutex queue_mutex_;
-  std::queue<QueuedValue> queue_ GUARDED_BY(queue_mutex_); 
+  static tensorflow::thread::ThreadPool pool_;
 };
+
+int BlazeThreadsCount() {
+  const int kDefaultDenseThreadsNum = 8;
+  int dense_threads_num;
+  ReadBoolFromEnvVar("BLAZE_THREADS_NUM", kDefaultDenseThreadsNum, &dense_threads_num);
+  VLOG(0) << "blaze set thread pool size " << dense_threads_num;
+  return dense_threads_num;
+}
+
+tensorflow::thread::ThreadPool BlazeXlaOp::pool_(Env::Default(), "blaze_kernel", BlazeThreadsCount());
 
 void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
   auto config = blaze_run_options_.mutable_config_proto();
@@ -129,8 +107,7 @@ void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
 }
 
 BlazeXlaOp::BlazeXlaOp(OpKernelConstruction* context)
-    : AsyncOpKernel(context), device_type_(context->device_type().type()),
-    pool_(tensorflow::Env::Default(), "blaze_thread", 4), spe_(4) {
+    : AsyncOpKernel(context), device_type_(context->device_type().type()) {
   OP_REQUIRES_OK(context, context->GetAttr("input_names", &input_names_));
   OP_REQUIRES_OK(context, context->GetAttr("output_names", &output_names_));
   OP_REQUIRES_OK(context, context->GetAttr("graph_def", &graph_def_path_));
@@ -143,7 +120,7 @@ BlazeXlaOp::BlazeXlaOp(OpKernelConstruction* context)
   OP_REQUIRES_OK(context, predictor_->InitSession());
   env_ = Env::Default();
   benchmark_counter_ = 0;
-  tmp_.store(0);
+  wait_ns_ = blaze_run_options_.wait_ms() * 1000000;
 }
 
 Status BlazeXlaOp::ParseAttr() {
@@ -173,13 +150,14 @@ Status BlazeXlaOp::ParseAttr() {
 }
 
 void BlazeXlaOp::ComputeNormal(OpKernelContext* ctx, const DoneCallback& done) {
-  pool_.Schedule([this, ctx, done] {
-    
-    auto start = env_->NowMicros();
-  //  spe_.Wait();
-//  OP_REQUIRES_ASYNC(ctx, end - start <= 5000,
-//                    errors::Internal("blaze wait too long ", end - start),
-//                    done);
+  auto begin = env_->NowNanos();
+  pool_.Schedule([this, ctx, done, begin] {
+    auto schedule_time = env_->NowNanos();
+    if (wait_ns_ > 0) {
+      OP_REQUIRES_ASYNC(ctx, schedule_time - begin <= wait_ns_,
+                        errors::Internal("blaze wait too long ", schedule_time - begin),
+                        done);
+    }
     if (!ctx->traced_infos()) {
       predictor_->Compute(ctx);
     } else {
@@ -194,9 +172,6 @@ void BlazeXlaOp::ComputeNormal(OpKernelContext* ctx, const DoneCallback& done) {
         TraceTensors(ctx);
       }
     }
-  //  spe_.Signal();
-    auto end = env_->NowMicros();
-    VLOG(0) << "blaze using " << end - start;
     done();
   });
 }

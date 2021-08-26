@@ -19,7 +19,7 @@ export CUDNN_INSTALL_PATH=$EXTERNAL_DIR/usr/local/cuda-11.2/
 export TF_CUDNN_VERSION=8.1.1
 
 export NCCL_INSTALL_PATH=$EXTERNAL_DIR/usr/local/cuda-11.2/
-export TF_NCCL_VERSION=2.3.7
+#export TF_NCCL_VERSION=2.3.7
 
 export TF_CUDA_CLANG=0
 export TF_CUDA_COMPUTE_CAPABILITIES="6.0,6.1,7.0,7.5,8.0,8.6"
@@ -49,7 +49,7 @@ declare -a install_targets=("tensorflow/libtensorflow_framework.so"
                             "tensorflow/core/kernels/libops_testutil.so"
 )
 
-if [ ! -f ".tf_configure.bazelrc.cuda11" ]; then
+if [ -f ".tf_configure.bazelrc.cuda11" ]; then
     cp .tf_configure.bazelrc.cuda11 .tf_configure.bazelrc
 else
     python ./configure.py
