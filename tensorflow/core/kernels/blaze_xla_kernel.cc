@@ -65,10 +65,10 @@ class BlazeXlaOp : public AsyncOpKernel {
 
 int BlazeThreadsCount() {
   const int kDefaultDenseThreadsNum = 8;
-  int dense_threads_num;
-  ReadBoolFromEnvVar("BLAZE_THREADS_NUM", kDefaultDenseThreadsNum, &dense_threads_num);
+  int64 dense_threads_num;
+  ReadInt64FromEnvVar("BLAZE_THREADS_NUM", kDefaultDenseThreadsNum, &dense_threads_num);
   VLOG(0) << "blaze set thread pool size " << dense_threads_num;
-  return dense_threads_num;
+  return (int)dense_threads_num;
 }
 
 tensorflow::thread::ThreadPool BlazeXlaOp::pool_(Env::Default(), "blaze_kernel", BlazeThreadsCount());
