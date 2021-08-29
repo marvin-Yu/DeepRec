@@ -10,45 +10,6 @@ namespace tensorflow {
 const char* const kOutputShape = "_output_shapes";
 const char* const kShape = "shape";
 
-#define TYPECASE_0(dt, X, Y)                                    \
-  case dt: {                                                  \
-    return (void*)X->flat<EnumToDataType<dt>::Type>().data(); \
-  }
-
-void* GetTensorAddress(const Tensor* tensor_ptr) {
-  auto tensor_type = tensor_ptr->dtype();
-  switch (tensor_type) {
-    TYPECASE_0(DT_FLOAT, tensor_ptr, dest_ptr);
-    TYPECASE_0(DT_HALF, tensor_ptr, dest_ptr);
-    TYPECASE_0(DT_INT8, tensor_ptr, dest_ptr);
-    TYPECASE_0(DT_INT32, tensor_ptr, dest_ptr);
-    TYPECASE_0(DT_INT64, tensor_ptr, dest_ptr);
-    default: {
-      LOG(ERROR) << "Unsupported Data type " << DataTypeString(tensor_type);
-      return nullptr;
-    }
-  }
-}
-
-#define TYPECASE_1(dt, X, Y)                                    \
-  case dt: {                                                  \
-    return X->flat<EnumToDataType<dt>::Type>().size() * sizeof(EnumToDataType<dt>::Type); \
-  }
-uint64 GetTensorSize(const Tensor* tensor_ptr) {
-  auto tensor_type = tensor_ptr->dtype();
-  switch (tensor_type) {
-    TYPECASE_1(DT_FLOAT, tensor_ptr, dest_ptr);
-    TYPECASE_1(DT_HALF, tensor_ptr, dest_ptr);
-    TYPECASE_1(DT_INT8, tensor_ptr, dest_ptr);
-    TYPECASE_1(DT_INT32, tensor_ptr, dest_ptr);
-    TYPECASE_1(DT_INT64, tensor_ptr, dest_ptr);
-    default: {
-      LOG(ERROR) << "Unsupported Data type " << DataTypeString(tensor_type);
-      return 0;
-    }
-  }
-}
-
 InputNodeMap BlazeXlaPredictor::ToInputNodeMap() {
   InputNodeMap node_map;
   for (int i = 0; i < graph_def_.node_size(); ++i) {
@@ -82,23 +43,6 @@ Status BlazeXlaPredictor::FindBlackPaddingInputs() {
     if (no_warmup.find(input_names_[i]) != no_warmup.end()) {
       skip_padding_[i] = true;
     }
-    /*
-    skip_padding_[i] = false;
-    auto& name = input_names_[i];
-
-    auto iter = node_map.find(name);
-    if (iter == node_map.end()) {
-      return errors::Internal("input ", name, " not in graph ",
-                              graph_def_.DebugString());
-    }
-    for (auto& node : iter->second) {
-      bool xla_enable = true;
-      if (TryGetNodeAttr(node, "_XlaCompile", &xla_enable) && xla_enable == false) {
-        LOG(INFO) << name << " will not padding in xla " << node.DebugString();
-        skip_padding_[i] = true;
-        break;
-      }
-    } */
   }
   return Status::OK();
 }
@@ -225,6 +169,59 @@ int BlazeXlaPredictor::InferBatchSize(const std::vector<Tensor>& tensors) {
   return batchsize;
 }
 
+Status BlazeXlaPredictor::PadToStaticCPUToGPU(const std::vector<Tensor>& inputs,
+                                      std::vector<Tensor>* padded_inputs,
+                                      int batchsize, int pad_to_batchsize,
+                                      OpKernelContext* ctx) {
+  for (int i = 0; i < inputs.size(); ++i) {
+    VLOG(1) << "Shape of input " << i << ": "
+            << inputs[i].shape().DebugString();
+    AllocatorAttributes alloc_attrs;
+    alloc_attrs.set_on_host(false);
+    TensorShape pad_to_shape;
+    const TensorShape& shape = inputs[i].shape();
+    pad_to_shape = shape;
+    int64 first_dim = shape.dim_size(0);
+    first_dim = (first_dim == 1)? 1 : pad_to_batchsize;
+    pad_to_shape.set_dim(0, first_dim);
+    Status allocate_status =
+        ctx->allocate_temp(inputs[i].dtype(),
+                           pad_to_shape,
+                           &(*padded_inputs)[i], alloc_attrs);
+    if (!allocate_status.ok()) {
+      return allocate_status;
+    }
+    const uint8* input_ptr = (uint8*)GetTensorAddress(&inputs[i]);
+    uint8* padded_ptr = (uint8*)GetTensorAddress(&(*padded_inputs)[i]);
+    uint64 input_size = GetTensorSize(&inputs[i]);
+    uint64 padded_size = GetTensorSize(&(*padded_inputs)[i]);
+    if (input_ptr == nullptr || padded_ptr == nullptr ||
+        input_size == 0 || padded_size == 0) {
+      return errors::Internal(
+          "Error when getting input address or size");
+    }
+#if GOOGLE_CUDA
+      auto padded_dev_ptr = AsDeviceMemory(padded_ptr, padded_size);
+      if (DataTypeIsInteger(inputs[i].dtype())) {
+        bool copy_status =
+            stream_->ThenMemZero(&padded_dev_ptr, padded_size).ok();
+        if (!copy_status) {
+          return errors::Internal("MemZero failed.");
+        }
+      }
+      bool copy_status =
+          stream_->ThenMemcpy(&padded_dev_ptr, input_ptr, input_size).ok();
+      if (!copy_status) {
+        return errors::Internal("MemcpyH2D for padding inputs failed.");
+      }
+#endif
+
+    VLOG(1) << "Shape of padded_input " << i << ": "
+            << (*padded_inputs)[i].shape().DebugString();
+  }
+  return Status::OK();
+}
+
 Status BlazeXlaPredictor::PadToStatic(const std::vector<Tensor>& inputs,
                                       std::vector<Tensor>* padded_inputs,
                                       int batchsize, int pad_to_batchsize,
@@ -315,6 +312,32 @@ Status BlazeXlaPredictor::SliceToDynamic(const std::vector<Tensor>& padded_outpu
   return Status::OK();
 }
 
+Status BlazeXlaPredictor::SliceToDynamicCPU(const std::vector<Tensor>& padded_outputs,
+                                         int batchsize, int pad_to_batchsize,
+                                         std::vector<Tensor>& outputs, OpKernelContext* ctx) {
+  for (int i = 0; i < padded_outputs.size(); ++i) {
+    VLOG(1) << "Shape of padded_output " << i << ": "
+            << padded_outputs[i].shape().DebugString();
+    TensorShape slice_to_shape = padded_outputs[i].shape();
+    if (slice_to_shape.dim_size(0) != pad_to_batchsize) {
+      return errors::Internal(
+          "Shape error, cannot slice output: padded_output shape = " +
+          slice_to_shape.DebugString() +
+          ", pad_to_batchsize = " +
+          std::to_string(pad_to_batchsize));
+    }
+    const auto& tmp_tensor = padded_outputs[i].Slice(0, batchsize);
+    auto device_context = blaze_device_->tensorflow_gpu_device_info()->default_context;
+    uint8* tmp_ptr = (uint8*)GetTensorAddress(&tmp_tensor);
+    uint64 tmp_size = GetTensorSize(&tmp_tensor);
+    auto tmp_dev_ptr = AsDeviceMemory(tmp_ptr, tmp_size);
+    Tensor tensor(tmp_tensor.dtype(), tmp_tensor.shape());
+    uint8* host_add = (uint8*)GetTensorAddress(&tensor);
+    stream_->ThenMemcpy(host_add, tmp_dev_ptr, tmp_size);
+    outputs.push_back(tensor);
+  }
+  return Status::OK();
+}
 void BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
   // Infer inputs' batchsize
 
@@ -365,8 +388,14 @@ void BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
   if (pad_to_batchsize != batchsize) {
     // Pad inputs
     std::vector<Tensor> padded_inputs(num_inputs);
-    Status status = PadToStatic(inputs, &padded_inputs,
+    Status status;
+    if (same_device_) {
+      status = PadToStatic(inputs, &padded_inputs,
         batchsize, pad_to_batchsize, ctx);
+    } else {
+      status = PadToStaticCPUToGPU(inputs, &padded_inputs,
+        batchsize, pad_to_batchsize, ctx);
+    }
     if (!status.ok()) {
       ctx->SetStatus(status);
       return;

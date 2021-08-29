@@ -844,6 +844,10 @@ Status InferAllocAttr(const Node* n, const Node* dst,
               << " remote type " << parsed_dst_name.type;
     }
   }
+  if (IsBlaze(dst)) {
+    attr->set_gpu_compatible(true);
+    VLOG(2) << "node " << n->name() << " is the source of a cpu->gpu copy";
+  }
   if (n->IsCollective()) {
     // We'll make the sweeping assumption that any collective op is going
     // to be involved in network i/o.
@@ -1556,6 +1560,9 @@ void ExecutorImpl::InitializePending(const Graph* graph,
 void ExecutorState::RunAsync(Executor::DoneCallback done) {
   const Graph* graph = impl_->graph_.get();
   TaggedNodeSeq ready;
+  string name = std::to_string(graph->num_nodes()) + "__" + std::to_string(
+      graph->num_edges()) + "_graph.pbtxt";
+  WriteTextProto(Env::Default(), name, graph->ToGraphDefDebug());
 
   // Ask the device to fill in the device context map.
   Device* device = impl_->params_.device;

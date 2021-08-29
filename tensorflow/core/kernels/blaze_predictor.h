@@ -29,6 +29,7 @@
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/thread_annotations.h"
 #include "tensorflow/core/platform/types.h"
+#include "tensorflow/core/util/device_name_utils.h"
 #include "tensorflow/stream_executor/lib/statusor.h"
 
 namespace tensorflow {
@@ -76,6 +77,12 @@ class BlazePredictor {
   //runtime options
   std::unique_ptr<Session> session_;
   Session::CallableHandle handle_;
+
+  //for cpu->gpu
+  std::string blaze_real_deive_;
+  bool same_device_;
+  Device* blaze_device_;
+  stream_executor::Stream* stream_;
  private:
   Status ParseAttr(const std::string& device);
   virtual Status PrepareData() {
@@ -87,6 +94,48 @@ class BlazePredictor {
   virtual Status MakeCallable();
   virtual Status Warmup();
   void SetDeviceInGraphDef(const std::string device_name, GraphDef* graph_def);
+
+  Status SetDeviceInfo(OpKernelConstruction* ctx);
+
+ protected:
+#define TYPECASE_0(dt, X, Y)                                    \
+  case dt: {                                                  \
+    return (void*)X->flat<EnumToDataType<dt>::Type>().data(); \
+  }
+
+void* GetTensorAddress(const Tensor* tensor_ptr) {
+  auto tensor_type = tensor_ptr->dtype();
+  switch (tensor_type) {
+    TYPECASE_0(DT_FLOAT, tensor_ptr, dest_ptr);
+    TYPECASE_0(DT_HALF, tensor_ptr, dest_ptr);
+    TYPECASE_0(DT_INT8, tensor_ptr, dest_ptr);
+    TYPECASE_0(DT_INT32, tensor_ptr, dest_ptr);
+    TYPECASE_0(DT_INT64, tensor_ptr, dest_ptr);
+    default: {
+      LOG(ERROR) << "Unsupported Data type " << DataTypeString(tensor_type);
+      return nullptr;
+    }
+  }
+}
+
+#define TYPECASE_1(dt, X, Y)                                    \
+  case dt: {                                                  \
+    return X->flat<EnumToDataType<dt>::Type>().size() * sizeof(EnumToDataType<dt>::Type); \
+  }
+uint64 GetTensorSize(const Tensor* tensor_ptr) {
+  auto tensor_type = tensor_ptr->dtype();
+  switch (tensor_type) {
+    TYPECASE_1(DT_FLOAT, tensor_ptr, dest_ptr);
+    TYPECASE_1(DT_HALF, tensor_ptr, dest_ptr);
+    TYPECASE_1(DT_INT8, tensor_ptr, dest_ptr);
+    TYPECASE_1(DT_INT32, tensor_ptr, dest_ptr);
+    TYPECASE_1(DT_INT64, tensor_ptr, dest_ptr);
+    default: {
+      LOG(ERROR) << "Unsupported Data type " << DataTypeString(tensor_type);
+      return 0;
+    }
+  }
+}
 };
 }
 #endif //end TENSORFLOW_CORE_KERNELS_BLAZE_PREDICOTR_H_

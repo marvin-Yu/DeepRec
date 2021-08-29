@@ -154,4 +154,40 @@ void BlazePredictor::SetDeviceInGraphDef(const std::string device_name,
   }
   VLOG(2) << "After setting device: \n" << graph_def->DebugString();
 }
+
+Status BlazePredictor::SetDeviceInfo(OpKernelConstruction* ctx) {
+  auto st = ctx->GetAttr("_blaze_real_device", &blaze_real_deive_);
+  if (!st.ok()) {
+    VLOG(0) << "Blaze not set device, using " << request_device_;
+    same_device_ = true;
+    blaze_device_ = nullptr;
+    return Status::OK();
+  } else {
+    DeviceNameUtils::ParsedName req_name;
+    DeviceNameUtils::ParsedName blaze_name;
+    if (!DeviceNameUtils::ParseFullName(request_device_, &req_name)) {
+      return errors::Internal(request_device_, " parse failed");
+    }
+
+    if (!DeviceNameUtils::ParseFullName(blaze_real_deive_, &blaze_name)) {
+      return errors::Internal(blaze_real_deive_, " parse failed");
+    }
+    
+    auto req_dev = DeviceNameUtils::LocalName(request_device_);
+    auto blaze_dev = DeviceNameUtils::LocalName(blaze_real_deive_);
+
+    if (req_dev != blaze_dev) {
+      same_device_ = false;
+      const DeviceMgr* mgr;
+      TF_RETURN_IF_ERROR(session_->LocalDeviceManager(&mgr));
+      TF_RETURN_IF_ERROR(mgr->LookupDevice(blaze_dev, &blaze_device_));
+      auto* dev_info = blaze_device_->tensorflow_gpu_device_info();
+      if (!dev_info) {
+        return errors::Internal("get gpu device info failed");
+      }
+      stream_ = dev_info->default_context->stream();
+    }
+    return Status::OK();
+  }
+}
 }

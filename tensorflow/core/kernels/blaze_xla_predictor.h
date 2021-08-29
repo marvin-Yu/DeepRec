@@ -41,7 +41,15 @@ class BlazeXlaPredictor : public BlazePredictor {
                      int batchsize, int pad_to_batchsize,
                      OpKernelContext* ctx);
 
+  Status PadToStaticCPUToGPU(const std::vector<Tensor>& inputs,
+                     std::vector<Tensor>* padded_inputs,
+                     int batchsize, int pad_to_batchsize,
+                     OpKernelContext* ctx);
+
   Status SliceToDynamic(const std::vector<Tensor>& padded_outputs,
+                        int batchsize, int pad_to_batchsize,
+                        std::vector<Tensor>& outputs, OpKernelContext* ctx);
+  Status SliceToDynamicCPU(const std::vector<Tensor>& padded_outputs,
                         int batchsize, int pad_to_batchsize,
                         std::vector<Tensor>& outputs, OpKernelContext* ctx);
   int InferBatchSize(const std::vector<Tensor>& tensors);
