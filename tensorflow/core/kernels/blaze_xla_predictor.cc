@@ -416,7 +416,11 @@ void BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
     // Unpad outputs
     std::vector<Tensor> outputs;
     outputs.reserve(padded_outputs.size());
-    status = SliceToDynamic(padded_outputs, batchsize, pad_to_batchsize, outputs, ctx);
+    if (same_device_) {
+      status = SliceToDynamic(padded_outputs, batchsize, pad_to_batchsize, outputs, ctx);
+    } else {
+      status = SliceToDynamicCPU(padded_outputs, batchsize, pad_to_batchsize, outputs, ctx);
+    }
     if (!status.ok()) {
       ctx->SetStatus(status);
       return;

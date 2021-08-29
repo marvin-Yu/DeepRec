@@ -47,7 +47,9 @@ class BlazePredictor {
     input_names_(input_names), output_names_(output_names),
     graph_def_(graph_def), request_device_(device),
     blaze_run_options_(options), device_type_(device_string),
-    input_types_(input_types), ctx_(ctx) {}
+    input_types_(input_types), ctx_(ctx) {
+      SetDeviceInfo(ctx);
+    }
 
     virtual ~BlazePredictor() {}
 

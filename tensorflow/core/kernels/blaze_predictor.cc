@@ -12,6 +12,7 @@ BlazePredictor::BlazePredictor(OpKernelConstruction* ctx) : device_type_(ctx->de
   OP_REQUIRES_OK(ctx, ctx->GetAttr("InT", &input_types_));
   OP_REQUIRES_OK(ctx, ParseAttr(ctx->def().device()));
   ctx_ = ctx;
+  SetDeviceInfo(ctx);
 }
 
 Status BlazePredictor::ParseAttr(const std::string& device) {
@@ -156,6 +157,7 @@ void BlazePredictor::SetDeviceInGraphDef(const std::string device_name,
 }
 
 Status BlazePredictor::SetDeviceInfo(OpKernelConstruction* ctx) {
+  VLOG(0) << "SetDeviceInfo called";
   auto st = ctx->GetAttr("_blaze_real_device", &blaze_real_deive_);
   if (!st.ok()) {
     VLOG(0) << "Blaze not set device, using " << request_device_;
@@ -187,6 +189,7 @@ Status BlazePredictor::SetDeviceInfo(OpKernelConstruction* ctx) {
       }
       stream_ = dev_info->default_context->stream();
     }
+    VLOG(0) << "same device " << same_device_;
     return Status::OK();
   }
 }
