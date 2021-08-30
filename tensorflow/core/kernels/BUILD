@@ -7475,6 +7475,7 @@ blaze_deps = [
     "//tensorflow/core:lib",
     "//tensorflow/core:lib_internal",
     "//tensorflow/core:lib_proto_parsing",
+    "//tensorflow/core:gpu_runtime",
     "//tensorflow/core:stream_executor",
     "//tensorflow/core:stream_executor_headers_lib",
     "//tensorflow/core/grappler/costs:graph_properties",

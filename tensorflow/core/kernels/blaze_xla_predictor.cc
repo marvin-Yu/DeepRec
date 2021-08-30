@@ -204,13 +204,13 @@ Status BlazeXlaPredictor::PadToStaticCPUToGPU(const std::vector<Tensor>& inputs,
       auto padded_dev_ptr = AsDeviceMemory(padded_ptr, padded_size);
       if (DataTypeIsInteger(inputs[i].dtype())) {
         bool copy_status =
-            stream_->ThenMemZero(&padded_dev_ptr, padded_size).ok();
+            GetStream()->ThenMemZero(&padded_dev_ptr, padded_size).ok();
         if (!copy_status) {
           return errors::Internal("MemZero failed.");
         }
       }
       bool copy_status =
-          stream_->ThenMemcpy(&padded_dev_ptr, input_ptr, input_size).ok();
+          GetStream()->ThenMemcpy(&padded_dev_ptr, input_ptr, input_size).ok();
       if (!copy_status) {
         return errors::Internal("MemcpyH2D for padding inputs failed.");
       }
@@ -333,7 +333,7 @@ Status BlazeXlaPredictor::SliceToDynamicCPU(const std::vector<Tensor>& padded_ou
     auto tmp_dev_ptr = AsDeviceMemory(tmp_ptr, tmp_size);
     Tensor tensor(tmp_tensor.dtype(), tmp_tensor.shape());
     uint8* host_add = (uint8*)GetTensorAddress(&tensor);
-    stream_->ThenMemcpy(host_add, tmp_dev_ptr, tmp_size);
+    GetStream()->ThenMemcpy(host_add, tmp_dev_ptr, tmp_size);
     outputs.push_back(tensor);
   }
   return Status::OK();

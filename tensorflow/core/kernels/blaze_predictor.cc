@@ -1,5 +1,6 @@
 #include "tensorflow/core/common_runtime/gpu/gpu_id.h"
 #include "tensorflow/core/common_runtime/gpu/gpu_id_utils.h"
+#include "tensorflow/core/common_runtime/gpu/gpu_device.h"
 #include "tensorflow/core/kernels/blaze_predictor.h"
 #include "tensorflow/core/platform/stream_executor.h"
 #include "tensorflow/core/platform/protobuf.h"
@@ -167,7 +168,6 @@ void BlazePredictor::SetDeviceInGraphDef(const std::string device_name,
 }
 
 Status BlazePredictor::SetDeviceInfo(OpKernelConstruction* ctx) {
-  VLOG(0) << "SetDeviceInfo called";
   auto st = ctx->GetAttr("_blaze_real_device", &blaze_real_deive_);
   if (!st.ok()) {
     VLOG(0) << "Blaze not set device, using " << request_device_;
@@ -192,21 +192,17 @@ Status BlazePredictor::SetDeviceInfo(OpKernelConstruction* ctx) {
       VLOG(0) << "req_dev: " << req_dev << "; blaze_dev: " << blaze_dev;
       same_device_ = false;
       const DeviceMgr* mgr = nullptr;
-        VLOG(0) << "caixukun sb?";
       TF_RETURN_IF_ERROR(session_->LocalDeviceManager(&mgr));
       if (mgr == nullptr) {
         return errors::Internal("DeviceMgr not found");
       }
-      VLOG(0) << "caixukun1";
       TF_RETURN_IF_ERROR(mgr->LookupDevice(blaze_dev, &blaze_device_));
       auto* dev_info = blaze_device_->tensorflow_gpu_device_info();
       if (!dev_info) {
         return errors::Internal("get gpu device info failed");
       }
-      VLOG(0) << "caixukun2";
-      stream_ = dev_info->default_context->stream();
+      stream_ = GetStream();
     }
-    VLOG(0) << "same device " << same_device_;
     return Status::OK();
   }
 }
@@ -214,7 +210,7 @@ Status BlazePredictor::SetDeviceInfo(OpKernelConstruction* ctx) {
 stream_executor::Stream* BlazePredictor::GetStream() const {
   #if GOOGLE_CUDA
   TfGpuId tf_gpu_id(vgpu_id_);
-  StreamExecutor* se = GpuIdUtil::ExecutorForTfGpuId(tf_gpu_id).ValueOrDie();
+  auto* se = GpuIdUtil::ExecutorForTfGpuId(tf_gpu_id).ValueOrDie();
 
   if (!se) { return nullptr; }
   static tensorflow::GPUOptions gpu_options;
@@ -224,7 +220,7 @@ stream_executor::Stream* BlazePredictor::GetStream() const {
     VLOG(0) << "get stream group failed";
     return nullptr;
   }
-  return stream_group->compute;
+  return sg->compute;
 
   #else
     return nullptr;
