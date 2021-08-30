@@ -223,7 +223,8 @@ bool CUDABlas::Init() {
   gpu::ScopedActivateExecutorContext sac{parent_};
   cublasStatus_t ret = cublasCreate(&blas_);
   if (ret != CUBLAS_STATUS_SUCCESS) {
-    LOG(ERROR) << "failed to create cublas handle: " << ToString(ret);
+    LOG(ERROR) << "failed to create cublas handle: " << ToString(ret)
+               << ", "<< CurrentStackTrace();
     return false;
   }
 

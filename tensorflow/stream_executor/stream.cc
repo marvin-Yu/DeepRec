@@ -2050,7 +2050,7 @@ Stream& ThenBlasImpl<Args...>::Run(
     } else {
       LOG(WARNING)
           << "attempting to perform BLAS operation using StreamExecutor "
-             "without BLAS support";
+             "without BLAS support, " << CurrentStackTrace();
       ok = false;
     }
     if (record_error) {
