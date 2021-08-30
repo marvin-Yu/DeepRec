@@ -1560,9 +1560,6 @@ void ExecutorImpl::InitializePending(const Graph* graph,
 void ExecutorState::RunAsync(Executor::DoneCallback done) {
   const Graph* graph = impl_->graph_.get();
   TaggedNodeSeq ready;
-  string name = std::to_string(graph->num_nodes()) + "__" + std::to_string(
-      graph->num_edges()) + "_graph.pbtxt";
-  WriteTextProto(Env::Default(), name, graph->ToGraphDefDebug());
 
   // Ask the device to fill in the device context map.
   Device* device = impl_->params_.device;

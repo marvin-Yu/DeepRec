@@ -1,4 +1,7 @@
+#include "tensorflow/core/common_runtime/gpu/gpu_id.h"
+#include "tensorflow/core/common_runtime/gpu/gpu_id_utils.h"
 #include "tensorflow/core/kernels/blaze_predictor.h"
+#include "tensorflow/core/platform/stream_executor.h"
 #include "tensorflow/core/platform/protobuf.h"
 
 namespace tensorflow {
@@ -12,7 +15,6 @@ BlazePredictor::BlazePredictor(OpKernelConstruction* ctx) : device_type_(ctx->de
   OP_REQUIRES_OK(ctx, ctx->GetAttr("InT", &input_types_));
   OP_REQUIRES_OK(ctx, ParseAttr(ctx->def().device()));
   ctx_ = ctx;
-  SetDeviceInfo(ctx);
 }
 
 Status BlazePredictor::ParseAttr(const std::string& device) {
@@ -50,9 +52,13 @@ Status BlazePredictor::GenSessionOptions(SessionOptions& options) {
 }
 
 Status BlazePredictor::PrepareGraph(GraphDef& graph_def) {
-
   const char* const kDevicePrefix = "/job:localhost/replica:0/task:0";
-  device_ = kDevicePrefix + request_device_;
+  auto st = ctx_->GetAttr("_blaze_real_device", &blaze_real_deive_);
+  if (!st.ok()) {
+    device_ = kDevicePrefix + request_device_;
+  } else {
+    device_ = kDevicePrefix + blaze_real_deive_;
+  }
 
   LOG(INFO) << "BlazePredictor will use device " << device_;
   graph_def = graph_def_;
@@ -114,6 +120,10 @@ Status BlazePredictor::InitSession() {
 
   TF_RETURN_IF_ERROR(MakeCallable());
   LOG(INFO) << "MakeCallable succ " << this;
+
+  LOG(INFO) << "SetDeviceInfo called";
+  TF_RETURN_IF_ERROR(SetDeviceInfo(ctx_));
+ 
   return Warmup();
 }
 
@@ -177,20 +187,47 @@ Status BlazePredictor::SetDeviceInfo(OpKernelConstruction* ctx) {
     
     auto req_dev = DeviceNameUtils::LocalName(request_device_);
     auto blaze_dev = DeviceNameUtils::LocalName(blaze_real_deive_);
-
+    vgpu_id_ = blaze_name.id;
     if (req_dev != blaze_dev) {
+      VLOG(0) << "req_dev: " << req_dev << "; blaze_dev: " << blaze_dev;
       same_device_ = false;
-      const DeviceMgr* mgr;
+      const DeviceMgr* mgr = nullptr;
+        VLOG(0) << "caixukun sb?";
       TF_RETURN_IF_ERROR(session_->LocalDeviceManager(&mgr));
+      if (mgr == nullptr) {
+        return errors::Internal("DeviceMgr not found");
+      }
+      VLOG(0) << "caixukun1";
       TF_RETURN_IF_ERROR(mgr->LookupDevice(blaze_dev, &blaze_device_));
       auto* dev_info = blaze_device_->tensorflow_gpu_device_info();
       if (!dev_info) {
         return errors::Internal("get gpu device info failed");
       }
+      VLOG(0) << "caixukun2";
       stream_ = dev_info->default_context->stream();
     }
     VLOG(0) << "same device " << same_device_;
     return Status::OK();
   }
+}
+
+stream_executor::Stream* BlazePredictor::GetStream() const {
+  #if GOOGLE_CUDA
+  TfGpuId tf_gpu_id(vgpu_id_);
+  StreamExecutor* se = GpuIdUtil::ExecutorForTfGpuId(tf_gpu_id).ValueOrDie();
+
+  if (!se) { return nullptr; }
+  static tensorflow::GPUOptions gpu_options;
+  auto sg = tensorflow::StreamGroupFactory::Global().GetOrCreate(
+      tf_gpu_id, 0, se, gpu_options);
+  if (!sg) {
+    VLOG(0) << "get stream group failed";
+    return nullptr;
+  }
+  return stream_group->compute;
+
+  #else
+    return nullptr;
+  #endif
 }
 }

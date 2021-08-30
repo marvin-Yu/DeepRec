@@ -47,9 +47,7 @@ class BlazePredictor {
     input_names_(input_names), output_names_(output_names),
     graph_def_(graph_def), request_device_(device),
     blaze_run_options_(options), device_type_(device_string),
-    input_types_(input_types), ctx_(ctx) {
-      SetDeviceInfo(ctx);
-    }
+    input_types_(input_types), ctx_(ctx) {}
 
     virtual ~BlazePredictor() {}
 
@@ -85,6 +83,8 @@ class BlazePredictor {
   bool same_device_;
   Device* blaze_device_;
   stream_executor::Stream* stream_;
+  int vgpu_id_;
+
  private:
   Status ParseAttr(const std::string& device);
   virtual Status PrepareData() {
@@ -100,6 +100,8 @@ class BlazePredictor {
   Status SetDeviceInfo(OpKernelConstruction* ctx);
 
  protected:
+  stream_executor::Stream* GetStream() const;
+
 #define TYPECASE_0(dt, X, Y)                                    \
   case dt: {                                                  \
     return (void*)X->flat<EnumToDataType<dt>::Type>().data(); \
