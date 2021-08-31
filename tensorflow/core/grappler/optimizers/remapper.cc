@@ -210,9 +210,7 @@ struct ContractionWithBiasAndAddActivation {
 #endif  // INTEL_MKL
 
 #ifndef INTEL_MKL
-bool DisableMKL() {
-  return true;
-}
+bool DisableMKL() { return true; }
 #endif  // INTEL_MKL
 
 bool IsInPreserveSet(const RemapperContext& ctx, const NodeDef* node) {
@@ -1159,9 +1157,10 @@ bool FindMatMulWithBiasAndAGelu(RemapperContext* ctx, int node_index,
   SubGraphMatcher<MatchingDirection::kFollowInputs> graph_matcher(
       &(ctx->graph_view));
   std::set<int> remove_node_indices;
-  bool found_match = graph_matcher.GetMatchedNodes(
-      pattern_syntax, ctx->graph_view.GetNode(node_index), node_label_to_index,
-      &remove_node_indices);
+  bool found_match =
+      graph_matcher.GetMatchedNodes(pattern_syntax, ctx->nodes_to_preserve,
+                                    ctx->graph_view.GetNode(node_index),
+                                    node_label_to_index, &remove_node_indices);
 
   // Add additional condition here
   if (found_match) {
