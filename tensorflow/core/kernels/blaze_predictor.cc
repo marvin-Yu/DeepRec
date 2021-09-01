@@ -313,12 +313,13 @@ Status BlazePredictor::CopyTensorGPUToCPU(const std::vector<Tensor>& gpu_tensors
     uint8* tmp_ptr = (uint8*)GetTensorAddress(&tmp_tensor);
     uint64 tmp_size = GetTensorSize(&tmp_tensor);
     auto tmp_dev_ptr = AsDeviceMemory(tmp_ptr, tmp_size);
-    Tensor *tensor;
+    Tensor tensor;
+    AllocatorAttributes alloc_attrs;
+    alloc_attrs.set_on_host(true);
     TF_RETURN_IF_ERROR(ctx->allocate_temp(tmp_tensor.dtype(),
-          tmp_tensor.shape(), tensor));
-    uint8* host_add = (uint8*)GetTensorAddress(tensor);
+          tmp_tensor.shape(), &((*cpu_tensors)[i]), alloc_attrs));
+    uint8* host_add = (uint8*)GetTensorAddress(&((*cpu_tensors)[i]));
     GetStream()->ThenMemcpy(host_add, tmp_dev_ptr, tmp_size);
-    (*cpu_tensors)[i] = *tensor;
 #else
     return errors::Internal("cuda not supported");
 #endif
