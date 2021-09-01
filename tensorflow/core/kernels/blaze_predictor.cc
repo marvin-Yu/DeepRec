@@ -5,6 +5,9 @@
 #include "tensorflow/core/platform/stream_executor.h"
 #include "tensorflow/core/platform/protobuf.h"
 
+#if GOOGLE_CUDA
+#include "tensorflow/core/kernels/gpu_utils.h"
+#endif
 namespace tensorflow {
 const int kBlazeStartStepId = 1024;
 
@@ -149,7 +152,7 @@ void BlazePredictor::Compute(OpKernelContext* ctx) {
   std::vector<Tensor> outputs;
 
   std::vector<Tensor> real_inputs(inputs.size());
-  OP_REQUIRES(ctx, PrepareInputs(inputs, &real_inputs, ctx));
+  OP_REQUIRES_OK(ctx, PrepareInputs(inputs, &real_inputs, ctx));
 
   if (ctx->prof_stats()) {
     RunMetadata metadata;
@@ -160,7 +163,7 @@ void BlazePredictor::Compute(OpKernelContext* ctx) {
   }
 
   std::vector<Tensor> real_outputs(outputs.size());
-  OP_REQUIRES(ctx, PrepareOutputs(outputs, &real_outputs, ctx));
+  OP_REQUIRES_OK(ctx, PrepareOutputs(outputs, &real_outputs, ctx));
   for (int i = 0; i < real_outputs.size(); ++i) {
     ctx->set_output(i, real_outputs[i]);
   }
@@ -202,9 +205,9 @@ Status BlazePredictor::SetDeviceInfo(OpKernelConstruction* ctx) {
     vgpu_id_ = blaze_name.id;
     if (req_dev != blaze_dev) {
       VLOG(0) << "req_dev: " << req_dev << "; blaze_dev: " << blaze_dev;
-      if (blaze_dev.type == "cpu" || blaze_dev.type == "CPU") {
-        return errors::Internal("req_dev.type: ", req_dev.type,
-            ", blaze_dev.type: ", blaze_dev.type, " not supported");
+      if (req_name.type == "cpu" || blaze_name.type == "CPU") {
+        return errors::Internal("req_dev.type: ", req_name.type,
+            ", blaze_dev.type: ", blaze_name.type, " not supported");
       }
       same_device_ = false;
       const DeviceMgr* mgr = nullptr;
@@ -304,6 +307,7 @@ Status BlazePredictor::CopyTensorGPUToCPU(const std::vector<Tensor>& gpu_tensors
     std::vector<Tensor>* cpu_tensors,
     OpKernelContext* ctx) {
   for (int i = 0; i < gpu_tensors.size(); ++i) {
+#if GOOGLE_CUDA
     TensorShape slice_to_shape = gpu_tensors[i].shape();
     const auto& tmp_tensor = gpu_tensors[i];
     uint8* tmp_ptr = (uint8*)GetTensorAddress(&tmp_tensor);
@@ -311,10 +315,13 @@ Status BlazePredictor::CopyTensorGPUToCPU(const std::vector<Tensor>& gpu_tensors
     auto tmp_dev_ptr = AsDeviceMemory(tmp_ptr, tmp_size);
     Tensor *tensor;
     TF_RETURN_IF_ERROR(ctx->allocate_temp(tmp_tensor.dtype(),
-          tmp_tensor.shape(), &tesor));
-    uint8* host_add = (uint8*)GetTensorAddress(&tensor);
+          tmp_tensor.shape(), tensor));
+    uint8* host_add = (uint8*)GetTensorAddress(tensor);
     GetStream()->ThenMemcpy(host_add, tmp_dev_ptr, tmp_size);
-    cpu_tensors[i] = std::move(*tensor);
+    (*cpu_tensors)[i] = *tensor;
+#else
+    return errors::Internal("cuda not supported");
+#endif
   }
   return Status::OK();
 }

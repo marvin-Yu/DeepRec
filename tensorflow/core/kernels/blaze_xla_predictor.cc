@@ -127,13 +127,13 @@ Status BlazeXlaPredictor::Warmup(OpKernelContext* ctx) {
     }
     // Call SessionRun
     std::vector<Tensor> padded_outputs;
-    // status = session_->RunCallable(
-    //     handle_, sliced_inputs, &padded_outputs, nullptr);
+    status = session_->RunCallable(
+         handle_, sliced_inputs, &padded_outputs, nullptr);
     if (!status.ok()) {
       return status;
     }
     auto end_us = Env::Default()->NowMicros();
-    VLOG(0) << "batch " <<  pad_to_batchsize << " has warmuped; const us: " << (end_us - start_us);
+    VLOG(0) << "batch " <<  pad_to_batchsize << " has warmuped; cost us: " << (end_us - start_us);
   }
   return Status::OK();
 }
@@ -436,7 +436,7 @@ void BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
     std::vector<Tensor> outputs;
     std::vector<Tensor> real_inputs(inputs.size());
 
-    OP_REQUIRES(ctx, PrepareInputs(inputs, &real_inputs, ctx));
+    OP_REQUIRES_OK(ctx, PrepareInputs(inputs, &real_inputs, ctx));
     if (ctx->prof_stats()) {
       RunMetadata metadata;
       OP_REQUIRES_OK(ctx, session_->RunCallable(
@@ -449,7 +449,7 @@ void BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
     }
 
     std::vector<Tensor> real_outputs(outputs.size());
-    OP_REQUIRES(ctx, PrepareOutputs(outputs, &real_outputs, ctx));
+    OP_REQUIRES_OK(ctx, PrepareOutputs(outputs, &real_outputs, ctx));
     for (int i = 0; i < real_outputs.size(); ++i) {
       ctx->set_output(i, real_outputs[i]);
     }

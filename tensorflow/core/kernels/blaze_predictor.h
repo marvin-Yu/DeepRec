@@ -114,7 +114,7 @@ class BlazePredictor {
   Status PrepareInputs(const std::vector<Tensor>& inputs,
       std::vector<Tensor>* real_inputs, OpKernelContext* ctx);
 
-  Status PrepareOutouts(const std::vector<Tensor>& outputs,
+  Status PrepareOutputs(const std::vector<Tensor>& outputs,
       std::vector<Tensor>* real_outputs, OpKernelContext* ctx);
 
 #define TYPECASE_0(dt, X, Y)                                    \
