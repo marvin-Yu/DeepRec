@@ -82,6 +82,7 @@ class BlazePredictor {
   std::string blaze_real_deive_;
   bool same_device_;
   Device* blaze_device_;
+  Allocator* blaze_allocator_;
   stream_executor::Stream* stream_;
   int vgpu_id_;
 
@@ -99,8 +100,22 @@ class BlazePredictor {
 
   Status SetDeviceInfo(OpKernelConstruction* ctx);
 
+ private:
+  const char* const kBlazeRealDevice = "_blaze_real_device";
+  Status CopyTensorCPUToGPU(const std::vector<Tensor>& inputs,
+                            std::vector<Tensor>* real_inputs,
+                            OpKernelContext* ctx);
+  Status CopyTensorGPUToCPU(const std::vector<Tensor>& gpu_tensors,
+                            std::vector<Tensor>* cpu_tensors,
+                            OpKernelContext* ctx);
+
  protected:
   stream_executor::Stream* GetStream() const;
+  Status PrepareInputs(const std::vector<Tensor>& inputs,
+      std::vector<Tensor>* real_inputs, OpKernelContext* ctx);
+
+  Status PrepareOutouts(const std::vector<Tensor>& outputs,
+      std::vector<Tensor>* real_outputs, OpKernelContext* ctx);
 
 #define TYPECASE_0(dt, X, Y)                                    \
   case dt: {                                                  \

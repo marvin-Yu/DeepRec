@@ -92,8 +92,14 @@ Status BlazeXlaPredictor::Warmup(OpKernelContext* ctx) {
   }
   auto max_bs = batch_sizes_[batch_sizes_.size() - 1];
   std::vector<Tensor> padded_inputs(num_inputs);
-  Status status = PadToStatic(inputs, &padded_inputs,
-                              batchsize, max_bs, ctx);
+  Status status;
+  if (same_device_) {
+    status = PadToStatic(inputs, &padded_inputs,
+        batchsize, max_bs, ctx);
+  } else {
+    status = PadToStaticCPUToGPU(inputs, &padded_inputs,
+        batchsize, max_bs, ctx);
+  }
   if (!status.ok()) {
     return status;
   }
@@ -121,8 +127,8 @@ Status BlazeXlaPredictor::Warmup(OpKernelContext* ctx) {
     }
     // Call SessionRun
     std::vector<Tensor> padded_outputs;
-    status = session_->RunCallable(
-        handle_, sliced_inputs, &padded_outputs, nullptr);
+    // status = session_->RunCallable(
+    //     handle_, sliced_inputs, &padded_outputs, nullptr);
     if (!status.ok()) {
       return status;
     }
@@ -184,13 +190,8 @@ Status BlazeXlaPredictor::PadToStaticCPUToGPU(const std::vector<Tensor>& inputs,
     int64 first_dim = shape.dim_size(0);
     first_dim = (first_dim == 1)? 1 : pad_to_batchsize;
     pad_to_shape.set_dim(0, first_dim);
-    Status allocate_status =
-        ctx->allocate_temp(inputs[i].dtype(),
-                           pad_to_shape,
-                           &(*padded_inputs)[i], alloc_attrs);
-    if (!allocate_status.ok()) {
-      return allocate_status;
-    }
+    Tensor padded_tensor(blaze_allocator_, inputs[i].dtype(), pad_to_shape);
+    (*padded_inputs)[i] = padded_tensor;
     const uint8* input_ptr = (uint8*)GetTensorAddress(&inputs[i]);
     uint8* padded_ptr = (uint8*)GetTensorAddress(&(*padded_inputs)[i]);
     uint64 input_size = GetTensorSize(&inputs[i]);
@@ -338,6 +339,7 @@ Status BlazeXlaPredictor::SliceToDynamicCPU(const std::vector<Tensor>& padded_ou
   }
   return Status::OK();
 }
+
 void BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
   // Infer inputs' batchsize
 
@@ -429,22 +431,27 @@ void BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
       ctx->set_output(i, outputs[i]);
     }
   } else {
-    // Call SessionRun
     VLOG(1) << "Skip padding: input bathsize = " << batchsize
             << ", input pad_to_batchsize = " << pad_to_batchsize;
     std::vector<Tensor> outputs;
+    std::vector<Tensor> real_inputs(inputs.size());
+
+    OP_REQUIRES(ctx, PrepareInputs(inputs, &real_inputs, ctx));
     if (ctx->prof_stats()) {
       RunMetadata metadata;
       OP_REQUIRES_OK(ctx, session_->RunCallable(
-              handle_, inputs, &outputs, &metadata));
+              handle_, real_inputs, &outputs, &metadata));
       ctx->prof_stats()->flops += metadata.prof_stats().flops();
       ctx->traced_infos()->prof_stats->flops += metadata.prof_stats().flops();
     } else {
       OP_REQUIRES_OK(ctx, session_->RunCallable(
-              handle_, inputs, &outputs, nullptr));
+              handle_, real_inputs, &outputs, nullptr));
     }
-    for (int i = 0; i < outputs.size(); ++i) {
-      ctx->set_output(i, outputs[i]);
+
+    std::vector<Tensor> real_outputs(outputs.size());
+    OP_REQUIRES(ctx, PrepareOutputs(outputs, &real_outputs, ctx));
+    for (int i = 0; i < real_outputs.size(); ++i) {
+      ctx->set_output(i, real_outputs[i]);
     }
   }
   return;

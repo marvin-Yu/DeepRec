@@ -54,10 +54,15 @@ Status BlazePredictor::GenSessionOptions(SessionOptions& options) {
 
 Status BlazePredictor::PrepareGraph(GraphDef& graph_def) {
   const char* const kDevicePrefix = "/job:localhost/replica:0/task:0";
-  auto st = ctx_->GetAttr("_blaze_real_device", &blaze_real_deive_);
+  const char* const kBlazeDevicePrefix = "/device:";
+  auto st = ctx_->GetAttr(kBlazeRealDevice, &blaze_real_deive_);
   if (!st.ok()) {
     device_ = kDevicePrefix + request_device_;
   } else {
+    if (blaze_real_deive_.rfind(kBlazeDevicePrefix, 0) != 0) {
+      return errors::Internal("node attr ", kBlazeRealDevice,
+          " : ", blaze_real_deive_, " not startswith ", kBlazeDevicePrefix);
+    }
     device_ = kDevicePrefix + blaze_real_deive_;
   }
 
@@ -122,7 +127,6 @@ Status BlazePredictor::InitSession() {
   TF_RETURN_IF_ERROR(MakeCallable());
   LOG(INFO) << "MakeCallable succ " << this;
 
-  LOG(INFO) << "SetDeviceInfo called";
   TF_RETURN_IF_ERROR(SetDeviceInfo(ctx_));
  
   return Warmup();
@@ -143,15 +147,22 @@ void BlazePredictor::Compute(OpKernelContext* ctx) {
   }
 
   std::vector<Tensor> outputs;
+
+  std::vector<Tensor> real_inputs(inputs.size());
+  OP_REQUIRES(ctx, PrepareInputs(inputs, &real_inputs, ctx));
+
   if (ctx->prof_stats()) {
     RunMetadata metadata;
-    OP_REQUIRES_OK(ctx, session_->RunCallable(handle_, inputs, &outputs, &metadata));
+    OP_REQUIRES_OK(ctx, session_->RunCallable(handle_, real_inputs, &outputs, &metadata));
     ctx->prof_stats()->flops += metadata.prof_stats().flops();
   } else {
-    OP_REQUIRES_OK(ctx, session_->RunCallable(handle_, inputs, &outputs, nullptr));
+    OP_REQUIRES_OK(ctx, session_->RunCallable(handle_, real_inputs, &outputs, nullptr));
   }
-  for (int i = 0; i < outputs.size(); ++i) {
-    ctx->set_output(i, outputs[i]);
+
+  std::vector<Tensor> real_outputs(outputs.size());
+  OP_REQUIRES(ctx, PrepareOutputs(outputs, &real_outputs, ctx));
+  for (int i = 0; i < real_outputs.size(); ++i) {
+    ctx->set_output(i, real_outputs[i]);
   }
   return;
 }
@@ -168,7 +179,7 @@ void BlazePredictor::SetDeviceInGraphDef(const std::string device_name,
 }
 
 Status BlazePredictor::SetDeviceInfo(OpKernelConstruction* ctx) {
-  auto st = ctx->GetAttr("_blaze_real_device", &blaze_real_deive_);
+  auto st = ctx->GetAttr(kBlazeRealDevice, &blaze_real_deive_);
   if (!st.ok()) {
     VLOG(0) << "Blaze not set device, using " << request_device_;
     same_device_ = true;
@@ -187,9 +198,14 @@ Status BlazePredictor::SetDeviceInfo(OpKernelConstruction* ctx) {
     
     auto req_dev = DeviceNameUtils::LocalName(request_device_);
     auto blaze_dev = DeviceNameUtils::LocalName(blaze_real_deive_);
+
     vgpu_id_ = blaze_name.id;
     if (req_dev != blaze_dev) {
       VLOG(0) << "req_dev: " << req_dev << "; blaze_dev: " << blaze_dev;
+      if (blaze_dev.type == "cpu" || blaze_dev.type == "CPU") {
+        return errors::Internal("req_dev.type: ", req_dev.type,
+            ", blaze_dev.type: ", blaze_dev.type, " not supported");
+      }
       same_device_ = false;
       const DeviceMgr* mgr = nullptr;
       TF_RETURN_IF_ERROR(session_->LocalDeviceManager(&mgr));
@@ -201,7 +217,16 @@ Status BlazePredictor::SetDeviceInfo(OpKernelConstruction* ctx) {
       if (!dev_info) {
         return errors::Internal("get gpu device info failed");
       }
+      AllocatorAttributes alloc_attrs;
+      alloc_attrs.set_on_host(false);
+      blaze_allocator_ = blaze_device_->GetAllocator(alloc_attrs);
+      if (!blaze_allocator_) {
+        return errors::Internal("get gpu allocator failed");
+      }
       stream_ = GetStream();
+      if (!stream_) {
+        return errors::Internal("get stream_ for ", blaze_device_, " failed" );
+      }
     }
     return Status::OK();
   }
@@ -225,5 +250,72 @@ stream_executor::Stream* BlazePredictor::GetStream() const {
   #else
     return nullptr;
   #endif
+}
+
+Status BlazePredictor::PrepareInputs(const std::vector<Tensor>& inputs,
+  std::vector<Tensor>* real_inputs, OpKernelContext* ctx) {
+  if (!same_device_) {
+    return CopyTensorCPUToGPU(inputs, real_inputs, ctx);
+  }
+  *real_inputs = inputs;
+  return Status::OK();
+}
+
+Status BlazePredictor::CopyTensorCPUToGPU(const std::vector<Tensor>& inputs,
+    std::vector<Tensor>* real_inputs,
+    OpKernelContext* ctx) {
+
+  for (int i = 0; i < inputs.size(); ++i) {
+    Tensor copyed_tensor(blaze_allocator_, inputs[i].dtype(), inputs[i].shape());
+    (*real_inputs)[i] = copyed_tensor;
+
+    const uint8* input_ptr = (uint8*)GetTensorAddress(&inputs[i]);
+    uint8* real_ptr = (uint8*)GetTensorAddress(&(*real_inputs)[i]);
+    uint64 input_size = GetTensorSize(&inputs[i]);
+    uint64 real_size = GetTensorSize(&(*real_inputs)[i]);
+    if (input_ptr == nullptr || real_ptr == nullptr) {
+      return errors::Internal(
+          "Error when getting input address or size");
+    }
+#if GOOGLE_CUDA
+      auto real_dev_ptr = AsDeviceMemory(real_ptr, real_size);
+      bool copy_status =
+          GetStream()->ThenMemcpy(&real_dev_ptr, input_ptr, input_size).ok();
+      if (!copy_status) {
+        return errors::Internal("MemcpyH2D for padding inputs failed.");
+      }
+#else
+      return errors::Internal("CUDA not suaported");
+#endif
+  }
+  return Status::OK();
+}
+
+Status BlazePredictor::PrepareOutputs(const std::vector<Tensor>& outputs,
+  std::vector<Tensor>* real_outputs, OpKernelContext* ctx) {
+  if (!same_device_) {
+    return CopyTensorGPUToCPU(outputs, real_outputs, ctx);
+  }
+  *real_outputs = outputs;
+  return Status::OK();
+}
+
+Status BlazePredictor::CopyTensorGPUToCPU(const std::vector<Tensor>& gpu_tensors,
+    std::vector<Tensor>* cpu_tensors,
+    OpKernelContext* ctx) {
+  for (int i = 0; i < gpu_tensors.size(); ++i) {
+    TensorShape slice_to_shape = gpu_tensors[i].shape();
+    const auto& tmp_tensor = gpu_tensors[i];
+    uint8* tmp_ptr = (uint8*)GetTensorAddress(&tmp_tensor);
+    uint64 tmp_size = GetTensorSize(&tmp_tensor);
+    auto tmp_dev_ptr = AsDeviceMemory(tmp_ptr, tmp_size);
+    Tensor *tensor;
+    TF_RETURN_IF_ERROR(ctx->allocate_temp(tmp_tensor.dtype(),
+          tmp_tensor.shape(), &tesor));
+    uint8* host_add = (uint8*)GetTensorAddress(&tensor);
+    GetStream()->ThenMemcpy(host_add, tmp_dev_ptr, tmp_size);
+    cpu_tensors[i] = std::move(*tensor);
+  }
+  return Status::OK();
 }
 }
