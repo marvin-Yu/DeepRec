@@ -75,6 +75,13 @@ ThreadPoolDevice::ThreadPoolDevice(const SessionOptions& options,
 ThreadPoolDevice::~ThreadPoolDevice() {}
 
 Allocator* ThreadPoolDevice::GetAllocator(AllocatorAttributes attr) {
+  if (attr.gpu_compatible()) {
+    GPUProcessState* ps = GPUProcessState::singleton();
+    if (ps) {
+      return ps->GetGpuHostAllocator(0);
+    }
+    return allocator_;
+  }
   return allocator_;
 }
 
