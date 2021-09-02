@@ -42,11 +42,6 @@ declare -a install_targets=("tensorflow/libtensorflow_framework.so"
                             "tensorflow/core/libtestlib.so"
                             "tensorflow/core/kernels/libops_testutil.so"
 )
-if [ ! -f ".tf_configure.bazelrc.cuda10" ]; then
-    cp .tf_configure.bazelrc.cuda10 .tf_configure.bazelrc
-else
-    python ./configure.py
-fi
 #if [ ! -f ".tf_configure.bazelrc" ]; then
 #    python ./configure.py
 #fi
