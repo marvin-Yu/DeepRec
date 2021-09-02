@@ -60,7 +60,7 @@ class BlazeXlaOp : public AsyncOpKernel {
   std::atomic<int> benchmark_counter_;
   int wait_ns_;
 
-  static tensorflow::thread::ThreadPool pool_;
+  tensorflow::thread::ThreadPool pool_;
 };
 
 int BlazeThreadsCount() {
@@ -71,7 +71,7 @@ int BlazeThreadsCount() {
   return (int)dense_threads_num;
 }
 
-tensorflow::thread::ThreadPool BlazeXlaOp::pool_(Env::Default(), "blaze_kernel", BlazeThreadsCount());
+//tensorflow::thread::ThreadPool BlazeXlaOp::pool_(Env::Default(), "blaze_kernel", BlazeThreadsCount());
 
 void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
   auto config = blaze_run_options_.mutable_config_proto();
@@ -107,7 +107,7 @@ void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
 }
 
 BlazeXlaOp::BlazeXlaOp(OpKernelConstruction* context)
-    : AsyncOpKernel(context), device_type_(context->device_type().type()) {
+    : AsyncOpKernel(context), device_type_(context->device_type().type()), pool_(Env::Default(), "blaze_kernel", 2) {
   OP_REQUIRES_OK(context, context->GetAttr("input_names", &input_names_));
   OP_REQUIRES_OK(context, context->GetAttr("output_names", &output_names_));
   OP_REQUIRES_OK(context, context->GetAttr("graph_def", &graph_def_path_));

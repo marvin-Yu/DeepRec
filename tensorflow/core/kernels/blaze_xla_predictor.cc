@@ -332,7 +332,12 @@ Status BlazeXlaPredictor::SliceToDynamicCPU(const std::vector<Tensor>& padded_ou
     uint8* tmp_ptr = (uint8*)GetTensorAddress(&tmp_tensor);
     uint64 tmp_size = GetTensorSize(&tmp_tensor);
     auto tmp_dev_ptr = AsDeviceMemory(tmp_ptr, tmp_size);
-    Tensor tensor(tmp_tensor.dtype(), tmp_tensor.shape());
+    Tensor tensor;
+    AllocatorAttributes alloc_attrs;
+    alloc_attrs.set_on_host(true);
+    alloc_attrs.set_gpu_compatible(true);
+    TF_RETURN_IF_ERROR(ctx->allocate_temp(tmp_tensor.dtype(),
+          tmp_tensor.shape(), &tensor, alloc_attrs));
     uint8* host_add = (uint8*)GetTensorAddress(&tensor);
     GetStream()->ThenMemcpy(host_add, tmp_dev_ptr, tmp_size);
     outputs.push_back(tensor);
