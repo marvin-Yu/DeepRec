@@ -182,8 +182,6 @@ Status BlazeXlaPredictor::PadToStaticCPUToGPU(const std::vector<Tensor>& inputs,
   for (int i = 0; i < inputs.size(); ++i) {
     VLOG(1) << "Shape of input " << i << ": "
             << inputs[i].shape().DebugString();
-    AllocatorAttributes alloc_attrs;
-    alloc_attrs.set_on_host(false);
     TensorShape pad_to_shape;
     const TensorShape& shape = inputs[i].shape();
     pad_to_shape = shape;
