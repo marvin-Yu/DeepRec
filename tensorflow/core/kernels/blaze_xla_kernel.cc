@@ -63,17 +63,17 @@ class BlazeXlaOp : public AsyncOpKernel {
 
   tensorflow::thread::ThreadPool pool_;
   std::atomic<int> running_counter_;
+  const int kBlazeRunningCount_;
 };
 
 int BlazeThreadsCount() {
-  const int kDefaultDenseThreadsNum = 8;
+  const int kDefaultDenseThreadsNum = 2;
   int64 dense_threads_num;
   ReadInt64FromEnvVar("BLAZE_THREADS_NUM", kDefaultDenseThreadsNum, &dense_threads_num);
   VLOG(0) << "blaze set thread pool size " << dense_threads_num;
   return (int)dense_threads_num;
 }
 
-//tensorflow::thread::ThreadPool BlazeXlaOp::pool_(Env::Default(), "blaze_kernel", BlazeThreadsCount());
 
 void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
   auto config = blaze_run_options_.mutable_config_proto();
@@ -109,7 +109,9 @@ void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
 }
 
 BlazeXlaOp::BlazeXlaOp(OpKernelConstruction* context)
-    : AsyncOpKernel(context), device_type_(context->device_type().type()), pool_(Env::Default(), "blaze_kernel", 2), running_counter_(0) {
+    : AsyncOpKernel(context), device_type_(context->device_type().type()), 
+    pool_(Env::Default(), "blaze_kernel", BlazeThreadsCount()), running_counter_(0),
+    kBlazeRunningCount_(BlazeThreadsCount()) {
   OP_REQUIRES_OK(context, context->GetAttr("input_names", &input_names_));
   OP_REQUIRES_OK(context, context->GetAttr("output_names", &output_names_));
   OP_REQUIRES_OK(context, context->GetAttr("graph_def", &graph_def_path_));
@@ -276,18 +278,15 @@ int BlazeXlaOp::GetBatchSizeUnsafe(OpKernelContext* context) {
 }
 
 void BlazeXlaOp::Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64 begin) {
-  std::function<void(OpKernelContext*, const DoneCallback&, uint64)> func = std::bind(&BlazeXlaOp::Schedule, this,
-      std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
-
-  if (running_counter_ >= 2) {
+  if (running_counter_ >= kBlazeRunningCount_) {
     auto schedule_time = env_->NowNanos();
     OP_REQUIRES_ASYNC(ctx, schedule_time - begin <= wait_ns_,
         errors::Internal("blaze wait too long ", schedule_time - begin),
         done);
-    auto func1 = [this, ctx, done, begin] {
+    auto schedule_func = [this, ctx, done, begin] {
       this->Schedule(ctx, done, begin);
     };
-    pool_.Schedule(func1);
+    pool_.Schedule(schedule_func);
   } else {
   pool_.Schedule([this, ctx, done, begin] {
     auto schedule_time = env_->NowNanos();

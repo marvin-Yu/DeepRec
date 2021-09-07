@@ -16,8 +16,6 @@ limitations under the License.
 #include "third_party/gpus/cuda/include/cublasLt.h"
 #include "third_party/gpus/cuda/include/cublas_v2.h"
 #include "third_party/gpus/cuda/include/cuda.h"
-#include "tensorflow/stream_executor/platform/port.h"
-#include "tensorflow/stream_executor/lib/stacktrace.h"
 
 #define SE_CUDA_DATA_HALF CUDA_R_16F
 
@@ -225,8 +223,7 @@ bool CUDABlas::Init() {
   gpu::ScopedActivateExecutorContext sac{parent_};
   cublasStatus_t ret = cublasCreate(&blas_);
   if (ret != CUBLAS_STATUS_SUCCESS) {
-    LOG(ERROR) << "failed to create cublas handle: " << ToString(ret)
-               << ", "<< port::CurrentStackTrace();
+    LOG(ERROR) << "failed to create cublas handle: " << ToString(ret);
     return false;
   }
 
