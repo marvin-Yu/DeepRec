@@ -288,14 +288,15 @@ void BlazeXlaOp::Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64
     };
     pool_.Schedule(schedule_func);
   } else {
+ ++running_counter_;
   pool_.Schedule([this, ctx, done, begin] {
     auto schedule_time = env_->NowNanos();
     if (wait_ns_ > 0) {
+	if (schedule_time - begin > wait_ns_) { --running_counter_;}
       OP_REQUIRES_ASYNC(ctx, schedule_time - begin <= wait_ns_,
                         errors::Internal("blaze wait too long ", schedule_time - begin),
                         done);
     }
-    ++running_counter_;
     if (!ctx->traced_infos()) {
       predictor_->Compute(ctx);
     } else {
@@ -312,6 +313,9 @@ void BlazeXlaOp::Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64
     }
 
     --running_counter_;
+   if (env_->NowNanos() - begin > 15000000) {
+    VLOG(0) << "caixukun cost: " << env_->NowNanos() - begin << " runn " << running_counter_ << "  " << env_->NowNanos() - schedule_time;
+   }
     done();
   });
   } 

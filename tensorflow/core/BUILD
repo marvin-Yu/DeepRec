@@ -3413,6 +3413,7 @@ tf_cuda_library(
         "//tensorflow/core/profiler/lib:traceme",
         "@com_google_absl//absl/container:flat_hash_set",
     ],
+	linkopts = ["-L/usr/local/cuda-10.1/lib64 -lnvToolsExt"],
     alwayslink = 1,
 )
 
