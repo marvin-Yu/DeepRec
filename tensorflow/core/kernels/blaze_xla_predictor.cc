@@ -186,7 +186,9 @@ Status BlazeXlaPredictor::PadToStaticCPUToGPU(const std::vector<Tensor>& inputs,
     const TensorShape& shape = inputs[i].shape();
     pad_to_shape = shape;
     int64 first_dim = shape.dim_size(0);
-    first_dim = (first_dim == 1)? 1 : pad_to_batchsize;
+    if (!skip_padding_[i]) {
+      first_dim = (first_dim == 1) ? 1 : pad_to_batchsize;
+    }
     pad_to_shape.set_dim(0, first_dim);
     Tensor padded_tensor(blaze_allocator_, inputs[i].dtype(), pad_to_shape);
     (*padded_inputs)[i] = padded_tensor;
