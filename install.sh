@@ -25,9 +25,6 @@ export TF_NEED_MPI=0
 export CC_OPT_FLAGS="-march=native"
 export TF_SET_ANDROID_WORKSPACE=0
 
-dep_create rpm/t-ads-tensorflow-cc-lib.deps
-cp .dep_create/var/home/a/mklml/lib/* $EXTERNAL_DIR/usr/local/lib64/
-
 declare -a targets=("//tensorflow:libtensorflow_framework.so"
                     "//tensorflow:libtensorflow_cc.so"
                     "//tensorflow/core:test"
@@ -42,11 +39,6 @@ declare -a install_targets=("tensorflow/libtensorflow_framework.so"
                             "tensorflow/core/libtestlib.so"
                             "tensorflow/core/kernels/libops_testutil.so"
 )
-if [ -f ".tf_configure.bazelrc.cuda10" ]; then
-    cp .tf_configure.bazelrc.cuda10 .tf_configure.bazelrc
-else
-    python ./configure.py
-fi
 #if [ ! -f ".tf_configure.bazelrc" ]; then
 #    python ./configure.py
 #fi

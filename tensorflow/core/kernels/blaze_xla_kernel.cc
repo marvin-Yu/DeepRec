@@ -58,6 +58,7 @@ class BlazeXlaOp : public AsyncOpKernel {
   Env* env_;
   mutex tracing_mu_;
   mutex benchmark_mu_;
+  mutex running_mu_;
   std::atomic<int> benchmark_counter_;
   int wait_ns_;
 
@@ -110,8 +111,8 @@ void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
 
 BlazeXlaOp::BlazeXlaOp(OpKernelConstruction* context)
     : AsyncOpKernel(context), device_type_(context->device_type().type()), 
-    pool_(Env::Default(), "blaze_kernel", BlazeThreadsCount()), running_counter_(0),
-    kBlazeRunningCount_(BlazeThreadsCount()) {
+    pool_(Env::Default(), "blaze_kernel", 8), running_counter_(0),
+    kBlazeRunningCount_(1) {
   OP_REQUIRES_OK(context, context->GetAttr("input_names", &input_names_));
   OP_REQUIRES_OK(context, context->GetAttr("output_names", &output_names_));
   OP_REQUIRES_OK(context, context->GetAttr("graph_def", &graph_def_path_));
@@ -279,6 +280,11 @@ int BlazeXlaOp::GetBatchSizeUnsafe(OpKernelContext* context) {
 
 void BlazeXlaOp::Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64 begin) {
   if (running_counter_ >= kBlazeRunningCount_) {
+    VLOG(0) << "caixukun return dir";
+    OP_REQUIRES_ASYNC(ctx, false,
+        errors::Internal("caixukun zou"),
+        done);
+    
     auto schedule_time = env_->NowNanos();
     OP_REQUIRES_ASYNC(ctx, schedule_time - begin <= wait_ns_,
         errors::Internal("blaze wait too long ", schedule_time - begin),
@@ -288,37 +294,37 @@ void BlazeXlaOp::Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64
     };
     pool_.Schedule(schedule_func);
   } else {
- ++running_counter_;
-  pool_.Schedule([this, ctx, done, begin] {
-    auto schedule_time = env_->NowNanos();
-    if (wait_ns_ > 0) {
-	if (schedule_time - begin > wait_ns_) { --running_counter_;}
+        ++running_counter_;
+      pool_.Schedule([this, ctx, done, begin] {
+      auto schedule_time = env_->NowNanos();
+      if (wait_ns_ > 0) {
+      if (schedule_time - begin > wait_ns_) { --running_counter_;}
       OP_REQUIRES_ASYNC(ctx, schedule_time - begin <= wait_ns_,
-                        errors::Internal("blaze wait too long ", schedule_time - begin),
-                        done);
-    }
-    if (!ctx->traced_infos()) {
+        errors::Internal("blaze wait too long ", schedule_time - begin),
+        done);
+      }
+      if (!ctx->traced_infos()) {
       predictor_->Compute(ctx);
-    } else {
+      } else {
       auto start_ns = env_->NowNanos();
       predictor_->Compute(ctx);
       auto end_ns = env_->NowNanos();
       if (ctx->traced_infos()->enable_prof_stats) {
-        ctx->traced_infos()->prof_stats->blaze_latency_ms = ((end_ns - start_ns) / 1000000.0f);
+      ctx->traced_infos()->prof_stats->blaze_latency_ms = ((end_ns - start_ns) / 1000000.0f);
       }
 
       if (ctx->traced_infos()->enable_trace_tensors) {
-        TraceTensors(ctx);
+      TraceTensors(ctx);
       }
-    }
+      }
 
-    --running_counter_;
-   if (env_->NowNanos() - begin > 15000000) {
-    VLOG(0) << "caixukun cost: " << env_->NowNanos() - begin << " runn " << running_counter_ << "  " << env_->NowNanos() - schedule_time;
-   }
-    done();
+      --running_counter_;
+      if (env_->NowNanos() - begin > 15000000) {
+        VLOG(0) << "caixukun cost: " << env_->NowNanos() - begin << " runn " << running_counter_ << "  " << env_->NowNanos() - schedule_time;
+      }
+      done();
   });
-  } 
+} 
 }
 
 REGISTER_KERNEL_BUILDER(Name("BlazeXlaOp").Device(DEVICE_CPU), BlazeXlaOp);
