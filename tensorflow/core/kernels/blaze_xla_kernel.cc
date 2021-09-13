@@ -65,6 +65,7 @@ class BlazeXlaOp : public AsyncOpKernel {
   tensorflow::thread::ThreadPool pool_;
   std::atomic<int> running_counter_;
   const int kBlazeRunningCount_;
+  const int kScheduleFactor_ = 2;
 };
 
 int BlazeThreadsCount() {
@@ -111,8 +112,8 @@ void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
 
 BlazeXlaOp::BlazeXlaOp(OpKernelConstruction* context)
     : AsyncOpKernel(context), device_type_(context->device_type().type()), 
-    pool_(Env::Default(), "blaze_kernel", 8), running_counter_(0),
-    kBlazeRunningCount_(1) {
+    pool_(Env::Default(), "blaze_kernel", BlazeThreadsCount() * kScheduleFactor_), running_counter_(0),
+    kBlazeRunningCount_(BlazeThreadsCount()) {
   OP_REQUIRES_OK(context, context->GetAttr("input_names", &input_names_));
   OP_REQUIRES_OK(context, context->GetAttr("output_names", &output_names_));
   OP_REQUIRES_OK(context, context->GetAttr("graph_def", &graph_def_path_));
@@ -280,11 +281,6 @@ int BlazeXlaOp::GetBatchSizeUnsafe(OpKernelContext* context) {
 
 void BlazeXlaOp::Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64 begin) {
   if (running_counter_ >= kBlazeRunningCount_) {
-    VLOG(0) << "caixukun return dir";
-    OP_REQUIRES_ASYNC(ctx, false,
-        errors::Internal("caixukun zou"),
-        done);
-    
     auto schedule_time = env_->NowNanos();
     OP_REQUIRES_ASYNC(ctx, schedule_time - begin <= wait_ns_,
         errors::Internal("blaze wait too long ", schedule_time - begin),
@@ -294,7 +290,7 @@ void BlazeXlaOp::Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64
     };
     pool_.Schedule(schedule_func);
   } else {
-        ++running_counter_;
+      ++running_counter_;
       pool_.Schedule([this, ctx, done, begin] {
       auto schedule_time = env_->NowNanos();
       if (wait_ns_ > 0) {
