@@ -112,7 +112,7 @@ void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
 
 BlazeXlaOp::BlazeXlaOp(OpKernelConstruction* context)
     : AsyncOpKernel(context), device_type_(context->device_type().type()), 
-    pool_(Env::Default(), "blaze_kernel", BlazeThreadsCount() * kScheduleFactor_), running_counter_(0),
+    pool_(Env::Default(), "blaze_kernel", BlazeThreadsCount() * 2), running_counter_(0),
     kBlazeRunningCount_(BlazeThreadsCount()) {
   OP_REQUIRES_OK(context, context->GetAttr("input_names", &input_names_));
   OP_REQUIRES_OK(context, context->GetAttr("output_names", &output_names_));
