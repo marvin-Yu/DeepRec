@@ -18,7 +18,6 @@ limitations under the License.
 #include <atomic>
 #include <string>
 #include <vector>
-#include "nvToolsExt.h"
 
 #include "absl/container/flat_hash_set.h"
 #include "tensorflow/core/common_runtime/collective_executor_mgr.h"
@@ -2402,8 +2401,6 @@ class DirectSession::RunCallableCallFrame : public CallFrameInterface {
     std::vector<Tensor>* fetch_tensors, RunMetadata* run_metadata,
     const thread::ThreadPoolOptions& threadpool_options,
     uint64_t before_padding, uint64_t after_padding) {
-  string pp = "callable_" + std::to_string(Env::Default()->NowNanos());
-
   TF_RETURN_IF_ERROR(CheckNotClosed());
   TF_RETURN_IF_ERROR(CheckGraphCreated("RunCallable()"));
   direct_session_runs->GetCell()->IncrementBy(1);
@@ -2476,6 +2473,7 @@ class DirectSession::RunCallableCallFrame : public CallFrameInterface {
     }
     metrics::RecordGraphOutputTensors(output_size);
   }
+
   return Status::OK();
 }
 

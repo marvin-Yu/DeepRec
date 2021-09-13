@@ -140,7 +140,6 @@ cc_library(
         "//tensorflow/core:core_cpu_internal",
         "//tensorflow/core:lib",
     ],
-linkopts = ["-L/usr/local/cuda-10.1/lib64 -lnvToolsExt"],
     alwayslink = 1,
 )
 

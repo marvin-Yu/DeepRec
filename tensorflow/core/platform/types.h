@@ -41,10 +41,12 @@ struct ProfStats {
   std::atomic<uint64> flops;
   std::atomic<float> blaze_latency_ms;
   uint64 tao_op_calls;
+  std::atomic<float> blaze_wait_ms;
   ProfStats() {
     flops = 0;
     blaze_latency_ms = 0;
     tao_op_calls = 0;
+    blaze_wait_ms = 0;
   }
 };
 

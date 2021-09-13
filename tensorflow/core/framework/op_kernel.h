@@ -1932,6 +1932,11 @@ struct UserTracedInfos {
           metrics->set_key("blaze_flops");
           metrics->set_value(stats.flops);
         }
+        {
+          auto metrics = run_metadata->mutable_blaze_metrics()->Add();
+          metrics->set_key("blaze_wait_ms");
+          metrics->set_value(stats.blaze_wait_ms);
+        }
       }
       if (traced_tensors) {
         for (int i = 0; i < traced_tensors->name_tensors_size(); ++i) {

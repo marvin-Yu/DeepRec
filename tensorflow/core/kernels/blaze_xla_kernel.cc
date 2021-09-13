@@ -280,44 +280,48 @@ int BlazeXlaOp::GetBatchSizeUnsafe(OpKernelContext* context) {
 }
 
 void BlazeXlaOp::Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64 begin) {
+  auto schedule_func = [this, ctx, done, begin] {
+    this->Schedule(ctx, done, begin);
+  };
   if (running_counter_ >= kBlazeRunningCount_) {
     auto schedule_time = env_->NowNanos();
     OP_REQUIRES_ASYNC(ctx, schedule_time - begin <= wait_ns_,
         errors::Internal("blaze wait too long ", schedule_time - begin),
         done);
-    auto schedule_func = [this, ctx, done, begin] {
-      this->Schedule(ctx, done, begin);
-    };
-    pool_.Schedule(schedule_func);
+    pool_.Schedule(std::move(schedule_func));
   } else {
+    {
+      mutex_lock l(running_mu_);
+      if (running_counter_ >= kBlazeRunningCount_) {
+        pool_.Schedule(std::move(schedule_func));
+        return;
+      }
       ++running_counter_;
-      pool_.Schedule([this, ctx, done, begin] {
+    }
+    pool_.Schedule([this, ctx, done, begin] {
       auto schedule_time = env_->NowNanos();
       if (wait_ns_ > 0) {
-      if (schedule_time - begin > wait_ns_) { --running_counter_;}
-      OP_REQUIRES_ASYNC(ctx, schedule_time - begin <= wait_ns_,
-        errors::Internal("blaze wait too long ", schedule_time - begin),
-        done);
+        if (schedule_time - begin > wait_ns_) { --running_counter_;}
+        OP_REQUIRES_ASYNC(ctx, schedule_time - begin <= wait_ns_,
+                          errors::Internal("blaze wait too long ", schedule_time - begin),
+                          done);
       }
       if (!ctx->traced_infos()) {
-      predictor_->Compute(ctx);
+        predictor_->Compute(ctx);
       } else {
-      auto start_ns = env_->NowNanos();
-      predictor_->Compute(ctx);
-      auto end_ns = env_->NowNanos();
-      if (ctx->traced_infos()->enable_prof_stats) {
-      ctx->traced_infos()->prof_stats->blaze_latency_ms = ((end_ns - start_ns) / 1000000.0f);
-      }
+        auto start_ns = env_->NowNanos();
+        predictor_->Compute(ctx);
+        auto end_ns = env_->NowNanos();
+        if (ctx->traced_infos()->enable_prof_stats) {
+          ctx->traced_infos()->prof_stats->blaze_latency_ms = ((end_ns - start_ns) / 1000000.0f);
+          ctx->traced_infos()->prof_stats->blaze_wait_ms = ((start_ns - begin) / 1000000.0f);
+        }
 
-      if (ctx->traced_infos()->enable_trace_tensors) {
-      TraceTensors(ctx);
+        if (ctx->traced_infos()->enable_trace_tensors) {
+          TraceTensors(ctx);
+        }
       }
-      }
-
       --running_counter_;
-      if (env_->NowNanos() - begin > 15000000) {
-        VLOG(0) << "caixukun cost: " << env_->NowNanos() - begin << " runn " << running_counter_ << "  " << env_->NowNanos() - schedule_time;
-      }
       done();
   });
 } 

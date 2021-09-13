@@ -220,7 +220,7 @@ Status PartiallyDeclusterGraph(Graph* graph) {
   nodes_to_partially_decluster.clear();
   TF_RETURN_IF_ERROR(
       FindNodesToDecluster(*graph, &nodes_to_partially_decluster, post_order));
- // CHECK(nodes_to_partially_decluster.empty());
+  CHECK(nodes_to_partially_decluster.empty());
 
   return Status::OK();
 }

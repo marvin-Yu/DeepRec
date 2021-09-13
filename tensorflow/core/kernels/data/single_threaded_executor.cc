@@ -20,7 +20,6 @@ limitations under the License.
 #include "tensorflow/core/graph/algorithm.h"
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/lib/core/status.h"
-#include "nvToolsExt.h"
 
 namespace tensorflow {
 namespace data {
@@ -159,10 +158,6 @@ class SingleThreadedExecutorImpl : public Executor {
   // instead, to avoid unnecessary atomic operations in the callback when
   // running synchronously.
   void RunAsync(const Args& args, DoneCallback done) override {
-	auto start = Env::Default()->NowNanos();
-     auto nnn = "caixukun_" + std::to_string(start);
-    nvtxRangePushA(nnn.c_str());
-
     // The inputs to each kernel are stored contiguously in `inputs`.
     //
     // We use `kernels_[i].input_start_index` and `kernels_[i].num_inputs` to
@@ -248,10 +243,7 @@ class SingleThreadedExecutorImpl : public Executor {
     params.prof_stats = args.prof_stats;
 
     // Execute the kernels one-at-a-time in topological order.
-//    std::vector<std::pair<uint64, uint64>> costs;
-//    costs.reserve(kernels_.size()); 
     for (size_t i = 0; i < kernels_.size(); ++i) {
-      auto st_i = Env::Default()->NowNanos();
       const KernelState& kernel_state = kernels_[i];
 
       // Prepare the per-kernel parameters.
@@ -269,8 +261,6 @@ class SingleThreadedExecutorImpl : public Executor {
         input_alloc_attrs[j] = input_alloc_attrs_[input_start_index + j];
       }
       params.op_kernel = kernel_state.kernel;
-      auto st_n = kernel_state.kernel->name() + "_" + std::to_string(st_i);
-	nvtxRangePushA(st_n.c_str());
       input_device_contexts.clear();
       input_device_contexts.resize(num_inputs);
       params.output_attr_array = kernel_state.output_alloc_attrs.data();
@@ -299,8 +289,6 @@ class SingleThreadedExecutorImpl : public Executor {
           }
         }
         done(ctx.status());
-nvtxRangePop();
-nvtxRangePop();
         return;
       }
 
@@ -321,21 +309,8 @@ nvtxRangePop();
         }
         delete val.tensor;
       }
-      auto st_ii = Env::Default()->NowNanos();
-    //  costs.push_back({st_i, st_ii});
-    nvtxRangePop();
-    }
-    auto end = Env::Default()->NowNanos();
-    if (end - start > 20000000) {
-   //   VLOG(0) << "caocaocao " << nnn;
-   //  string out = "";
-   //  for (auto& pp : costs) {
-   //  	out = out + "; begin: " + std::to_string(pp.first) + " -> end: " + std::to_string(pp.second);
-   //  }
-//	VLOG(0) << out;
     }
     done(Status::OK());
-    nvtxRangePop();
   }
 
  private:

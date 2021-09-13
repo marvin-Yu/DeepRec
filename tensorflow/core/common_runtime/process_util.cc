@@ -127,7 +127,7 @@ thread::ThreadPool* NewThreadPoolFromSessionOptions(
   const int32 num_threads = NumInterOpThreadsFromSessionOptions(options);
   VLOG(1) << "Direct session inter op parallelism threads: " << num_threads;
   return new thread::ThreadPool(
-      options.env, ThreadOptions(), "Compute", 5,
+      options.env, ThreadOptions(), "Compute", num_threads,
       !options.config.experimental().disable_thread_spinning(),
       /*allocator=*/nullptr);
 }
