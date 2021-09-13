@@ -290,14 +290,14 @@ void BlazeXlaOp::Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64
         done);
     pool_.Schedule(std::move(schedule_func));
   } else {
-    {
-      mutex_lock l(running_mu_);
-      if (running_counter_ >= kBlazeRunningCount_) {
-        pool_.Schedule(std::move(schedule_func));
-        return;
-      }
+   // {
+  //    mutex_lock l(running_mu_);
+  //    if (running_counter_ >= kBlazeRunningCount_) {
+  //      pool_.Schedule(std::move(schedule_func));
+ //       return;
+ //     }
       ++running_counter_;
-    }
+ //   }
     pool_.Schedule([this, ctx, done, begin] {
       auto schedule_time = env_->NowNanos();
       if (wait_ns_ > 0) {
