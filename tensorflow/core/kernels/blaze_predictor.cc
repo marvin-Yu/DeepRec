@@ -7,6 +7,7 @@
 
 #if GOOGLE_CUDA
 #include "tensorflow/core/kernels/gpu_utils.h"
+using tensorflow::se::Event;
 #endif
 namespace tensorflow {
 const int kBlazeStartStepId = 1024;
@@ -319,7 +320,15 @@ Status BlazePredictor::CopyTensorGPUToCPU(const std::vector<Tensor>& gpu_tensors
     TF_RETURN_IF_ERROR(ctx->allocate_temp(tmp_tensor.dtype(),
           tmp_tensor.shape(), &((*cpu_tensors)[i]), alloc_attrs));
     uint8* host_add = (uint8*)GetTensorAddress(&((*cpu_tensors)[i]));
-    GetStream()->ThenMemcpy(host_add, tmp_dev_ptr, tmp_size);
+    auto stream = GetStream();
+    stream->ThenMemcpy(host_add, tmp_dev_ptr, tmp_size);
+    auto event = std::make_shared<Event>(stream->parent());
+    if (!event->Init()) {
+      LOG(ERROR) << "event init failed!";
+      return errors::Internal("SliceToDynamic GPU2CPU failed event init");
+    }
+    stream->ThenRecordEvent(event.get());
+    stream->ThenSynchronizeEvent(event.get());
 #else
     return errors::Internal("cuda not supported");
 #endif
