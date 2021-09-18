@@ -51,7 +51,7 @@ class BlazePredictor {
 
     virtual ~BlazePredictor() {}
 
-  virtual void Compute(OpKernelContext* ctx);
+  virtual Status Compute(OpKernelContext* ctx);
   virtual void ComputeNull(OpKernelContext* ctx) {}
   //session must created in constructor function, otherwise in compute function
   //it will cost lots of time the first time

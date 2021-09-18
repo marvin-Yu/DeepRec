@@ -136,14 +136,17 @@ Status BlazePredictor::InitSession() {
   return Warmup();
 }
 
-void BlazePredictor::Compute(OpKernelContext* ctx) {
+Status BlazePredictor::Compute(OpKernelContext* ctx) {
   int num_inputs = ctx->num_inputs();
-  OP_REQUIRES(ctx, num_inputs == input_names_.size(),
-              errors::Internal("ctx input size ", num_inputs,
-                               " != ", input_names_.size()));
-  OP_REQUIRES(ctx, ctx->num_outputs() == output_names_.size(),
-              errors::Internal("ctx output size ", ctx->num_outputs(),
-                               " != ", output_names_.size()));
+  if (num_inputs != input_names_.size()) {
+    return errors::Internal("ctx input size ", num_inputs,
+        " != ", input_names_.size());
+  }
+  if (ctx->num_outputs() != output_names_.size()) {
+    return errors::Internal("ctx output size ", ctx->num_outputs(),
+        " != ", output_names_.size());
+  }
+
   std::vector<Tensor> inputs;
   inputs.reserve(num_inputs);
   for (int i = 0; i < num_inputs; ++i) {
@@ -153,22 +156,22 @@ void BlazePredictor::Compute(OpKernelContext* ctx) {
   std::vector<Tensor> outputs;
 
   std::vector<Tensor> real_inputs(inputs.size());
-  OP_REQUIRES_OK(ctx, PrepareInputs(inputs, &real_inputs, ctx));
+  TF_RETURN_IF_ERROR(PrepareInputs(inputs, &real_inputs, ctx));
 
   if (ctx->prof_stats()) {
     RunMetadata metadata;
-    OP_REQUIRES_OK(ctx, session_->RunCallable(handle_, real_inputs, &outputs, &metadata));
+    TF_RETURN_IF_ERROR(session_->RunCallable(handle_, real_inputs, &outputs, &metadata));
     ctx->prof_stats()->flops += metadata.prof_stats().flops();
   } else {
-    OP_REQUIRES_OK(ctx, session_->RunCallable(handle_, real_inputs, &outputs, nullptr));
+    TF_RETURN_IF_ERROR(session_->RunCallable(handle_, real_inputs, &outputs, nullptr));
   }
 
   std::vector<Tensor> real_outputs(outputs.size());
-  OP_REQUIRES_OK(ctx, PrepareOutputs(outputs, &real_outputs, ctx));
+  TF_RETURN_IF_ERROR(PrepareOutputs(outputs, &real_outputs, ctx));
   for (int i = 0; i < real_outputs.size(); ++i) {
     ctx->set_output(i, real_outputs[i]);
   }
-  return;
+  return Status::OK();
 }
 
 void BlazePredictor::SetDeviceInGraphDef(const std::string device_name,

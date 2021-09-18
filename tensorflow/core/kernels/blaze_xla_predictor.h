@@ -28,7 +28,7 @@ class BlazeXlaPredictor : public BlazePredictor {
 
   ~BlazeXlaPredictor() override {}
 
-  void Compute(OpKernelContext* ctx) override;
+  Status Compute(OpKernelContext* ctx) override;
 //  void ComputeNull(OpKernelContext* ctx) override;
  private:
   Status FindBlackPaddingInputs();

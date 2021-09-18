@@ -306,11 +306,12 @@ void BlazeXlaOp::Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64
                           errors::Internal("blaze wait too long ", schedule_time - begin),
                           done);
       }
+      Status status;
       if (!ctx->traced_infos()) {
-        predictor_->Compute(ctx);
+        status = predictor_->Compute(ctx);
       } else {
         auto start_ns = env_->NowNanos();
-        predictor_->Compute(ctx);
+        status = predictor_->Compute(ctx);
         auto end_ns = env_->NowNanos();
         if (ctx->traced_infos()->enable_prof_stats) {
           ctx->traced_infos()->prof_stats->blaze_latency_ms = ((end_ns - start_ns) / 1000000.0f);
@@ -322,6 +323,7 @@ void BlazeXlaOp::Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64
         }
       }
       --running_counter_;
+      OP_REQUIRES_ASYNC(ctx, status.ok(), status, done);
       done();
   });
 } 
