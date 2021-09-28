@@ -58,7 +58,7 @@ fi
 export TEST_TMPDIR=~/.cache/bazel/_bazel_${USER}/cuda11_cache
 for target in "${targets[@]}"
 do
-    bazel build --copt=-mavx2 --config=cuda --copt -mfpmath=both --copt -mfma --copt -msse4.2 --copt -D_GLIBCXX_USE_CXX11_ABI=0 --copt -DGOOGLE_CUDA=1  $target
+    bazel build -c opt --copt -g --copt=-mavx2 --config=cuda --copt -mfpmath=both --copt -mfma --copt -msse4.2 --copt -D_GLIBCXX_USE_CXX11_ABI=0 --copt -DGOOGLE_CUDA=1  $target
 done
 
 EXTERNAL_DIR="../_external"
