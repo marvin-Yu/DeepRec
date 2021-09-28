@@ -36,7 +36,7 @@ class BlazeXlaOp : public AsyncOpKernel {
   void CopyTensor(MemoryType, OpKernelContext* ctx,
                   const string& name, const Tensor& tensor);
 
-  void Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64 begin);
+  void Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64 begin, bool is_first=true);
   void ComputeNormal(OpKernelContext* context, const DoneCallback& done);
   void ComputeBenchmark(OpKernelContext* context, const DoneCallback& done);
   void ComputeNull(OpKernelContext* context, const DoneCallback& done);
@@ -66,6 +66,9 @@ class BlazeXlaOp : public AsyncOpKernel {
   std::atomic<int> running_counter_;
   const int kBlazeRunningCount_;
   const int kScheduleFactor_ = 2;
+
+  std::atomic<int> waiting_counter_;
+  const kMaxWaitingCount_;
 };
 
 int BlazeThreadsCount() {
@@ -76,6 +79,13 @@ int BlazeThreadsCount() {
   return (int)dense_threads_num;
 }
 
+int BlazeWatingCount() {
+  const int kDefaultWaitingCount = 10;
+  int64 dense_waiting_num;
+  ReadInt64FromEnvVar("DENSE_MAX_WAITING_COUNT", kDefaultWaitingCount, &dense_waiting_num);
+  VLOG(0) << "blaze max waiting count " << dense_waiting_num;
+  return (int)dense_waiting_num;
+}
 
 void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
   auto config = blaze_run_options_.mutable_config_proto();
@@ -113,7 +123,8 @@ void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
 BlazeXlaOp::BlazeXlaOp(OpKernelConstruction* context)
     : AsyncOpKernel(context), device_type_(context->device_type().type()), 
     pool_(Env::Default(), "blaze_kernel", BlazeThreadsCount() * 2), running_counter_(0),
-    kBlazeRunningCount_(BlazeThreadsCount()) {
+    kBlazeRunningCount_(BlazeThreadsCount()), waiting_counter_(0),
+    kMaxWaitingCount_(BlazeWatingCount()) {
   OP_REQUIRES_OK(context, context->GetAttr("input_names", &input_names_));
   OP_REQUIRES_OK(context, context->GetAttr("output_names", &output_names_));
   OP_REQUIRES_OK(context, context->GetAttr("graph_def", &graph_def_path_));
@@ -279,25 +290,26 @@ int BlazeXlaOp::GetBatchSizeUnsafe(OpKernelContext* context) {
   return 1;
 }
 
-void BlazeXlaOp::Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64 begin) {
+void BlazeXlaOp::Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64 begin, bool is_first) {
   auto schedule_func = [this, ctx, done, begin] {
-    this->Schedule(ctx, done, begin);
+    this->Schedule(ctx, done, begin, false);
   };
   if (running_counter_ >= kBlazeRunningCount_) {
     auto schedule_time = env_->NowNanos();
-    OP_REQUIRES_ASYNC(ctx, schedule_time - begin <= wait_ns_,
-        errors::Internal("blaze wait too long ", schedule_time - begin),
-        done);
+    if (wait_ns_ > 0) {
+      OP_REQUIRES_ASYNC(ctx, schedule_time - begin <= wait_ns_,
+          errors::Internal("blaze wait too long ", schedule_time - begin),
+          done);
+    } else {
+      OP_REQUIRES_ASYNC(ctx, waiting_counter_ < kMaxWaitingCount_,
+          errors::Internal("waiting pool is full ", waiting_counter_),
+          done);
+    }
+    if (is_first) { ++waiting_counter_; }
     pool_.Schedule(std::move(schedule_func));
   } else {
-   // {
-  //    mutex_lock l(running_mu_);
-  //    if (running_counter_ >= kBlazeRunningCount_) {
-  //      pool_.Schedule(std::move(schedule_func));
- //       return;
- //     }
-      ++running_counter_;
- //   }
+    if (!is_first) { --waiting_counter_; }
+    ++running_counter_;
     pool_.Schedule([this, ctx, done, begin] {
       auto schedule_time = env_->NowNanos();
       if (wait_ns_ > 0) {
