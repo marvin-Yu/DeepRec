@@ -68,7 +68,7 @@ class BlazeXlaOp : public AsyncOpKernel {
   const int kScheduleFactor_ = 2;
 
   std::atomic<int> waiting_counter_;
-  const kMaxWaitingCount_;
+  const int kMaxWaitingCount_;
 };
 
 int BlazeThreadsCount() {
@@ -302,7 +302,7 @@ void BlazeXlaOp::Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64
           done);
     } else {
       OP_REQUIRES_ASYNC(ctx, waiting_counter_ < kMaxWaitingCount_,
-          errors::Internal("waiting pool is full ", waiting_counter_),
+          errors::Internal("waiting pool is full ", waiting_counter_.load()),
           done);
     }
     if (is_first) { ++waiting_counter_; }
