@@ -2012,8 +2012,7 @@ REGISTER_OP("TileGrad")
 
 // --------------------------------------------------------------------------
 REGISTER_OP("Where")
-    .Input("input: T")
-    .Attr("T: {numbertype, bool} = DT_BOOL")
+    .Input("input: bool") 
     .Output("index: int64")
     .SetShapeFn([](InferenceContext* c) {
       c->set_output(0, c->Matrix(c->UnknownDim(), c->Rank(c->input(0))));
