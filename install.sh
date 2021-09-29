@@ -36,6 +36,11 @@ find tensorflow/core -name '*.h' -exec cp --parents \{\} $HEADER_DIR/ \;
 find tensorflow/core -name '*.proto' -exec cp --parents \{\} $HEADER_DIR/ \;
 find tensorflow/c -name '*.h' -exec cp --parents \{\} $HEADER_DIR/ \;
 find tensorflow/cc -name '*.h' -exec cp --parents \{\} $HEADER_DIR/ \;
+if [ -d bazel-genfiles ]; then
+   cd bazel-genfiles
+   find tensorflow/ -name '*.h' -exec cp --parents \{\} $HEADER_DIR/ \;
+   cd -
+fi
 if [ -d bazel-out/local-opt ]; then
     cd bazel-out/local-opt/genfiles
     find tensorflow/ -name '*.h' -exec cp --parents \{\} $HEADER_DIR/ \;
