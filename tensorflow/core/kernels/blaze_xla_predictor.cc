@@ -365,7 +365,11 @@ Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
     VLOG(0) << "Begin warmup";
     mutex_lock l(warmup_mu_);
     warmuping_ = true;
-    TF_RETURN_IF_ERROR(Warmup(ctx));
+    auto st = Warmup(ctx);
+    if (!st.ok()) {
+      warmuping_ = false;
+      return st;
+    }
     warmuped_ = true;
     warmuping_ = false;
   }
