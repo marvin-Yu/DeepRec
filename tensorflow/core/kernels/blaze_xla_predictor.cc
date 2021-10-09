@@ -120,8 +120,8 @@ Status BlazeXlaPredictor::Warmup(OpKernelContext* ctx) {
       const TensorShape& shape = inputs[i].shape();
       int64 first_dim = shape.dim_size(0);
       first_dim = (first_dim == 1) ? 1 : bs;
-      if (first_dim == 1 || skip_padding_[i]) {
-        sliced_inputs.push_back(padded_inputs[i]);;
+      if (skip_padding_[i] || (bs > 1 && first_dim == 1)) {
+        sliced_inputs.push_back(padded_inputs[i]);
       } else {
         sliced_inputs.push_back(padded_inputs[i].Slice(0, bs));
       }
