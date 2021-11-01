@@ -315,7 +315,7 @@ void BlazeXlaOp::Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64
       if (wait_ns_ > 0) {
         if (schedule_time - begin > wait_ns_) { --running_counter_;}
         OP_REQUIRES_ASYNC(ctx, schedule_time - begin <= wait_ns_,
-                          errors::Internal("blaze wait too long ", schedule_time - begin),
+                          errors::DeadlineExceeded("blaze wait too long ", schedule_time - begin),
                           done);
       }
       Status status;
