@@ -463,6 +463,8 @@ Status CreateTRTNode(const ConversionParams& params,
           .Attr("use_calibration", info.use_calibration)
           .Attr("OutT", out_types)
           //.Attr("_flops", int64(params.total_flops)) // huasha.lqf add and del ...
+          .Attr("engine_pad_batch_step", params.engine_pad_batch_step)
+          .Attr("engine_pad_to_batches", params.engine_pad_to_batches)
           .Finalize(&trt_node);
   if (!status.ok()) {
     LOG(ERROR) << "Node construction failed with" << status;

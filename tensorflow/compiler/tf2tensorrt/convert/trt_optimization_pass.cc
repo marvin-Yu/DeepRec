@@ -74,6 +74,16 @@ Status TRTOptimizationPass::Init(
       convert_ranges_.push_back(node_range);
     }
   }
+  if (params.count("engine_pad_batch_step")) {
+    engine_pad_batch_step_ = params.at("engine_pad_batch_step").i();
+  }
+  if (params.count("engine_pad_to_batches")) {
+    auto batch_vec = params.at("engine_pad_to_batches").list();
+    engine_pad_to_batches_.reserve(batch_vec.i_size());
+    for (const auto i : batch_vec.i()) {
+      engine_pad_to_batches_.push_back(i);
+    }
+  }
   return Status::OK();
 }
 
@@ -263,6 +273,8 @@ Status TRTOptimizationPass::Optimize(grappler::Cluster* cluster,
   cp.max_cached_engines = max_cached_batches_;
   cp.use_calibration = use_calibration_;
   cp.convert_ranges = convert_ranges_;
+  cp.engine_pad_batch_step = engine_pad_batch_step_;
+  cp.engine_pad_to_batches = engine_pad_to_batches_;
   auto status = ConvertAfterShapes(cp);
   // Get Flops:
   auto total_flops = cp.total_flops;

@@ -41,6 +41,8 @@ REGISTER_OP("TRTEngineOp")
     .Attr("precision_mode: {'FP32', 'FP16', 'INT8'}")
     .Attr("calibration_data: string = ''")
     .Attr("use_calibration: bool = true")
+    .Attr("engine_pad_batch_step: int = -1")
+    .Attr("engine_pad_to_batches: list(int) >= 0 = []")
     //.Attr("_flops: int64 = 0") // Huasha.lqf add an del ...
     .Input("in_tensor: InT")
     .Output("out_tensor: OutT")

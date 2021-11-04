@@ -169,6 +169,12 @@ class TRTEngineOp : public AsyncOpKernel {
   bool use_calibration_;
 
   int64 flops_;
+
+  // For auto pad
+  int64 engine_pad_batch_step_;
+  // Batches of extra cached engines besides auto padding steps
+  std::vector<int64> engine_pad_to_batches_;
+
 };
 
 #define TYPECASE(dt, X, Y)                                    \
@@ -293,6 +299,20 @@ TRTEngineOp::TRTEngineOp(OpKernelConstruction* context)
                                            &max_cached_engines_));
   //OP_REQUIRES_OK(context, context->GetAttr("_flops", &flops_)); // huasha.lqf add and del ...
   flops_ = 1;
+
+  OP_REQUIRES_OK(context,
+                 context->GetAttr("engine_pad_batch_step", &engine_pad_batch_step_));
+  OP_REQUIRES_OK(context, context->GetAttr("engine_pad_to_batches",
+                                           &engine_pad_to_batches_));
+  std::sort(engine_pad_to_batches_.begin(), engine_pad_to_batches_.end());
+  if (VLOG_IS_ON(0)) {
+    string s("engine_pad_batch_step = ");
+    StrAppend(&s, engine_pad_batch_step_, ", engine_pad_to_batches = ");
+    for (auto i : engine_pad_to_batches_) {
+      StrAppend(&s, i, " ");
+    }
+    VLOG(0) << s;
+  }
 }
 
 void TRTEngineOp::ExecuteNativeSegment(OpKernelContext* ctx,
@@ -442,6 +462,37 @@ Status TRTEngineOp::GetEngineInputShapes(
       }
     }
   }
+
+  const int actual_batch_size = actual_input_shapes[0].dim_size(0);
+  // do not pad batch size 1 for performance (for example, do not pad single user in recommender system)
+  if (actual_batch_size == 1) return Status::OK();
+  // update engine_batch_size if min_matched_batch_size in cache is too large
+  if (engine_pad_batch_step_ > 0) {
+    int64 pad_to_batch_size = (actual_batch_size / engine_pad_batch_step_ + 1.0) * engine_pad_batch_step_;
+    if (pad_to_batch_size < min_matched_batch_size) {
+      min_matched_batch_size = pad_to_batch_size;
+      for (auto& shape : *engine_input_shapes) {
+        shape.set_dim(0, pad_to_batch_size);
+      }
+      VLOG(1) << "TRT pad inputs, autopad/actual/step batch_sizes: "
+              << pad_to_batch_size << "/" << actual_batch_size << "/" << engine_pad_batch_step_;
+    }
+  }
+
+  // update engine_batch_size if an user specified batchsize is smaller than auto generated batch_size
+  for (auto i : engine_pad_to_batches_) {
+    if (actual_batch_size <= i) {
+      if (i < min_matched_batch_size) {
+        for (auto& shape : *engine_input_shapes) {
+          shape.set_dim(0, i);
+        }
+        VLOG(1) << "TRT pad inputs, user_specified/cached/actual batch_sizes: "
+                << i << "/" << min_matched_batch_size  << "/" << actual_batch_size;
+      }
+      break;
+    }
+  }
+
   return Status::OK();
 }
 
@@ -666,6 +717,9 @@ Status TRTEngineOp::GetEngineCacheResource(OpKernelContext* ctx,
       std::string(kTfTrtContainerName), std::string(resource_name), cache_res,
       {[this, ctx](TRTEngineCacheResource** cr) -> Status {
         *cr = new TRTEngineCacheResource(ctx, this->max_cached_engines_);
+        VLOG(1) << "New TRTEngineCacheResource "
+                << std::string(kTfTrtContainerName) << "/" << this->name() << " " << *cr
+                << " in TRTEngineOp " << this->name() << " " << this;
         return Status::OK();
       }});
 }
@@ -742,9 +796,11 @@ StatusOr<EngineContext*> TRTEngineOp::GetEngine(
   if (!cache.count(engine_input_shapes)) {
     TrtUniquePtrType<nvinfer1::ICudaEngine> engine;
     bool convert_successfully = false;
-    LOG(INFO) << "Building a new TensorRT engine for " << name()
-              << " input shapes: "
-              << TensorShapeUtils::ShapeListString(engine_input_shapes);
+    LOG(INFO) << "Building a new TensorRT engine for " << name() << " " << this
+              << ", input shapes: "
+              << TensorShapeUtils::ShapeListString(engine_input_shapes)
+              << ", inserted to TRTEngineCacheResource " << cache_res
+              << ". Cache size " << cache.size() + 1;
 
     // Convert to partial shapes
     std::vector<PartialTensorShape> partial_shapes(engine_input_shapes.begin(),
@@ -753,8 +809,9 @@ StatusOr<EngineContext*> TRTEngineOp::GetEngine(
     // Up to this point, calibrator_ can never be empty, since otherwise it
     // means calibration_mode_ is true and this path won't get executed.
     int64_t total_flops = 0; // Get Flops
+    int64_t engine_batch_size = engine_input_shapes[0].dim_size(0);
     auto status = convert::ConvertGraphDefToEngine(
-        segment_graph_, precision_mode_, batch_size, workspace_size_,
+        segment_graph_, precision_mode_, engine_batch_size, workspace_size_,
         partial_shapes, &logger, allocator, calibrator_.get(), &engine,
         use_calibration_, &convert_successfully, &total_flops);
     if (!status.ok()) {
@@ -776,6 +833,10 @@ StatusOr<EngineContext*> TRTEngineOp::GetEngine(
     VLOG(1) << "Added new engine to cache of " << name()
             << ". Cache size: " << cache.size();
   }
+  VLOG(4) << "TRT pad inputs, engine/actual batch_sizes: "
+          << engine_input_shapes[0].dim_size(0) << "/" << input_shapes[0].dim_size(0)
+          << ", TRTEngineCacheResource " << cache_res;
+
   return cache.at(engine_input_shapes).get();
 }
 

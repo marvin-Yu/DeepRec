@@ -40,7 +40,8 @@ class TRTOptimizationPass : public grappler::CustomGraphOptimizer {
         is_dynamic_op_(true),
         max_cached_batches_(50),
         max_workspace_size_bytes_(2LL << 30),
-        use_calibration_(false) {
+        use_calibration_(false),
+        engine_pad_batch_step_(-1) {
     VLOG(1) << "Constructing " << name_;
   }
 
@@ -72,7 +73,8 @@ class TRTOptimizationPass : public grappler::CustomGraphOptimizer {
   int64_t max_workspace_size_bytes_;
   bool use_calibration_;
   std::vector<string> convert_ranges_;
-
+  int engine_pad_batch_step_;
+  std::vector<int> engine_pad_to_batches_;
 };
 
 }  // namespace convert
