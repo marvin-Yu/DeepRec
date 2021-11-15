@@ -1922,21 +1922,20 @@ struct UserTracedInfos {
     if (run_metadata) {
       if (prof_stats) {
         //Todo done flops monitor
-        {
-          auto metrics = run_metadata->mutable_blaze_metrics()->Add();
-          metrics->set_key("blaze_latency_ms");
-          metrics->set_value(prof_stats->blaze_latency_ms);
-        }
-        {
-          auto metrics = run_metadata->mutable_blaze_metrics()->Add();
-          metrics->set_key("blaze_flops");
-          metrics->set_value(stats.flops);
-        }
-        {
-          auto metrics = run_metadata->mutable_blaze_metrics()->Add();
-          metrics->set_key("blaze_wait_ms");
-          metrics->set_value(stats.blaze_wait_ms);
-        }
+#define BLAZE_ADD_STATS(KEY, VALUE, TYPE) { \
+  auto metrics = run_metadata->mutable_blaze_metrics()->Add(); \
+  metrics->set_key(KEY); \
+  metrics->set_value(VALUE); \
+  metrics->set_type(TYPE); \
+}
+      BLAZE_ADD_STATS("blaze_latency_ms", prof_stats->blaze_latency_ms, RunMetadata::BlazeMetrics::GUAGE);
+      BLAZE_ADD_STATS("blaze_flops", prof_stats->flops, RunMetadata::BlazeMetrics::GUAGE);
+      BLAZE_ADD_STATS("blaze_wait_ms", prof_stats->blaze_wait_ms, RunMetadata::BlazeMetrics::GUAGE);
+      BLAZE_ADD_STATS("blaze_batch_size", prof_stats->batch_size, RunMetadata::BlazeMetrics::GUAGE);
+      BLAZE_ADD_STATS("blaze_running_counter", prof_stats->blaze_running_counter, RunMetadata::BlazeMetrics::GUAGE);
+      BLAZE_ADD_STATS("blaze_waiting_counter", prof_stats->blaze_waiting_counter, RunMetadata::BlazeMetrics::GUAGE);
+      BLAZE_ADD_STATS("blaze_nan", prof_stats->blaze_nan, RunMetadata::BlazeMetrics::GUAGE);
+#undef BLAZE_ADD_STATS
       }
       if (traced_tensors) {
         for (int i = 0; i < traced_tensors->name_tensors_size(); ++i) {

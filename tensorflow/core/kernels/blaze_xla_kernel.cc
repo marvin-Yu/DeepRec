@@ -69,7 +69,13 @@ class BlazeXlaOp : public AsyncOpKernel {
 
   std::atomic<int> waiting_counter_;
   const int kMaxWaitingCount_;
+
+  static std::atomic<int> total_waiting_counter_;
+  static std::atomic<int> total_running_counter_;
 };
+
+std::atomic<int> BlazeXlaOp::total_waiting_counter_(0);
+std::atomic<int> BlazeXlaOp::total_running_counter_(0);
 
 int BlazeThreadsCount() {
   const int kDefaultDenseThreadsNum = 2;
@@ -305,15 +311,16 @@ void BlazeXlaOp::Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64
           errors::Internal("waiting pool is full ", waiting_counter_.load()),
           done);
     }
-    if (is_first) { ++waiting_counter_; }
+    if (is_first) { ++waiting_counter_; ++total_waiting_counter_; }
     pool_.Schedule(std::move(schedule_func));
   } else {
-    if (!is_first) { --waiting_counter_; }
+    if (!is_first) { --waiting_counter_; --total_waiting_counter_; }
     ++running_counter_;
+    ++total_running_counter_;
     pool_.Schedule([this, ctx, done, begin] {
       auto schedule_time = env_->NowNanos();
       if (wait_ns_ > 0) {
-        if (schedule_time - begin > wait_ns_) { --running_counter_;}
+        if (schedule_time - begin > wait_ns_) { --running_counter_; --total_running_counter_; }
         OP_REQUIRES_ASYNC(ctx, schedule_time - begin <= wait_ns_,
                           errors::DeadlineExceeded("blaze wait too long ", schedule_time - begin),
                           done);
@@ -328,6 +335,36 @@ void BlazeXlaOp::Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64
         if (ctx->traced_infos()->enable_prof_stats) {
           ctx->traced_infos()->prof_stats->blaze_latency_ms = ((end_ns - start_ns) / 1000000.0f);
           ctx->traced_infos()->prof_stats->blaze_wait_ms = ((start_ns - begin) / 1000000.0f);
+          auto output = ctx->mutable_output(0);
+          if (output) {
+            ctx->traced_infos()->prof_stats->batch_size = output->dim_size(0);
+            // check memory
+            if (ctx->output_memory_type(0) == HOST_MEMORY) {
+              //check type, only support fp32 now
+              if (output->dtype() == DT_FLOAT) {
+                bool is_nan = false;
+                int nan_counter = 0;
+                auto fp32_v = output->flat<float>();
+                //2dim will be ok
+                int index = 0;
+                auto inner_size = output->NumElements() / output->dim_size(0);
+                for (int i = 0; i < output->dim_size(0); ++i) {
+                  for (int j = 0; j < inner_size; ++j) {
+                    if (!std::isfinite(fp32_v(index + j))) {
+                      ++nan_counter;
+                      is_nan = true;
+                      break;
+                    }
+                  }
+                  index += inner_size;
+                }
+                ctx->traced_infos()->prof_stats->blaze_nan = is_nan ? 1 : 0;
+                ctx->traced_infos()->prof_stats->blaze_nan_counter = nan_counter;
+              }
+            }
+          }
+          ctx->traced_infos()->prof_stats->blaze_running_counter += total_running_counter_;
+          ctx->traced_infos()->prof_stats->blaze_waiting_counter += total_waiting_counter_;
         }
 
         if (ctx->traced_infos()->enable_trace_tensors) {
@@ -335,6 +372,7 @@ void BlazeXlaOp::Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64
         }
       }
       --running_counter_;
+      --total_running_counter_;
       OP_REQUIRES_ASYNC(ctx, status.ok(), status, done);
       done();
   });

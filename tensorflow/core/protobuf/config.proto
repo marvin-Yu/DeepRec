@@ -680,8 +680,13 @@ message RunMetadata {
   }
 
   message BlazeMetrics {
+    enum MetricType {
+      GUAGE = 0;
+      QPS = 1;
+    }
     string key = 1;
     float value = 2;
+    MetricType type = 3;
   }
 
 // ToDO remove this, using key value pair
