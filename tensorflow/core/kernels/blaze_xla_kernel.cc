@@ -373,6 +373,7 @@ void BlazeXlaOp::Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64
       }
       --running_counter_;
       --total_running_counter_;
+      --total_waiting_counter_;
       OP_REQUIRES_ASYNC(ctx, status.ok(), status, done);
       done();
   });
