@@ -1935,6 +1935,7 @@ struct UserTracedInfos {
       BLAZE_ADD_STATS("blaze_running_counter", prof_stats->blaze_running_counter, RunMetadata::BlazeMetrics::GUAGE);
       BLAZE_ADD_STATS("blaze_waiting_counter", prof_stats->blaze_waiting_counter, RunMetadata::BlazeMetrics::GUAGE);
       BLAZE_ADD_STATS("blaze_nan", prof_stats->blaze_nan, RunMetadata::BlazeMetrics::GUAGE);
+      BLAZE_ADD_STATS("blaze_nan_counter", prof_stats->blaze_nan_counter, RunMetadata::BlazeMetrics::GUAGE);
 #undef BLAZE_ADD_STATS
       }
       if (traced_tensors) {
