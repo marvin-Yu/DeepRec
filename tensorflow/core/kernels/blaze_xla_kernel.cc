@@ -303,10 +303,16 @@ void BlazeXlaOp::Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64
   if (running_counter_ >= kBlazeRunningCount_) {
     auto schedule_time = env_->NowNanos();
     if (wait_ns_ > 0) {
+      if (TF_PREDICT_FALSE(schedule_time - begin > wait_ns_) && !is_first) {
+        --total_waiting_counter_;
+      }
       OP_REQUIRES_ASYNC(ctx, schedule_time - begin <= wait_ns_,
           errors::Internal("blaze wait too long ", schedule_time - begin),
           done);
     } else {
+      if (TF_PREDICT_FALSE(waiting_counter_ >= kMaxWaitingCount_) && !is_first) {
+        --total_waiting_counter_;
+      }
       OP_REQUIRES_ASYNC(ctx, waiting_counter_ < kMaxWaitingCount_,
           errors::Internal("waiting pool is full ", waiting_counter_.load()),
           done);
@@ -339,7 +345,7 @@ void BlazeXlaOp::Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64
           if (output) {
             ctx->traced_infos()->prof_stats->batch_size = output->dim_size(0);
             // check memory
-            if (ctx->output_memory_type(0) == HOST_MEMORY) {
+            if (device_type_ != DEVICE_GPU) {
               //check type, only support fp32 now
               if (output->dtype() == DT_FLOAT) {
                 bool is_nan = false;
@@ -350,7 +356,7 @@ void BlazeXlaOp::Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64
                 auto inner_size = output->NumElements() / output->dim_size(0);
                 for (int i = 0; i < output->dim_size(0); ++i) {
                   for (int j = 0; j < inner_size; ++j) {
-                    if (!std::isfinite(fp32_v(index + j))) {
+                    if (std::isnan(fp32_v(index + j))) {
                       ++nan_counter;
                       is_nan = true;
                       break;
@@ -373,7 +379,6 @@ void BlazeXlaOp::Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64
       }
       --running_counter_;
       --total_running_counter_;
-      --total_waiting_counter_;
       OP_REQUIRES_ASYNC(ctx, status.ok(), status, done);
       done();
   });
