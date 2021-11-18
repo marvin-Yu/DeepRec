@@ -3302,7 +3302,7 @@ tf_cuda_library(
     deps = [
         ":bfc_allocator",
         ":graph",
-        #":gpu_runtime",
+        ":gpu_runtime_headers",
         ":framework",
         ":framework_internal",
         ":lib",
@@ -3641,6 +3641,11 @@ tf_cuda_library(
         ":stream_executor",
         "//third_party/eigen3",
     ] + if_static([":gpu_runtime_impl"]),
+)
+
+tf_cuda_library(
+    name = "gpu_runtime_headers",
+    hdrs = GPU_RUNTIME_HEADERS,
 )
 
 # This is redundant with the "gpu_runtime_*" targets above. It's useful for
