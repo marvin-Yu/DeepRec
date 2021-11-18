@@ -59,13 +59,12 @@ Status GemmThunk::ExecuteOnStream(const ExecuteParams &params) {
   return RunGemm(hlo_instruction(), backend_config_, lhs_data, rhs_data,
                  output_data, params.stream, implements_whole_instruction_,
                  params.profiler,
-                 /*profile_result =*/ nullptr,
-                 /*algorithm =*/ absl::nullopt,
+                 /*profile_result =*/nullptr,
+                 /*algorithm =*/absl::nullopt,
                  //[DYNAMIC-SHAPE]
                  params.before_padding, params.after_padding,
                  //[PROF-STATS]
-                 &flops_
-                 );
+                 &flops_);
 }
 
 // This struct contains the metadata of a matrix, e.g., its base address and
@@ -86,7 +85,7 @@ static bool DoGemmWithAlgorithm(
     //[DYNAMIC-SHAPE]
     uint64 before_padding, uint64 after_padding,
     //[PROF-STATS]
-    int64* flops) {
+    int64 *flops) {
   DCHECK(!output_matrix.transpose);
 
   PrimitiveType type = primitive_util::NativeToPrimitiveType<InT>();
@@ -126,19 +125,22 @@ static bool DoGemmWithAlgorithm(
   //[DYNAMIC-SHAPE]
   int64 num_cols_needed = output_matrix.num_cols;
   if (before_padding != 0 && after_padding != 0) {
-    if (num_cols_needed == after_padding){
-      num_cols_needed = (before_padding+7)/8*8; // make it multiple of 8
-      if (num_cols_needed > output_matrix.num_cols) { // in case of out-of-bound, i.e. before_padding==1, after_padding==2
+    if (num_cols_needed == after_padding) {
+      num_cols_needed = before_padding;
+      if (num_cols_needed >
+          output_matrix.num_cols) {  // in case of out-of-bound, i.e.
+                                     // before_padding==1, after_padding==2
         num_cols_needed = output_matrix.num_cols;
       } else {
-        VLOG(2) << "[DYNAMIC-SHAPE] actual size before padding is "<<before_padding
-                <<", using size "<<num_cols_needed<<" instead of "<<after_padding;
+        VLOG(2) << "[DYNAMIC-SHAPE] actual size before padding is "
+                << before_padding << ", using size " << num_cols_needed
+                << " instead of " << after_padding;
       }
     }
   }
   //[PROF-STATS]
   if (flops) {
-    *flops = batch_size*(2*k*num_cols_needed*output_matrix.num_rows);
+    *flops = batch_size * (2 * k * num_cols_needed * output_matrix.num_rows);
   }
 
   if (algorithm) {
@@ -147,7 +149,7 @@ static bool DoGemmWithAlgorithm(
     return stream
         ->ThenBlasGemmWithAlgorithm(
             lhs_transpose, rhs_transpose, output_matrix.num_rows,
-            //output_matrix.num_cols,
+            // output_matrix.num_cols,
             num_cols_needed,
             /*size of reduce dim=*/k,
             /*alpha=*/static_cast<InT>(alpha), lhs_data,
@@ -178,9 +180,9 @@ static bool DoGemmWithAlgorithm(
 
   return stream
       ->ThenBlasGemm(
-          lhs_transpose, rhs_transpose, output_matrix.num_rows,
-          num_cols_needed, /*size of reduce dim=*/k, /*alpha=*/alpha,
-          lhs_data, /*leading dim of LHS=*/lhs_matrix.num_rows, rhs_data,
+          lhs_transpose, rhs_transpose, output_matrix.num_rows, num_cols_needed,
+          /*size of reduce dim=*/k, /*alpha=*/alpha, lhs_data,
+          /*leading dim of LHS=*/lhs_matrix.num_rows, rhs_data,
           /*leading dim of RHS=*/rhs_matrix.num_rows, /*beta=*/beta,
           &output_data, /*leading dim of output=*/output_matrix.num_rows)
       .ok();
@@ -197,8 +199,7 @@ Status RunGemm(const HloInstruction *gemm,
                //[DYNAMIC-SHAPE]
                uint64 before_padding, uint64 after_padding,
                //[PROF-STATS]
-               int64* flops
-               ) {
+               int64 *flops) {
   VLOG(2) << "Executing a GemmThunk";
   CHECK(IsCublasGemm(*gemm));
 
@@ -230,6 +231,25 @@ Status RunGemm(const HloInstruction *gemm,
   for (const auto *shape : {&lhs_shape, &rhs_shape, &output_shape}) {
     CHECK_LT(shape->layout().minor_to_major(row_dim), 2);
     CHECK_LT(shape->layout().minor_to_major(col_dim), 2);
+  }
+
+  // check batch_dim_dynamic.
+  if (output_shape.is_batch_dim_dynamic()) {
+    if (dim_nums.lhs_batch_dimensions_size() == 1 &&
+        output_shape.get_dynamic_batch_dim() == 1) {
+      VLOG(2) << "Enable batched gemm dynamic on instruction: "
+              << gemm->ToString();
+    } else if (dim_nums.lhs_batch_dimensions().empty() &&
+               output_shape.get_dynamic_batch_dim() == 0) {
+      VLOG(2) << "Enable gemm dynamic on instruction: " << gemm->ToString();
+    } else {
+      VLOG(2) << absl::StrFormat(
+          "Don't support batch_dim_dynamic: lhs_shape : %s, rhs_shape: %s, "
+          "output_shape : %s.",
+          lhs_shape.ToString(), rhs_shape.ToString(), output_shape.ToString());
+      before_padding = 0;
+      after_padding = 0;
+    }
   }
 
   // BLAS gemm reduces rows of LHS and columns of RHS. The Dot operator between
@@ -294,11 +314,12 @@ Status RunGemm(const HloInstruction *gemm,
         GemmBackendConfig::ALGORITHM_NOT_SET) {
       return absl::nullopt;
     }
-    //return backend_config.selected_algorithm();
+    // return backend_config.selected_algorithm();
 
     //[DYNAMIC-SHAPE]
-    // use absl::nullopt instead of backend_config.selected_algorithm() at runtime.
-    // this won't affect GemmAlgorithmPicker, since algoritm will be specified while picking.
+    // use absl::nullopt instead of backend_config.selected_algorithm() at
+    // runtime. this won't affect GemmAlgorithmPicker, since algoritm will be
+    // specified while picking.
     return absl::nullopt;
   }();
 

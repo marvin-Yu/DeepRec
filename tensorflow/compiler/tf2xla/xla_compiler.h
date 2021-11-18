@@ -165,6 +165,7 @@ class XlaCompiler {
     // dynamic dims to arg number map. Empty if no dynamic shapes.
     std::map<int32, int32> dynamic_dim_to_arg_num_map;
     bool is_pad_arg = false;
+    int64 dynamic_batch_dim = -1;
 
     // Whether this argument will receive the same data across all replicas.
     bool is_same_data_across_replicas = false;

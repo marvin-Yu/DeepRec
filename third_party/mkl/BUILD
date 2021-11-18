@@ -37,6 +37,14 @@ config_setting(
     visibility = ["//visibility:public"],
 )
 
+config_setting(
+    name = "build_with_mkl_gemm_only",
+    define_values = {
+        "build_with_mkl_gemm_only": "true",
+    },
+    visibility = ["//visibility:public"],
+)
+
 load(
     "//third_party/mkl:build_defs.bzl",
     "if_mkl",

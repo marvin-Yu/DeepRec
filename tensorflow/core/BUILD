@@ -3302,6 +3302,7 @@ tf_cuda_library(
     deps = [
         ":bfc_allocator",
         ":graph",
+        ":gpu_runtime",
         ":framework",
         ":framework_internal",
         ":lib",

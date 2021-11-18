@@ -29,6 +29,7 @@
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/thread_annotations.h"
 #include "tensorflow/core/platform/types.h"
+#include "tensorflow/core/util/device_name_utils.h"
 #include "tensorflow/stream_executor/lib/statusor.h"
 
 namespace tensorflow {
@@ -50,7 +51,7 @@ class BlazePredictor {
 
     virtual ~BlazePredictor() {}
 
-  virtual void Compute(OpKernelContext* ctx);
+  virtual Status Compute(OpKernelContext* ctx);
   virtual void ComputeNull(OpKernelContext* ctx) {}
   //session must created in constructor function, otherwise in compute function
   //it will cost lots of time the first time
@@ -76,6 +77,15 @@ class BlazePredictor {
   //runtime options
   std::unique_ptr<Session> session_;
   Session::CallableHandle handle_;
+
+  //for cpu->gpu
+  std::string blaze_real_deive_;
+  bool same_device_;
+  Device* blaze_device_;
+  Allocator* blaze_allocator_;
+  stream_executor::Stream* stream_;
+  int vgpu_id_;
+
  private:
   Status ParseAttr(const std::string& device);
   virtual Status PrepareData() {
@@ -87,6 +97,64 @@ class BlazePredictor {
   virtual Status MakeCallable();
   virtual Status Warmup();
   void SetDeviceInGraphDef(const std::string device_name, GraphDef* graph_def);
+
+  Status SetDeviceInfo(OpKernelConstruction* ctx);
+
+ private:
+  const char* const kBlazeRealDevice = "_blaze_real_device";
+  Status CopyTensorCPUToGPU(const std::vector<Tensor>& inputs,
+                            std::vector<Tensor>* real_inputs,
+                            OpKernelContext* ctx);
+  Status CopyTensorGPUToCPU(const std::vector<Tensor>& gpu_tensors,
+                            std::vector<Tensor>* cpu_tensors,
+                            OpKernelContext* ctx);
+
+ protected:
+  stream_executor::Stream* GetStream() const;
+  Status PrepareInputs(const std::vector<Tensor>& inputs,
+      std::vector<Tensor>* real_inputs, OpKernelContext* ctx);
+
+  Status PrepareOutputs(const std::vector<Tensor>& outputs,
+      std::vector<Tensor>* real_outputs, OpKernelContext* ctx);
+
+#define TYPECASE_0(dt, X, Y)                                    \
+  case dt: {                                                  \
+    return (void*)X->flat<EnumToDataType<dt>::Type>().data(); \
+  }
+
+void* GetTensorAddress(const Tensor* tensor_ptr) {
+  auto tensor_type = tensor_ptr->dtype();
+  switch (tensor_type) {
+    TYPECASE_0(DT_FLOAT, tensor_ptr, dest_ptr);
+    TYPECASE_0(DT_HALF, tensor_ptr, dest_ptr);
+    TYPECASE_0(DT_INT8, tensor_ptr, dest_ptr);
+    TYPECASE_0(DT_INT32, tensor_ptr, dest_ptr);
+    TYPECASE_0(DT_INT64, tensor_ptr, dest_ptr);
+    default: {
+      LOG(ERROR) << "Unsupported Data type " << DataTypeString(tensor_type);
+      return nullptr;
+    }
+  }
+}
+
+#define TYPECASE_1(dt, X, Y)                                    \
+  case dt: {                                                  \
+    return X->flat<EnumToDataType<dt>::Type>().size() * sizeof(EnumToDataType<dt>::Type); \
+  }
+uint64 GetTensorSize(const Tensor* tensor_ptr) {
+  auto tensor_type = tensor_ptr->dtype();
+  switch (tensor_type) {
+    TYPECASE_1(DT_FLOAT, tensor_ptr, dest_ptr);
+    TYPECASE_1(DT_HALF, tensor_ptr, dest_ptr);
+    TYPECASE_1(DT_INT8, tensor_ptr, dest_ptr);
+    TYPECASE_1(DT_INT32, tensor_ptr, dest_ptr);
+    TYPECASE_1(DT_INT64, tensor_ptr, dest_ptr);
+    default: {
+      LOG(ERROR) << "Unsupported Data type " << DataTypeString(tensor_type);
+      return 0;
+    }
+  }
+}
 };
 }
 #endif //end TENSORFLOW_CORE_KERNELS_BLAZE_PREDICOTR_H_

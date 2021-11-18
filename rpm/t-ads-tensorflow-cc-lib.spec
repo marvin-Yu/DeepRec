@@ -4,7 +4,7 @@
 ##############################################################
 Name: %(echo t-ads-tensorflow-cc-lib${SUFFIX})
 Packager:wenqi.gwq
-Version:1.15.11
+Version:1.15.29
 # if you want get version number from outside, use like this
 Release:%(echo $RELEASE)%{?dist}
 
@@ -33,6 +33,14 @@ Alimama alogserver for display ads
 %prep
 
 %build
+
+# down load bazel cache file from oss
+rm -rf /home/admin/.cache/bazel/_bazel_admin/
+wget -q http://211619.oss-cn-hangzhou-zmf.aliyuncs.com/public/tf_115_cache.tgz\
+  && mkdir -p /home/admin/.cache/bazel/_bazel_admin/ \
+  && tar -zxvf tf_115_cache.tgz -C /home/admin/.cache/bazel/_bazel_admin/\
+  && rm -rf tf_115_cache.tgz
+
 WORK_DIR=$OLDPWD/../
 cd $WORK_DIR
 export TEST_TMPDIR=/home/admin/.cache/bazel/
@@ -57,7 +65,6 @@ mkdir -p .%{_prefix}/tensorflow/lib
 
 cp -r $OLDPWD/../../_external/usr/local/include/* .%{_prefix}/tensorflow/include
 cp -a $OLDPWD/../../_external/usr/local/lib64/* .%{_prefix}/tensorflow/lib
-cp -a $OLDPWD/../rpm/.dep_create/var/home/a/mklml/lib/libmklml_intel.so .%{_prefix}/tensorflow/lib/
 
 %files
 %defattr(-,ads,users)

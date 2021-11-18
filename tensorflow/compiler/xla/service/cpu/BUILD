@@ -626,6 +626,7 @@ cc_library(
         "//tensorflow/compiler/xla:executable_run_options",
         "//tensorflow/core:framework_lite",
         "//third_party/eigen3",
+        "//tensorflow/core/platform:logging",
     ] + mkl_deps(),
 )
 

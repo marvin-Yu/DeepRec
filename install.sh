@@ -42,13 +42,20 @@ declare -a install_targets=("tensorflow/libtensorflow_framework.so"
                             "tensorflow/core/libtestlib.so"
                             "tensorflow/core/kernels/libops_testutil.so"
 )
-if [ ! -f ".tf_configure.bazelrc" ]; then
-    python ./configure.py
+
+if [ -f ".tf_configure.bazelrc.cuda10" ]; then    
+    cp .tf_configure.bazelrc.cuda10 .tf_configure.bazelrc   
+else
+    rm .tf_configure.bazelrc -f
+    python ./configure.py   
 fi
+#if [ ! -f ".tf_configure.bazelrc" ]; then
+#    python ./configure.py
+#fi
 ## now loop through the above array
 for target in "${targets[@]}"
 do
-    bazel build --copt=-mavx2 --config=cuda --copt -mfpmath=both --copt -mfma --copt -msse4.2 --copt -D_GLIBCXX_USE_CXX11_ABI=0 --copt -DGOOGLE_CUDA=1  $target
+    bazel build -c opt --copt -g --copt=-mavx2 --config=cuda --copt -mfpmath=both --copt -mfma --copt -msse4.2 --copt -D_GLIBCXX_USE_CXX11_ABI=0 --copt -DGOOGLE_CUDA=1  $target
 done
 
 EXTERNAL_DIR="../_external"
@@ -109,6 +116,6 @@ cp -r $ABSL_DIR $HEADER_DIR/absl
 #rm $HEADER_DIR/diting -rf
 #cp -r $DITING_DIR $HEADER_DIR/diting
 
-
+cp .tf_configure.bazelrc .tf_configure.bazelrc.cuda10
 FARMHASH=$BAZEL_EXTERNAL_DIR"farmhash_archive/src/farmhash.h"
 cp $FARMHASH $HEADER_DIR

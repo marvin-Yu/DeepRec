@@ -13,18 +13,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 #include "tensorflow/core/common_runtime/copy_tensor.h"
+#include "tensorflow/core/lib/core/threadpool.h"
 #include "tensorflow/core/kernels/benchmark_helper.h"
 #include "tensorflow/core/kernels/blaze_predictor.h"
 #include "tensorflow/core/kernels/blaze_xla_predictor.h"
+#include "tensorflow/core/util/env_var.h"
 #include "tensorflow/compiler/jit/flags.h"
 
 namespace tensorflow {
-class BlazeXlaOp : public OpKernel {
+class BlazeXlaOp : public AsyncOpKernel {
  public:
   explicit BlazeXlaOp(OpKernelConstruction* context);
   ~BlazeXlaOp() {}
 
-  void Compute(OpKernelContext* context) override;
+  void ComputeAsync(OpKernelContext* context, DoneCallback done) override;
 
   Status ParseRunOptions(BlazeKernelOptions& run_options);
  private:
@@ -34,8 +36,11 @@ class BlazeXlaOp : public OpKernel {
   void CopyTensor(MemoryType, OpKernelContext* ctx,
                   const string& name, const Tensor& tensor);
 
-  void ComputeNormal(OpKernelContext* context);
-  void ComputeBenchmark(OpKernelContext* context);
+  void Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64 begin, bool is_first=true);
+  void ComputeNormal(OpKernelContext* context, const DoneCallback& done);
+  void ComputeBenchmark(OpKernelContext* context, const DoneCallback& done);
+  void ComputeNull(OpKernelContext* context, const DoneCallback& done);
+  int GetBatchSizeUnsafe(OpKernelContext* context);
 
   DeviceType device_type_;
   std::vector<std::string> input_names_;
@@ -53,8 +58,40 @@ class BlazeXlaOp : public OpKernel {
   Env* env_;
   mutex tracing_mu_;
   mutex benchmark_mu_;
+  mutex running_mu_;
   std::atomic<int> benchmark_counter_;
+  int wait_ns_;
+
+  tensorflow::thread::ThreadPool pool_;
+  std::atomic<int> running_counter_;
+  const int kBlazeRunningCount_;
+  const int kScheduleFactor_ = 2;
+
+  std::atomic<int> waiting_counter_;
+  const int kMaxWaitingCount_;
+
+  static std::atomic<int> total_waiting_counter_;
+  static std::atomic<int> total_running_counter_;
 };
+
+std::atomic<int> BlazeXlaOp::total_waiting_counter_(0);
+std::atomic<int> BlazeXlaOp::total_running_counter_(0);
+
+int BlazeThreadsCount() {
+  const int kDefaultDenseThreadsNum = 2;
+  int64 dense_threads_num;
+  ReadInt64FromEnvVar("BLAZE_THREADS_NUM", kDefaultDenseThreadsNum, &dense_threads_num);
+  VLOG(0) << "blaze set thread pool size " << dense_threads_num;
+  return (int)dense_threads_num;
+}
+
+int BlazeWatingCount() {
+  const int kDefaultWaitingCount = 10;
+  int64 dense_waiting_num;
+  ReadInt64FromEnvVar("DENSE_MAX_WAITING_COUNT", kDefaultWaitingCount, &dense_waiting_num);
+  VLOG(0) << "blaze max waiting count " << dense_waiting_num;
+  return (int)dense_waiting_num;
+}
 
 void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
   auto config = blaze_run_options_.mutable_config_proto();
@@ -90,7 +127,10 @@ void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
 }
 
 BlazeXlaOp::BlazeXlaOp(OpKernelConstruction* context)
-    : OpKernel(context), device_type_(context->device_type().type()) {
+    : AsyncOpKernel(context), device_type_(context->device_type().type()), 
+    pool_(Env::Default(), "blaze_kernel", BlazeThreadsCount() * 2), running_counter_(0),
+    kBlazeRunningCount_(BlazeThreadsCount()), waiting_counter_(0),
+    kMaxWaitingCount_(BlazeWatingCount()) {
   OP_REQUIRES_OK(context, context->GetAttr("input_names", &input_names_));
   OP_REQUIRES_OK(context, context->GetAttr("output_names", &output_names_));
   OP_REQUIRES_OK(context, context->GetAttr("graph_def", &graph_def_path_));
@@ -103,6 +143,7 @@ BlazeXlaOp::BlazeXlaOp(OpKernelConstruction* context)
   OP_REQUIRES_OK(context, predictor_->InitSession());
   env_ = Env::Default();
   benchmark_counter_ = 0;
+  wait_ns_ = blaze_run_options_.wait_ms() * 1000000;
 }
 
 Status BlazeXlaOp::ParseAttr() {
@@ -131,27 +172,15 @@ Status BlazeXlaOp::ParseAttr() {
   return Status::OK();
 }
 
-void BlazeXlaOp::ComputeNormal(OpKernelContext* ctx) {
-  if (!ctx->traced_infos()) {
-    predictor_->Compute(ctx);
-  } else {
-    auto start_ns = env_->NowNanos();
-    predictor_->Compute(ctx);
-    auto end_ns = env_->NowNanos();
-    if (ctx->traced_infos()->enable_prof_stats) {
-      ctx->traced_infos()->prof_stats->blaze_latency_ms = ((end_ns - start_ns) / 1000000.0f);
-    }
-
-    if (ctx->traced_infos()->enable_trace_tensors) {
-      TraceTensors(ctx);
-    }
-  }
+void BlazeXlaOp::ComputeNormal(OpKernelContext* ctx, const DoneCallback& done) {
+  auto begin = env_->NowNanos();
+  Schedule(ctx, done, begin);
 }
 
-void BlazeXlaOp::ComputeBenchmark(OpKernelContext* ctx) {
+void BlazeXlaOp::ComputeBenchmark(OpKernelContext* ctx, const DoneCallback& done) {
   if (benchmark_counter_ < 200) {
     // out from warmup
-    ComputeNormal(ctx);
+    ComputeNormal(ctx, done);
     ++benchmark_counter_;
   } else {
     auto& helper = BenchmarkHelper::GetInstance();
@@ -168,20 +197,32 @@ void BlazeXlaOp::ComputeBenchmark(OpKernelContext* ctx) {
       }
     }
   }
+  done();
 }
 
-void BlazeXlaOp::Compute(OpKernelContext* ctx) {
+void BlazeXlaOp::ComputeNull(OpKernelContext* context, const DoneCallback& done) {
+  auto batch_size = GetBatchSizeUnsafe(context);
+  Tensor *output;
+  context->allocate_output(0, {batch_size, 2}, &output);
+  done();
+}
+
+void BlazeXlaOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
   switch(blaze_run_options_.run_mode()) {
     case BlazeKernelOptions::DEFAULT: {
-      ComputeNormal(ctx);
+      ComputeNormal(ctx, std::move(done));
       break;
     }
     case BlazeKernelOptions::BENCHMARK: {
-      ComputeBenchmark(ctx);
+      ComputeBenchmark(ctx, std::move(done));
+      break;
+    }
+    case BlazeKernelOptions::SKIP: {
+      ComputeNull(ctx, std::move(done));
       break;
     }
     default: {
-      ComputeNormal(ctx);
+      ComputeNormal(ctx, std::move(done));
     }
   }
 }
@@ -242,6 +283,101 @@ void BlazeXlaOp::CopyTensor(MemoryType mtype, OpKernelContext* ctx,
     name_tensor->set_name(name);
     tensor.AsProtoField(name_tensor->mutable_tensor());
   }
+}
+
+//unsafe func to infer batchsize, just for testing
+int BlazeXlaOp::GetBatchSizeUnsafe(OpKernelContext* context) {
+  for (int i = 0; i < context->num_inputs(); ++i) {
+    const auto& shape = context->input(i).shape();
+    if (shape.dims() != 0 && shape.dim_size(0) != 1) {
+      return shape.dim_size(0);
+    }
+  }
+  return 1;
+}
+
+void BlazeXlaOp::Schedule(OpKernelContext* ctx, const DoneCallback& done, uint64 begin, bool is_first) {
+  auto schedule_func = [this, ctx, done, begin] {
+    this->Schedule(ctx, done, begin, false);
+  };
+  if (running_counter_ >= kBlazeRunningCount_) {
+    auto schedule_time = env_->NowNanos();
+    if (wait_ns_ > 0) {
+      OP_REQUIRES_ASYNC(ctx, schedule_time - begin <= wait_ns_,
+          errors::Internal("blaze wait too long ", schedule_time - begin),
+          done);
+    } else {
+      OP_REQUIRES_ASYNC(ctx, waiting_counter_ < kMaxWaitingCount_,
+          errors::Internal("waiting pool is full ", waiting_counter_.load()),
+          done);
+    }
+    if (is_first) { ++waiting_counter_; ++total_waiting_counter_; }
+    pool_.Schedule(std::move(schedule_func));
+  } else {
+    if (!is_first) { --waiting_counter_; --total_waiting_counter_; }
+    ++running_counter_;
+    ++total_running_counter_;
+    pool_.Schedule([this, ctx, done, begin] {
+      auto schedule_time = env_->NowNanos();
+      if (wait_ns_ > 0) {
+        if (schedule_time - begin > wait_ns_) { --running_counter_; --total_running_counter_; }
+        OP_REQUIRES_ASYNC(ctx, schedule_time - begin <= wait_ns_,
+                          errors::DeadlineExceeded("blaze wait too long ", schedule_time - begin),
+                          done);
+      }
+      Status status;
+      if (!ctx->traced_infos()) {
+        status = predictor_->Compute(ctx);
+      } else {
+        auto start_ns = env_->NowNanos();
+        status = predictor_->Compute(ctx);
+        auto end_ns = env_->NowNanos();
+        if (ctx->traced_infos()->enable_prof_stats) {
+          ctx->traced_infos()->prof_stats->blaze_latency_ms = ((end_ns - start_ns) / 1000000.0f);
+          ctx->traced_infos()->prof_stats->blaze_wait_ms = ((start_ns - begin) / 1000000.0f);
+          auto output = ctx->mutable_output(0);
+          if (output) {
+            ctx->traced_infos()->prof_stats->batch_size = output->dim_size(0);
+            // check memory
+            if (ctx->output_memory_type(0) == HOST_MEMORY) {
+              //check type, only support fp32 now
+              if (output->dtype() == DT_FLOAT) {
+                bool is_nan = false;
+                int nan_counter = 0;
+                auto fp32_v = output->flat<float>();
+                //2dim will be ok
+                int index = 0;
+                auto inner_size = output->NumElements() / output->dim_size(0);
+                for (int i = 0; i < output->dim_size(0); ++i) {
+                  for (int j = 0; j < inner_size; ++j) {
+                    if (!std::isfinite(fp32_v(index + j))) {
+                      ++nan_counter;
+                      is_nan = true;
+                      break;
+                    }
+                  }
+                  index += inner_size;
+                }
+                ctx->traced_infos()->prof_stats->blaze_nan = is_nan ? 1 : 0;
+                ctx->traced_infos()->prof_stats->blaze_nan_counter = nan_counter;
+              }
+            }
+          }
+          ctx->traced_infos()->prof_stats->blaze_running_counter += total_running_counter_;
+          ctx->traced_infos()->prof_stats->blaze_waiting_counter += total_waiting_counter_;
+        }
+
+        if (ctx->traced_infos()->enable_trace_tensors) {
+          TraceTensors(ctx);
+        }
+      }
+      --running_counter_;
+      --total_running_counter_;
+      --total_waiting_counter_;
+      OP_REQUIRES_ASYNC(ctx, status.ok(), status, done);
+      done();
+  });
+} 
 }
 
 REGISTER_KERNEL_BUILDER(Name("BlazeXlaOp").Device(DEVICE_CPU), BlazeXlaOp);

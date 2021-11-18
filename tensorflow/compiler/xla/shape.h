@@ -76,6 +76,18 @@ class Shape {
     return dynamic_dimensions_;
   }
 
+  void set_batch_dim_dynamic(bool is_dynamic) {
+    batch_dim_dynamic_ = is_dynamic;
+  }
+
+  bool is_batch_dim_dynamic() const { return batch_dim_dynamic_; }
+
+  void set_dynamic_batch_dim(int64 dynamic_batch_dim) {
+    dynamic_batch_dim_ = dynamic_batch_dim;
+  }
+
+  int64 get_dynamic_batch_dim() const { return dynamic_batch_dim_; }
+
   // Add dimension_upper_bound().
 
   // Removes the given dimension form the shape. Layout, if it exists, is
@@ -224,6 +236,8 @@ class Shape {
   // This vector is the same size as 'dimensions_' and indicates whether the
   // respective dimension is dynamically sized.
   std::vector<bool> dynamic_dimensions_;
+  bool batch_dim_dynamic_ = false;
+  int64 dynamic_batch_dim_ = -1;
 
   // The tuple element subshapes. This is nonempty only for tuple shapes.
   std::vector<Shape> tuple_shapes_;

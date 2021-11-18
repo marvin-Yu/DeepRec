@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "tensorflow/core/common_runtime/threadpool_device.h"
 
+#include "tensorflow/core/common_runtime/gpu/gpu_process_state.h"
 #include "tensorflow/core/common_runtime/local_device.h"
 #include "tensorflow/core/common_runtime/scoped_allocator.h"
 #include "tensorflow/core/common_runtime/scoped_allocator_mgr.h"
@@ -75,6 +76,13 @@ ThreadPoolDevice::ThreadPoolDevice(const SessionOptions& options,
 ThreadPoolDevice::~ThreadPoolDevice() {}
 
 Allocator* ThreadPoolDevice::GetAllocator(AllocatorAttributes attr) {
+  if (attr.gpu_compatible()) {
+    GPUProcessState* ps = GPUProcessState::singleton();
+    if (ps) {
+      return ps->GetGpuHostAllocator(0);
+    }
+    return allocator_;
+  }
   return allocator_;
 }
 

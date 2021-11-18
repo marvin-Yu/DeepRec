@@ -3693,6 +3693,8 @@ cc_library(
         ":segment_reduction_ops",
         ":sequence_ops",
         "//tensorflow/core/gru_op:gru_op",
+        "//tensorflow/core/topk_op:topk_op",
+        "//tensorflow/core/tree_op:tree_op",
         "//tensorflow/core/take_ops:take_ops",
     ],
 )
@@ -7474,6 +7476,7 @@ blaze_deps = [
     "//tensorflow/core:lib",
     "//tensorflow/core:lib_internal",
     "//tensorflow/core:lib_proto_parsing",
+    "//tensorflow/core:gpu_runtime",
     "//tensorflow/core:stream_executor",
     "//tensorflow/core:stream_executor_headers_lib",
     "//tensorflow/core/grappler/costs:graph_properties",

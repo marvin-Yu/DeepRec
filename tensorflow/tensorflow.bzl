@@ -45,6 +45,7 @@ load(
     "if_mkl",
     "if_mkl_lnx_x64",
     "if_mkl_ml",
+    "if_mkl_gemm_only",
     "mkl_deps",
 )
 load(
@@ -309,6 +310,7 @@ def tf_copts(
         if_mkl(["-DINTEL_MKL=1", "-DEIGEN_USE_VML"]) +
         if_mkl_open_source_only(["-DINTEL_MKL_DNN_ONLY"]) +
         if_mkl_v1_open_source_only(["-DENABLE_MKLDNN_V1"]) +
+        if_mkl_gemm_only(["-DINTEL_MKL_GEMM_ONLY"]) +
         if_enable_mkl(["-DENABLE_MKL"]) +
         if_ngraph(["-DINTEL_NGRAPH=1"]) +
         if_mkl_lnx_x64(["-fopenmp"]) +
@@ -633,7 +635,7 @@ def tf_cc_binary(
             name = name_os,
             copts = copts,
             srcs = srcs + tf_binary_additional_srcs(),
-            deps = deps + tf_binary_dynamic_kernel_deps(kernels) + if_mkl_ml(
+            deps = deps + tf_binary_dynamic_kernel_deps(kernels) + if_mkl_gemm_only(
                 [
                     clean_dep("//third_party/mkl:intel_binary_blob"),
                 ],
@@ -1005,7 +1007,7 @@ def tf_cc_test(
                 "-lm",
             ],
         }) + linkopts + _rpath_linkopts(name),
-        deps = deps + tf_binary_dynamic_kernel_deps(kernels) + if_mkl_ml(
+        deps = deps + tf_binary_dynamic_kernel_deps(kernels) + if_mkl_gemm_only(
             [
                 clean_dep("//third_party/mkl:intel_binary_blob"),
             ],

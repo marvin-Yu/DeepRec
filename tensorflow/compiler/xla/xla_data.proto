@@ -218,6 +218,8 @@ message ShapeProto {
   // zero (indicating that no dimensions are dynamic) or equal to the number of
   // elements in the 'dimensions' field.
   repeated bool is_dynamic_dimension = 6;
+  bool is_batch_dim_dynamic = 99;
+  int64 dynamic_batch_dim = 100;
 
   // Important: if any field is added, be sure to modify ShapeUtil::Equal(),
   // ShapeUtil::Compatible() and ShapeUtil::Hash() appropriately to account for

@@ -18,8 +18,7 @@ limitations under the License.
 
 #include <iostream>
 #include "tensorflow/core/platform/types.h"
-#ifdef INTEL_MKL
-#include "mkl_cblas.h"
+#if defined(INTEL_MKL) || defined(INTEL_MKL_GEMM_ONLY)
 
 extern void __xla_cpu_runtime_MKLMatMulF32(
     const void* /* xla::ExecutableRunOptions* */ run_options_ptr, float* out,
@@ -80,5 +79,5 @@ extern void __xla_cpu_runtime_MKLSingleThreadedMatMulF64(
   exit(1);
 }
 
-#endif  // INTEL_MKL
+#endif  // INTEL_MKL_GEMM_ONL || INTEL_MKL
 #endif  // TENSORFLOW_COMPILER_XLA_SERVICE_CPU_RUNTIME_MATMUL_MKL_H_

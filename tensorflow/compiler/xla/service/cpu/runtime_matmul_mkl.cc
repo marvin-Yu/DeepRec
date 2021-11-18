@@ -12,8 +12,8 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-
-#if defined(INTEL_MKL) && !defined(INTEL_MKL_DNN_ONLY)
+#include "tensorflow/core/platform/logging.h"
+#if defined(INTEL_MKL) || defined(INTEL_MKL_GEMM_ONLY)
 #include "tensorflow/compiler/xla/service/cpu/runtime_matmul_mkl.h"
 #include "mkl_cblas.h"
 #include "mkl_service.h"
@@ -21,8 +21,6 @@ limitations under the License.
 #include "tensorflow/compiler/xla/executable_run_options.h"
 #include "tensorflow/core/platform/types.h"
 
-#define EIGEN_USE_THREADS
-#include "third_party/eigen3/unsupported/Eigen/CXX11/ThreadPool"
 #include "tensorflow/core/platform/dynamic_annotations.h"
 
 using tensorflow::int32;
@@ -139,4 +137,4 @@ __xla_cpu_runtime_MKLSingleThreadedMatMulF64(const void* run_options_ptr,
   // Set thread number back to the previous number.
   mkl_set_num_threads_local(prev_num_threads);
 }
-#endif  // INTEL_MKL
+#endif  // INTEL_MKL_GEMM_ONLY || INTEL_MKL
