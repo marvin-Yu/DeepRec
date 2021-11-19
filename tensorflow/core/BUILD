@@ -2326,6 +2326,17 @@ tf_proto_library(
 )
 
 tf_proto_library(
+    name = "autotuning_proto_all",
+    srcs = [],
+    cc_api_version = 2,
+    make_default_target_header_only = True,
+    protodeps = [
+        ":autotuning_proto",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+tf_proto_library(
     name = "conv_autotuning_proto",
     srcs = ["protobuf/conv_autotuning.proto"],
     cc_api_version = 2,

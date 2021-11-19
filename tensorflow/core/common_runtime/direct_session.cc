@@ -1881,7 +1881,7 @@ Status DirectSession::CreateExecutors(
     if (!status.ok()) {
       // Fallback to create default executor
       if (executor_type != "DEFAULT") {
-        LOG(WARNING) << "Try to create " << executor_type << " executor failed. "
+        LOG(WARNING) << "Try to create " << executor_type << " executor failed. Error: " << status.error_message() << "."
                      << "Fallback to create default executor.";
         TF_RETURN_IF_ERROR(NewExecutor(
             "DEFAULT", params, std::move(partition_graph), &item->executor));

@@ -3,6 +3,7 @@
 load(
     "//tensorflow/core/platform:default/build_config.bzl",
     "cc_proto_library",
+    "tf_deps",
 )
 load(
     "//tensorflow/core/platform:default/build_config_root.bzl",
@@ -14,7 +15,7 @@ load(
 )
 
 # xla_proto_library() is a convenience wrapper around cc_proto_library.
-def xla_proto_library(name, srcs = [], deps = [], visibility = None, testonly = 0, **kwargs):
+def xla_proto_library(name, deps = [], srcs = [], visibility = None, testonly = 0, **kwargs):
     if kwargs.get("use_grpc_plugin"):
         kwargs["use_grpc_namespace"] = True
     cc_proto_library(
@@ -30,6 +31,7 @@ def xla_proto_library(name, srcs = [], deps = [], visibility = None, testonly = 
         protoc = "@com_google_protobuf//:protoc",
         testonly = testonly,
         visibility = visibility,
+        protolib_deps = deps,
         **kwargs
     )
 

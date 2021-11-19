@@ -1511,7 +1511,7 @@ xla_proto_library(
     deps = [
         "//tensorflow/compiler/xla:xla_data_proto",
         "//tensorflow/compiler/xla/service:hlo_proto",
-        "//tensorflow/core:autotuning_proto_cc",
+        "//tensorflow/core:autotuning_proto_all_cc",
     ],
 )
 
