@@ -76,6 +76,7 @@ Status BlazeXlaPredictor::Warmup() {
   return Status::OK();
 }
 
+// attention: not thread-safe
 Status BlazeXlaPredictor::Warmup(OpKernelContext* ctx) {
   if (warmuped_) {
     return Status::OK();
@@ -92,6 +93,10 @@ Status BlazeXlaPredictor::Warmup(OpKernelContext* ctx) {
     return errors::Internal("Cannot infer inputs' batchsize");
   }
   auto max_bs = batch_sizes_[batch_sizes_.size() - 1];
+  if (max_bs < batchsize) {
+    mutex_lock l(batch_size_mu_);
+    max_bs = AddNewBatchSize(batchsize);
+  }
   std::vector<Tensor> padded_inputs(num_inputs);
   Status status;
   if (same_device_) {
