@@ -1287,7 +1287,7 @@ def _create_local_cuda_repository(repository_ctx):
         )
         repository_ctx.file("crosstool/windows/msvc_wrapper_for_nvcc.py", "")
     else:
-        cuda_defines["%{host_compiler_path}"] = "clang/bin/crosstool_wrapper_driver_is_not_gcc"
+        cuda_defines["%{host_compiler_path}"] = "/usr/bin/crosstool_wrapper_driver_is_not_gcc"
         cuda_defines["%{host_compiler_warnings}"] = ""
 
         # nvcc has the system include paths built in and will automatically

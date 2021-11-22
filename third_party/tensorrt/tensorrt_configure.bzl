@@ -24,12 +24,17 @@ _TF_TENSORRT_LIBS = ["nvinfer", "nvinfer_plugin"]
 _TF_TENSORRT_HEADERS = ["NvInfer.h", "NvUtils.h", "NvInferPlugin.h"]
 _TF_TENSORRT_HEADERS_V6 = [
     "NvInfer.h",
-    "NvUtils.h",
+    "NvCaffeParser.h",
     "NvInferPlugin.h",
-    "NvInferVersion.h",
-    "NvInferRTSafe.h",
-    "NvInferRTExt.h",
     "NvInferPluginUtils.h",
+    "NvInferRuntimeCommon.h",
+    "NvInferRuntime.h",
+    "NvInferVersion.h",
+    "NvOnnxConfig.h",
+    "NvOnnxParser.h",
+    "NvOnnxParserRuntime.h",
+    "NvUffParser.h",
+    "NvUtils.h",
 ]
 
 _DEFINE_TENSORRT_SONAME_MAJOR = "#define NV_TENSORRT_SONAME_MAJOR"
