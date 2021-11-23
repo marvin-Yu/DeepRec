@@ -91,6 +91,13 @@ cc_library(
 )
 
 cc_library(
+    name = "nvml",
+    srcs = ["cuda/lib/%{nvml_lib}"],
+    data = ["cuda/lib/%{nvml_lib}"],
+    linkstatic = 1,
+)
+
+cc_library(
     name = "cusolver",
     srcs = ["cuda/lib/%{cusolver_lib}"],
     data = ["cuda/lib/%{cusolver_lib}"],
