@@ -717,6 +717,13 @@ def _find_libs(repository_ctx, cuda_config):
             cuda_config.config["cusparse_library_dir"],
             cuda_config.cusparse_version,
         ),
+        "nvml": _find_cuda_lib(
+            "nvidia-ml",
+            repository_ctx,
+            cpu_value,
+            cuda_config.config["nvml_library_dir"],
+            cuda_config.nvml_version,
+        ),
     }
 
 def _cudart_static_linkopt(cpu_value):
@@ -775,6 +782,7 @@ def _get_cuda_config(repository_ctx):
         curand_version = ("64_%s" if is_windows else "%s") % config["curand_version"].split(".")[0]
         cufft_version = ("64_%s" if is_windows else "%s") % config["cufft_version"].split(".")[0]
         cusparse_version = ("64_%s" if is_windows else "%s") % config["cusparse_version"].split(".")[0]
+        nvml_version = ("64_%s" if is_windows else "%s") % config["nvml_version"].split(".")[0]
     elif (int(cuda_major), int(cuda_minor)) >= (10, 1):
         # cuda_lib_version is for libraries like cuBLAS, cuFFT, cuSOLVER, etc.
         # It changed from 'x.y' to just 'x' in CUDA 10.1.
@@ -785,6 +793,7 @@ def _get_cuda_config(repository_ctx):
         curand_version = cuda_lib_version
         cufft_version = cuda_lib_version
         cusparse_version = cuda_lib_version
+        nvml_version = "1"
     else:
         cudart_version = cuda_version
         cublas_version = cuda_version
@@ -792,6 +801,7 @@ def _get_cuda_config(repository_ctx):
         curand_version = cuda_version
         cufft_version = cuda_version
         cusparse_version = cuda_version
+        nvml_version = "1"
 
     return struct(
         cuda_toolkit_path = toolkit_path,
@@ -804,6 +814,7 @@ def _get_cuda_config(repository_ctx):
         cufft_version = cufft_version,
         cusparse_version = cusparse_version,
         cudnn_version = cudnn_version,
+        nvml_version = nvml_version,
         compute_capabilities = compute_capabilities(repository_ctx),
         cpu_value = cpu_value,
         config = config,
@@ -881,6 +892,7 @@ def _create_dummy_repository(repository_ctx):
             "%{curand_lib}": lib_name("curand", cpu_value),
             "%{cupti_lib}": lib_name("cupti", cpu_value),
             "%{cusparse_lib}": lib_name("cusparse", cpu_value),
+            "%{nvml_lib}": lib_name("nvml", cpu_value),
             "%{copy_rules}": """
 filegroup(name="cuda-include")
 filegroup(name="cublas-include")
@@ -901,6 +913,7 @@ filegroup(name="cudnn-include")
         "cuda/cuda/lib/%s" % lib_name("cudart_static", cpu_value),
     )
     repository_ctx.file("cuda/cuda/lib/%s" % lib_name("cublas", cpu_value))
+    repository_ctx.file("cuda/cuda/lib/%s" % lib_name("nvml", cpu_value))
     repository_ctx.file("cuda/cuda/lib/%s" % lib_name("cusolver", cpu_value))
     repository_ctx.file("cuda/cuda/lib/%s" % lib_name("cudnn", cpu_value))
     repository_ctx.file("cuda/cuda/lib/%s" % lib_name("curand", cpu_value))
@@ -1230,6 +1243,7 @@ def _create_local_cuda_repository(repository_ctx):
             "%{curand_lib}": cuda_libs["curand"].basename,
             "%{cupti_lib}": cuda_libs["cupti"].basename,
             "%{cusparse_lib}": cuda_libs["cusparse"].basename,
+            "%{nvml_lib}": cuda_libs["nvml"].basename,
             "%{copy_rules}": "\n".join(copy_rules),
         },
         "cuda/BUILD",
@@ -1363,6 +1377,7 @@ def _create_local_cuda_repository(repository_ctx):
             "%{cusparse_version}": cuda_config.cusparse_version,
             "%{cudnn_version}": cuda_config.cudnn_version,
             "%{cuda_toolkit_path}": cuda_config.cuda_toolkit_path,
+            "%{nvml_version}": cuda_config.nvml_version,
         },
         "cuda/cuda/cuda_config.h",
     )

@@ -430,6 +430,33 @@ def _find_cufft_config(base_paths, required_version, cuda_version):
       "cufft_library_dir": os.path.dirname(library_path),
   }
 
+def _find_nvml_config(base_paths, required_version, cuda_version):
+
+  if _at_least_version(cuda_version, "11.0"):
+
+    def get_header_version(path):
+      version = (
+          _get_header_version(path, name)
+          for name in ("CUFFT_VER_MAJOR", "CUFFT_VER_MINOR", "CUFFT_VER_PATCH"))
+      return ".".join(version)
+
+    header_path, header_version = _find_header(base_paths, "nvml.h",
+                                               required_version,
+                                               get_header_version)
+    nvml_version = header_version.split(".")[0]
+
+  else:
+    header_version = cuda_version
+    header_path = _find_file(base_paths, _header_paths(), "nvml.h")
+    nvml_version = required_version
+
+  library_path = _find_library(base_paths, "nvidia-ml", nvml_version)
+
+  return {
+      "nvml_version": header_version,
+      "nvml_include_dir": os.path.dirname(header_path),
+      "nvml_library_dir": os.path.dirname(library_path),
+  }
 
 def _find_cudnn_config(base_paths, required_version):
 
@@ -617,6 +644,12 @@ def find_cuda_config():
     cusparse_version = os.environ.get("TF_CUSPARSE_VERSION", "")
     result.update(
         _find_cusparse_config(cusparse_paths, cusparse_version, cuda_version))
+    
+    nvml_paths = base_paths
+    if tuple(int(v) for v in cuda_version.split(".")) < (11, 0):
+      nvml_paths = cuda_paths
+    nvml_version = os.environ.get("TF_NVML_VERSION", "")
+    result.update(_find_nvml_config(cufft_paths, nvml_version, cuda_version))
 
   if "cudnn" in libraries:
     cudnn_paths = _get_legacy_path("CUDNN_INSTALL_PATH", base_paths)

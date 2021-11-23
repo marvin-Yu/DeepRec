@@ -597,6 +597,13 @@ tf_cc_shared_object(
     ] + tf_additional_binary_deps(),
 )
 
+cc_library(
+    name = "tensorflow_lib",
+    srcs = ["//tensorflow:libtensorflow_cc.so",
+            "//tensorflow:libtensorflow_framework.so"],
+    visibility = ["//visibility:public"],
+)
+
 # -------------------------------------------
 # New rules should be added above this target.
 # -------------------------------------------
