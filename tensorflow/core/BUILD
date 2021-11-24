@@ -1150,6 +1150,7 @@ cc_library(
             "//tensorflow/core/platform/default/build_config:minimal",
             "//tensorflow/core/platform:types",
         ],
+    linkstatic=1,
 )
 
 # Generates library per group of ops.
@@ -2492,6 +2493,7 @@ cc_library(
         "//tensorflow/core/platform/default/build_config:platformlib",
         "fbs_tensor_h"
     ] + if_static([":lib_internal_impl"]),
+    linkstatic=1,
 )
 
 cc_library(
