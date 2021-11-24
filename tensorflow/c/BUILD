@@ -368,6 +368,7 @@ tf_cuda_library(
         "//tensorflow/core:lib",
         "//tensorflow/core/util/tensor_bundle",
     ],
+    alwayslink=1,
 )
 
 tf_cuda_library(

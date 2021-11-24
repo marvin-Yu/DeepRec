@@ -3176,6 +3176,7 @@ tf_cuda_library(
     ] + if_static([
         "@com_google_absl//absl/algorithm:container",
     ]),
+    alwayslink=1,
 )
 
 CORE_CPU_LIB_HEADERS = CORE_CPU_BASE_HDRS + [

@@ -6,6 +6,7 @@ load("//tensorflow:tensorflow.bzl", "VERSION")
 load("//tensorflow:tensorflow.bzl", "tf_cc_shared_object")
 load("//tensorflow:tensorflow.bzl", "tf_custom_op_library_additional_deps_impl")
 load("//tensorflow:tensorflow.bzl", "tf_native_cc_binary")
+load("//tensorflow:tensorflow.bzl", "cc_header_only_library")
 load(
     "//tensorflow/core/platform:default/build_config.bzl",
     "tf_additional_binary_deps",
@@ -600,7 +601,36 @@ tf_cc_shared_object(
 cc_library(
     name = "tensorflow_lib",
     srcs = ["//tensorflow:libtensorflow_cc.so",
-            "//tensorflow:libtensorflow_framework.so"],
+            "//tensorflow:libtensorflow_framework.so",
+           ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "tensorflow_headers_lib",
+    deps = [
+        ":tensorflow_headers",
+        "//third_party/eigen3",
+        "@com_google_absl//absl/strings",
+        "@com_google_protobuf//:protobuf",
+        "@flatbuffers//:flatbuffers",
+        "@jsoncpp_git//:jsoncpp",
+        "@farmhash_archive//:farmhash",
+    ],
+    visibility = ["//visibility:public"],
+)
+cc_header_only_library(
+    name = "tensorflow_headers",
+    deps = [
+        "//tensorflow/core:framework_headers_lib",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:all_kernels",
+        "//tensorflow/cc:cc_ops",
+        "//tensorflow/c:c_api",
+        "//tensorflow/c:checkpoint_reader",
+        "//tensorflow/cc/saved_model:loader",
+        "//tensorflow/cc/saved_model:tag_constants",
+    ],
     visibility = ["//visibility:public"],
 )
 
