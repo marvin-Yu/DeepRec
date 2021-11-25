@@ -610,6 +610,7 @@ cc_library(
     srcs = [
         "//tensorflow/core/platform:cpu_feature_guard.cc",
         "//tensorflow/core/platform:denormal.cc",
+        "//tensorflow/core/platform:tensor_float_32_utils.cc",
         "//tensorflow/core/platform:legacy_platform_other_srcs",
         "//tensorflow/core/platform:profile_utils/android_armv7a_cpu_utils_helper.cc",
         "//tensorflow/core/platform:profile_utils/clock_cycle_profiler.cc",
