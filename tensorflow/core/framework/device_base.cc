@@ -91,8 +91,8 @@ string ProtoDebugString(const DeviceAttributes& object) {
   return object.DebugString();
 }
 
-string ProtoDebugString(const ConfigProto& object) {
-  return object.DebugString();
+string ProtoShortDebugString(const ConfigProto& object) {
+  return object.ShortDebugString();
 }
 
 }  // namespace tensorflow
