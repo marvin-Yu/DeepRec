@@ -24,6 +24,7 @@ limitations under the License.
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
 #include "tensorflow/core/lib/gtl/stl_util.h"
 #include "tensorflow/core/util/work_sharder.h"
+#include "tensorflow/core/protobuf/config.pb.h"
 
 namespace tensorflow {
 
@@ -83,6 +84,14 @@ bool IsSymbolicExecutionDevice(const absl::string_view device_name) {
   } else {
     return false;
   }
+}
+
+string ProtoDebugString(const DeviceAttributes& object) {
+  return object.DebugString();
+}
+
+string ProtoDebugString(const ConfigProto& object) {
+  return object.DebugString();
 }
 
 }  // namespace tensorflow
