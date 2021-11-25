@@ -3655,11 +3655,6 @@ tf_cuda_library(
     ] + if_static([":gpu_runtime_impl"]),
 )
 
-tf_cuda_library(
-    name = "gpu_runtime_headers",
-    hdrs = GPU_RUNTIME_HEADERS,
-)
-
 # This is redundant with the "gpu_runtime_*" targets above. It's useful for
 # applications that want to depend on a minimal subset of TensorFlow (e.g. XLA).
 tf_cuda_library(
