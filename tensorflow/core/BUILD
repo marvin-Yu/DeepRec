@@ -1150,7 +1150,7 @@ cc_library(
             "//tensorflow/core/platform/default/build_config:minimal",
             "//tensorflow/core/platform:types",
         ],
-    linkstatic=1,
+    #linkstatic=1,
 )
 
 # Generates library per group of ops.
@@ -2493,7 +2493,7 @@ cc_library(
         "//tensorflow/core/platform/default/build_config:platformlib",
         "fbs_tensor_h"
     ] + if_static([":lib_internal_impl"]),
-    linkstatic=1,
+    #linkstatic=1,
 )
 
 cc_library(
@@ -3178,7 +3178,7 @@ tf_cuda_library(
     ] + if_static([
         "@com_google_absl//absl/algorithm:container",
     ]),
-    alwayslink=1,
+    #alwayslink=1,
 )
 
 CORE_CPU_LIB_HEADERS = CORE_CPU_BASE_HDRS + [

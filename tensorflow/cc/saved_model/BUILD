@@ -57,7 +57,7 @@ cc_library(
     ]) + if_ios([
         "//tensorflow/core:ios_tensorflow_lib",
     ]),
-    alwayslink = 1,
+    #alwayslink = 1,
 )
 
 tf_cc_test(
@@ -93,7 +93,7 @@ cc_library(
     ]) + if_android([
         "//tensorflow/core:android_tensorflow_lib",
     ]),
-    alwayslink = 1,
+    #alwayslink = 1,
 )
 
 cc_library(
