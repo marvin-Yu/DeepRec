@@ -25,6 +25,7 @@ limitations under the License.
 #include "tensorflow/core/lib/gtl/stl_util.h"
 #include "tensorflow/core/util/work_sharder.h"
 #include "tensorflow/core/protobuf/config.pb.h"
+#include "tensorflow/core/framework/device_attributes.pb.h"
 
 namespace tensorflow {
 
