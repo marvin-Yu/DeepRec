@@ -1150,7 +1150,6 @@ cc_library(
             "//tensorflow/core/platform/default/build_config:minimal",
             "//tensorflow/core/platform:types",
         ],
-    #linkstatic=1,
 )
 
 # Generates library per group of ops.
@@ -2493,7 +2492,6 @@ cc_library(
         "//tensorflow/core/platform/default/build_config:platformlib",
         "fbs_tensor_h"
     ] + if_static([":lib_internal_impl"]),
-    #linkstatic=1,
 )
 
 cc_library(
@@ -3316,7 +3314,7 @@ tf_cuda_library(
     deps = [
         ":bfc_allocator",
         ":graph",
-        ":gpu_runtime_headers",
+        ":gpu_runtime",
         ":framework",
         ":framework_internal",
         ":lib",
@@ -3502,7 +3500,7 @@ tf_cuda_library(
         ":direct_session_internal",
         ":framework",
         ":framework_internal",
-        ":gpu_runtime",
+        #":gpu_runtime",
         ":graph",
         ":lib",
         ":lib_internal",
