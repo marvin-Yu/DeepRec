@@ -594,7 +594,6 @@ tf_cc_shared_object(
         "//tensorflow/core:lib_internal_impl",
         "//tensorflow/stream_executor:stream_executor_impl",
         "//tensorflow:tf_framework_version_script.lds",
-        "//tensorflow/core/platform:tensor_float_32_utils",
         "@com_google_protobuf//:protobuf"
     ] + tf_additional_binary_deps(),
 )
@@ -629,8 +628,8 @@ cc_header_only_library(
         "//tensorflow/cc:cc_ops",
         "//tensorflow/c:c_api",
         "//tensorflow/c:checkpoint_reader",
-        "//tensorflow/cc/saved_model:loader",
         "//tensorflow/cc/saved_model:tag_constants",
+        "//tensorflow/cc/saved_model:loader_lite_impl",
     ],
     visibility = ["//visibility:public"],
 )
@@ -718,6 +717,7 @@ tf_cc_shared_object(
         "//tensorflow/cc/profiler",
         "//tensorflow/core:tensorflow",
         "//tensorflow/core/debug:debug_gateway_internal",
+        "@com_google_protobuf//:protobuf"
     ] + if_ngraph(["@ngraph_tf//:ngraph_tf"]),
 )
 
