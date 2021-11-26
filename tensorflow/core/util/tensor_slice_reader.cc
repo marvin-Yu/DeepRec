@@ -373,4 +373,8 @@ const string TensorSliceReader::DebugString() const {
 
 }  // namespace checkpoint
 
+string ProtoShortDebugString(const SavedSliceMeta& obj) {
+  return obj.DebugString();
+}
+
 }  // namespace tensorflow
