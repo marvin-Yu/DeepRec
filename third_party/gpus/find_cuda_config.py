@@ -185,6 +185,7 @@ def _library_paths():
   return [
       "",
       "lib64",
+      "lib64/stubs",
       "lib",
       "lib/*-linux-gnu",
       "lib/x64",
