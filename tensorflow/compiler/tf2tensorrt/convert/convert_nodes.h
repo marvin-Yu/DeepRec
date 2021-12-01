@@ -150,7 +150,8 @@ Status ConvertGraphDefToEngine(
     const std::vector<PartialTensorShape>& input_shapes, Logger* logger,
     nvinfer1::IGpuAllocator* allocator, TRTInt8Calibrator* calibrator,
     TrtUniquePtrType<nvinfer1::ICudaEngine>* engine, bool use_calibration,
-    bool* convert_successfully);
+    bool* convert_successfully,
+    int64_t* total_flops = nullptr);
 
 // Helper class for the segmenter to determine whether an output edge from the
 // TRT segment is valid.
@@ -371,6 +372,7 @@ struct OpConverterParams {
   TrtWeightStore* weight_store;
   const TrtPrecisionMode precision_mode;
   const bool use_calibration;
+  int64_t flops = 0;
 };
 
 using OpConverter = std::function<Status(OpConverterParams*)>;
@@ -386,7 +388,7 @@ class TrtNodeValidator {
 
   // Returns OK iff 'node' is a TF-TRT conversion candidate, which will be added
   // to TRT subgraph and later converted into TRT engine.
-  Status IsTensorRTCandidate(const Node* node);
+  Status IsTensorRTCandidate(const Node* node, const std::unordered_set<string> &target_nodes);
 
  private:
   static const std::set<string>* quantize_ops;
@@ -441,6 +443,10 @@ class Converter {
     // outputs.
     nvinfer1::DataType trt_dtype;
   };
+
+  int64_t GetFlops() const { return flops_; }
+
+  void UpdateFlops(int64_t flops) { flops_ += flops; }
 
   Converter(nvinfer1::INetworkDefinition* trt_network,
             TrtPrecisionMode precision_mode, bool use_calibration);
@@ -578,6 +584,8 @@ class Converter {
   // size of all inputs are compatible, and make sure individual TF node is
   // acceptable by TRT.
   int batch_size_ = -1;
+
+  int64_t flops_ = 0;
 
   friend class ConverterTest;
   friend class OpConverterTest;

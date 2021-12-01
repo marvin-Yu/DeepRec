@@ -126,6 +126,7 @@ cc_library(
     ],
 )
 
+
 tf_kernel_library(
     name = "strided_slice_op",
     srcs = [
@@ -3649,6 +3650,7 @@ cc_library(
     ],
 )
 
+
 tf_kernel_library(
     name = "sparse_matmul_op",
     defines = select({
@@ -4993,6 +4995,18 @@ tf_kernel_library(
         "//tensorflow/core/distributed_runtime:worker_interface",
         "//tensorflow/core/distributed_runtime:message_wrappers",
         "//tensorflow/core:run_graph_op_op_lib",
+    ],
+)
+
+tf_kernel_library(
+    name = "cuda_graph_op",
+    prefix = "cuda_graph_op",
+    deps = REQUIRED_DEPS + [
+        "//tensorflow/core:lib_internal",
+        "//tensorflow/core:core_cpu",
+        "//tensorflow/core:cuda_graph_mgr",
+        "//tensorflow/core:cuda_graph_op_op_lib",
+        "//tensorflow/stream_executor/cuda:cuda_stream"
     ],
 )
 

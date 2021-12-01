@@ -16,6 +16,7 @@ limitations under the License.
 #ifndef TENSORFLOW_CORE_COMMON_RUNTIME_EXECUTOR_H_
 #define TENSORFLOW_CORE_COMMON_RUNTIME_EXECUTOR_H_
 
+#include <atomic>
 #include "tensorflow/core/common_runtime/device.h"
 #include "tensorflow/core/common_runtime/rendezvous_mgr.h"
 #include "tensorflow/core/framework/rendezvous.h"
@@ -123,6 +124,10 @@ class Executor {
     // for benchmarking in blaze, trace tensor shaope, if interger, tensor
     // values together
     bool trace_tensor_infos;
+    // in normal TF session run,
+    // it will be nullptr.
+    TensorHolder * tensor_holder = nullptr;
+
     typedef std::function<Status(const string& node_name, const int output_slot,
                                  const Tensor* tensor, const bool is_ref,
                                  OpKernelContext* ctx)>
@@ -131,6 +136,7 @@ class Executor {
     void AddSettings(const RunOptions& run_options) {
       trace_tensor_infos = run_options.trace_tensor_infos();
     }
+    std::atomic<int64_t>* flops = nullptr;
   };
 
   typedef std::function<void(const Status&)> DoneCallback;

@@ -29,6 +29,8 @@ limitations under the License.
 namespace tensorflow {
 namespace tensor {
 
+static const float EPSILON = 0.0001;
+
 Tensor DeepCopy(const Tensor& other) {
   Tensor tmp = Tensor(other.dtype(), other.shape());
   DeepCopy(other, &tmp);
@@ -53,6 +55,94 @@ void DeepCopy(const Tensor& input, Tensor* output) {
     CHECK_EQ(DT_VARIANT, input.dtype());
     output->unaligned_flat<Variant>() = input.unaligned_flat<Variant>();
   }
+}
+
+void PrintTensorData(const Tensor& t) {
+  const void* data;
+  /* if (t.dtype() == DT_HALF) {
+    data = static_cast<const void*>(t.flat<Eigen::half>().data());
+  } else  */ 
+  if (t.dtype() == DT_FLOAT) {
+    data = static_cast<const void*>(t.flat<float>().data());
+  } else if (t.dtype() == DT_BOOL) {
+    data = static_cast<const void*>(t.flat<bool>().data());
+  } else if (t.dtype() == DT_INT32) {
+    data = static_cast<const void*>(t.flat<int>().data());
+  } else {
+    LOG(INFO) << "Print Tensor: Unsupported data type!" << std::endl;
+    return;
+  }
+
+  int dims = t.dims();
+  std::ostringstream tensor_string;
+  tensor_string << "shape: " << std::endl;
+  for (int i = 0; i < dims; i++) {
+    tensor_string << t.dim_size(i) << ", ";
+  }
+  tensor_string << std::endl;
+
+  int size = t.NumElements();
+  size = size > 32 ? 32 : size;
+
+  for (int i = 0; i < size; i++) {
+    float value;
+    /* if (t.dtype() == DT_HALF) {
+      value = __half2float(static_cast<const __half*>(data)[i]);
+    } else */
+    if (t.dtype() == DT_INT32) {
+      value = static_cast<const int*>(data)[i];
+    } else if (t.dtype() == DT_BOOL) {
+      value = static_cast<const bool*>(data)[i];
+    } else {
+      value = static_cast<const float*>(data)[i];
+    }
+    tensor_string << value << ",";
+  }
+  LOG(INFO) << tensor_string.str();
+}
+
+bool CheckTensorEquality(const Tensor& a, const Tensor& b) {
+  if (a.dtype() != b.dtype()) {
+    LOG(ERROR) << "Tensor type not equal, tensor a is " << a.dtype() 
+               << " tensor b is " << b.dtype();
+    return false;
+  }
+  if (a.dtype() != DT_FLOAT && a.dtype() != DT_INT32) {
+    LOG(ERROR) << "Check Tensor Equality: Unsupported data type " << a.dtype();
+    return false;
+  }
+  if (a.NumElements() != b.NumElements()) {
+        LOG(ERROR) << "Tensor num elememts not equal, tensor a is " << a.NumElements() 
+                   << " tensor b is " << b.NumElements();
+    return false;
+  }
+
+  if (a.dtype() == DT_INT32) {
+    const int* a_data = a.flat<int>().data();
+    const int* b_data = b.flat<int>().data();
+
+    for (int i = 0; i < a.NumElements(); ++i) {
+      if (a_data[i] != b_data[i]) {
+        LOG(ERROR) << "Tensor content not equal, index " << i 
+                   << " tensor a is " << a_data[i]
+                   << " tensor b is " << b_data[i];
+        return false;
+      }
+    }
+  } else {
+    const float* a_data = a.flat<float>().data();
+    const float* b_data = b.flat<float>().data();
+
+    for (int i = 0; i < a.NumElements(); ++i) {
+      if (fabs(a_data[i] - b_data[i]) > EPSILON) {
+        LOG(ERROR) << "Tensor content not equal, index " << i 
+                   << " tensor a is " << a_data[i]
+                   << " tensor b is " << b_data[i];
+        return false;
+      }
+    }  
+  }
+  return true;
 }
 
 Status Concat(const gtl::ArraySlice<Tensor>& tensors, Tensor* result) {

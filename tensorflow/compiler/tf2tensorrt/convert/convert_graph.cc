@@ -424,7 +424,8 @@ Status CreateTRTNode(const ConversionParams& params,
         max_batch_size, info.max_workspace_size_bytes, input_shapes,
         &trt_logger, alloc, /*calibrator=*/nullptr, &engine,
         info.use_calibration,
-        /*convert_successfully=*/nullptr));
+        /*convert_successfully=*/nullptr,
+        &(params.total_flops)));
     TrtUniquePtrType<nvinfer1::IHostMemory> engine_data(engine->serialize());
     segment_string = string(static_cast<const char*>(engine_data->data()),
                             engine_data->size());
@@ -461,6 +462,9 @@ Status CreateTRTNode(const ConversionParams& params,
           .Attr("precision_mode", prec_string)
           .Attr("use_calibration", info.use_calibration)
           .Attr("OutT", out_types)
+          //.Attr("_flops", int64(params.total_flops)) // huasha.lqf add and del ...
+          .Attr("engine_pad_batch_step", params.engine_pad_batch_step)
+          .Attr("engine_pad_to_batches", params.engine_pad_to_batches)
           .Finalize(&trt_node);
   if (!status.ok()) {
     LOG(ERROR) << "Node construction failed with" << status;
@@ -619,13 +623,14 @@ Status ConvertAfterShapes(const ConversionParams& params) {
     segment_options.exclude_node_list.insert(node);
   }
   segment_options.minimum_segment_size = params.minimum_segment_size;
+  segment_options.convert_ranges = params.convert_ranges;
   segment::SegmentNodesVector initial_segments;
   TrtNodeValidator validator(*params.graph_properties, params.precision_mode,
                              params.use_calibration);
   TF_RETURN_IF_ERROR(segment::SegmentGraph(
       &graph,
       std::bind(&TrtNodeValidator::IsTensorRTCandidate, &validator,
-                std::placeholders::_1),
+                std::placeholders::_1, std::placeholders::_2),
       // Input validation is already done by TrtNodeValidator, so we don't
       // need to check the input edges.
       [](const Edge* edge) { return true; }, OutputEdgeValidator(),
@@ -731,7 +736,10 @@ Status ConvertAfterShapes(const ConversionParams& params) {
         StrCat("TensorRT node ", engine.engine_name, " added for segment ", i,
                " consisting of ", converted_segments.at(i).size(), " nodes");
     if (status.ok()) {
-      LOG(INFO) << msg << " succeeded.";
+      LOG(INFO) << msg << " succeeded. They are:";
+      for (auto node : converted_segments.at(i)) {
+        LOG(INFO) << "    " << node->name();
+      }
     } else {
       // Graph is not modified.
       LOG(WARNING) << msg << " failed: " << status << ". Fallback to TF...";

@@ -45,6 +45,8 @@ limitations under the License.
 #include "tensorflow/core/platform/stream_executor.h"
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/public/session_options.h"
+#include "tensorflow/stream_executor/gpu/gpu_driver.h"
+
 
 namespace tensorflow {
 class GPUKernelTracker;
@@ -126,6 +128,30 @@ class BaseGPUDevice : public LocalDevice {
   // the compute stream and are not yet known to have completed.
   int PendingKernels();
 
+  bool ReserveGPUMemChunks(size_t chunk_size, int chunk_num);
+
+
+#ifdef GOOGLE_CUDA
+  // For enabling cuda-graph 
+  void SetSingleStream();
+
+  void ResetStreams();
+  
+  // get the underlying cuda stream
+  cudaStream_t GetSingleStream(){
+      if( ! stream_catpure_mode_) return nullptr;
+      // todo: make clear what if there are more than 1 streams? 
+      auto gpu_stream = streams_[0]->compute->implementation();
+      return static_cast<cudaStream_t>(gpu_stream->GpuStreamHack());
+  }
+  
+  void SetStreamCaptureMode(bool mode){
+      // now, no actual synchronization will be called, only faked.
+      se::gpu::GpuDriver::SetCudaStreamCaptureMode(mode);
+      stream_catpure_mode_ = mode;
+  }
+#endif
+  
  protected:
   Allocator* gpu_allocator_;  // not owned
   Allocator* cpu_allocator_;  // not owned
@@ -143,7 +169,10 @@ class BaseGPUDevice : public LocalDevice {
 
  private:
   friend class GPUDeviceTestHelper;
+  SessionOptions session_options_;
+  bool stream_catpure_mode_ = false;
   gtl::InlinedVector<StreamGroup*, 4> streams_;
+  StreamGroup stream_backup_;
   mutex scratch_init_mutex_;
   gtl::InlinedVector<char*, 4> scratch_;
   std::vector<GPUDeviceContext*> device_contexts_;
@@ -340,6 +369,7 @@ class GPUKernelTracker {
       pending_decreased_.wait(l);
     }
   }
+
 
  private:
   friend class GPUKernelTrackerTest;

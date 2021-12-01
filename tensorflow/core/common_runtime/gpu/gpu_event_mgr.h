@@ -106,7 +106,12 @@ class EventMgr {
     FreeMemory(to_free);
   }
 
+  static void SetStreamCaptureMode(bool mode) { stream_capture_mode_ = mode; }
+
  private:
+  static bool stream_capture_mode_;
+
+  friend class TEST_EventMgr;
   friend class TEST_EventMgrHelper;
   se::StreamExecutor* const exec_;
   const int64 deferred_bytes_threshold_;

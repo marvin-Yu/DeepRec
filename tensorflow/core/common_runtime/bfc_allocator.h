@@ -79,6 +79,8 @@ class BFCAllocator : public Allocator {
 
   void SetSafeFrontier(uint64 count) override;
 
+  bool ReserveChunks(size_t chunk_size, int chunk_num) override;
+
  private:
   struct Bin;
 

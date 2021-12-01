@@ -242,6 +242,7 @@ PlatformUtil::GetStreamExecutors(
       // shared hosts.
 
       // TODO(ylxu): update allowed_devices based on GPU virtual_devices option.
+      // The following check is not compatible with GPU virtual_devices option.
       // if (allowed_devices && allowed_devices->count(i) == 0) {
       //   VLOG(1) << "Not initializing StreamExecutor for device " << i
       //           << " since it is not in the visible device list";

@@ -11,6 +11,7 @@ option go_package = "github.com/tensorflow/tensorflow/tensorflow/go/core/protobu
 import "tensorflow/core/framework/cost_graph.proto";
 import "tensorflow/core/framework/graph.proto";
 import "tensorflow/core/framework/step_stats.proto";
+import "tensorflow/core/framework/types.proto";
 import "tensorflow/core/protobuf/cluster.proto";
 import "tensorflow/core/protobuf/debug.proto";
 import "tensorflow/core/protobuf/named_tensor.proto";
@@ -194,6 +195,40 @@ message GPUOptions {
   Experimental experimental = 9;
 }
 
+// A detail description for a input tensor of a subgraph
+message SubgraphInputTensor {
+  // node which output this tensor in origin graph and output slot idx
+  string tensor_provider_name = 1;
+
+  int32 tensor_provider_slot = 2;
+
+  // ph info which replace input tensor
+  string ph_name = 3;
+
+  DataType type = 4;
+  
+  repeated int64 shape = 5;
+}
+
+// A detail description for a subgraph
+message SubgraphDescription {
+  // subgraph name, to differentitate multiple subgraph in a graph
+  string subgraph_name = 1;
+
+  // input tensor and replaced ph info
+  repeated SubgraphInputTensor input_tensors = 2;
+
+  // output node name, which are subgraph's top node
+  repeated string output_node_names = 3;
+  
+  // if capture cuda graph, capture fixed batch size graph instance
+  repeated int32 cuda_graph_batch_sizes = 4;
+
+  // if true, capture a graph whose all non -1 input tensor first dim 
+  // rewritted to 1
+  bool capture_single_batch = 5;
+}
+
 // Options passed to the graph optimizer
 message OptimizerOptions {
   // If true, optimize the graph using common subexpression elimination.
@@ -240,6 +275,20 @@ message OptimizerOptions {
     ON_2 = 2;
   }
   GlobalJitLevel global_jit_level = 5;
+
+  // If true, will enable cudagraph, cut subgraph for capturing when create session
+  // and replace subgraph with cudagraphOp when serving.
+  bool cuda_graph_enable = 7;
+
+  repeated SubgraphDescription subgraph_descriptions = 8;
+
+  // model name
+  string subgraph_group_name = 9;
+
+  // output node names of final serving graph with cuda graph
+  repeated string output_names_with_cg = 10;
+  
+  bool cuda_graph_capture = 11;
 }
 
 message GraphOptions {
@@ -639,6 +688,8 @@ message RunOptions {
   // session.run() call will be accumulated. The value can be access through
   // RunMetadata.flop_count_sp
   bool record_flop_count = 109;
+  bool emb_merge_dumplicate = 110;
+  float emb_merge_dumplicate_threshold = 111;
 
   bool trace_tensors = 127;
   map<string, string> debug_spec = 128;

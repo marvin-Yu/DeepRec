@@ -56,6 +56,7 @@ class GpuContext;
 // Thread safety: these functions should not be used from signal handlers.
 class GpuDriver {
  public:
+  
   // Wraps a call to cuInit with logging to help indicate what has gone wrong in
   // the case of failure. Safe to call multiple times; will be fast on all calls
   // after the first.
@@ -559,6 +560,10 @@ class GpuDriver {
   // Seam for injecting an error at CUDA initialization time for testing
   // purposes.
   static bool driver_inject_init_error_;
+  
+  static bool cuda_stream_capture_mode_;
+
+  static void SetCudaStreamCaptureMode(bool mode) { cuda_stream_capture_mode_ = mode; }
 };
 
 // Ensures a context is activated within a scope.

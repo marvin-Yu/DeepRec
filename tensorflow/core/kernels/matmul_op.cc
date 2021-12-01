@@ -478,6 +478,15 @@ class MatMulOp : public OpKernel {
         {a.dim_size(a_dim_remaining), b.dim_size(b_dim_remaining)});
     Tensor* out = nullptr;
     OP_REQUIRES_OK(ctx, ctx->allocate_output(0, out_shape, &out));
+
+    // Add Flops:
+    //  W[B*M] X[M*N] - > B * M * N 
+    auto flops = a.dim_size(a_dim_remaining)
+      * b.dim_size(b_dim_remaining)
+      * a.dim_size(1 - a_dim_remaining)
+      * 2;
+    ctx->set_flops(flops);
+
     if (out->NumElements() == 0) {
       // If a has shape [0, x] or b has shape [x, 0], the output shape
       // is a 0-element matrix, so there is nothing to do.
@@ -534,6 +543,7 @@ class MatMulOp : public OpKernel {
       LaunchMatMul<Device, T, USE_CUBLAS>::launch(
           ctx, a, b, dim_pair, &algorithms_, use_autotune_, out);
     }
+
   }
 
  private:

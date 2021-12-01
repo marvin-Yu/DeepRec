@@ -35,6 +35,19 @@ inline void SetDefaultDevice(const string& device, GraphDef* graph_def) {
   }
 }
 
+inline void CheckNodeDevice(const string& device, GraphDef* graph_def) {
+  int node_size = graph_def->node_size();
+  LOG(INFO) << "Graph node size is "  << node_size << std::endl;
+  for (int i = 0; i < node_size; ++i) {
+    auto node = graph_def->mutable_node(i);
+    if (node->device().empty()) {
+      LOG(INFO) << "Node device of " << node->name() << " is empty" << std::endl;
+    } else if (node->device() != device) {
+      LOG(INFO) << "Node device of " << node->name() << " is " << node->device() << " not match expected " << device << std::endl;
+    }
+  }
+}
+
 }  // namespace graph
 }  // namespace tensorflow
 

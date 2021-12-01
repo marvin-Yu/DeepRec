@@ -29,6 +29,7 @@ limitations under the License.
 
 namespace stream_executor {
 
+
 namespace {
 // Code to turn parameters to functions on stream into strings that
 // will be VLOG'ed. We need overloads, instead of
@@ -325,14 +326,15 @@ Stream& Stream::InitWithTimer(Timer* timer) {
 
 Stream& Stream::ThenRecordEvent(Event* event) {
   VLOG_CALL(PARAM(event));
-
-  port::Status status = parent_->RecordEvent(this, event);
-  if (!status.ok()) {
-    LOG(ERROR) << "Error recording event in stream: " << status.error_message()
-               << "; not marking stream as bad, as the Event object may be "
-               << "at fault. Monitor for further errors.";
+  
+  if(! cuda_stream_capture_mode_ ){
+      port::Status status = parent_->RecordEvent(this, event);
+      if (!status.ok()) {
+          LOG(ERROR) << "Error recording event in stream: " << status.error_message()
+                     << "; not marking stream as bad, as the Event object may be "
+                     << "at fault. Monitor for further errors.";
+      }
   }
-
   return *this;
 }
 
@@ -1968,11 +1970,13 @@ void Stream::ReturnSubStream(Stream* sub_stream) {
 Stream& Stream::ThenStartTimer(Timer* t) {
   VLOG_CALL(PARAM(t));
 
-  if (ok()) {
-    CheckError(parent_->StartTimer(this, t));
-  } else {
-    LOG(INFO) << DebugStreamPointers()
-              << " did not enqueue 'start timer': " << t;
+  if(! cuda_stream_capture_mode_ ){
+      if (ok()) {
+          CheckError(parent_->StartTimer(this, t));
+      } else {
+          LOG(INFO) << DebugStreamPointers()
+                    << " did not enqueue 'start timer': " << t;
+      }
   }
   return *this;
 }
@@ -1980,11 +1984,13 @@ Stream& Stream::ThenStartTimer(Timer* t) {
 Stream& Stream::ThenStopTimer(Timer* t) {
   VLOG_CALL(PARAM(t));
 
-  if (ok()) {
-    CheckError(parent_->StopTimer(this, t));
-  } else {
-    LOG(INFO) << DebugStreamPointers()
-              << " did not enqueue 'stop timer': " << t;
+  if(! cuda_stream_capture_mode_){
+      if (ok()) {
+          CheckError(parent_->StopTimer(this, t));
+      } else {
+          LOG(INFO) << DebugStreamPointers()
+                    << " did not enqueue 'stop timer': " << t;
+      }
   }
   return *this;
 }
@@ -1992,30 +1998,35 @@ Stream& Stream::ThenStopTimer(Timer* t) {
 Stream& Stream::ThenWaitFor(Stream* other) {
   VLOG_CALL(PARAM(other));
 
-  CHECK(this != other) << "stream cannot wait for itself";
-  if (ok() && other->ok()) {
-    CheckError(parent_->CreateStreamDependency(this, other));
-  } else {
-    SetError();
-    LOG(INFO) << DebugStreamPointers() << " did not wait for "
-              << other->DebugStreamPointers();
+  if(! cuda_stream_capture_mode_){
+  
+      CHECK(this != other) << "stream cannot wait for itself";
+      if (ok() && other->ok()) {
+          CheckError(parent_->CreateStreamDependency(this, other));
+      } else {
+          SetError();
+          LOG(INFO) << DebugStreamPointers() << " did not wait for "
+                    << other->DebugStreamPointers();
+      }
   }
   return *this;
 }
 
 Stream& Stream::ThenWaitFor(Event* event) {
   VLOG_CALL(PARAM(event));
-
-  if (ok()) {
-    port::Status status = parent_->WaitForEvent(this, event);
-    if (!status.ok()) {
-      LOG(ERROR) << "Error waiting for event in stream: "
-                 << status.error_message()
-                 << "; not marking stream as bad, as the Event object may be "
-                 << "at fault. Monitor for further errors.";
-    }
-  } else {
-    LOG(INFO) << DebugStreamPointers() << " did not wait for an event.";
+  
+  if(! cuda_stream_capture_mode_){
+      if (ok()) {
+          port::Status status = parent_->WaitForEvent(this, event);
+          if (!status.ok()) {
+              LOG(ERROR) << "Error waiting for event in stream: "
+                         << status.error_message()
+                         << "; not marking stream as bad, as the Event object may be "
+                         << "at fault. Monitor for further errors.";
+          }
+      } else {
+          LOG(INFO) << DebugStreamPointers() << " did not wait for an event.";
+      }
   }
   return *this;
 }

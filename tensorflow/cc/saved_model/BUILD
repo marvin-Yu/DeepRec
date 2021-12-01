@@ -116,6 +116,7 @@ cc_library(
         ":reader",
     ] + if_not_mobile([
         "//tensorflow/core:core_cpu",
+        "//tensorflow/core:cuda_graph_mgr",
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",

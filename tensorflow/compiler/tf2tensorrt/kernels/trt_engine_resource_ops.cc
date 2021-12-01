@@ -140,11 +140,14 @@ class InitializeTRTResource : public OpKernel {
               engine_instance.serialized_engine().c_str(),
               engine_instance.serialized_engine().size(), nullptr));
       auto raw_engine = engine.get();
+      /*
       resource->cache_.emplace(
           engine_input_shapes,
           absl::make_unique<EngineContext>(
               std::move(engine), TrtUniquePtrType<nvinfer1::IExecutionContext>(
                                      raw_engine->createExecutionContext())));
+      */
+      resource->cache_.emplace(engine_input_shapes, absl::make_unique<EngineContext>(std::move(engine)));
       ++num_loaded_engine;
     } while (1);
     VLOG(1) << "Loaded " << num_loaded_engine << " TRT engines for op "

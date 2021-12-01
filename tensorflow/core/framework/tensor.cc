@@ -189,8 +189,13 @@ struct Helper {
 
   // Memory usage.
   static int64 TotalBytes(TensorBuffer* in, int64 n) {
+    // For cuda graph tensor reusing,
+    // We allow buffer size >= required size
+    // DCHECK_GE(in->size(), sizeof(T) * n);
+    // return sizeof(T) * n;
+
     DCHECK_EQ(in->size(), sizeof(T) * n);
-    return in->size();
+    return in->size();      
   }
 };
 
@@ -1660,6 +1665,65 @@ gtl::InlinedVector<int64, 4> Tensor::ComputeFlatOuterDims(
     out_dims[num_out_dims - 1] *= orig[in_dim];
   }
   return out_dims;
+}
+
+
+TensorHolder::TensorHolder() {}
+
+TensorHolder::TensorHolder(const TensorHolder& tensor_holder) {
+        tensors_ = tensor_holder.tensors_;
+}
+
+
+Tensor TensorHolder::FindUsableTensor(DataType type, const TensorShape & shape) {
+    // Todo
+    // Change to a global optimal solution? may need to run two times?    
+    // Find a tensor with refcount == 1, and with proper buffer size
+    std::lock_guard<std::mutex> lck(mtx_);
+    
+    // disable reusing
+    return Tensor();
+}
+
+
+size_t TensorHolder::Add(const Tensor* tensor) {
+    std::lock_guard<std::mutex> lck(mtx_);
+    tensors_.push_back(Tensor());
+    auto & t = tensors_[tensors_.size() - 1];
+    t.shape_ = tensor->shape_;
+    t.buf_ = tensor->buf_;
+    t.buf_->Ref();    
+    return tensors_.size();
+}
+
+const Tensor* TensorHolder::GetTensorPtr(unsigned int index) {
+  return &(tensors_[index]);
+}
+
+int TensorHolder::AllocatedBytes(){
+    std::lock_guard<std::mutex> lck(mtx_);
+    int bytes = 0;
+    for(auto & t: tensors_){
+        bytes += t.AllocatedBytes();
+    }
+    return bytes;
+}
+
+
+bool TensorHolder::HostContains(const void *address) const{        
+    for(auto & t: tensors_){
+        TensorDescription t_desc;
+        t.FillDescription(&t_desc);
+        std::string allocator_name = t_desc.allocation_description().allocator_name();
+        if(allocator_name.find("host") != std::string::npos){
+            // tensor on host
+            if(t.base<void>() == address){
+                LOG(INFO) << "host tensor is reserved" << std::endl;
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 }  // namespace tensorflow

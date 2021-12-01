@@ -176,6 +176,7 @@ void RecvOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
     args.cancellation_manager = ctx->cancellation_manager();
   }
 
+  
   FrameAndIter frame_iter = GetFrameAndIter(ctx, hostmem_sendrecv_);
   if (frame_iter == FrameAndIter(0, 0)) {
     VLOG(2) << "Recv " << parsed_key_.buf_;

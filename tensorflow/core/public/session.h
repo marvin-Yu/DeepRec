@@ -18,7 +18,9 @@ limitations under the License.
 
 #include <string>
 #include <vector>
+#include <atomic>
 
+#include "tensorflow/core/common_runtime/cuda_graph_meta.h"
 #include "tensorflow/core/framework/device_attributes.pb.h"
 #include "tensorflow/core/framework/graph.pb.h"
 #include "tensorflow/core/framework/tensor.h"
@@ -26,6 +28,12 @@ limitations under the License.
 #include "tensorflow/core/platform/env.h"
 #include "tensorflow/core/protobuf/config.pb.h"
 #include "tensorflow/core/public/session_options.h"
+
+
+#ifdef GOOGLE_CUDA
+#include <cuda_runtime.h>
+#endif
+
 
 namespace tensorflow {
 class DeviceMgr;
@@ -111,6 +119,34 @@ class Session {
   virtual Status Extend(GraphDef&& graph) { return Extend(graph); }
 #endif
 
+
+#ifdef GOOGLE_CUDA
+  virtual Status CreateForCapture(const GraphDef& graph) { return Create(graph); };
+#ifndef SWIG
+  virtual Status CreateForCapture(GraphDef&& graph) { return CreateForCapture(graph); }
+#endif
+  virtual Status RunForCapture(const std::vector<std::pair<string, Tensor> >& inputs,
+                     const std::vector<string>& output_tensor_names,
+                     const std::vector<string>& target_node_names,
+                     CudaGraphMeta* cuda_graph_meta) {
+    std::vector<Tensor> outputs;
+    return Run(inputs, output_tensor_names, target_node_names, &outputs); 
+  };
+  virtual Status RunForCapture(const RunOptions& run_options,
+                     const std::vector<std::pair<string, Tensor> >& inputs,
+                     const std::vector<string>& output_tensor_names,
+                     const std::vector<string>& target_node_names,
+                     RunMetadata* run_metadata,
+                     CudaGraphMeta* cuda_graph_meta) {
+    std::vector<Tensor> outputs;
+    return Run(run_options, inputs, output_tensor_names, target_node_names, &outputs, run_metadata);
+  };
+  virtual bool SupportsCudaGraph() { return false; }
+  virtual cudaStream_t  EnableGraphCapture() {return nullptr;} 
+  virtual void DisableGraphCapture() { }
+  virtual std::unordered_map<std::string, GraphDef>* GetCudaGraphRewriteDefs() { return nullptr; };
+#endif
+  
   /// \brief Runs the graph with the provided input tensors and fills
   /// `outputs` for the endpoints specified in `output_tensor_names`.
   /// Runs to but does not return Tensors for the nodes in
@@ -141,7 +177,8 @@ class Session {
                 const std::vector<string>& target_nodes,
                 std::vector<Tensor> *outputs,
                 RunMetadata* run_metadata,
-                StatusCallback done) {}
+                StatusCallback done,
+                std::atomic<int64_t>* flops = nullptr) {}
 
   /// \brief Implementations which support `RunOptions`.
   //

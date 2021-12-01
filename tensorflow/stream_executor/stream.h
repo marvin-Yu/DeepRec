@@ -105,6 +105,9 @@ class Stream {
   // upon this object.
   ~Stream();
 
+  void SetStreamCaptureMode(bool mode) { cuda_stream_capture_mode_ = mode; }
+  
+  
   // Returns whether any errors have occurred while entraining work for this
   // stream.
   bool ok() const { return !InErrorState(); }
@@ -2051,7 +2054,9 @@ class Stream {
   template <typename... Args>
   friend struct ThenBlasImpl;  // for implementing ThenBlasXXX.
   friend class ocl::CLBlas;    // for parent_.
-
+  
+  bool cuda_stream_capture_mode_ = false;
+  
   bool InErrorState() const LOCKS_EXCLUDED(mu_) {
     absl::ReaderMutexLock lock(&mu_);
     return !ok_;

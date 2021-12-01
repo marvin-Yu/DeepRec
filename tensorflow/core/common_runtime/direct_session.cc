@@ -16,6 +16,7 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/direct_session.h"
 
 #include <atomic>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -23,9 +24,11 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/collective_executor_mgr.h"
 #include "tensorflow/core/common_runtime/collective_param_resolver_local.h"
 #include "tensorflow/core/common_runtime/constant_folding.h"
+#include "tensorflow/core/common_runtime/cuda_graph_mgr.h"
 #include "tensorflow/core/common_runtime/debugger_state_interface.h"
 #include "tensorflow/core/common_runtime/device_factory.h"
 #include "tensorflow/core/common_runtime/device_resolver_local.h"
+#include "tensorflow/core/common_runtime/gpu/gpu_device.h"
 #include "tensorflow/core/common_runtime/executor.h"
 #include "tensorflow/core/common_runtime/executor_factory.h"
 #include "tensorflow/core/common_runtime/function.h"
@@ -40,6 +43,7 @@ limitations under the License.
 #include "tensorflow/core/framework/function.h"
 #include "tensorflow/core/framework/graph.pb.h"
 #include "tensorflow/core/framework/graph.pb_text.h"
+#include "tensorflow/core/framework/graph_def_rewriter.h"
 #include "tensorflow/core/framework/graph_def_util.h"
 #include "tensorflow/core/framework/log_memory.h"
 #include "tensorflow/core/framework/logging.h"
@@ -48,6 +52,7 @@ limitations under the License.
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/versions.pb.h"
 #include "tensorflow/core/graph/algorithm.h"
+#include "tensorflow/core/graph/default_device.h"
 #include "tensorflow/core/graph/graph.h"
 #include "tensorflow/core/graph/graph_constructor.h"
 #include "tensorflow/core/graph/graph_partition.h"
@@ -76,6 +81,7 @@ limitations under the License.
 #include "tensorflow/core/profiler/lib/traceme.h"
 #include "tensorflow/core/protobuf/config.pb.h"
 #include "tensorflow/core/util/device_name_utils.h"
+#include "tensorflow/core/util/dump_graph.h"
 #include "tensorflow/core/util/env_var.h"
 
 namespace tensorflow {
@@ -186,7 +192,7 @@ class DirectSessionFactory : public SessionFactory {
             experimental_config.session_metadata().DebugString());
       }
     }
-
+    
     // Must do this before the CPU allocator is created.
     if (options.config.graph_options().build_cost_model() > 0) {
       EnableCPUAllocatorFullStats(true);
@@ -329,9 +335,11 @@ DirectSession::DirectSession(const SessionOptions& options,
     for (int i = 0; i < thread_pool_size; ++i) {
       thread::ThreadPool* pool = nullptr;
       bool owned = false;
+      // LOG(INFO) << "[Jieluo] before update init error";
       init_error_.Update(NewThreadPoolFromThreadPoolOptions(
           options_, options_.config.session_inter_op_thread_pool(i), i, &pool,
           &owned));
+      // LOG(INFO) << "[Jieluo] init error " << init_error_.error_message();
       thread_pools_.emplace_back(pool, owned);
     }
   } else if (options_.config.use_per_session_threads()) {
@@ -427,6 +435,8 @@ Status DirectSession::Create(const GraphDef& graph) {
 }
 
 Status DirectSession::Create(GraphDef&& graph) {
+  // LOG(INFO) << "[Jieluo] Direct session create graph " << graph.ShortDebugString()
+  //           << " init error msg " << init_error_.error_message();
   TF_RETURN_IF_ERROR(init_error_);
   if (graph.node_size() > 0) {
     mutex_lock l(graph_state_lock_);
@@ -434,10 +444,127 @@ Status DirectSession::Create(GraphDef&& graph) {
       return errors::AlreadyExists(
           "A Graph has already been created for this session.");
     }
+#ifdef GOOGLE_CUDA
+    bool cuda_graph_enable = options_.config.graph_options().
+                             optimizer_options().
+                             cuda_graph_enable();
+    bool cuda_graph_capture = options_.config.graph_options().
+                              optimizer_options().
+                              cuda_graph_capture();
+    
+    if (cuda_graph_enable) {
+      // LOG(INFO) << "[Jieluo] cuda graph is enable";
+      cudagraph_defs_.clear();
+      CudaGraphMgr& mgr = CudaGraphMgr::Singleton();
+      // get all cudagraph num, for checking existance and capturing
+      int num_cuda_graph = options_.config.graph_options().
+                               optimizer_options().
+                               subgraph_descriptions_size();
+      const std::string& group_name = options_.config.graph_options().
+                                          optimizer_options().
+                                          subgraph_group_name();
+      // check and capture uncaptured graph
+      if (cuda_graph_capture) {
+        // LOG(INFO) << "[Jieluo] cuda graph capture is enable";
+        // capture uncaptured graph
+        for (int i = 0; i < num_cuda_graph; ++i) {
+          int buckets_size = options_.config.graph_options().
+                                optimizer_options().
+                                subgraph_descriptions(i).
+                                cuda_graph_batch_sizes_size();
+          std::vector<int> buckets;
+          buckets.reserve(buckets_size);
+          for (int j = 0; j < buckets_size; ++j) {
+            buckets.emplace_back(options_.config.graph_options()
+                                  .optimizer_options()
+                                  .subgraph_descriptions(i)
+                                  .cuda_graph_batch_sizes(j));
+          }
+
+          GraphDef cudagraph_capture;
+          std::vector<std::string> input_node_names;
+          std::vector<std::string> output_node_names;
+          bool gen_succ = SubgraphGenerator::GenerateSubgraph(
+              graph, cudagraph_capture,
+              options_.config.graph_options()
+                  .optimizer_options()
+                  .subgraph_descriptions(i),
+                input_node_names, output_node_names);
+          if (!gen_succ) {
+            LOG(ERROR) << "Generate subgraph for cudagraph capturing failed, "
+                          "please check GraphDef and session options";
+            // todo: return not ok
+          }
+          const std::string& graph_name = options_.config.graph_options().
+                                          optimizer_options().
+                                          subgraph_descriptions(i).
+                                          subgraph_name();
+          cudagraph_defs_.emplace(graph_name, cudagraph_capture);
+          LOG(INFO) << "Begin capture sub graph " << i 
+                    << " graph name " << graph_name;
+          mgr.CaptureCudagraph(cudagraph_capture,
+                               group_name, graph_name,
+                               input_node_names, output_node_names, buckets);
+          LOG(INFO) << "End capture sub graph " << i;
+        }
+      }
+      GraphDef cudagraph_serving;
+      std::vector<const SubgraphDescription*> descs;
+      int descs_size = options_.config.graph_options().optimizer_options().subgraph_descriptions_size();
+      descs.reserve(descs_size);
+      for (int i = 0; i < descs_size; ++i) {
+        descs.emplace_back(&options_.config.graph_options().optimizer_options().subgraph_descriptions(i));
+      }
+      std::vector<std::string> final_outputs;
+      int final_output_size = options_.config.graph_options().
+                                optimizer_options().
+                                output_names_with_cg_size();
+      final_outputs.reserve(final_output_size);
+      for (int i = 0; i < final_output_size; ++i) {
+        final_outputs.emplace_back(options_.config.graph_options().
+                                optimizer_options().
+                                output_names_with_cg(i));
+      }
+      bool succ = SubgraphGenerator::ReplaceSubgraph(graph, cudagraph_serving,
+                                                     group_name,
+                                                     descs,
+                                                     final_outputs);
+      if (!succ) {
+        LOG(ERROR) << "Generate subgraph for cudagraph capturing failed, "
+                      "please check GraphDef and session options";
+        // todo: return not ok
+      }
+      cudagraph_defs_.emplace("_SERVING", cudagraph_serving);
+     // return Status::OK(); 
+      return ExtendLocked(std::move(cudagraph_serving));
+    }
+#endif
     return ExtendLocked(std::move(graph));
   }
   return Status::OK();
 }
+
+#ifdef GOOGLE_CUDA
+Status DirectSession::CreateForCapture(const GraphDef& graph) {
+  return CreateForCapture(GraphDef(graph));
+}
+
+Status DirectSession::CreateForCapture(GraphDef&& graph) {
+  // LOG(INFO) << "[Jieluo] Direct session capture graph " << graph.ShortDebugString()
+  //           << " init error msg " << init_error_.error_message();
+  TF_RETURN_IF_ERROR(init_error_);
+  if (graph.node_size() > 0) {
+    mutex_lock l(graph_state_lock_);
+    if (graph_created_) {
+      return errors::AlreadyExists(
+          "A Graph has already been created for this session.");
+    }
+    graph::SetDefaultDevice("/device:GPU:0", &graph);
+    return ExtendLocked(std::move(graph));
+  }
+  return Status::OK();
+}
+#endif 
 
 Status DirectSession::Extend(const GraphDef& graph) {
   return Extend(GraphDef(graph));
@@ -450,6 +577,68 @@ Status DirectSession::Extend(GraphDef&& graph) {
 }
 
 Status DirectSession::ExtendLocked(GraphDef graph) {
+    
+#ifdef GOOGLE_CUDA
+  host_memory_inputs_.clear();
+  host_memory_inputs_address_.clear();
+
+  // check nodes with host_memory inputs
+  for(auto &n : graph.node()){
+      const KernelDef *kernel_def;
+      const OpDef *op_def;
+
+      int input_idx = 0;
+      // find kernel def and op_def
+      Status s = FindKernelDef(DEVICE_GPU, n, &kernel_def, nullptr);
+      if(s.ok()){
+          TF_RETURN_IF_ERROR(OpRegistry::Global()->LookUpOpDef(n.op(), &op_def));
+          
+          for(const auto& arg: op_def->input_arg()){
+              bool is_host_memory  = false;
+              
+              for(const auto& host_memory_arg : kernel_def->host_memory_arg()){
+                  if(host_memory_arg == arg.name()){
+                      is_host_memory = true;
+                      break;
+                  }
+              }
+              
+              int repeats = -1;              
+              if(! arg.number_attr().empty()){
+                  TF_RETURN_IF_ERROR(GetNodeAttr(n, arg.number_attr(), &repeats));            
+              }else if(! arg.type_list_attr().empty()){
+                  const AttrValue * attr_value;
+                  TF_RETURN_IF_ERROR(AttrSlice(n).Find(arg.type_list_attr(), &attr_value));
+                  repeats = attr_value->list().type_size();
+              }else{
+                  repeats = 1;
+              }
+              
+              if(repeats < 0){
+                      return errors::InvalidArgument("Value for input arg repeats ", repeats, " < 0");
+              }
+              
+              if(is_host_memory){
+                  for(int i = 0; i < repeats; i ++){
+                      std::string node_input = n.input()[input_idx + i];                      
+                      size_t pos;                      
+                      if((pos = node_input.find(":")) != std::string::npos){
+                          node_input = node_input.substr(0, pos);                          
+                      }                                            
+                      for(auto &m : graph.node()){
+                          if(m.name() == node_input && m.op() == "Placeholder"){
+                              LOG(INFO) << "find input node:" << m.op() << ", " << m.name();
+                              host_memory_inputs_.push_back(node_input);
+                          }
+                      }                      
+                  }
+              }
+              input_idx += repeats;
+          }
+      }
+  }
+#endif
+  
   if (!(flib_def_ && execution_state_)) {
     // If this is the first call, we can initialize the execution state
     // with `graph` and do not need to call `Extend()`.
@@ -496,6 +685,15 @@ Status DirectSession::Run(const NamedTensorList& inputs,
              &run_metadata);
 }
 
+Status DirectSession::RunForCapture(const std::vector<std::pair<string, Tensor> >& inputs,
+                                    const std::vector<string>& output_tensor_names,
+                                    const std::vector<string>& target_node_names,
+                                    CudaGraphMeta* cuda_graph_meta) {
+  RunMetadata run_metadata;
+  return RunForCapture(RunOptions(), inputs, output_tensor_names, target_node_names,
+             &run_metadata, cuda_graph_meta);
+}
+
 Status DirectSession::CreateDebuggerState(
     const CallableOptions& callable_options, int64 global_step,
     int64 session_run_index, int64 executor_step_index,
@@ -530,7 +728,8 @@ Status DirectSession::RunInternal(
     int64 step_id, const RunOptions& run_options,
     CallFrameInterface* call_frame, ExecutorsAndKeys* executors_and_keys,
     RunMetadata* run_metadata,
-    const thread::ThreadPoolOptions& threadpool_options) {
+    const thread::ThreadPoolOptions& threadpool_options,
+    CudaGraphMeta* cuda_graph_meta) {
   const uint64 start_time_usecs = options_.env->NowMicros();
   const int64 executor_step_count = executors_and_keys->step_count.fetch_add(1);
   RunState run_state(step_id, &devices_);
@@ -724,12 +923,30 @@ Status DirectSession::RunInternal(
     };
   }
 
+#ifdef GOOGLE_CUDA
+  if(cuda_graph_capture_mode_ && cuda_graph_meta != nullptr){
+    LOG(INFO) << "capturing on stream -- " << capturing_stream_;
+    cudaError_t ret = cudaStreamBeginCapture(capturing_stream_, cudaStreamCaptureModeGlobal);
+    if (ret != cudaSuccess){
+      LOG(ERROR) << "cuda being capture faild: " << ret;
+      return errors::Internal("Failed to begin capture CUDA Graph.");
+    }
+  }
+  // create tensor holder before the scheduling
+  TensorHolder * tensor_holder = nullptr;
+  if(cuda_graph_capture_mode_ && cuda_graph_meta != nullptr){
+    tensor_holder = &(cuda_graph_meta->tensor_holder_);
+  }
+#endif
+
   for (const auto& item : executors_and_keys->items) {
+    
     // TODO(azaks): support partial run.
     // TODO(azaks): if the device picks its own threadpool, we need to assign
     //     less threads to the main compute pool by default.
     thread::ThreadPool* device_thread_pool =
         item.device->tensorflow_device_thread_pool();
+    
     // TODO(crk): Investigate usage of RunHandlerPool when using device specific
     // thread pool(s).
     if (is_blaze_) {
@@ -745,9 +962,31 @@ Status DirectSession::RunInternal(
       args.user_intra_op_threadpool = handler->AsIntraThreadPoolInterface();
     }
 
+#ifdef GOOGLE_CUDA
+    if(cuda_graph_capture_mode_ && cuda_graph_meta != nullptr){
+      // Nodes will be scheduled in the current thread
+      // except for the async nodes (like recv nodes)
+      // e.g. after the recv node received the tensor (h2d memcpy complete),
+      // subsequent nodes will be scheduled in a new thread
+      
+      // Now the schedule sequence becomes (assume GPU schedules first):
+      // GPU_const_node1 -> GPU_const_node2 -> ... -> GPU_recv_from_CPU (waiting, get inputs) ->
+      // (switch to CPU Scheduling) ->  CPU_send_to_GPU -> cpu_recv_from_GPU (waiting) ->
+      // (switch to GPU Scheduling) ->  GPU_recv_h2d_cpy -> GPU_nodes -> GPU_send_to_CPU -> GPU_done ->
+      // (switch tp CPU Scheduling) ->  CPU_recv_d2h_cpy -> CPU_done
+      args.runner = [] (Executor::Args::Closure c) {
+        c();
+      };
+      
+      // hold tensors for both CPU and GPU, will not reuse:
+      args.tensor_holder = tensor_holder;
+    }
+#endif
+    
     item.executor->RunAsync(args, barrier->Get());
-  }
 
+  }
+  
   WaitForNotification(&run_state, &step_cancellation_manager,
                       run_options.timeout_in_ms() > 0
                           ? run_options.timeout_in_ms()
@@ -782,8 +1021,7 @@ Status DirectSession::RunInternal(
   }
 
   // Build and return the cost model as instructed.
-  if (update_cost_model) {
-    // Build the cost model
+  if (update_cost_model) {    // Build the cost model
     std::unordered_map<string, const Graph*> device_to_graph;
     for (const PerPartitionExecutorsAndLib& partition :
          executors_and_keys->items) {
@@ -824,6 +1062,33 @@ Status DirectSession::RunInternal(
   }
   metrics::UpdateGraphExecTime(options_.env->NowMicros() - start_time_usecs);
 
+#ifdef GOOGLE_CUDA
+  if(cuda_graph_capture_mode_ && cuda_graph_meta != nullptr){
+    cudaError_t ret = cudaStreamEndCapture(capturing_stream_, &(cuda_graph_meta->cuda_graph_));
+    if (ret != cudaSuccess){
+      LOG(ERROR) << "cudagraph end capture faild: " << ret;
+      return errors::Internal("cuda graph end capture failed.");
+    }
+
+    //remove the begining H2D nodes, and get the src-dst mapping
+    bool capture_valid = RemoveH2DNodes(cuda_graph_meta->cuda_graph_, 
+                                        cuda_graph_meta->src_dst_mapping_,
+                                        cuda_graph_meta->output_dst_src_mappping_,
+                                        cuda_graph_meta);
+
+    if(! capture_valid){
+        LOG(ERROR) << "the captured CUDA graph is not valid, please check the network.";
+        return errors::Internal("the captured CUDA graph is not valid, please check the network.");
+    }
+
+    ret = cudaGraphInstantiate(&(cuda_graph_meta->cuda_graph_instance_), cuda_graph_meta->cuda_graph_, NULL, NULL, 0);
+    if (ret != cudaSuccess){
+      LOG(ERROR) << "cudagraph create execute instance faild: " << ret;
+      return errors::Internal("cudagraph create execute instance faild.");
+    }
+  }
+#endif
+
   return Status::OK();
 }
 
@@ -834,6 +1099,249 @@ Status DirectSession::RunInternal(
       return;                      \
     }                              \
   } while (0)
+#ifdef GOOGLE_CUDA
+
+bool DirectSession::RemoveH2DNodes(
+    cudaGraph_t graph, std::vector<std::pair<void*, void*>>& input_mappings,
+    std::vector<std::pair<void*, void*>>& output_mappings,
+    CudaGraphMeta* cuda_graph_meta) {
+  input_mappings.clear();
+  output_mappings.clear();
+
+  size_t num_nodes;
+  cudaError_t ret = cudaGraphGetNodes(graph, NULL, &num_nodes);
+  if (ret != cudaSuccess) {
+    LOG(ERROR) << "Get CUDA graph node num  failed." << ret;
+    return false;
+  }
+
+  std::vector<cudaGraphNode_t> nodes(num_nodes);
+  ret = cudaGraphGetNodes(graph, &nodes[0], &num_nodes);
+  if (ret != cudaSuccess) {
+    LOG(ERROR) << "Get CUDA graph nodes failed." << ret;
+    return false;
+  }
+
+  size_t num_d2h_nodes = 0;
+  const TensorHolder* tensor_holder = &(cuda_graph_meta->tensor_holder_);
+  if (tensor_holder == nullptr) {
+    LOG(ERROR) << "Get current tensor holder failed" << ret;
+    return false;
+  }
+
+  for (int i = 0; i < num_nodes; i++) {
+    cudaGraphNodeType node_type;
+    ret = cudaGraphNodeGetType(nodes[i], &node_type);
+    if (ret != cudaSuccess) {
+      LOG(ERROR) << "Get CUDA graph node type failed." << ret;
+      return false;
+    }
+
+    if (node_type != cudaGraphNodeTypeMemcpy) {
+      continue;
+    }
+
+    cudaMemcpy3DParms params;
+    ret = cudaGraphMemcpyNodeGetParams(nodes[i], &params);
+    if (ret != cudaSuccess) {
+      LOG(ERROR) << "Get CUDA graph memcpy node params failed." << ret;
+      return false;
+    }
+
+    bool is_h2d = (params.kind == cudaMemcpyHostToDevice);
+    bool is_d2h = (params.kind == cudaMemcpyDeviceToHost);
+    void* host_buffer = nullptr;
+    void* device_buffer = nullptr;
+
+    if (is_h2d || is_d2h) {
+      // input nodes
+      if (is_h2d) {
+        LOG(INFO) << "H2D node.";
+        host_buffer = params.srcPtr.ptr;
+        device_buffer = params.dstPtr.ptr;
+
+        if (std::find(input_host_address_.begin(), input_host_address_.end(),
+                      host_buffer) == input_host_address_.end()) {
+          // h2d node should be kept,
+          // make sure it's in tensor_holder
+          if (!tensor_holder->HostContains(host_buffer)) {
+            LOG(ERROR) << "The captured graph not valid, contains "
+                          "src(host) tensors not reserved.";
+            return false;
+          }
+          continue;
+        }
+
+        for (auto& it : input_mappings) {
+          if (host_buffer == it.first) {
+            LOG(ERROR) << "The captured graph not valid, contains H2D "
+                          "nodes with same src addresses.";
+            return false;
+          }
+        }
+
+        // remove the node successfully
+        input_mappings.push_back(std::pair<void*, void*>(host_buffer, device_buffer));
+      } else {  // d2h output nodes
+        LOG(INFO) << "D2H node.";
+        num_d2h_nodes += 1;
+        host_buffer = params.dstPtr.ptr;
+        device_buffer = params.srcPtr.ptr;
+        for (auto& it : output_mappings) {
+          if (host_buffer == it.first) {
+            LOG(ERROR) << "The captured graph not valid, contains D2H "
+                          "nodes with same dst addresses.";
+            return false;
+          }
+        }
+        LOG(INFO) << "put D2H node in output mapping, host " << host_buffer << " device " << device_buffer; 
+        output_mappings.push_back(std::pair<void*, void*>(host_buffer, device_buffer));
+      }
+    } else {
+      continue;
+    }
+
+    size_t num_edges;
+    ret = cudaGraphGetEdges(graph, NULL, NULL, &num_edges);
+    if (ret != cudaSuccess) {
+      LOG(ERROR) << "Get CUDA graph edge num failed." << ret;
+      return false;
+    }
+
+    std::vector<cudaGraphNode_t> from(num_edges);
+    std::vector<cudaGraphNode_t> to(num_edges);
+
+    ret = cudaGraphGetEdges(graph, &from[0], &to[0], &num_edges);
+    if (ret != cudaSuccess) {
+      LOG(ERROR) << "Get CUDA graph edges failed." << ret;
+      return false;
+    }
+
+    auto from_iter = std::find(from.begin(), from.end(), nodes[i]);
+    auto to_iter = std::find(to.begin(), to.end(), nodes[i]);
+
+    int from_idx = -1;
+    int to_idx = -1;
+
+    if (from_iter != from.end()) {
+      from_idx = std::distance(from.begin(), from_iter);
+    }
+
+    if (to_iter != to.end()) {
+      to_idx = std::distance(to.begin(), to_iter);
+    }
+
+    if (from_idx >= 0 && to_idx >= 0) {
+      // need to to graph surgeon
+      // ...->n1->h2d->n2->...  convert to ...->n1->n2->...
+      cudaGraphNode_t n1 = from[to_idx];
+      cudaGraphNode_t n2 = to[from_idx];
+
+      ret = cudaGraphRemoveDependencies(graph, &n1, &nodes[i], 1);
+      if (ret != cudaSuccess) {
+        LOG(ERROR) << "cuda graph remove dependencies failed." << ret;
+        return false;
+      }
+      ret = cudaGraphRemoveDependencies(graph, &nodes[i], &n2, 1);
+      if (ret != cudaSuccess) {
+        LOG(ERROR) << "cuda graph remove dependencies failed." << ret;
+        return false;
+      }
+      ret = cudaGraphAddDependencies(graph, &n1, &n2, 1);
+      if (ret != cudaSuccess) {
+        LOG(ERROR) << "cuda graph add dependencies failed." << ret;
+        return false;
+      }
+    } else if (from_idx >= 0) {
+      // simple case:   h2d->n2->...
+      cudaGraphNode_t n2 = to[from_idx];
+      ret = cudaGraphRemoveDependencies(graph, &nodes[i], &n2, 1);
+      if (ret != cudaSuccess) {
+        LOG(ERROR) << "cuda graph remove dependencies failed." << ret;
+        return false;
+      }
+    } else if (to_idx >= 0) {
+      // simple case:  ...->n1->h2d
+      cudaGraphNode_t n1 = from[to_idx];
+      ret = cudaGraphRemoveDependencies(graph, &n1, &nodes[i], 1);
+      if (ret != cudaSuccess) {
+        LOG(ERROR) << "cuda graph remove dependencies failed." << ret;
+        return false;
+      }
+    }
+
+    ret = cudaGraphDestroyNode(nodes[i]);
+    if (ret != cudaSuccess) {
+      LOG(ERROR) << "cuda graph remove nodes failed." << ret;
+      return false;
+    }
+  }
+
+  LOG(INFO) << "remove " << input_mappings.size() << " H2D nodes.";
+  LOG(INFO) << "remove " << output_mappings.size() << " D2H nodes.";
+
+  if (num_d2h_nodes != num_output_tensors_) {
+    LOG(ERROR) << "Captured graph not valid, num of D2H nodes not matched with "
+                  "output tensors: "
+               << num_d2h_nodes << " vs. " << num_output_tensors_;
+    return false;
+  }
+
+  // all input tensors (except host_memory input), has corresponding H2D nodes
+  for (const auto& host_address : input_host_address_) {
+    bool found = false;
+    for (const auto& host_device_address : input_mappings) {
+      if (host_device_address.first == host_address) {
+        found = true;
+        break;
+      }
+    }
+
+    if (found) continue;
+
+    if (std::find(host_memory_inputs_address_.begin(),
+                  host_memory_inputs_address_.end(),
+                  host_address) != host_memory_inputs_address_.end()) {
+      LOG(WARNING) << "Num of removed H2D nodes not matched with input "
+                      "tensors, due to host_memory input constraints: "
+                   << input_mappings.size() << " vs. " << input_host_address_.size();
+    } else {
+      LOG(ERROR) << "Captured graph not valid, num of removed H2D nodes not "
+                    "matched with input tensors: "
+                 << input_mappings.size() << " vs. " << input_host_address_.size();
+      return false;
+    }
+  }
+
+  return true;
+}
+
+#endif
+
+static const void* GetTensorBasePtr(const Tensor &t){
+    const void *data = nullptr;
+    if(t.dtype() == DT_HALF){
+        data = reinterpret_cast<const void*>(t.flat<Eigen::half>().data());
+    }else if(t.dtype() == DT_FLOAT){
+        data = reinterpret_cast<const void*>(t.flat<float>().data());
+    }else if(t.dtype() == DT_INT32){
+        data = reinterpret_cast<const void*>(t.flat<int>().data());
+    }else if(t.dtype() == DT_BOOL){
+        data = reinterpret_cast<const void*>(t.flat<bool>().data());
+    }else if(t.dtype() == DT_INT64){
+        data = reinterpret_cast<const void*>(t.flat<int64>().data());
+    }else{
+        LOG(ERROR) << "Unsupported data format --" << t.dtype();
+    }
+    return data;
+}
+
+#define TF_DONE_RETURN_IF_ERROR(s) do {         \
+        if (!(s).ok()) {                        \
+            done((s));                          \
+            return;                             \
+        }                                       \
+    } while (0)
 
 #define DONE_WITH_STATUS(s) \
   do {                      \
@@ -847,9 +1355,13 @@ void DirectSession::RunInternalAsync(
     ExecutorsAndKeys* executors_and_keys,
     RunMetadata* run_metadata,
     const thread::ThreadPoolOptions& threadpool_options,
-    const NamedTensorList& inputs, const std::vector<string>& output_names,
-    const std::vector<string>& target_nodes, std::vector<Tensor>* outputs,
-    CallbackFrame* frame, StatusCallback done) {
+    const NamedTensorList& inputs,
+    const std::vector<string>& output_names,
+    const std::vector<string>& target_nodes,
+    std::vector<Tensor>* outputs,
+    CallbackFrame* frame,
+    StatusCallback done,
+    std::atomic<int64_t>* flops) {
   const uint64 start_time_usecs = options_.env->NowMicros();
   const int64 executor_step_count = executors_and_keys->step_count.fetch_add(1);
   frame->run_state = std::make_shared<RunState>(step_id, &devices_);
@@ -941,6 +1453,7 @@ void DirectSession::RunInternalAsync(
   args->user_intra_op_threadpool = threadpool_options.intra_op_threadpool;
 
   args->enable_prof_stats = enable_prof_stats_;
+  args.flops = flops;
 
   const bool do_trace = (run_options.trace_level() > RunOptions::NO_TRACE);
   if (enable_prof_stats_ || do_trace) {
@@ -1083,23 +1596,27 @@ void DirectSession::RunAsync(const RunOptions& run_options,
                              const std::vector<string>& output_names,
                              const std::vector<string>& target_nodes,
                              std::vector<Tensor>* outputs,
-                             RunMetadata* run_metadata, StatusCallback done) {
+                             RunMetadata* run_metadata,
+                             StatusCallback done,
+                             std::atomic<int64_t>* flops) {
   auto frame = new CallbackFrame;
   StatusCallback new_done = [frame, done](const Status& ret) {
     delete frame;
     done(ret);
   };
   RunAsync(run_options, inputs, output_names, target_nodes, outputs,
-           run_metadata, frame, new_done);
+           run_metadata, frame, new_done, flops);
 }
 
 void DirectSession::RunAsync(const RunOptions& run_options,
-                             const NamedTensorList& inputs,
-                             const std::vector<string>& output_names,
-                             const std::vector<string>& target_nodes,
-                             std::vector<Tensor>* outputs,
-                             RunMetadata* run_metadata, CallbackFrame* frame,
-                             StatusCallback done) {
+                          const NamedTensorList& inputs,
+                          const std::vector<string>& output_names,
+                          const std::vector<string>& target_nodes,
+                          std::vector<Tensor>* outputs,
+                          RunMetadata* run_metadata,
+                          CallbackFrame* frame,
+                          StatusCallback done,
+                          std::atomic<int64_t>* flops) {
   TF_DONE_RETURN_IF_ERROR(CheckNotClosed());
   TF_DONE_RETURN_IF_ERROR(CheckGraphCreated("Run()"));
   direct_session_runs->GetCell()->IncrementBy(1);
@@ -1113,7 +1630,7 @@ void DirectSession::RunAsync(const RunOptions& run_options,
     input_size += it.second.AllocatedBytes();
   }
   metrics::RecordGraphInputTensors(input_size);
-
+  
   // Check if we already have an executor for these arguments.
   ExecutorsAndKeys* executors_and_keys;
   RunStateArgs run_state_args(run_options.debug_options());
@@ -1161,9 +1678,10 @@ void DirectSession::RunAsync(const RunOptions& run_options,
     LogMemory::RecordStep(step_id, run_state_args.handle);
   }
 
-  RunInternalAsync(step_id, run_options, &call_frame, executors_and_keys,
-                   run_metadata, thread::ThreadPoolOptions(), inputs,
-                   output_names, target_nodes, outputs, frame, done);
+  RunInternalAsync(step_id, run_options, &call_frame,
+      executors_and_keys, run_metadata,
+      thread::ThreadPoolOptions(), inputs,
+      output_names, target_nodes, outputs, frame, done, flops);
 }
 
 Status DirectSession::Run(const RunOptions& run_options,
@@ -1199,7 +1717,7 @@ Status DirectSession::Run(const RunOptions& run_options,
     mutex_lock l(collective_graph_key_lock_);
     collective_graph_key_ = executors_and_keys->collective_graph_key;
   }
-
+  
   // Configure a call frame for the step, which we use to feed and
   // fetch values to and from the executors.
   FunctionCallFrame call_frame(executors_and_keys->input_types,
@@ -1279,6 +1797,181 @@ Status DirectSession::Run(const RunOptions& run_options,
   }
 
   return Status::OK();
+}
+
+Status DirectSession::RunForCapture(const RunOptions& run_options,
+                                    const std::vector<std::pair<string, Tensor> >& inputs,
+                                    const std::vector<string>& output_tensor_names,
+                                    const std::vector<string>& target_node_names,
+                                    RunMetadata* run_metadata,
+                                    CudaGraphMeta* cuda_graph_meta) {
+  TF_RETURN_IF_ERROR(CheckNotClosed());
+  TF_RETURN_IF_ERROR(CheckGraphCreated("Run()"));
+  if (cuda_graph_meta == nullptr) {
+    //todo: return error;
+  }
+  direct_session_runs->GetCell()->IncrementBy(1);
+
+  // Extract the inputs names for this run of the session.
+  std::vector<string> input_tensor_names;
+  input_tensor_names.reserve(inputs.size());
+  size_t input_size = 0;
+  for (const auto& it : inputs) {
+    input_tensor_names.push_back(it.first);
+    input_size += it.second.AllocatedBytes();
+  }
+  metrics::RecordGraphInputTensors(input_size);
+
+#ifdef GOOGLE_CUDA
+  // save the host addresses for the inputs
+  if(cuda_graph_capture_mode_){
+      input_host_address_.clear();
+      for(const auto& it: inputs){        
+          input_host_address_.push_back(GetTensorBasePtr(it.second));
+          if(std::find(host_memory_inputs_.begin(), host_memory_inputs_.end(), it.first) != host_memory_inputs_.end()){
+              host_memory_inputs_address_.push_back(GetTensorBasePtr(it.second));
+          }
+      }  
+  }
+  num_output_tensors_ = output_tensor_names.size();  
+#endif
+
+  // Check if we already have an executor for these arguments.
+  ExecutorsAndKeys* executors_and_keys;
+  RunStateArgs run_state_args(run_options.debug_options());
+  run_state_args.collective_graph_key =
+      run_options.experimental().collective_graph_key();
+
+  TF_RETURN_IF_ERROR(GetOrCreateExecutors(input_tensor_names, output_tensor_names,
+                                          target_node_names, &executors_and_keys,
+                                          &run_state_args));
+  {
+    mutex_lock l(collective_graph_key_lock_);
+    collective_graph_key_ = executors_and_keys->collective_graph_key;
+  }
+  
+  // Configure a call frame for the step, which we use to feed and
+  // fetch values to and from the executors.
+  FunctionCallFrame call_frame(executors_and_keys->input_types,
+                               executors_and_keys->output_types);
+  gtl::InlinedVector<Tensor, 4> feed_args(inputs.size());
+  for (const auto& it : inputs) {
+    if (it.second.dtype() == DT_RESOURCE) {
+      Tensor tensor_from_handle;
+      TF_RETURN_IF_ERROR(
+          ResourceHandleToInputTensor(it.second, &tensor_from_handle));
+      feed_args[executors_and_keys->input_name_to_index[it.first]] =
+          tensor_from_handle;
+    } else {
+      feed_args[executors_and_keys->input_name_to_index[it.first]] = it.second;
+    }
+  }
+  const Status s = call_frame.SetArgs(feed_args);
+  if (errors::IsInternal(s)) {
+    return errors::InvalidArgument(s.error_message());
+  } else if (!s.ok()) {
+    return s;
+  }
+
+  const int64 step_id = run_options.has_run_id() ? 
+                        run_options.run_id().value() : step_id_counter_.fetch_add(1);
+  //const int64 step_id = step_id_counter_.fetch_add(1);
+
+  if (LogMemory::IsEnabled()) {
+    LogMemory::RecordStep(step_id, run_state_args.handle);
+  }
+
+  TF_RETURN_IF_ERROR(RunInternal(step_id, run_options, &call_frame,
+                                 executors_and_keys, run_metadata,
+                                 thread::ThreadPoolOptions(),
+                                 cuda_graph_meta));
+
+  // Receive outputs.
+  std::vector<Tensor> outputs;
+  if (true) {
+    std::vector<Tensor> sorted_outputs;
+    const Status s = call_frame.ConsumeRetvals(
+        &sorted_outputs, /* allow_dead_tensors = */ false);
+    if (errors::IsInternal(s)) {
+      return errors::InvalidArgument(s.error_message());
+    } else if (!s.ok()) {
+      return s;
+    }
+    const bool unique_outputs =
+        output_tensor_names.size() == executors_and_keys->output_name_to_index.size();
+    // first_indices[i] = j implies that j is the smallest value for which
+    // output_names[i] == output_names[j].
+    std::vector<int> first_indices;
+    if (!unique_outputs) {
+      first_indices.resize(output_tensor_names.size());
+      for (int i = 0; i < output_tensor_names.size(); ++i) {
+        for (int j = 0; j <= i; ++j) {
+          if (output_tensor_names[i] == output_tensor_names[j]) {
+            first_indices[i] = j;
+            break;
+          }
+        }
+      }
+    }
+    outputs.clear();
+    size_t output_size = 0;
+    outputs.reserve(sorted_outputs.size());
+    for (int i = 0; i < output_tensor_names.size(); ++i) {
+      const string& output_name = output_tensor_names[i];
+      if (first_indices.empty() || first_indices[i] == i) {
+        outputs.emplace_back(
+            std::move(sorted_outputs[executors_and_keys
+                                         ->output_name_to_index[output_name]]));
+      } else {
+        outputs.push_back(outputs[first_indices[i]]);
+      }
+      output_size += outputs.back().AllocatedBytes();
+    }
+    ExtractOutputMetaInfo(outputs, cuda_graph_meta);
+    metrics::RecordGraphOutputTensors(output_size);
+  }
+  return Status::OK();
+}
+
+bool DirectSession::ExtractOutputMetaInfo(std::vector<Tensor>& outputs, 
+                                          CudaGraphMeta* cuda_graph_meta) {
+  for (int i = 0; i < outputs.size(); ++i) {
+    void* host_buffer = nullptr;
+    Tensor& tensor = outputs[i];
+    if (tensor.dtype() == DT_HALF) {
+      host_buffer = reinterpret_cast<void*>(tensor.flat<Eigen::half>().data());
+    } else if (tensor.dtype() == DT_FLOAT) {
+      host_buffer = reinterpret_cast<void*>(tensor.flat<float>().data());
+    } else if (tensor.dtype() == DT_INT32) {
+      host_buffer = reinterpret_cast<void*>(tensor.flat<int>().data());
+    } else if (tensor.dtype() == DT_BOOL) {
+      host_buffer = reinterpret_cast<void*>(tensor.flat<bool>().data());
+    } else if (tensor.dtype() == DT_INT64) {
+      host_buffer = reinterpret_cast<void*>(tensor.flat<int64>().data());
+    } else {
+      LOG(ERROR) << "Unsupported data type "
+                 << tensor.dtype();  // todo: if callback, return meta
+      return false;
+    }
+
+    CudaGraphOutputInfo info;
+    bool found = false;
+    info.shape_ = tensor.shape();
+    info.dtype_ = tensor.dtype();
+    info.ele_num_per_dim0_ = tensor.NumElements() / tensor.dim_size(0);
+    for (int j = 0; j < cuda_graph_meta->output_dst_src_mappping_.size(); ++j) {
+      if (host_buffer == cuda_graph_meta->output_dst_src_mappping_[j].first) {
+        found = true;
+        info.device_buffer_ = cuda_graph_meta->output_dst_src_mappping_[j].second;
+        break;
+      }
+    }
+    if (!found) {
+      return false;
+    }
+    cuda_graph_meta->output_infos_.emplace_back(info);
+  }
+  return true;
 }
 
 Status DirectSession::AfterRunAsync(const ::tensorflow::RunOptions& run_options,
@@ -1400,6 +2093,56 @@ Status DirectSession::AfterRunAsync(const ::tensorflow::RunOptions& run_options,
   }
   return Status::OK();
 }
+
+
+#ifdef GOOGLE_CUDA
+
+cudaStream_t DirectSession::EnableGraphCapture(){
+    // modify the streams
+    // so that we only have one stream for computing, D2H, H2D, D2D
+    std::vector<Device*> devices = device_mgr_->ListDevices();
+    // filter the gpu devices
+    cudaStream_t stream = NULL;
+    for (auto * d : devices){
+        if(d->attributes().device_type() == "GPU"){
+            auto gpu = dynamic_cast<BaseGPUDevice*>(d);
+
+            // todo: combine following calls
+            gpu->SetSingleStream();
+            gpu->SetStreamCaptureMode(true);
+            stream = gpu->GetSingleStream();
+            capturing_stream_ = stream;
+            break;
+        }
+    }
+    cuda_graph_capture_mode_ = true;
+    //disable event poll
+    EventMgr::SetStreamCaptureMode(true);
+    
+    return stream;
+}
+
+void DirectSession::DisableGraphCapture(){
+    
+    std::vector<Device*> devices = device_mgr_->ListDevices();
+    // filter the gpu devices
+    for (auto * d : devices){
+        if(d->attributes().device_type() == "GPU"){
+            auto gpu = dynamic_cast<BaseGPUDevice*>(d);
+
+            // Todo: combine the following calls
+            gpu->ResetStreams();
+            gpu->SetStreamCaptureMode(false);
+            
+            capturing_stream_ = nullptr;
+            break;
+        }
+    }
+    cuda_graph_capture_mode_ = false;
+    EventMgr::SetStreamCaptureMode(false);
+}
+
+#endif
 
 Status DirectSession::PRunSetup(const std::vector<string>& input_names,
                                 const std::vector<string>& output_names,
@@ -1809,7 +2552,7 @@ Status DirectSession::CreateExecutors(
   for (auto iter = graphs.begin(); iter != graphs.end(); ++iter) {
     const string& partition_name = iter->first;
     std::unique_ptr<Graph>& partition_graph = iter->second;
-
+    
     Device* device;
     TF_RETURN_IF_ERROR(device_mgr_->LookupDevice(partition_name, &device));
 

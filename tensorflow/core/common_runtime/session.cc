@@ -62,7 +62,8 @@ Status Session::PRun(const string& handle,
 
 Session* NewSession(const SessionOptions& options) {
   SessionFactory* factory;
-  Status s = SessionFactory::GetFactory(options, &factory);
+  // todo: if want to use cudagraph, must use direct session
+  Status s = SessionFactory::GetFactory(options, &factory); 
   if (!s.ok()) {
     LOG(ERROR) << s;
     return nullptr;

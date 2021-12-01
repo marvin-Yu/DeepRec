@@ -613,6 +613,16 @@ class OpKernelContext {
   typedef std::pair<Allocator*, TrackingAllocator*> WrappedAllocator;
   typedef std::shared_ptr<UserTracedInfos> TracedInfosPtr;
 
+  int64_t get_flops() {
+    return _flops;
+  }
+
+  void set_flops(int64_t flops) {
+    _flops = flops;
+  }
+
+  TensorHolder * tensor_holder = nullptr;
+  
   // TODO(zhifengc): Do some cleanup of Params.
   // The Params struct is passed in to initialize an OpKernelContext,
   // and must outlive the OpKernelContext.
@@ -1128,7 +1138,7 @@ class OpKernelContext {
     retrieved.swap(wrapped_allocators_);
     return retrieved;
   }
-
+  
   // Communication.
   //
   // An op kernel communicates with outside environment through
@@ -1368,6 +1378,8 @@ class OpKernelContext {
       temp_tensor_buffer_and_size_ GUARDED_BY(stats_mu_);
   std::unique_ptr<gtl::InlinedVector<int64, 2>> persistent_alloc_ids_
       GUARDED_BY(stats_mu_);
+
+  int64_t _flops = 0;
 
   TF_DISALLOW_COPY_AND_ASSIGN(OpKernelContext);
 };
@@ -1973,6 +1985,25 @@ struct UserTracedInfos {
   bool enable_trace_tensor_infos;
   mutex tensor_info_mu_;
 };
+#define OP_REQUIRES_ASYNC_WITH_ARGS(CTX, EXP, STATUS, CALLBACK, ARGS)  \
+  do {                                                 \
+    if (!TF_PREDICT_TRUE(EXP)) {                       \
+      (CTX)->CtxFailure(__FILE__, __LINE__, (STATUS)); \
+      (CALLBACK)(ARGS);                                \
+      return;                                          \
+    }                                                  \
+  } while (0)
+
+#define OP_REQUIRES_OK_ASYNC_WITH_ARGS(CTX, STATUS, CALLBACK, ARGS)         \
+  do {                                                      \
+    ::tensorflow::Status _s(STATUS);                        \
+    if (!TF_PREDICT_TRUE(_s.ok())) {                        \
+      (CTX)->CtxFailureWithWarning(__FILE__, __LINE__, _s); \
+      (CALLBACK)(ARGS);                                     \
+      return;                                               \
+    }                                                       \
+  } while (0)
+
 }  // namespace tensorflow
 
 #endif  // TENSORFLOW_CORE_FRAMEWORK_OP_KERNEL_H_

@@ -47,6 +47,10 @@ struct ConversionParams {
   // maximum number of cached engines
   int max_cached_engines = 1;
   bool use_calibration = true;
+  std::vector<string> convert_ranges;
+  mutable int64_t total_flops = 0;
+  int engine_pad_batch_step = -1;
+  std::vector<int> engine_pad_to_batches;
 };
 
 // Method to call from optimization pass

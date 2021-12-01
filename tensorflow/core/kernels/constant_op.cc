@@ -83,6 +83,11 @@ ConstantOp::ConstantOp(OpKernelConstruction* ctx)
 }
 
 void ConstantOp::Compute(OpKernelContext* ctx) {
+  if (ctx->tensor_holder) {
+    if (tensor_.AllocatedBytes() > 0) {
+      size_t tensor_size = ctx->tensor_holder->Add(&tensor_);
+    }
+  } 
   ctx->set_output(0, tensor_);
   if (TF_PREDICT_FALSE(ctx->track_allocations())) {
     ctx->record_persistent_memory_allocation(tensor_.AllocatedBytes());

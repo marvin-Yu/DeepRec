@@ -103,6 +103,7 @@ void IntraProcessRendezvous::SameWorkerRecvDone(
   attr.set_gpu_compatible(send_args.alloc_attrs.gpu_compatible() ||
                           recv_args.alloc_attrs.gpu_compatible());
   Allocator* out_allocator = dst_device->GetAllocator(attr);
+  
   bool sync_dst_compute = true;
   if (in.dtype() != DT_VARIANT) {
     // Variants are handled by CopyTensor::ViaDMA.
@@ -119,10 +120,44 @@ void IntraProcessRendezvous::SameWorkerRecvDone(
       aa.freed_by_func = &freed_by_func;
       sync_dst_compute = false;
     }
-    Tensor copy(out_allocator, in.dtype(), in.shape(), aa);
-    *out = copy;
-  }
+    
+    // if(! src_host && dst_host){
+    //     LOG(INFO) << "rendezvous recev: from gpu to cpu.";
+    //     LOG(INFO) << "In total bytes: " << in.TotalBytes();
+    //     LOG(INFO) << "In allocated bytes: " << in.AllocatedBytes();
+    //     LOG(INFO) << "In buf@" << in.buf_;
+    // }
+    
+    // GPU recv node
+    bool reuse = src_host && !dst_host && tensor_holder;
+    if(reuse){
+        // Tensor reuse_tensor = tensor_holder->FindUsableTensor(in.dtype(), in.shape());
+        // if(reuse_tensor.TotalBytes() > 0){
+        //     out->shape_ = in.shape();
+        //     out->set_dtype(in.dtype());
+        //     if(out->buf_){
+        //         out->buf_->Unref();
+        //     }
+        //     out->buf_ = reuse_tensor.buf_;
+        //     out->buf_->Ref();
+        // }else{
+        //    Tensor copy(out_allocator, in.dtype(), in.shape(), aa);
+        //    tensor_holder->Add(&copy);
+        //    *out = copy;
+        //}
 
+        // always create new tensor for GPU receive node
+        // as we may do H2D copy mannualy 
+        Tensor copy(out_allocator, in.dtype(), in.shape(), aa);
+        size_t size = tensor_holder->Add(&copy);
+        *out = copy;
+        
+    }else{
+        Tensor copy(out_allocator, in.dtype(), in.shape(), aa);
+        *out = copy;
+    }
+  }
+  
   CopyTensor::ViaDMA(
       parsed.edge_name, send_args.device_context, recv_args.device_context,
       src_device, dst_device, send_args.alloc_attrs, recv_args.alloc_attrs, &in,

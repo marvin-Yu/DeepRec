@@ -866,9 +866,18 @@ class ExecutorState {
   ExecutorState(const Executor::Args& args, ExecutorImpl* impl);
   ~ExecutorState();
 
+  void UpdateFlops(int64_t flop) {
+    if (flops) {
+      *flops += flop;
+    }
+  }
+
   void RunAsync(Executor::DoneCallback done);
 
  private:
+
+  TensorHolder * tensor_holder = nullptr;
+    
   // Either a tensor pointer (pass-by-reference) or a tensor (pass-by-value).
   // TODO(yuanbyu): A better way to do "has_value"?
   struct Entry {
@@ -1314,13 +1323,16 @@ class ExecutorState {
   mutex mu_;
   Status status_ GUARDED_BY(mu_);
 
+  std::atomic<int64_t>* flops = nullptr;
+
   // Mapping from frame name to outstanding frames. A new frame is created
   // at some iteration of an active frame. So the unique key for the new
   // child frame is composed of the name of the parent frame, the iteration
   // number at which the parent frame is creating the new frame, and the
   // name of the new frame from nodedef.
   gtl::FlatMap<string, FrameState*> outstanding_frames_ GUARDED_BY(mu_);
-
+  
+    
   // The unique name of a frame.
   inline string MakeFrameName(FrameState* frame, int64 iter_id,
                               const string& name) {
@@ -1414,6 +1426,7 @@ ExecutorState::ExecutorState(const Executor::Args& args, ExecutorImpl* impl)
 
       log_memory_(LogMemory::IsEnabled()),
       step_id_(args.step_id),
+      tensor_holder(args.tensor_holder),
       round_step_id_(args.round_step_id),
       rendezvous_(args.rendezvous),
       global_rendezvous_(args.global_rendezvous),
@@ -1434,7 +1447,8 @@ ExecutorState::ExecutorState(const Executor::Args& args, ExecutorImpl* impl)
       cancellation_manager_(args.cancellation_manager),
       runner_(args.runner),
       sync_on_finish_(args.sync_on_finish),
-      num_outstanding_ops_(0) {
+      num_outstanding_ops_(0),
+      flops(args.flops) {
   if (args.user_intra_op_threadpool != nullptr) {
     Device* device = impl_->params_.device;
     user_device_ = RenamedDevice::NewRenamedDevice(
@@ -1613,7 +1627,12 @@ struct ExecutorState::AsyncState {
     params.input_device_contexts = &saved_input_device_contexts;
     params.input_alloc_attrs = &saved_input_alloc_attrs;
   }
-
+  
+  void SetTensorHolder(TensorHolder * tensor_holder){
+      ctx.tensor_holder = tensor_holder;
+      ctx.rendezvous()->tensor_holder = tensor_holder;
+  }
+    
   TensorValueVec saved_inputs;
   DeviceContextVec saved_input_device_contexts;
   AllocatorAttributeVec saved_input_alloc_attrs;
@@ -1805,6 +1824,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
       params.output_attr_array = item.output_attrs();
       params.forward_from_array = item.forward_from();
 
+      
       if (item.kernel_is_async) {
         // Asynchronous computes.
         AsyncOpKernel* async = item.kernel->AsAsync();
@@ -1812,7 +1832,11 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
         launched_asynchronously = true;
         AsyncState* state =
             new AsyncState(params, tagged_node, &item, first_input, stats);
-
+      
+        if(tensor_holder){
+            state->SetTensorHolder(tensor_holder);
+        }
+        
         auto done = [this, state]() {
           Device* device = impl_->params_.device;
           NodeExecStatsInterface* stats = state->stats;  // Shorthand
@@ -1855,6 +1879,10 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
           }
           const bool completed =
               NodeDone(s, state->item->node, ready, stats, nullptr);
+          // Get Flops:
+          auto flops = state->ctx.get_flops();
+          UpdateFlops(flops);
+
           delete state;
           if (completed) ScheduleFinish();
         };
@@ -1873,8 +1901,17 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
       } else {
         // Synchronous computes.
         OpKernelContext ctx(&params, item.num_outputs);
+        
+        if(tensor_holder){
+            ctx.tensor_holder = tensor_holder;
+        }
+
         nodestats::SetOpStart(stats);
         device->Compute(op_kernel, &ctx);
+
+        // Get Flops:
+        auto flops = ctx.get_flops();
+        UpdateFlops(flops);
 
         nodestats::SetOpEnd(stats);
         s = ProcessOutputs(item, &ctx, &outputs, stats);
@@ -2448,6 +2485,7 @@ bool ExecutorState::NodeDone(const Status& s, const Node* node,
 
 void ExecutorState::ScheduleReady(const TaggedNodeSeq& ready,
                                   TaggedNodeReadyQueue* inline_ready) {
+  
   if (ready.empty()) return;
 
   int64 scheduled_nsec = 0;
@@ -2828,7 +2866,9 @@ void ExecutorState::DeleteFrame(FrameState* frame, TaggedNodeSeq* ready) {
     mutex_lock executor_lock(mu_);
     outstanding_frames_.erase(frame_name);
   }
+
   delete frame;
+  
 }
 
 void ExecutorState::CleanupFramesIterations(FrameState* frame, int64 iter,

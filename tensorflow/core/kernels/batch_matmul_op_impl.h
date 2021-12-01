@@ -297,6 +297,9 @@ struct LaunchBatchMatMul<GPUDevice, Scalar> {
   static void Launch(OpKernelContext* context, const Tensor& in_x,
                      const Tensor& in_y, bool adj_x, bool adj_y,
                      const MatMulBCast& bcast, Tensor* out) {
+
+     
+      
     constexpr se::blas::Transpose kTranspose =
         is_complex<Scalar>::value ? se::blas::Transpose::kConjugateTranspose
                                   : se::blas::Transpose::kTranspose;
@@ -306,6 +309,8 @@ struct LaunchBatchMatMul<GPUDevice, Scalar> {
     const uint64 k = in_x.dim_size(adj_x ? 1 : 2);
     const uint64 n = in_y.dim_size(adj_y ? 1 : 2);
     const int64 batch_size = bcast.output_batch_size();
+
+    
     auto blas_transpose_a = trans[adj_x];
     auto blas_transpose_b = trans[adj_y];
 
@@ -406,6 +411,7 @@ struct LaunchBatchMatMul<GPUDevice, Scalar> {
         }
       }
     } else {
+        
       BlasScratchAllocator scratch_allocator(context);
       bool blas_launch_status =
           stream
@@ -431,6 +437,7 @@ struct LaunchBatchMatMul<GPUDevice, Eigen::half> {
   static void Launch(OpKernelContext* context, const Tensor& in_x,
                      const Tensor& in_y, bool adj_x, bool adj_y,
                      const MatMulBCast& bcast, Tensor* out) {
+      
     typedef Eigen::half Scalar;
     constexpr perftools::gputools::blas::Transpose kTranspose =
         is_complex<Scalar>::value
@@ -444,7 +451,9 @@ struct LaunchBatchMatMul<GPUDevice, Eigen::half> {
     const uint64 batch_size = bcast.output_batch_size();
     auto blas_transpose_a = trans[adj_x];
     auto blas_transpose_b = trans[adj_y];
-
+    
+    //std::cout << "in luanch batch matmul, batch size = " << batch_size << std::endl;
+    
     auto* stream = context->op_device_context()->stream();
     OP_REQUIRES(context, stream, errors::Internal("No GPU stream available."));
 
@@ -465,6 +474,18 @@ struct LaunchBatchMatMul<GPUDevice, Eigen::half> {
     auto* b_base_ptr = in_y.template flat<Scalar>().data();
     auto* c_base_ptr = out->template flat<Scalar>().data();
 
+    /* TensorShape ptrs_shape; */
+    /* ptrs_shape.AddDim(batch_size); */
+    /* Tensor a_ptrs(DT_INT64, ptrs_shape); */
+    /* Tensor b_ptrs(DT_INT64, ptrs_shape); */
+    /* Tensor c_ptrs(DT_INT64, ptrs_shape); */
+    
+    //if(context->tensor_holder != nullptr){
+    //    tensor_holder.Add(&a_ptrs);
+    //    tensor_holder.Add(&b_ptrs);
+    //    tensor_holder.Add(&c_ptrs);
+    //}
+    
     if (!bcast.IsBroadcastingRequired()) {
       for (int64 i = 0; i < batch_size; ++i) {
         a_device_memory.push_back(AsDeviceMemory(a_base_ptr + i * m * k));
@@ -473,6 +494,8 @@ struct LaunchBatchMatMul<GPUDevice, Eigen::half> {
         a_ptrs.push_back(&a_device_memory.back());
         b_ptrs.push_back(&b_device_memory.back());
         c_ptrs.push_back(&c_device_memory.back());
+
+        //a_ptrs.flat<int64>().data()[i] = &a_device_memory.back()
       }
     } else {
       const std::vector<int64>& a_batch_indices = bcast.x_batch_indices();
@@ -500,6 +523,7 @@ struct LaunchBatchMatMul<GPUDevice, Eigen::half> {
     // C' = B' x A', where ' stands for transpose (not adjoint).
     // TODO(yangzihao): Choose the best of the three strategies using autotune.
     if (batch_size == 1) {
+        
       // This is a regular matrix*matrix or matrix*vector multiply. Avoid the
       // overhead of the scratch allocator and the batch interface.
       // TODO(benbarsdell): Use fp16 Gemv if it becomes supported by CUBLAS
@@ -518,15 +542,18 @@ struct LaunchBatchMatMul<GPUDevice, Eigen::half> {
       }
     } else {
       BlasScratchAllocator scratch_allocator(context);
+
+      
       bool blas_launch_status =
           stream
-              ->ThenBlasGemmBatchedWithScratch(
+             ->ThenBlasGemmBatchedWithScratch(
                   blas_transpose_b, blas_transpose_a, n, m, k,
                   static_cast<Coefficient>(1.0), b_ptrs, adj_y ? k : n, a_ptrs,
                   adj_x ? m : k, static_cast<Coefficient>(0.0), c_ptrs, n,
                   batch_size, &scratch_allocator)
               .ok();
       if (!blas_launch_status) {
+        // std::cout << "blas launch failed. " << std::endl;
         context->SetStatus(errors::Internal(
             "Blas xGEMMBatched launch failed : a.shape=",
             in_x.shape().DebugString(),

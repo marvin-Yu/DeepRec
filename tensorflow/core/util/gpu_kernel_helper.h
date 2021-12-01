@@ -91,7 +91,6 @@ inline const gpuStream_t& GetGpuStream(OpKernelContext* context) {
                                                ->GpuStreamMemberHack()));
   return *ptr;
 }
-
 // Launches a GPU kernel through cudaLaunchKernel in CUDA environment, or
 // hipLaunchKernel in ROCm environment with the given arguments.
 //

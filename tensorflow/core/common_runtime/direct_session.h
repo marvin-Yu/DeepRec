@@ -22,7 +22,7 @@ limitations under the License.
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-
+#include <mutex>
 #include "tensorflow/core/common_runtime/costmodel_manager.h"
 #include "tensorflow/core/common_runtime/debugger_state_interface.h"
 #include "tensorflow/core/common_runtime/device_mgr.h"
@@ -44,6 +44,11 @@ limitations under the License.
 #include "tensorflow/core/platform/thread_annotations.h"
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/public/session.h"
+
+
+#ifdef GOOGLE_CUDA
+#include <cuda_runtime.h>
+#endif
 
 namespace tensorflow {
 
@@ -131,13 +136,36 @@ class DirectSession : public Session {
   ::tensorflow::Status ReleaseCallable(CallableHandle handle) override;
 
   const SessionOptions& options() const { return options_; }
+
+#ifdef GOOGLE_CUDA
+  ::tensorflow::Status CreateForCapture(const GraphDef& graph) override;
+  ::tensorflow::Status CreateForCapture(GraphDef&& graph) override;
+  ::tensorflow::Status RunForCapture(const std::vector<std::pair<string, Tensor> >& inputs,
+                     const std::vector<string>& output_tensor_names,
+                     const std::vector<string>& target_node_names,
+                     CudaGraphMeta* cuda_graph_meta) override;
+  ::tensorflow::Status RunForCapture(const RunOptions& run_options,
+                     const std::vector<std::pair<string, Tensor> >& inputs,
+                     const std::vector<string>& output_tensor_names,
+                     const std::vector<string>& target_node_names,
+                     RunMetadata* run_metadata,
+                     CudaGraphMeta* cuda_graph_meta) override;
+  bool SupportsCudaGraph() override { return true; };
+  cudaStream_t EnableGraphCapture() override;
+  void DisableGraphCapture() override;
+  std::unordered_map<std::string, GraphDef>* GetCudaGraphRewriteDefs() override {
+    return &cudagraph_defs_;
+  };
+#endif
+
   void RunAsync(const RunOptions& run_options,
       const NamedTensorList& inputs,
       const std::vector<string>& output_names,
       const std::vector<string>& target_nodes,
       std::vector<Tensor>* outputs,
       RunMetadata* run_metadata,
-      StatusCallback done) override;
+      StatusCallback done,
+      std::atomic<int64_t>* flops = nullptr) override;
 
   void RunAsync(const RunOptions& run_options,
       const NamedTensorList& inputs,
@@ -146,13 +174,42 @@ class DirectSession : public Session {
       std::vector<Tensor>* outputs,
       RunMetadata* run_metadata,
       CallbackFrame* frame,
-      StatusCallback done);
+      StatusCallback done,
+      std::atomic<int64_t>* flops = nullptr);
 
 
   void SetStepInitId(int step_id) {
     step_id_counter_ = step_id;
   }
  private:
+
+#ifdef GOOGLE_CUDA
+  bool cuda_graph_capture_mode_ = false;
+  cudaStream_t capturing_stream_ = nullptr;
+
+  bool RemoveH2DNodes(cudaGraph_t graph, std::vector<std::pair<void*, void*>> &input_mappings,
+                      std::vector<std::pair<void*, void*>>& output_mappings,
+                      CudaGraphMeta* cuda_graph_meta);
+
+  bool ExtractOutputMetaInfo(std::vector<Tensor>& outputs, CudaGraphMeta* cuda_graph_meta);
+
+  size_t num_output_tensors_;
+
+  // Names of place holders which will be the host_memory_inputs of GPU ops
+  // No H2D will be inserted for these data, so cannot be captured by CUDA
+  // Only const values (given specific input shape) are allowed.
+  // these values will be sent to the CUDA Graph in the form of launch parameters
+  // like block/grid sizes.
+  // todo: may move to method arguments
+  std::vector<std::string> host_memory_inputs_; 
+  std::vector<const void*> input_host_address_;
+  std::vector<const void*> host_memory_inputs_address_;
+
+  std::vector<const void*> output_host_address_;
+
+  std::unordered_map<std::string, GraphDef> cudagraph_defs_;
+#endif
+
   // For access to collective_graph_key_.
   friend class DirectSessionCollectiveTest;
 
@@ -164,7 +221,7 @@ class DirectSession : public Session {
     FunctionLibraryRuntime* flib = nullptr;  // not owned.
     std::unique_ptr<Executor> executor;
   };
-
+  
   // An ExecutorsAndKeys is created for a given set of feeds/fetches.
   // 'step_count' is the number of times this graph is executed.
   // 'graph' is the entire graph being executed. 'name_to_node'
@@ -276,7 +333,8 @@ class DirectSession : public Session {
       int64 step_id, const RunOptions& run_options,
       CallFrameInterface* call_frame, ExecutorsAndKeys* executors_and_keys,
       RunMetadata* run_metadata,
-      const thread::ThreadPoolOptions& threadpool_options);
+      const thread::ThreadPoolOptions& threadpool_options,
+      CudaGraphMeta* cuda_graph_meta = nullptr);
 
   void RunInternalAsync(
       int64 step_id, const RunOptions& run_options,
@@ -288,7 +346,8 @@ class DirectSession : public Session {
       const std::vector<string>& target_nodes,
       std::vector<Tensor>* outputs,
       CallbackFrame* frame,
-      StatusCallback done);
+      StatusCallback done,
+      std::atomic<int64_t>* flops = nullptr);
 
   ::tensorflow::Status AfterRunAsync(const ::tensorflow::RunOptions& run_options,
        const std::vector<string>& output_names,

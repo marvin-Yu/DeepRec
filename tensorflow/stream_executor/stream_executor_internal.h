@@ -134,6 +134,8 @@ class StreamInterface {
   // stream-slot rather than a stream-value.
   virtual void **GpuStreamMemberHack() { return nullptr; }
 
+  virtual void Destroy() { }
+  
  private:
   SE_DISALLOW_COPY_AND_ASSIGN(StreamInterface);
 };

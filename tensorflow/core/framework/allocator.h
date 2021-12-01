@@ -205,6 +205,8 @@ class Allocator {
   virtual void ClearStats() {}
 
   virtual void SetSafeFrontier(uint64 count) {}
+
+  virtual bool ReserveChunks(size_t chunk_size, int chunk_num) { return false; };
 };
 
 // An implementation of Allocator that delegates all calls to another Allocator.

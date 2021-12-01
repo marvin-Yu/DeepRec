@@ -1125,7 +1125,19 @@ Status TrtNodeValidator::ConvertToTensorOrWeights(
   return Status::OK();
 }
 
-Status TrtNodeValidator::IsTensorRTCandidate(const Node* node) {
+Status TrtNodeValidator::IsTensorRTCandidate(const Node* node, const std::unordered_set<string> &target_nodes) {
+  VLOG(3) << "[biaofang_test convert_nodes]: " << node->def().name() << ", " << node->def().op() << ", " << node->def().device() 
+      << ", "  << node->id() << ", " << node->name() << ", " << node->requested_device() << ", " << node->assigned_device_name();
+  // KGB model only support GPU
+  std::string tmp_device = node->requested_device().length() <= 5 ? "NOT_SUPPORT": (node->requested_device().substr(node->requested_device().length()-5, 3));
+  if (tmp_device != DEVICE_GPU) {
+    return errors::Unimplemented("Device type ", tmp_device, " is not supported.");
+  }
+  LOG(INFO) << "GPU node: " << node->name();
+  if (/* !target_nodes.empty() && */ target_nodes.find(node->name()) == target_nodes.end()) {
+    return errors::Unimplemented("Node(", node->name(), ") is not in convert_ranges.");
+  }
+
   const string& op = node->def().op();
   // In INT8 mode, we will always apply the quantization ranges provided by
   // these ops to the relevant tensors. This happens regardless of the value of
@@ -1213,7 +1225,8 @@ Converter::Converter(nvinfer1::INetworkDefinition* trt_network,
                      TrtPrecisionMode precision_mode, bool use_calibration)
     : trt_network_(trt_network),
       precision_mode_(precision_mode),
-      use_calibration_(use_calibration) {
+      use_calibration_(use_calibration),
+      flops_(0) {
   InitializeTrtPlugins();
   this->RegisterOpConverters();
 }
@@ -1261,6 +1274,9 @@ Status Converter::ConvertNode(const NodeDef& node_def) {
                            ": ", status.error_message()));
     }
   }
+
+  UpdateFlops(params.flops);
+
   return Status::OK();
 }
 
@@ -3827,7 +3843,7 @@ Status ConvertBinary(OpConverterParams* params) {
 
   nvinfer1::Dims broadcasted_dims_l, broadcasted_dims_r;
   TF_RETURN_IF_ERROR(
-      GetTrtBroadcastShape(operand_l, operand_r, /*check_feasibility=*/true,
+      GetTrtBroadcastShape(operand_l, operand_r, /*check_feasibility=*/false,
                            &broadcasted_dims_l, &broadcasted_dims_r));
   nvinfer1::ITensor* tensor_l = nullptr;
   nvinfer1::ITensor* tensor_r = nullptr;
@@ -4628,6 +4644,7 @@ Status ConvertFullyConnectedHelper(OpConverterParams* params,
   while (input_dim.nbDims < 3) {
     input_dim.d[input_dim.nbDims++] = 1;
   }
+
   TF_RETURN_IF_ERROR(params->converter->PrepareTensorForShape(
       TRT_TensorOrWeights(tensor_a), input_dim, /*validation_only=*/false,
       &tensor_a));
@@ -4656,6 +4673,9 @@ Status ConvertFullyConnectedHelper(OpConverterParams* params,
       TRT_TensorOrWeights(output_tensor), output_dim, /*validation_only=*/false,
       &output_tensor));
 
+  int64_t flops = 1;
+  flops *= input_dim.d[0] * noutput;
+  params->flops = flops;
   params->outputs->push_back(TRT_TensorOrWeights(output_tensor));
   return Status::OK();
 }
@@ -4745,6 +4765,12 @@ Status ConvertMatMulHelper(OpConverterParams* params,
   TFTRT_RETURN_ERROR_IF_NULLPTR(layer, node_name);
   nvinfer1::ITensor* output_tensor = layer->getOutput(0);
   params->outputs->push_back(TRT_TensorOrWeights(output_tensor));
+
+  // Get Flops For MatrixMultiply:
+  //  no batch size in dims
+  int64_t flops = 1;
+  flops *= tensor_a->getDimensions().d[0] * tensor_b->getDimensions().d[1]; // N,  N * L
+  params->flops = flops * 2;
   return Status::OK();
 }
 
@@ -5468,7 +5494,8 @@ Status ConvertGraphDefToEngine(
     const std::vector<PartialTensorShape>& input_shapes, Logger* logger,
     nvinfer1::IGpuAllocator* allocator, TRTInt8Calibrator* calibrator,
     TrtUniquePtrType<nvinfer1::ICudaEngine>* engine, bool use_calibration,
-    bool* convert_successfully) {
+    bool* convert_successfully,
+    int64_t* total_flops /*= nullptr*/) {
   engine->reset();
   if (convert_successfully) *convert_successfully = false;
 
@@ -5586,6 +5613,7 @@ Status ConvertGraphDefToEngine(
       TF_RETURN_IF_ERROR(converter.ConvertNode(node_def));
     }
   }
+
   TF_RETURN_IF_ERROR(converter.RenameAndMarkOutputTensors(output_tensors));
   if (convert_successfully) *convert_successfully = true;
 
@@ -5598,6 +5626,12 @@ Status ConvertGraphDefToEngine(
   if (engine->get() == nullptr) {
     return errors::Internal("Failed to build TensorRT engine");
   }
+
+  // Get Float
+  if (total_flops) {
+    *total_flops += converter.GetFlops();
+  }
+
   VLOG(1) << "Finished conversion";
   return Status::OK();
 }

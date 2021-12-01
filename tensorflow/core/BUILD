@@ -893,6 +893,7 @@ tf_cuda_library(
         "framework/device_base.h",
         "framework/function.h",
         "framework/function_handle_cache.h",
+        "framework/graph_def_rewriter.h",
         "framework/graph_def_util.h",
         "framework/graph_to_functiondef.h",
         "framework/kernel_def_builder.h",
@@ -1167,6 +1168,7 @@ tf_gen_op_libs(
         "collective_ops",
         "control_flow_ops",
         "ctc_ops",
+        "cuda_graph_op",
         "data_flow_ops",
         "dataset_ops",
         "decode_proto_ops",
@@ -1392,6 +1394,7 @@ cc_library(
         ":collective_ops_op_lib",
         ":control_flow_ops_op_lib",
         ":ctc_ops_op_lib",
+        ":cuda_graph_op_op_lib",
         ":cudnn_rnn_ops_op_lib",
         ":data_flow_ops_op_lib",
         ":dataset_ops_op_lib",
@@ -1570,6 +1573,7 @@ cc_library(
         "//tensorflow/core/kernels:collective_ops",
         "//tensorflow/core/kernels:control_flow_ops",
         "//tensorflow/core/kernels:ctc_ops",
+        "//tensorflow/core/kernels:cuda_graph_op",
         "//tensorflow/core/kernels:cudnn_rnn_kernels",
         "//tensorflow/core/kernels:data_flow",
         "//tensorflow/core/kernels:decode_proto_op",
@@ -3085,6 +3089,7 @@ GRAPH_HDRS = [
     "graph/node_builder.h",
     "graph/optimizer_cse.h",
     "graph/subgraph.h",
+    "graph/subgraph_extractor.h",
     "graph/tensor_id.h",
     "graph/testlib.h",
     "graph/types.h",
@@ -3103,6 +3108,7 @@ tf_cuda_library(
         "graph/graph_partition.cc",
         "graph/optimizer_cse.cc",
         "graph/subgraph.cc",
+        "graph/subgraph_extractor.cc",
         "graph/validate.cc",
     ],
     hdrs = GRAPH_HDRS,
@@ -3156,6 +3162,7 @@ tf_cuda_library(
         "common_runtime/scoped_allocator.cc",
         "common_runtime/scoped_allocator_mgr.cc",
         "common_runtime/shape_refiner.cc",
+        "common_runtime/cuda_graph_meta.h",
         "common_runtime/graph_optimizer.h",
         "graph/graph_constructor.cc",  # Depends on common_runtime.
         "graph/dist_graph_partition.cc",
@@ -3196,6 +3203,7 @@ CORE_CPU_LIB_HEADERS = CORE_CPU_BASE_HDRS + [
     "common_runtime/colocation_graph.h",
     "common_runtime/constant_folding.h",
     "common_runtime/copy_tensor.h",
+    "common_runtime/cuda_graph_meta.h",
     "common_runtime/costmodel_manager.h",
     "common_runtime/placer_inspection_required_ops_utils.h",
     "common_runtime/debugger_state_interface.h",
@@ -3450,10 +3458,14 @@ tf_cuda_library(
     hdrs = [
         "common_runtime/direct_session.h",
         "util/env_var.h",
+        "common_runtime/gpu/gpu_device.h",
+        "common_runtime/gpu/gpu_id_utils.h",
+        "common_runtime/gpu_device_context.h",
     ],
     copts = tf_copts(),
     deps = [
         ":core_cpu_internal",
+        ":cuda_graph_mgr",
         ":framework",
         ":framework_internal",
         ":graph",
@@ -3470,6 +3482,29 @@ tf_cuda_library(
         "@com_google_absl//absl/container:flat_hash_set",
     ],
     alwayslink = 1,
+)
+
+tf_cuda_library(
+    name = "cuda_graph_mgr",
+    srcs = [ "common_runtime/cuda_graph_mgr.cc"],
+    hdrs = [        
+        "common_runtime/cuda_graph_mgr.h",
+        "common_runtime/cuda_graph_meta.h",
+        "common_runtime/gpu/gpu_device.h",
+        "common_runtime/gpu/gpu_id_utils.h",
+        "common_runtime/gpu_device_context.h",
+    ],
+    deps = [
+        ":core_cpu_internal",
+        ":framework",
+        ":framework_internal",
+        ":graph",
+        ":lib",
+        ":lib_internal",
+        ":proto_text",
+        "//tensorflow/tools/traffic:traffic",
+    ]
+
 )
 
 tf_cuda_library(
@@ -4172,6 +4207,35 @@ tf_cc_test(
         ":test_main",
         ":testlib",
     ],
+)
+
+tf_cc_test(
+    name = "subgraph_extractor_test",
+    size = "small",
+    data = glob(["graph/testdata/*.pbtxt"]),
+    srcs = ["graph/subgraph_extractor_test.cc"],
+    deps = [
+        ":graph",
+	":framework",
+        ":lib",
+        ":test",
+        ":test_main",
+    ]
+)
+
+tf_cc_test(
+    name = "graph_def_rewriter_test",
+    size = "small",
+    data = glob(["framework/testdata/*.pbtxt"]),
+    srcs = ["framework/graph_def_rewriter_test.cc"],
+    deps = [
+        ":framework",
+        ":framework_internal",
+        ":array_ops_op_lib",
+        ":lib",
+        ":test",
+        ":test_main",
+    ]
 )
 
 tf_cc_tests(

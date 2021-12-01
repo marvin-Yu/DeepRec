@@ -1456,7 +1456,7 @@ def main():
                                 environ_cp.get('LD_LIBRARY_PATH'))
 
   environ_cp['TF_NEED_CUDA'] = str(
-      int(get_var(environ_cp, 'TF_NEED_CUDA', 'CUDA', False)))
+      int(get_var(environ_cp, 'TF_NEED_CUDA', 'CUDA', True)))
   if (environ_cp.get('TF_NEED_CUDA') == '1' and
       'TF_CUDA_CONFIG_REPO' not in environ_cp):
 
@@ -1464,7 +1464,7 @@ def main():
         environ_cp,
         'TF_NEED_TENSORRT',
         'TensorRT',
-        False,
+        True,
         bazel_config_name='tensorrt')
 
     environ_save = dict(environ_cp)

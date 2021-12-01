@@ -140,6 +140,8 @@ EventMgr::~EventMgr() {
   }
 }
 
+bool EventMgr::stream_capture_mode_ = false;
+
 void EventMgr::StartPollingLoop() {
   CHECK(polling_stopped_ == nullptr);
   {
@@ -271,6 +273,7 @@ void EventMgr::PollEvents(bool is_dedicated_poller,
   // Sweep the remaining events in order.  If this is the dedicated
   // polling thread, check the entire set.  Otherwise, just sweep up to
   // the first non-complete record that is still pending.
+  /*
   int64 event_size = 0;
   {
     mutex_lock el(used_events_mu_);
@@ -303,6 +306,38 @@ void EventMgr::PollEvents(bool is_dedicated_poller,
         // Mark this InUse record as completed.
         iu.event = nullptr;
         used_events_.pop_front();
+   }
+   */
+  for (auto& iu : used_events_) {
+    if (iu.event == nullptr) continue;
+
+    if(! stream_capture_mode_){
+      se::Event::Status s = iu.event->PollForStatus();
+      switch (s) {
+        case se::Event::Status::kUnknown:
+        case se::Event::Status::kError:
+          // We don't expect to see these.  Someday maybe propagate
+          // a Status error, but for now fail hard.
+          LOG(FATAL) << "Unexpected Event status: " << static_cast<int>(s);
+          break;
+        case se::Event::Status::kPending:
+          if (!is_dedicated_poller) return;  // quit processing queue
+          break;
+        case se::Event::Status::kComplete:
+          // Make a copy of the InUse record so we can free it after releasing
+          // the lock
+          to_free->push_back(iu);
+          free_events_.push_back(iu.event);
+          // Mark this InUse record as completed.
+          iu.event = nullptr;
+      }
+    }else{
+      // Make a copy of the InUse record so we can free it after releasing
+      // the lock
+      to_free->push_back(iu);
+      free_events_.push_back(iu.event);
+      // Mark this InUse record as completed.
+      iu.event = nullptr;
     }
   }
   // Then clear any completed InUse records from the front of the queue.

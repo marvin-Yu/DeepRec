@@ -44,6 +44,7 @@ BFCAllocator::BFCAllocator(SubAllocator* sub_allocator, size_t total_memory,
         RoundedBytes(std::min(total_memory, size_t{1048576}));
   } else {
     curr_region_allocation_bytes_ = RoundedBytes(total_memory);
+    LOG(INFO) << "curr_region_allocation_bytes_ = " << curr_region_allocation_bytes_;
   }
 
   // Allocate the requested amount of memory.
@@ -67,6 +68,7 @@ BFCAllocator::BFCAllocator(SubAllocator* sub_allocator, size_t total_memory,
       CHECK_NE(BinForSize(bin_size * 2), BinFromIndex(b));
     }
   }
+  //assert(Extend(4, RoundedBytes(total_memory)));
 }
 
 BFCAllocator::~BFCAllocator() {
@@ -92,6 +94,19 @@ const BFCAllocator::Chunk* BFCAllocator::ChunkFromHandle(ChunkHandle h) const {
   DCHECK_GE(h, 0);
   DCHECK_LT(h, static_cast<int>(chunks_.size()));
   return &(chunks_[h]);
+}
+
+bool BFCAllocator::ReserveChunks(size_t chunk_size, int chunk_num) {
+  // LOG(INFO) << "[Jieluo] Reserve chunk, chunk size " << chunk_size << " chunk num " << chunk_num;
+  bool all_succ = true;
+  size_t alignment = 64;
+  for (int i = 0; i < chunk_num; ++i) {
+    if (!Extend(alignment, chunk_size)) {
+      LOG(ERROR) << "Reserve chunk No." << i << "failed, not all chunk reserved.";
+      return false; 
+    }
+  }
+  return true;
 }
 
 bool BFCAllocator::Extend(size_t alignment, size_t rounded_bytes) {

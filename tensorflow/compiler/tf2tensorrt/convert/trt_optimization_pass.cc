@@ -67,6 +67,23 @@ Status TRTOptimizationPass::Init(
   if (params.count("use_calibration")) {
     use_calibration_ = params.at("use_calibration").b();
   }
+  if (params.count("convert_ranges")) {
+    int range_sizes = params.at("convert_ranges").list().s_size();
+    for (int i = 0; i < range_sizes; i++) {
+      auto node_range = params.at("convert_ranges").list().s(i);
+      convert_ranges_.push_back(node_range);
+    }
+  }
+  if (params.count("engine_pad_batch_step")) {
+    engine_pad_batch_step_ = params.at("engine_pad_batch_step").i();
+  }
+  if (params.count("engine_pad_to_batches")) {
+    auto batch_vec = params.at("engine_pad_to_batches").list();
+    engine_pad_to_batches_.reserve(batch_vec.i_size());
+    for (const auto i : batch_vec.i()) {
+      engine_pad_to_batches_.push_back(i);
+    }
+  }
   return Status::OK();
 }
 
@@ -255,7 +272,12 @@ Status TRTOptimizationPass::Optimize(grappler::Cluster* cluster,
   cp.is_dyn_op = is_dynamic_op_;
   cp.max_cached_engines = max_cached_batches_;
   cp.use_calibration = use_calibration_;
+  cp.convert_ranges = convert_ranges_;
+  cp.engine_pad_batch_step = engine_pad_batch_step_;
+  cp.engine_pad_to_batches = engine_pad_to_batches_;
   auto status = ConvertAfterShapes(cp);
+  // Get Flops:
+  auto total_flops = cp.total_flops;
   VLOG(1) << "Returning from " << name_;
   return status;
 }

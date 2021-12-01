@@ -20,9 +20,11 @@ limitations under the License.
 namespace tensorflow {
 
 bool GPUBFCAllocator::GetAllowGrowthValue(const GPUOptions& gpu_options) {
+
   const char* force_allow_growth_string =
       std::getenv("TF_FORCE_GPU_ALLOW_GROWTH");
   if (force_allow_growth_string == nullptr) {
+    LOG(INFO) << "Use allow_growth option -- " << gpu_options.allow_growth();
     return gpu_options.allow_growth();
   }
 

@@ -47,14 +47,18 @@ class TensorCord;
 class TensorDescription;
 class TensorProto;
 class Var;
-
+class Rendezvous;
+class IntraProcessRendezvous;
+class TensorHolder;
+class GPUUtil;
+ 
 namespace batch_util {
 Status CopyElementToSlice(Tensor element, Tensor* parent, int64 index);
 Status MaybeMoveSliceToElement(Tensor* parent, Tensor* element, int64 index);
 }  // namespace batch_util
 
 /// @ingroup core
-
+ 
 /// Interface to access the raw ref-counted data buffer.
 class TensorBuffer : public core::RefCounted {
  public:
@@ -669,6 +673,11 @@ class Tensor {
   friend class OpKernelContext;       // For access to RefCountIsOne().
   friend class ScopedAllocator;       // For access to buf_.
   friend class XlaTensor;             // For access to RefCountIsOne().
+  friend class Rendezvous;            // For access to buf_.
+  friend class IntraProcessRendezvous;
+  friend class TensorHolder;
+  friend class GPUUtil;
+  
   template <typename Device, typename T>
   friend class AssignVariableOp;  // For access to RefCountIsOne().
   template <typename Device, typename T>
@@ -1028,6 +1037,28 @@ inline Tensor& Tensor::operator=(Tensor&& other) {
   }
   return *this;
 }
+
+// Hold the tenors during/after cuda graph capture, and do some reuse if possible.
+// Avoid the tensor memory being released, so that we can run cudagraph & TF
+// at the same time without conflicts.
+// callers make sure it only holds GPU tensors.
+// the user of cudagraph should keep the input/output tensors on CPU
+class TensorHolder
+{
+public:
+    TensorHolder();
+    TensorHolder(const TensorHolder& tensor_holder);
+    
+    Tensor FindUsableTensor(DataType type, const TensorShape & shape);    
+    size_t Add(const Tensor* tensor);
+    const Tensor* GetTensorPtr(unsigned int index);
+    int AllocatedBytes();
+    bool HostContains(const void * address) const;
+    
+private:
+    std::mutex mtx_;
+    std::vector<Tensor> tensors_;
+};
 
 // END_SKIP_DOXYGEN
 
