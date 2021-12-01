@@ -1320,7 +1320,7 @@ class OpKernelContext {
     return params_->dec_num_deferred_ops_function;
   }
 
-  Allocator* get_allocator(AllocatorAttributes attr);
+  Allocator* get_allocator(AllocatorAttributes attr, Allocator** res);
 
  private:
   bool record_memory_consumption_ = false;

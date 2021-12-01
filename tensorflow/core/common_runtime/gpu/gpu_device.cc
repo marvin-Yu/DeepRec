@@ -230,6 +230,7 @@ class EigenGpuStreamDevice : public ::Eigen::StreamInterface {
 // object (and therefore the same CUDA streams). This is necessary since there
 // is a single memory allocator per device (see ProcessState::GetGPUAllocator)
 // and allocators must not be shared across streams.
+/*
 class BaseGPUDevice::StreamGroupFactory {
  public:
   // Returns the unique stream group for use with the stream defined by
@@ -346,6 +347,7 @@ class BaseGPUDevice::StreamGroupFactory {
   StreamGroupFactory() = default;
   TF_DISALLOW_COPY_AND_ASSIGN(StreamGroupFactory);
 };
+*/
 
 BaseGPUDevice::BaseGPUDevice(const SessionOptions& options, const string& name,
                              Bytes memory_limit, const DeviceLocality& locality,

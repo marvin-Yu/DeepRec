@@ -285,11 +285,20 @@ OpKernelContext::OpKernelContext(Params* params, int num_outputs)
       persistent_memory_allocated_(0) {
   params_->ensure_eigen_gpu_device();
   if (params_->eigen_gpu_device != nullptr) {
-    Allocator* eigen_gpu_allocator = get_allocator(AllocatorAttributes());
-    Status s = params_->device->ReinitializeGpuDevice(
+    bool status_set = false;
+    Allocator* eigen_gpu_allocator;
+    Status s = get_allocator((params_->allocator_attributes
+                              ? *params_->allocator_attributes
+                              : AllocatorAttributes()),
+                             &eigen_gpu_allocator);
+    if (!s.ok()) {
+      SetStatus(s);
+      status_set = true;
+    }
+    s = params_->device->ReinitializeGpuDevice(
         this, params_->eigen_gpu_device, params_->op_device_context,
         eigen_gpu_allocator);
-    if (!s.ok()) {
+    if (!status_set && !s.ok()) {
       SetStatus(s);
     }
   }
@@ -314,7 +323,7 @@ OpKernelContext::~OpKernelContext() {
   }
 }
 
-Allocator* OpKernelContext::get_allocator(AllocatorAttributes attr) {
+Allocator* OpKernelContext::get_allocator(AllocatorAttributes attr, Allocator** res) {
   Allocator* allocator = nullptr;
   if (TF_PREDICT_FALSE(attr.scope_id > 0)) {
     allocator = params_->device->GetScopedAllocator(attr, step_id());
@@ -325,7 +334,8 @@ Allocator* OpKernelContext::get_allocator(AllocatorAttributes attr) {
         return errors::InvalidArgument("Trying to get persistent allocator "
                                        "but no such allocator provided");
       }
-      return params_->persistent_allocator;
+      *res = params_->persistent_allocator;
+      return Status::OK();
     } else {
       allocator = params_->device->GetAllocator(attr);
     }
@@ -334,15 +344,18 @@ Allocator* OpKernelContext::get_allocator(AllocatorAttributes attr) {
     mutex_lock lock(mu_);
     for (const auto& wrapped : wrapped_allocators_) {
       if (wrapped.first == allocator) {
-        return wrapped.second;
+        *res = wrapped.second;
+        return Status::OK();
       }
     }
     TrackingAllocator* wrapped_allocator =
         new TrackingAllocator(allocator, params_->track_allocations);
     wrapped_allocators_.push_back(std::make_pair(allocator, wrapped_allocator));
-    return wrapped_allocator;
+    *res = wrapped_allocator;
+    return Status::OK();
   } else {
-    return allocator;
+    *res = allocator;
+    return Status::OK();
   }
 }
 
@@ -748,8 +761,8 @@ Status OpKernelContext::allocate_tensor(
       }
   }
 
-  Allocator* a = get_allocator(attr);
-  //TF_RETURN_IF_ERROR(get_allocator(attr, &a));
+  Allocator* a;
+  TF_RETURN_IF_ERROR(get_allocator(attr, &a));
   Tensor new_tensor(a, type, shape,
                     AllocationAttributes(allocation_attr.no_retry_on_failure,
                                          /* allocation_will_be_logged= */ true,
@@ -843,7 +856,8 @@ Status OpKernelContext::allocate_temp(
   Status s =
       allocate_tensor(type, shape, out_temp, allocator_attr, allocation_attr);
   if (track_allocations() && s.ok() && out_temp->TotalBytes() > 0) {
-    Allocator* a = get_allocator(allocator_attr);
+    Allocator* a;
+    TF_RETURN_IF_ERROR(get_allocator(attr, &a));
     if (a->TracksAllocationSizes()) {
       int64 alloc_size = a->AllocatedSize(out_temp->tensor_data().data());
       record_temp_memory_allocation(alloc_size, *out_temp);
@@ -878,7 +892,8 @@ Status OpKernelContext::allocate_persistent(DataType type,
     }
 
     if (track_allocations()) {
-      Allocator* a = get_allocator(attr);
+      Allocator* a;
+      TF_RETURN_IF_ERROR(get_allocator(attr, &a));
       if (a->TracksAllocationSizes()) {
         // Zero-byte Tensors don't use allocators: check and skip tracking.
         AllocationDescription alloc_desc;
