@@ -750,6 +750,9 @@ class OpKernelContext {
     // Persistent allocator. Not own.
     Allocator* persistent_allocator = nullptr;
 
+    // Allocator attributes to use.
+    std::shared_ptr<AllocatorAttributes> allocator_attributes;
+
     // For tracking actively running deferred ops.
     std::function<void()> inc_num_deferred_ops_function = []() {};
     std::function<void()> dec_num_deferred_ops_function = []() {};
@@ -1056,7 +1059,10 @@ class OpKernelContext {
   }
   Status allocate_temp(DataType type, const TensorShape& shape,
                        Tensor* out_temp) {
-    return allocate_temp(type, shape, out_temp, AllocatorAttributes());
+    return allocate_temp(type, shape, out_temp,
+                         (params_->allocator_attributes
+                          ? *params_->allocator_attributes
+                          : AllocatorAttributes()));
   }
 
   // Allocates a Tensor of the specified type and shape which the Op
@@ -1320,7 +1326,7 @@ class OpKernelContext {
     return params_->dec_num_deferred_ops_function;
   }
 
-  Allocator* get_allocator(AllocatorAttributes attr, Allocator** res);
+  Status get_allocator(AllocatorAttributes attr, Allocator** res);
 
  private:
   bool record_memory_consumption_ = false;

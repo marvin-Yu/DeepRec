@@ -616,6 +616,7 @@ cc_library(
         "@flatbuffers//:flatbuffers",
         "@jsoncpp_git//:jsoncpp",
         "@farmhash_archive//:farmhash",
+        "@local_config_cuda//cuda:cuda_headers",
     ],
     visibility = ["//visibility:public"],
 )

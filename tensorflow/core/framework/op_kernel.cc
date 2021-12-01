@@ -323,7 +323,7 @@ OpKernelContext::~OpKernelContext() {
   }
 }
 
-Allocator* OpKernelContext::get_allocator(AllocatorAttributes attr, Allocator** res) {
+Status OpKernelContext::get_allocator(AllocatorAttributes attr, Allocator** res) {
   Allocator* allocator = nullptr;
   if (TF_PREDICT_FALSE(attr.scope_id > 0)) {
     allocator = params_->device->GetScopedAllocator(attr, step_id());
@@ -467,7 +467,7 @@ bool OpKernelContext::forward_input_to_output_with_shape(
     int input_index, int output_index, const TensorShape& output_shape,
     Tensor** output) {
   const auto output_attr = params_->output_attr_array == nullptr
-                               ? AllocatorAttributes()
+                               ? (params_->allocator_attributes ? *params_->allocator_attributes : AllocatorAttributes())
                                : output_alloc_attr(output_index);
   std::unique_ptr<Tensor> new_tensor = forward_input(
       input_index, output_index, expected_output_dtype(output_index),
@@ -857,7 +857,7 @@ Status OpKernelContext::allocate_temp(
       allocate_tensor(type, shape, out_temp, allocator_attr, allocation_attr);
   if (track_allocations() && s.ok() && out_temp->TotalBytes() > 0) {
     Allocator* a;
-    TF_RETURN_IF_ERROR(get_allocator(attr, &a));
+    TF_RETURN_IF_ERROR(get_allocator(allocator_attr, &a));
     if (a->TracksAllocationSizes()) {
       int64 alloc_size = a->AllocatedSize(out_temp->tensor_data().data());
       record_temp_memory_allocation(alloc_size, *out_temp);
