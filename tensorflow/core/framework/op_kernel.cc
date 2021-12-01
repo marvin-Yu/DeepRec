@@ -320,7 +320,15 @@ Allocator* OpKernelContext::get_allocator(AllocatorAttributes attr) {
     allocator = params_->device->GetScopedAllocator(attr, step_id());
     CHECK(allocator);
   } else {
-    allocator = params_->device->GetAllocator(attr);
+    if (TF_PREDICT_FALSE(!attr.on_host() && attr.persistent())) {
+      if (!params_->persistent_allocator) {
+        return errors::InvalidArgument("Trying to get persistent allocator "
+                                       "but no such allocator provided");
+      }
+      return params_->persistent_allocator;
+    } else {
+      allocator = params_->device->GetAllocator(attr);
+    }
   }
   if (TF_PREDICT_FALSE(track_allocations())) {
     mutex_lock lock(mu_);
@@ -740,8 +748,8 @@ Status OpKernelContext::allocate_tensor(
       }
   }
 
-  Allocator* a;
-  TF_RETURN_IF_ERROR(get_allocator(attr, &a));
+  Allocator* a = get_allocator(attr, &a);
+  //TF_RETURN_IF_ERROR(get_allocator(attr, &a));
   Tensor new_tensor(a, type, shape,
                     AllocationAttributes(allocation_attr.no_retry_on_failure,
                                          /* allocation_will_be_logged= */ true,
