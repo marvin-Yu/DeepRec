@@ -748,7 +748,7 @@ Status OpKernelContext::allocate_tensor(
       }
   }
 
-  Allocator* a = get_allocator(attr, &a);
+  Allocator* a = get_allocator(attr);
   //TF_RETURN_IF_ERROR(get_allocator(attr, &a));
   Tensor new_tensor(a, type, shape,
                     AllocationAttributes(allocation_attr.no_retry_on_failure,

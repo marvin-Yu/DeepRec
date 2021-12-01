@@ -747,6 +747,8 @@ class OpKernelContext {
     static const int kNoReservation = -1;
     // Values in [0,...) represent reservations for the indexed output.
     const int* forward_from_array = nullptr;
+    // Persistent allocator. Not own.
+    Allocator* persistent_allocator = nullptr;
 
     // For tracking actively running deferred ops.
     std::function<void()> inc_num_deferred_ops_function = []() {};

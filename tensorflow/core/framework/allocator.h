@@ -290,6 +290,8 @@ struct AllocatorAttributes {
   bool nic_compatible() const { return value & (0x1 << 1); }
   void set_gpu_compatible(bool v) { value |= (static_cast<int>(v) << 2); }
   bool gpu_compatible() const { return value & (0x1 << 2); }
+  void set_persistent(bool v) { value |= (static_cast<int>(v) << 20); }
+  bool persistent() { return value & (0x1 << 20); }
   void Merge(AllocatorAttributes other) {
     value |= other.value;
     if (scope_id != other.scope_id) {
