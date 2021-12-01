@@ -1453,7 +1453,7 @@ void DirectSession::RunInternalAsync(
   args->user_intra_op_threadpool = threadpool_options.intra_op_threadpool;
 
   args->enable_prof_stats = enable_prof_stats_;
-  args.flops = flops;
+  args->flops = flops;
 
   const bool do_trace = (run_options.trace_level() > RunOptions::NO_TRACE);
   if (enable_prof_stats_ || do_trace) {
