@@ -17,7 +17,9 @@ limitations under the License.
 
 #include <cmath>
 #include <vector>
+#include <fstream>
 
+#include "absl/strings/escaping.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/type_traits.h"
 #include "tensorflow/core/framework/variant.h"
@@ -453,8 +455,232 @@ bool CompressTensorProtoInPlace(int64 min_num_elements,
       return false;
   }
 }
-
 #undef HANDLE_COMPRESS_CASE
+inline const string  DumpOneElement(const strings::AlphaNum& a,
+                                                bool print_v2) {
+  return StrCat(a);
+}
+inline string DumpOneElement(const tstring& a, bool print_v2) {
+  if (print_v2) {
+    return "\"" + absl::CEscape(a) + "\"";
+  } else {
+    return absl::CEscape(a);
+  }
+}
+inline float DumpOneElement(const Eigen::half& h, bool print_v2) {
+  return static_cast<float>(h);
+}
+
+// Dump from left dim to right dim recursively.
+template <typename T>
+void DumpOneDim(int dim_index, const gtl::InlinedVector<int64, 4>& shape,
+                 int64 limit, int shape_size, const T* data, int64* data_index,
+                 std::ofstream &ofs) {
+  if (*data_index >= limit) return;
+  int64 element_count = shape[dim_index];
+  // We have reached the right-most dimension of the tensor.
+  if (dim_index == shape_size - 1) {
+    for (int64 i = 0; i < element_count; i++) {
+      if (*data_index >= limit) {
+        // If not enough elements has been printed, append "...".
+        if (dim_index != 0) {
+          ofs << "...";
+        }
+        return;
+      }
+      if (i > 0) ofs << " ";
+      ofs << DumpOneElement(data[(*data_index)++], false);
+    }
+    return;
+  }
+  // Loop every element of one dim.
+  for (int64 i = 0; i < element_count; i++) {
+    bool flag = false;
+    if (*data_index < limit) {
+      ofs << "[";
+      flag = true;
+    }
+    // As for each element, print the sub-dim.
+    DumpOneDim(dim_index + 1, shape, limit, shape_size, data, data_index,
+                ofs);
+    if (*data_index < limit || flag) {
+      ofs << "]";
+      flag = false;
+    }
+  }
+}
+
+// Appends the spacing between elements for a given dim onto a result string
+void DumpDimSpacing(int dim_index, int num_dims, std::ofstream &ofs) {
+  if (dim_index == num_dims - 1) {
+    ofs << " ";
+    return;
+  }
+  for (int j = 0; j < num_dims - dim_index - 1; j++) {
+    ofs << "\n";
+  }
+  for (int j = 0; j <= dim_index; j++) {
+    ofs << " ";
+  }
+}
+
+// Dump from left dim to right dim recursively.
+template <typename T>
+void DumpOneDimV2(int dim_index, const gtl::InlinedVector<int64, 4>& shape,
+                   int64 num_elts_at_ends, int num_dims, const T* data,
+                   int64 data_index, std::ofstream &ofs) {
+  // We have recursed beyond all the dimensions into a single element
+  // of the tensor.
+  if (dim_index == num_dims) {
+    ofs << DumpOneElement(data[data_index], true);
+    return;
+  }
+
+  ofs << "[";
+  int64 element_count = shape[dim_index];
+  int64 start_of_end =
+      std::max(num_elts_at_ends, element_count - num_elts_at_ends);
+
+  // Loop every element of one dim.
+  int64 elements_per_iter = 1;
+  for (int i = dim_index + 1; i < num_dims; i++) {
+    elements_per_iter *= shape[i];
+  }
+  for (int64 i = 0; (i < num_elts_at_ends) && (i < element_count); i++) {
+    if (i > 0) {
+      DumpDimSpacing(dim_index, num_dims, ofs);
+    }
+
+    // As for each element, print the sub-dim.
+    DumpOneDimV2(dim_index + 1, shape, num_elts_at_ends, num_dims, data,
+                  data_index + elements_per_iter * i, ofs);
+  }
+  if (element_count > 2 * num_elts_at_ends) {
+    DumpDimSpacing(dim_index, num_dims, ofs);
+    ofs << "...";
+  }
+  for (int64 i = start_of_end; i < element_count; i++) {
+    // As for each element, print the sub-dim.
+    DumpDimSpacing(dim_index, num_dims, ofs);
+    DumpOneDimV2(dim_index + 1, shape, num_elts_at_ends, num_dims, data,
+                  data_index + elements_per_iter * i, ofs);
+  }
+
+  ofs << "]";
+}
+
+template <typename T>
+void DumpTensor(std::ofstream &ofs, int64 limit, int64 num_elts,
+                      const TensorShape& tensor_shape, const char* data,
+                      const bool print_v2) {
+  const T* array = reinterpret_cast<const T*>(data);
+
+  const gtl::InlinedVector<int64, 4> shape = tensor_shape.dim_sizes();
+  if (shape.empty()) {
+    for (int64 i = 0; i < limit; ++i) {
+      if (i > 0) ofs << " ";
+      ofs << DumpOneElement(array[i], print_v2);
+    }
+    if (num_elts > limit) ofs << "...";
+    return;
+  }
+  if (print_v2) {
+    const int num_dims = tensor_shape.dims();
+    DumpOneDimV2(0, shape, limit, num_dims, array, 0, ofs);
+  } else {
+    int64 data_index = 0;
+    const int shape_size = tensor_shape.dims();
+    DumpOneDim(0, shape, limit, shape_size, array, &data_index, ofs);
+
+    if (num_elts > limit) ofs << "...";
+  }
+}
+
+void DumpTensorToFile(std::ofstream &ofs, const Tensor& tensor, bool print_v2) {
+  ofs << "Tensor<type: " << DataTypeString(tensor.dtype());
+  ofs << " shape: " << tensor.shape().DebugString();
+  ofs << " values: " << std::endl;
+  const int64 num_elts = tensor.NumElements();
+  if (!tensor.IsInitialized()) {
+    ofs << "uninitialized Tensor of " << num_elts << " elements of type " << tensor.dtype() << std::endl;
+    return;
+  }
+  const char* data = tensor.tensor_data().data();
+  int64 limit = num_elts;
+  switch (tensor.dtype()) {
+    case DT_HALF:
+      DumpTensor<Eigen::half>(ofs, limit, num_elts, tensor.shape(), data,
+                                         print_v2);
+      break;
+    case DT_FLOAT:
+      DumpTensor<float>(ofs, limit, num_elts, tensor.shape(), data, print_v2);
+      break;
+    case DT_DOUBLE:
+      DumpTensor<double>(ofs, limit, num_elts, tensor.shape(), data, print_v2);
+      break;
+    case DT_UINT32:
+      DumpTensor<uint32>(ofs, limit, num_elts, tensor.shape(), data, print_v2);
+      break;
+    case DT_INT32:
+      DumpTensor<int32>(ofs, limit, num_elts, tensor.shape(), data, print_v2);
+      break;
+    case DT_UINT8:
+    case DT_QUINT8:
+      DumpTensor<uint8>(ofs, limit, num_elts, tensor.shape(), data, print_v2);
+      break;
+    case DT_UINT16:
+    case DT_QUINT16:
+      DumpTensor<uint16>(ofs, limit, num_elts, tensor.shape(), data, print_v2);
+      break;
+    case DT_INT16:
+    case DT_QINT16:
+      DumpTensor<int16>(ofs, limit, num_elts, tensor.shape(), data, print_v2);
+      break;
+    case DT_INT8:
+    case DT_QINT8:
+      DumpTensor<int8>(ofs, limit, num_elts, tensor.shape(), data, print_v2);
+      break;
+    case DT_UINT64:
+      DumpTensor<uint64>(ofs, limit, num_elts, tensor.shape(), data, print_v2);
+      break;
+    case DT_INT64:
+      DumpTensor<int64>(ofs, limit, num_elts, tensor.shape(), data, print_v2);
+      break;
+    case DT_BOOL:
+      // TODO(tucker): Is it better to emit "True False..."?  This
+      // will emit "1 0..." which is more compact.
+      DumpTensor<bool>(ofs, limit, num_elts, tensor.shape(), data, print_v2);
+      break;
+    case DT_STRING:
+      DumpTensor<tstring>(ofs, limit, num_elts, tensor.shape(), data, print_v2);
+      break;
+    default: {
+      // All irregular cases
+      if (print_v2) {
+        ofs << "[";
+      }
+      // TODO(irving): Don't call flat every time around this
+      // loop.
+      for (size_t i = 0; i < num_elts; ++i) {
+        if (i > 0) ofs << " ";
+        switch (tensor.dtype()) {
+          case DT_VARIANT: {
+            const Variant& v = tensor.flat<Variant>()(i);
+            ofs << v.DebugString();
+          } break;
+          default:
+          // TODO(zhifengc, josh11b): Pretty-print other types (bool,
+          // complex64, quantized).
+          ofs << "?";
+        }
+      }
+      if (print_v2) {
+        ofs << "]";
+      }
+    }
+  }
+  ofs << ">" << std::endl;
+}
 
 }  // namespace tensor
 }  // namespace tensorflow

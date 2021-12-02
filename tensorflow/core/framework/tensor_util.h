@@ -332,6 +332,7 @@ inline bool CompressTensorProtoInPlace(TensorProto* tensor) {
                                     kDefaultMinCompressionRatio, tensor);
 }
 
+void DumpTensorToFile(std::ofstream &ofs, const Tensor& tensor, bool print_v2);
 }  // namespace tensor
 }  // namespace tensorflow
 
