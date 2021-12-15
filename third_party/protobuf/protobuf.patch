@@ -1,5 +1,5 @@
 diff --git a/BUILD b/BUILD
-index 2fb2605..7861c43 100644
+index 2fb2605..a80e17f 100644
 --- a/BUILD
 +++ b/BUILD
 @@ -4,6 +4,7 @@ licenses(["notice"])
@@ -19,7 +19,15 @@ index 2fb2605..7861c43 100644
  
  ################################################################################
  # Protobuf Runtime Library
-@@ -218,7 +219,7 @@ cc_library(
+@@ -210,6 +211,7 @@ cc_library(
+     linkopts = LINK_OPTS,
+     visibility = ["//visibility:public"],
+     deps = [":protobuf_lite"] + PROTOBUF_DEPS,
++    linkstatic = True,
+ )
+ 
+ # This provides just the header files for use in projects that need to build
+@@ -218,7 +220,7 @@ cc_library(
  # TODO(keveman): Remove this target once the support gets added to Bazel.
  cc_library(
      name = "protobuf_headers",
@@ -28,7 +36,7 @@ index 2fb2605..7861c43 100644
      includes = ["src/"],
      visibility = ["//visibility:public"],
  )
-@@ -674,8 +675,6 @@ py_library(
+@@ -674,8 +676,6 @@ py_library(
              "python/google/protobuf/**/*.py",
          ],
          exclude = [
@@ -37,7 +45,7 @@ index 2fb2605..7861c43 100644
              "python/google/protobuf/internal/*_test.py",
              "python/google/protobuf/internal/test_util.py",
          ],
-@@ -836,6 +835,19 @@ py_library(
+@@ -836,6 +836,19 @@ py_library(
      ],
  )
  
