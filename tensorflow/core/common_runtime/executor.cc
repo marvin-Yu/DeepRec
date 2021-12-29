@@ -1877,11 +1877,11 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
             device->ConsumeListOfAccessedTensors(state->ctx.op_device_context(),
                                                  accessed);
           }
-          const bool completed =
-              NodeDone(s, state->item->node, ready, stats, nullptr);
           // Get Flops:
           auto flops = state->ctx.get_flops();
           UpdateFlops(flops);
+          const bool completed =
+              NodeDone(s, state->item->node, ready, stats, nullptr);
 
           delete state;
           if (completed) ScheduleFinish();
