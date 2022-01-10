@@ -110,6 +110,7 @@ TEST_F(RemapperTest, FusedBatchNormNCHW) {
 }
 
 TEST_F(RemapperTest, FuseBatchNormWithRelu) {
+  if (IsMKLEnabled()) GTEST_SKIP() << "Fusion not available with oneDNN.";
   using ::tensorflow::ops::Placeholder;
 
   for (bool is_training : {true, false}) {
@@ -216,6 +217,7 @@ TEST_F(RemapperTest, FuseBatchNormWithRelu) {
 }
 
 TEST_F(RemapperTest, FuseBatchNormWithAddAndRelu) {
+  if (IsMKLEnabled()) GTEST_SKIP() << "Fusion not available with oneDNN.";
   using ::tensorflow::ops::Placeholder;
 
   for (bool is_training : {true, false}) {
@@ -460,10 +462,9 @@ class RemapperFuseMatMulWithBiasTest : public RemapperTest {
 TEST_F(RemapperFuseMatMulWithBiasTest, F32) { RunTest<DT_FLOAT>(); }
 
 TEST_F(RemapperFuseMatMulWithBiasTest, Bf16) {
-#if !defined(INTEL_MKL) || !defined(ENABLE_INTEL_MKL_BFLOAT16)
-  GTEST_SKIP() << "Intel MKL with bfloat16 support is not enabled, skipping "
-                  "FuseMatMulWithBias with bfloat16.";
-#endif  // !defined(INTEL_MKL) || !defined(ENABLE_INTEL_MKL_BFLOAT16)
+  if (!IsMKLEnabled() || !IsDataTypeSupportedByOneDNNOnThisCPU(DT_BFLOAT16))
+    GTEST_SKIP() << "Intel oneDNN with bfloat16 support is not supported, "
+                    "skipping FuseMatMulWithBias with bfloat16.";
   RunTest<DT_BFLOAT16>();  // NOLINT
 }
 
