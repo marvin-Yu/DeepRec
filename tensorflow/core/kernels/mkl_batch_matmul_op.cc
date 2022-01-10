@@ -306,14 +306,15 @@ class FusedBatchMatMulMkl : public BatchMatMulMkl<Device, Scalar, v2_bcast> {
                               .Label(mkl_op_registry::kMklNameChangeOpLabel), \
                           FusedBatchMatMulMkl<CPUDevice, TYPE, true>)
 
-#ifdef ENABLE_MKL
 TF_CALL_float(REGISTER_BATCH_MATMUL_MKL);
 TF_CALL_float(REGISTER_BATCH_MATMUL_MKL_V2);
 TF_CALL_float(REGISTER_FUSED_BATCH_MATMUL_MKL);
 TF_CALL_bfloat16(REGISTER_BATCH_MATMUL_MKL);
 TF_CALL_bfloat16(REGISTER_BATCH_MATMUL_MKL_V2);
 TF_CALL_bfloat16(REGISTER_FUSED_BATCH_MATMUL_MKL);
-#endif  // ENABLE_MKL
+TF_CALL_half(REGISTER_BATCH_MATMUL_MKL);
+TF_CALL_half(REGISTER_BATCH_MATMUL_MKL_V2);
+TF_CALL_half(REGISTER_FUSED_BATCH_MATMUL_MKL);
 
 }  // end namespace tensorflow
 #endif

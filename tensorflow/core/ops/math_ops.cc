@@ -18,6 +18,9 @@ limitations under the License.
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/shape_inference.h"
 
+// TODO(intel-tf): Move all MKL ops in this file to a separate file,
+// mkl_math_ops.cc.
+
 namespace tensorflow {
 
 using shape_inference::DimensionHandle;
@@ -165,7 +168,7 @@ REGISTER_OP("_FusedBatchMatMul")
     .Input("y: T")
     .Input("args: num_args * T")
     .Output("output: T")
-    .Attr("T: {bfloat16, float}")
+    .Attr("T: {bfloat16, float, half}")
     .Attr("adj_x: bool = false")
     .Attr("adj_y: bool = false")
     .Attr("num_args: int >= 0")
@@ -181,7 +184,7 @@ REGISTER_OP("_MklFusedBatchMatMul")
     .Input("y: T")
     .Input("args: num_args * T")
     .Output("output: T")
-    .Attr("T: {bfloat16, float}")
+    .Attr("T: {bfloat16, float, half}")
     .Attr("adj_x: bool = false")
     .Attr("adj_y: bool = false")
     .Attr("num_args: int >= 0")
@@ -982,7 +985,7 @@ REGISTER_OP("_MklMatMul")
     .Output("product: T")
     .Attr("transpose_a: bool = false")
     .Attr("transpose_b: bool = false")
-    .Attr("T: {bfloat16, float, double, complex64, complex128}")
+    .Attr("T: {bfloat16, float, half, double, complex64, complex128}")
     .SetShapeFn(shape_inference::MatMulShape);
 #endif  // INTEL_MKL
 
