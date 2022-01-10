@@ -140,6 +140,7 @@ void MklPoolingFwdPrimitive<T>::Execute(const T* src_data, T* dst_data,
 
 template class MklPoolingFwdPrimitive<float>;
 template class MklPoolingFwdPrimitive<bfloat16>;
+template class MklPoolingFwdPrimitive<Eigen::half>;
 
 #ifndef ENABLE_ONEDNN_V3
 template class MklPoolingFwdPrimitive<quint8>;
@@ -255,6 +256,7 @@ void MklPoolingBwdPrimitive<T>::Execute(const T* diff_dst_data,
 
 template class MklPoolingBwdPrimitive<float>;
 template class MklPoolingBwdPrimitive<bfloat16>;
+template class MklPoolingBwdPrimitive<Eigen::half>;
 
 // Initialization for TensorFlow format
 void MklPoolParameters::Init(OpKernelContext* context,

@@ -16,6 +16,7 @@ limitations under the License.
 #ifndef TENSORFLOW_CORE_UTIL_UTIL_H_
 #define TENSORFLOW_CORE_UTIL_UTIL_H_
 
+#include "absl/base/call_once.h"
 #include "tensorflow/core/framework/tensor_shape.h"
 #include "tensorflow/core/lib/core/stringpiece.h"
 #include "tensorflow/core/platform/cpu_info.h"
@@ -62,8 +63,17 @@ string SliceDebugString(const TensorShape& shape, const int64 flat);
 bool DisableMKL();
 #endif  // INTEL_MKL
 
-// Check if BF16 is supported
-bool IsBF16SupportedByOneDNNOnThisCPU();
+// Check if MKL is enabled in runtime
+bool IsMKLEnabled();
+
+// Flag a warning if input type is unsupported on CPU when oneDNN is enabled
+void DataTypeUnsupportedWarning(const DataType& dt);
+
+// Check if input type is supported on CPU when oneDNN is enabled
+bool IsDataTypeSupportedByOneDNNOnThisCPU(const DataType& dt);
+
+// Check if input type supports AMX on CPU when oneDNN is enabled
+bool IsAMXDataTypeSupportedByOneDNNOnThisCPU(const DataType& dt);
 
 }  // namespace tensorflow
 

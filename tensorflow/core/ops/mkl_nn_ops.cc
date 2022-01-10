@@ -32,6 +32,129 @@ using shape_inference::DimensionHandle;
 using shape_inference::InferenceContext;
 using shape_inference::ShapeHandle;
 
+REGISTER_OP("_MklNativeConv3D")
+    .Input("input: T")
+    .Input("filter: T")
+    .Output("output: T")
+    .Attr("T: {bfloat16, float, half}")
+    .Attr("strides: list(int) >= 5")
+    .Attr("is_filter_const: bool = false")
+    .Attr(GetPaddingAttrString())
+    .Attr(GetConvnet3dDataFormatAttrString())
+    .Attr("dilations: list(int) = [1, 1, 1, 1, 1]")
+    .SetShapeFn(shape_inference::Conv3DShape)
+    .Doc(R"doc(
+MKL version of Conv3D operator that does not depend on layout propagation.
+Uses oneDNN APIs to perform 3D convolution.
+
+*NOTE*: Do not invoke this operator directly in Python. Graph rewrite pass is
+expected to invoke these operators.
+)doc");
+
+REGISTER_OP("_MklNativeConv3DBackpropInputV2")
+    .Input("input_sizes: Tshape")
+    .Input("filter: T")
+    .Input("out_backprop: T")
+    .Output("output: T")
+    .Attr("T: {bfloat16, float, half}")
+    .Attr("strides: list(int) >= 5")
+    .Attr("dilations: list(int) = [1, 1, 1, 1, 1]")
+    .Attr("Tshape: {int32, int64} = DT_INT32")
+    .Attr(GetPaddingAttrString())
+    .Attr(GetConvnet3dDataFormatAttrString())
+    .SetShapeFn([](InferenceContext* c) {
+      ShapeHandle s;
+      TF_RETURN_IF_ERROR(c->MakeShapeFromShapeTensor(0, &s));
+      TF_RETURN_IF_ERROR(c->WithRank(s, 5, &s));
+      c->set_output(0, s);
+      return Status::OK();
+    })
+    .Doc(R"doc(
+MKL version of Convolution3D backward input op that does not depend on layout
+propagation. Uses oneDNN APIs to compute the gradients of convolution with
+respect to the input.
+
+*NOTE*: Do not invoke this operator directly in Python. Graph rewrite pass is
+expected to invoke these operators.
+)doc");
+
+REGISTER_OP("_MklNativeConv3DBackpropFilterV2")
+    .Input("input: T")
+    .Input("filter_sizes: int32")
+    .Input("out_backprop: T")
+    .Output("output: T")
+    .Attr("T: {bfloat16, float, half}")
+    .Attr("strides: list(int)")
+    .Attr(GetPaddingAttrString())
+    .Attr(GetConvnet3dDataFormatAttrString())
+    .Attr("dilations: list(int) = [1, 1, 1, 1, 1]")
+    .SetShapeFn([](InferenceContext* c) {
+      ShapeHandle s;
+      TF_RETURN_IF_ERROR(c->MakeShapeFromShapeTensor(1, &s));
+      TF_RETURN_IF_ERROR(c->WithRank(s, 5, &s));
+      c->set_output(0, s);
+      return Status::OK();
+    })
+    .Doc(R"doc(
+MKL version of Conv3DBackpropFilter op that does not depend on layout
+propagation. Uses oneDNN APIs to compute the gradients of convolution
+with respect to the filter.
+
+*NOTE*: Do not invoke this operator directly in Python. Graph rewrite pass is
+expected to invoke these operators.
+)doc");
+
+REGISTER_OP("_MklNativeDepthwiseConv2dNative")
+    .Input("input: T")
+    .Input("filter: T")
+    .Output("output: T")
+    .Attr("T: {half, bfloat16, float, double}")
+    .Attr("strides: list(int)")
+    .Attr("is_filter_const: bool = false")
+    .Attr(GetPaddingAttrString())
+    .Attr(GetConvnetDataFormatAttrString())
+    .Attr(GetExplicitPaddingsAttrString())
+    .Attr("dilations: list(int) = [1, 1, 1, 1]")
+    .SetShapeFn(shape_inference::DepthwiseConv2DNativeShape);
+
+REGISTER_OP("_MklNativeDepthwiseConv2dNativeBackpropInput")
+    .Input("input_sizes: int32")
+    .Input("filter: T")
+    .Input("out_backprop: T")
+    .Output("output: T")
+    .Attr("T: {half, bfloat16, float, double}")
+    .Attr("strides: list(int)")
+    .Attr(GetPaddingAttrString())
+    .Attr(GetConvnetDataFormatAttrString())
+    .Attr(GetExplicitPaddingsAttrString())
+    .Attr("dilations: list(int) = [1, 1, 1, 1]")
+    .SetShapeFn([](InferenceContext* c) {
+      ShapeHandle s;
+      TF_RETURN_IF_ERROR(c->MakeShapeFromShapeTensor(0, &s));
+      TF_RETURN_IF_ERROR(c->WithRank(s, 4, &s));
+      c->set_output(0, s);
+      return Status::OK();
+    });
+
+REGISTER_OP("_MklNativeDepthwiseConv2dNativeBackpropFilter")
+    .Input("input: T")
+    .Input("filter_sizes: int32")
+    .Input("out_backprop: T")
+    .Output("output: T")
+    .Attr("T: {half, bfloat16, float, double}")
+    .Attr("strides: list(int)")
+    .Attr(GetPaddingAttrString())
+    .Attr(GetConvnetDataFormatAttrString())
+    .Attr(GetExplicitPaddingsAttrString())
+    .Attr("dilations: list(int) = [1, 1, 1, 1]")
+    .SetShapeFn([](InferenceContext* c) {
+      ShapeHandle s;
+      TF_RETURN_IF_ERROR(c->MakeShapeFromShapeTensor(1, &s));
+      TF_RETURN_IF_ERROR(c->WithRank(s, 4, &s));
+      c->set_output(0, s);
+      return Status::OK();
+    });
+
 REGISTER_OP("_MklFusedConv2D")
     .Input("input: T")
     .Input("filter: T")
@@ -43,7 +166,7 @@ REGISTER_OP("_MklFusedConv2D")
     .Output("filter_output: T")
     .Output("mkl_output: uint8")
     .Output("mkl_filter_output: uint8")
-    .Attr("T: {bfloat16, float}")
+    .Attr("T: {bfloat16, float, half}")
     .Attr("num_args: int >= 0")
     .Attr("strides: list(int)")
     .Attr("is_filter_const: bool = false")
@@ -68,7 +191,7 @@ REGISTER_OP("_MklNativeFusedConv2D")
     .Input("filter: T")
     .Input("args: num_args * T")
     .Output("output: T")
-    .Attr("T: {bfloat16, float}")
+    .Attr("T: {bfloat16, float, half}")
     .Attr("num_args: int >= 0")
     .Attr("strides: list(int)")
     .Attr("is_filter_const: bool = false")
@@ -93,7 +216,7 @@ REGISTER_OP("_MklNativeConv2DWithBias")
     .Input("filter: T")
     .Input("bias: T")
     .Output("output: T")
-    .Attr("T: {bfloat16, float}")
+    .Attr("T: {bfloat16, float, half}")
     .Attr("strides: list(int)")
     .Attr("use_cudnn_on_gpu: bool = true")
     .Attr("is_filter_const: bool = false")
@@ -141,7 +264,7 @@ REGISTER_OP("_MklFusedDepthwiseConv2dNative")
     .Output("filter_output: T")
     .Output("mkl_output: uint8")
     .Output("mkl_filter_output: uint8")
-    .Attr("T: {bfloat16, float}")
+    .Attr("T: {bfloat16, float, half}")
     .Attr("num_args: int >= 0")
     .Attr("strides: list(int)")
     .Attr("is_filter_const: bool = false")
@@ -161,7 +284,7 @@ REGISTER_OP("_MklNativeFusedDepthwiseConv2dNative")
     .Input("filter: T")
     .Input("args: num_args * T")
     .Output("output: T")
-    .Attr("T: {bfloat16, float}")
+    .Attr("T: {bfloat16, float, half}")
     .Attr("num_args: int >= 0")
     .Attr("strides: list(int)")
     .Attr("is_filter_const: bool = false")
@@ -184,7 +307,7 @@ REGISTER_OP("_MklFusedMatMul")
     .Attr("is_filter_const: bool = false")
     .Attr("transpose_a: bool = false")
     .Attr("transpose_b: bool = false")
-    .Attr("T: {bfloat16, float}")
+    .Attr("T: {bfloat16, float, half}")
     .Attr("num_args: int >= 0")
     .Attr("fused_ops: list(string) = []")
     // Attributes for the FusedBatchNorm ----------- //
@@ -209,7 +332,7 @@ REGISTER_OP("_MklNativeFusedMatMul")
     .Attr("is_filter_const: bool = false")
     .Attr("transpose_a: bool = false")
     .Attr("transpose_b: bool = false")
-    .Attr("T: {bfloat16, float}")
+    .Attr("T: {bfloat16, float, half}")
     .Attr("num_args: int >= 0")
     .Attr("fused_ops: list(string) = []")
     // Attributes for the FusedBatchNorm ----------- //
@@ -233,7 +356,7 @@ REGISTER_OP("__MklDummyPadWithFusedConv2D")
     .Output("filter_output: T")
     .Output("mkl_output: uint8")
     .Output("mkl_filter_output: uint8")
-    .Attr("T: {bfloat16, float}")
+    .Attr("T: {bfloat16, float, half}")
     .Attr("num_args: int >= 0")
     .Attr("strides: list(int)")
     .Attr(GetPaddingAttrString())
@@ -265,7 +388,7 @@ REGISTER_OP("_MklPadWithFusedConv2D")
     .Output("filter_output: T")
     .Output("mkl_output: uint8")
     .Output("mkl_filter_output: uint8")
-    .Attr("T: {bfloat16, float}")
+    .Attr("T: {bfloat16, float, half}")
     .Attr("num_args: int >= 0")
     .Attr("strides: list(int)")
     .Attr("is_filter_const: bool = false")
@@ -291,7 +414,7 @@ REGISTER_OP("_MklNativePadWithFusedConv2D")
     .Input("args: num_args * T")
     .Input("paddings: Tpaddings")
     .Output("output: T")
-    .Attr("T: {bfloat16, float}")
+    .Attr("T: {bfloat16, float, half}")
     .Attr("num_args: int >= 0")
     .Attr("strides: list(int)")
     .Attr("is_filter_const: bool = false")
@@ -316,7 +439,7 @@ REGISTER_OP("_MklNativePadWithConv2D")
     .Input("filter: T")
     .Input("paddings: Tpaddings")
     .Output("output: T")
-    .Attr("T: {bfloat16, float}")
+    .Attr("T: {bfloat16, float, half}")
     .Attr("strides: list(int)")
     .Attr("use_cudnn_on_gpu: bool = true")
     .Attr(GetPaddingAttrString())
@@ -1746,7 +1869,7 @@ REGISTER_OP("_MklFusedBatchNormEx")
     .Output("mkl_reserve_space_1: uint8")
     .Output("mkl_reserve_space_2: uint8")
     .Output("mkl_reserve_space_3: uint8")
-    .Attr("T: {bfloat16, float}")
+    .Attr("T: {bfloat16, float, half}")
     .Attr("U: {float}")
     .Attr("epsilon: float = 0.0001")
     .Attr("exponential_avg_factor: float = 1.0")
@@ -1824,7 +1947,7 @@ REGISTER_OP("_MklNativeFusedBatchNormV2")
     .Output("batch_variance: U")
     .Output("reserve_space_1: U")
     .Output("reserve_space_2: U")
-    .Attr("T: {bfloat16, float}")
+    .Attr("T: {bfloat16, float, half}")
     .Attr("U: {float}")
     .Attr("epsilon: float = 0.0001")
     .Attr(GetConvnetDataFormatAttrString())
@@ -1843,7 +1966,7 @@ REGISTER_OP("_MklNativeFusedBatchNormGradV2")
     .Output("offset_backprop: U")
     .Output("reserve_space_3: U")
     .Output("reserve_space_4: U")
-    .Attr("T: {bfloat16, float}")
+    .Attr("T: {bfloat16, float, half}")
     .Attr("U: {float}")
     .Attr("epsilon: float = 0.0001")
     .Attr(GetConvnetDataFormatAttrString())
@@ -1910,7 +2033,7 @@ REGISTER_OP("_MklNativeFusedBatchNormEx")
     .Output("reserve_space_1: U")
     .Output("reserve_space_2: U")
     .Output("reserve_space_3: U")
-    .Attr("T: {bfloat16, float}")
+    .Attr("T: {bfloat16, float, half}")
     .Attr("U: {float}")
     .Attr("epsilon: float = 0.0001")
     .Attr("exponential_avg_factor: float = 1.0")

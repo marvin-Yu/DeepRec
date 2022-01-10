@@ -365,6 +365,11 @@ class AutoMixedPrecisionTest(test.TestCase, parameterized.TestCase):
       self.skipTest('No GPU is available')
     if mode == 'mkl' and not test_util.IsMklEnabled():
       self.skipTest('MKL is not enabled')
+    # Test will fail on machines without AVX512f, e.g., Broadwell
+    isAVX512f = _pywrap_utils.IsDataTypeSupportedByOneDNNOnThisCPU(
+        dtypes.bfloat16)
+    if mode == 'mkl' and not isAVX512f:
+      self.skipTest('Skipping test due to non-AVX512f machine')
 
   def _run_simple_loop_test(self, mode, inp, body, out):
     """Runs a test of a simple loop.

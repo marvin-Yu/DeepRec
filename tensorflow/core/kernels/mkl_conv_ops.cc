@@ -2700,6 +2700,7 @@ REGISTER_KERNEL_BUILDER(Name("DepthwiseConv2dNative")
 
 TF_CALL_float(REGISTER_NO_OP_CPU_2D_DEPTHWISE);
 TF_CALL_bfloat16(REGISTER_NO_OP_CPU_2D_DEPTHWISE);
+TF_CALL_half(REGISTER_NO_OP_CPU_2D_DEPTHWISE);
 
 // Register templatized OneDNN kernels for non-fused and fused-versions of
 // QuantizedDepthwiseConv2D.
@@ -2824,6 +2825,7 @@ REGISTER_KERNEL_BUILDER(
 
 TF_CALL_float(REGISTER_MKL_CPU_2D);
 TF_CALL_bfloat16(REGISTER_MKL_CPU_2D);
+TF_CALL_half(REGISTER_MKL_CPU_2D);
 
 #define REGISTER_MKL_CPU_2D_DEPTHWISE(T)                                      \
   REGISTER_KERNEL_BUILDER(                                                    \
@@ -2855,6 +2857,7 @@ TF_CALL_bfloat16(REGISTER_MKL_CPU_2D);
 
 TF_CALL_float(REGISTER_MKL_CPU_2D_DEPTHWISE);
 TF_CALL_bfloat16(REGISTER_MKL_CPU_2D_DEPTHWISE);
+TF_CALL_half(REGISTER_MKL_CPU_2D_DEPTHWISE);
 
 // Note we are registering _MklFusedConv2D.
 // We check the fused_ops attributes to decide if bias is enabled or not.
@@ -2909,6 +2912,7 @@ TF_CALL_bfloat16(REGISTER_MKL_CPU_2D_DEPTHWISE);
 
 TF_CALL_float(REGISTER_MKL_CPU_2D_FUSED);
 TF_CALL_bfloat16(REGISTER_MKL_CPU_2D_FUSED);
+TF_CALL_half(REGISTER_MKL_CPU_2D_FUSED);
 
 // Register 3D operations
 #define REGISTER_MKL_CPU_3D(T)                                 \
@@ -2920,6 +2924,7 @@ TF_CALL_bfloat16(REGISTER_MKL_CPU_2D_FUSED);
       MklConvOp<CPUDevice, T, T, T, T, T, int32, false, false, false, false>);
 TF_CALL_float(REGISTER_MKL_CPU_3D);
 TF_CALL_bfloat16(REGISTER_MKL_CPU_3D);
+TF_CALL_half(REGISTER_MKL_CPU_3D);
 
 }  // namespace tensorflow
 #endif  // INTEL_MKL
