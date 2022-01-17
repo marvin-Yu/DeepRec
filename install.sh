@@ -55,7 +55,8 @@ fi
 ## now loop through the above array
 for target in "${targets[@]}"
 do
-    bazel build -c opt --copt -g --copt=-mavx2 --config=cuda --copt -mfpmath=both --copt -mfma --copt -msse4.2 --copt -D_GLIBCXX_USE_CXX11_ABI=0 --copt -DGOOGLE_CUDA=1  $target
+  echo $AA
+#    bazel build -c opt --copt -g --copt=-mavx2 --config=cuda --copt -mfpmath=both --copt -mfma --copt -msse4.2 --copt -D_GLIBCXX_USE_CXX11_ABI=0 --copt -DGOOGLE_CUDA=1  $target
 done
 
 EXTERNAL_DIR="../_external"
@@ -81,6 +82,8 @@ find tensorflow/core -name '*.h' -exec cp --parents \{\} $HEADER_DIR/ \;
 find tensorflow/core -name '*.proto' -exec cp --parents \{\} $HEADER_DIR/ \;
 find tensorflow/c -name '*.h' -exec cp --parents \{\} $HEADER_DIR/ \;
 find tensorflow/cc -name '*.h' -exec cp --parents \{\} $HEADER_DIR/ \;
+find tensorflow/stream_executor -name '*.h' -exec cp --parents \{\} $HEADER_DIR/ \;
+find tensorflow/compiler -name '*.h' -exec cp --parents \{\} $HEADER_DIR/ \;
 if [ -d bazel-out/local-opt ]; then
     cd bazel-out/local-opt/genfiles
     find tensorflow/ -name '*.h' -exec cp --parents \{\} $HEADER_DIR/ \;
