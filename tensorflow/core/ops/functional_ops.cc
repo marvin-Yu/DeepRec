@@ -293,17 +293,6 @@ REGISTER_OP("FakeParam")
       return Status::OK();
     });
 
-REGISTER_OP("BlazeXlaOp")
-    .Attr("InT: list({int8,int64,float16,float32,int32})")
-    .Attr("OutT: list({int8,int64,float16,float32,int32})")
-    .Attr("input_names: list(string) >= 0")
-    .Attr("output_names: list(string) >= 0")
-    .Attr("graph_def: string")
-    .Attr("blaze_option_path: string")
-    .Input("in_tensor: InT")
-    .Output("out_tensor: OutT")
-    .SetShapeFn(shape_inference::UnknownShape);
-
 REGISTER_OP("BlazeGeneralMap")
     .Input("key: Tin")
     .Output("output: Tout")
