@@ -76,6 +76,7 @@ Status BlazeXlaPredictor::Warmup() {
   return Status::OK();
 }
 
+// attention: not thread-safe
 Status BlazeXlaPredictor::Warmup(OpKernelContext* ctx) {
   if (warmuped_) {
     return Status::OK();
@@ -92,6 +93,10 @@ Status BlazeXlaPredictor::Warmup(OpKernelContext* ctx) {
     return errors::Internal("Cannot infer inputs' batchsize");
   }
   auto max_bs = batch_sizes_[batch_sizes_.size() - 1];
+  if (max_bs < batchsize) {
+    mutex_lock l(batch_size_mu_);
+    max_bs = AddNewBatchSize(batchsize);
+  }
   std::vector<Tensor> padded_inputs(num_inputs);
   Status status;
   if (same_device_) {
@@ -128,8 +133,11 @@ Status BlazeXlaPredictor::Warmup(OpKernelContext* ctx) {
     }
     // Call SessionRun
     std::vector<Tensor> padded_outputs;
+
+    VLOG(0) << "RunCallable handle_ " << handle_ << " session_ " << session_.get();
     status = session_->RunCallable(
          handle_, sliced_inputs, &padded_outputs, nullptr);
+    VLOG(0) << "RunCallable handle_ " << handle_ << " session_ " << session_.get() << " finish";
     if (!status.ok()) {
       return status;
     }
