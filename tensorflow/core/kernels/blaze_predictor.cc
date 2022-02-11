@@ -34,7 +34,7 @@ BlazePredictor::~BlazePredictor() {
       LOG(ERROR) << "release session not found in static map, should not happen";
       return;
     }
-    if (--(it->second.second) == 0) {
+    if (--(it->second.count) == 0) {
       session_map_.erase(it);
     }
  	}
