@@ -86,6 +86,8 @@ if [ -d bazel-genfiles ]; then
    find tensorflow/ -name '*.h' -exec cp --parents \{\} $HEADER_DIR/ \;
    cd -
 fi
+find tensorflow/stream_executor -name '*.h' -exec cp --parents \{\} $HEADER_DIR/ \;
+find tensorflow/compiler -name '*.h' -exec cp --parents \{\} $HEADER_DIR/ \;
 if [ -d bazel-out/local-opt ]; then
     cd bazel-out/local-opt/genfiles
     find tensorflow/ -name '*.h' -exec cp --parents \{\} $HEADER_DIR/ \;
@@ -124,4 +126,3 @@ cp -r $ABSL_DIR $HEADER_DIR/absl
 cp .tf_configure.bazelrc .tf_configure.bazelrc.cuda10
 FARMHASH=$BAZEL_EXTERNAL_DIR"farmhash_archive/src/farmhash.h"
 cp $FARMHASH $HEADER_DIR
-

@@ -1580,7 +1580,7 @@ cc_library(
         "//tensorflow/core/kernels:encode_proto_op",
         "//tensorflow/core/kernels:tile_fuse_op",
         "//tensorflow/core/kernels:tile_fuse_base",
-        "//tensorflow/core/kernels:blaze_xla_op",
+        "//tensorflow/core/kernels:blaze_predictor",
         "//tensorflow/core/kernels:fake_quant_ops",
         "//tensorflow/core/kernels:function_ops",
         "//tensorflow/core/kernels:functional_ops",

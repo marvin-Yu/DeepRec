@@ -753,7 +753,7 @@ message RunMetadata {
 // ToDO remove this, using key value pair
   ProfStats prof_stats = 500;
   TracedTensors traced_tensors = 501;
-  repeated BlazeMetrics blaze_metrics = 502;
+//  repeated BlazeMetrics blaze_metrics = 502;
   TracedTensors tensor_infos = 503;
 }
 
