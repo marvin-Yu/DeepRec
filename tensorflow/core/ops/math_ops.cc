@@ -438,37 +438,54 @@ REGISTER_OP("BlazeGRU")
       return Status::OK();
     });
 
-
-REGISTER_OP("GroupedTopK")
-    .Input("input: T")             //[..., input_len]
-    .Input("k: Tindices")          //scaler
-    .Input("splits: Tindices")     //[num_group]
-    .Output("value: T")            //[..., output_len]
-    .Output("index: Tindices")     //[..., output_len]
-    .Attr("T: {half, float, double}")
-    .Attr("Tindices: {int32}")
+REGISTER_OP("BatchTopKOnRT")
+    .Input("values_in: T")
+    .Input("row_splits_in: int64")
+    .Input("k: int64")
+    .Output("values_out: T")
+    .Output("idx_out: int64")
+    .Output("row_splits_out: int64")
+    .Attr("T: {double, float, half}")
+    .Attr("ascending: bool = false")
     .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
-      shape_inference::ShapeHandle output;
-      TF_RETURN_IF_ERROR(
-          c->ReplaceDim(c->input(0), -1, c->UnknownDim(), &output));
-      c->set_output(0, output);
+      ShapeHandle values_in, row_splits_in, k;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 1, &values_in));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 1, &row_splits_in));
+      TF_RETURN_IF_ERROR(c->WithRankAtMost(c->input(2), 1, &k));
+      if (c->Rank(k) == 1 && 
+          c->Value(c->Dim(k, 0)) != c->Value(c->Dim(row_splits_in, 0)) - 1) {
+        return errors::InvalidArgument("length of k != number of groups: ",
+                                       c->Value(c->Dim(k, 0)), " != ", c->Value(c->Dim(row_splits_in, 0)), " - 1");
+      }
+      c->set_output(0, c->MakeShape({c->UnknownDim()}));
+      c->set_output(1, c->MakeShape({c->UnknownDim()}));
+      c->set_output(2, c->input(1));
       return Status::OK();
     });
 
-REGISTER_OP("IdxGTopK")
-    .Input("input: T")              //[..., input_len]
-    .Input("k: Tindices")           //scaler
-    .Input("src_idx: Tindices")     //[num_group+1]
-    .Input("dst_idx: Tindices")     //[num_group+1]
-    .Output("value: T")             //[..., output_len]
-    .Output("index: Tindices")      //[..., output_len]
-    .Attr("T: {half, float, double}")
-    .Attr("Tindices: {int32}")
+REGISTER_OP("BatchGatherOnRT")
+    .Input("params_values: T")
+    .Input("params_row_splits: int64")
+    .Input("indices_values: int64")
+    .Input("indices_row_splits: int64")
+    .Output("ret_values: T")
+    .Attr("T: {int32, int64}")
     .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
-      shape_inference::ShapeHandle output;
-      TF_RETURN_IF_ERROR(
-          c->ReplaceDim(c->input(0), -1, c->UnknownDim(), &output));
-      c->set_output(0, output);
+      c->set_output(0, c->input(2));
+      return Status::OK();
+    });
+
+REGISTER_OP("BatchConcatOnRT")
+    .Input("left_values: T")
+    .Input("left_row_splits: int64")
+    .Input("right_values: T")
+    .Input("right_row_splits: int64")
+    .Output("ret_values: T")
+    .Output("ret_row_splits: int64")
+    .Attr("T: {half, float, double, int32, int64}")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      c->set_output(0, c->MakeShape({c->UnknownDim()}));
+      c->set_output(1, c->MakeShape({c->UnknownDim()}));
       return Status::OK();
     });
 
@@ -484,6 +501,123 @@ REGISTER_OP("BlazeTopK")
       TF_RETURN_IF_ERROR(
           c->ReplaceDim(c->input(0), -1, c->UnknownDim(), &output));
       c->set_output(0, output);
+      return Status::OK();
+    });
+
+REGISTER_OP("SplitsGather")
+    .Input("splits: T")
+    .Input("indices_values: int64")
+    .Input("indices_row_splits: int64")
+    .Output("ret_values: T")
+    .Output("ret_row_splits: int64")
+    .Attr("T: {int32, int64}")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      c->set_output(0, c->MakeShape({c->UnknownDim()}));
+      c->set_output(1, c->input(2));
+      return Status::OK();
+    });
+
+REGISTER_OP("GroupGather")
+    .Input("params_values: T")
+    .Input("params_row_splits: int64")
+    .Input("indices_values: int64")
+    .Input("indices_row_splits: int64")
+    .Output("ret_values: T")
+    .Output("ret_row_splits: int64")
+    .Attr("T: {int32, int64}")
+    .Attr("unique: bool = false")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      c->set_output(0, c->MakeShape({c->UnknownDim()}));
+      c->set_output(1, c->input(3));
+      return Status::OK();
+    });
+
+REGISTER_OP("SetUnion")
+    .Input("a_values: T")
+    .Input("a_row_splits: int64")
+    .Input("b_values: T")
+    .Input("b_row_splits: int64")
+    .Output("c_values: T")
+    .Output("c_row_splits: int64")
+    .Attr("T: {int32, int64}")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      ShapeHandle shape;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 1, &shape));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 1, &shape));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &shape));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 1, &shape));
+      c->set_output(0, c->MakeShape({c->UnknownDim()}));
+      c->set_output(1, c->input(1));
+      return Status::OK();
+    });
+
+REGISTER_OP("SetIntersection")
+    .Input("a_values: T")
+    .Input("a_row_splits: int64")
+    .Input("b_values: T")
+    .Input("b_row_splits: int64")
+    .Output("c_values: T")
+    .Output("c_row_splits: int64")
+    .Attr("T: {int32, int64}")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      ShapeHandle shape;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 1, &shape));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 1, &shape));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &shape));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 1, &shape));
+      c->set_output(0, c->MakeShape({c->UnknownDim()}));
+      c->set_output(1, c->input(1));
+      return Status::OK();
+    });
+
+REGISTER_OP("SetDifference")
+    .Input("a_values: T")
+    .Input("a_row_splits: int64")
+    .Input("b_values: T")
+    .Input("b_row_splits: int64")
+    .Output("c_values: T")
+    .Output("c_row_splits: int64")
+    .Attr("T: {int32, int64}")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      ShapeHandle shape;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 1, &shape));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 1, &shape));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &shape));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 1, &shape));
+      c->set_output(0, c->MakeShape({c->UnknownDim()}));
+      c->set_output(1, c->input(1));
+      return Status::OK();
+    });
+
+REGISTER_OP("BitmapDifference")
+    .Input("idx_next: T")
+    .Input("idx_flag: int32")
+    .Output("idx_next_new: T")
+    .Output("idx_flag_new: int32")
+    .Attr("T: {int32, int64}")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      ShapeHandle shape;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 1, &shape));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 1, &shape));
+      c->set_output(0, c->MakeShape({c->UnknownDim()}));
+      c->set_output(1, c->input(1));
+      return Status::OK();
+    });
+
+REGISTER_OP("BitmapInit")
+    .Input("idx: T")
+    .Input("length: int32")
+    .Output("bitmap: int32")
+    .Attr("T: {int32, int64}")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      ShapeHandle input;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 1, &input));
+      DimensionHandle k_dim;
+      TF_RETURN_IF_ERROR(c->MakeDimForScalarInput(1, &k_dim));
+      ShapeHandle s;
+      TF_RETURN_IF_ERROR(c->Subshape(input, 0, -1, &s));
+      TF_RETURN_IF_ERROR(c->Concatenate(s, c->Vector(k_dim), &s));
+      c->set_output(0, s);
       return Status::OK();
     });
 

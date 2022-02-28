@@ -40,7 +40,8 @@ namespace tensorflow {
 struct ProfStats {
   std::atomic<uint64> flops;
   std::atomic<float> blaze_latency_ms;
-  uint64 tao_op_calls;
+  uint64 tao_op_calls = 0;
+  bool dump_shapes = false;
   std::atomic<float> blaze_wait_ms;
   std::atomic<int> batch_size;
   std::atomic<int> blaze_running_counter;
@@ -58,6 +59,7 @@ struct ProfStats {
     blaze_waiting_counter = 0;
     blaze_nan = 0;
     blaze_nan_counter = 0;
+    dump_shapes = false;
   }
 };
 

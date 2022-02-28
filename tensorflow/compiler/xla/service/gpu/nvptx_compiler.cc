@@ -318,6 +318,7 @@ bool MaybeLoadPtxFromFile(const HloModule* module, std::string* ptx) {
     HloPrintOptions options;
     options.set_print_cluster_id(false);
     options.set_print_metadata(false);
+    options.set_print_const_values(false);
     uint64 key = tensorflow::Hash64(module->ToString(options));
     string filename = ptx_cache_dir + "/" + std::to_string(key) + ".ptx";
     auto env = tensorflow::Env::Default();
@@ -413,11 +414,19 @@ NVPTXCompiler::CompileTargetBinary(const HloModule* module,
   InitCubinCacheDir();
 
   uint64 key;
+  std::string key_str;
   HloPrintOptions options;
   if (!ptx_cache_dir.empty() || !cubin_cache_dir.empty()) {
       options.set_print_cluster_id(false);
       options.set_print_metadata(false);
-      key = tensorflow::Hash64(module->ToString(options));
+      // When constants are scalar, ptx will optimize it to ptx
+      // which will cause ptx cache miss when model updated.
+      // Therefore, we dont optimize scalar constans to ptx  when set TF_SCALAR_CONST_IN_PTX false
+      bool scalar_const_in_ptx;
+      tensorflow::ReadBoolFromEnvVar("TF_SCALAR_CONST_IN_PTX", true, &scalar_const_in_ptx);
+      options.set_print_const_values(scalar_const_in_ptx);
+      key_str = module->ToString(options);
+      key = tensorflow::Hash64(key_str);
   }
 
   string ptx;
@@ -437,6 +446,7 @@ NVPTXCompiler::CompileTargetBinary(const HloModule* module,
       if (!env->FileExists(ptx_fullpath).ok()) {
         VLOG(0) << "Dump " << ptx_filename << " to " << ptx_cache_dir;
         VLOG(0) << "Dump " << hlo_filename << " to " << ptx_cache_dir;
+        VLOG(1) << "Print hlo model str " << key_str;
         DumpPtxToFileInDir(ptx_cache_dir, ptx_filename, ptx);
         DumpPtxToFileInDir(ptx_cache_dir, hlo_filename, module->ToString(options));
       }

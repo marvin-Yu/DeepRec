@@ -7,7 +7,12 @@ load(
 tf_kernel_library(
     name = "tree_op",
     srcs = [
+      "BatchGatherOnRT_kernel.cc",
+      "BatchConcatOnRT_kernel.cc",
+      "SplitsGather_kernel.cc",
+      "GroupGather_kernel.cc",
       "tree_kernel.cc",
+      "set_kernel.cc",
     ],
     visibility = ["//visibility:public"],
     deps = [

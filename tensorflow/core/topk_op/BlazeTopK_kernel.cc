@@ -1,6 +1,5 @@
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/util/work_sharder.h"
-#include "tensorflow/core/topk_op/util.h"
 #include <algorithm>
 #include <cmath>
 
@@ -28,13 +27,9 @@ class BlazeTopK : public OpKernel {
 
     int batch_size = input.dimension(0);
     int input_len = input.dimension(1);
-    
-    OP_REQUIRES(context, k <= input_len, 
-                errors::InvalidArgument("require: k <= input_len, but", k ," > ", input_len));
 
-    int sampling_num = std::max(1000, k);
-    float ratio = (float)k / input_len;
-    int idx0 = std::ceil(ratio*sampling_num) * 2;
+    OP_REQUIRES(context, 0 <= k && k <= input_len, 
+                errors::InvalidArgument("require: 0 <= k <= input_len, but", k ," > ", input_len));
 
     //Allocate Output
     TensorShape output_shape = input_tensor.shape();
@@ -44,6 +39,13 @@ class BlazeTopK : public OpKernel {
     OP_REQUIRES_OK(context, context->allocate_output(1, output_shape, &index_output));
     auto value = value_output->flat_inner_dims<T>();
     auto index = index_output->flat_inner_dims<int>();
+
+    if (k == 0)
+      return;
+
+    int sampling_num = std::min(std::max(1000, k), input_len);
+    float ratio = (float)k / input_len;
+    int idx0 = std::min((int)std::ceil(ratio*sampling_num)*2, sampling_num-1);
 
     std::function<void(int64, int64)> shard = [&](int64 begin, int64 end) {
       //outside for loop for reuse

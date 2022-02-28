@@ -17,7 +17,6 @@ limitations under the License.
 
 #include <numeric>
 #include <vector>
-
 #include "absl/memory/memory.h"
 #include "absl/types/variant.h"
 #include "tensorflow/compiler/jit/flags.h"
@@ -52,9 +51,12 @@ limitations under the License.
 #include "tensorflow/core/lib/hash/hash.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/util/dump_graph.h"
+#include "tensorflow/core/grappler/grappler_item.h"
+#include "tensorflow/core/grappler/costs/graph_properties.h"
 
 namespace tensorflow {
 namespace {
+using namespace tensorflow::grappler;
 
 // Checks that arguments `args` match types `types`.
 Status CheckSignature(const DataTypeVector& types,
@@ -111,7 +113,7 @@ ComputeArgAndRetvalShardings(const Graph& graph) {
   return std::make_pair(std::move(arg_shardings), std::move(retval_shardings));
 }
 
-Status ExecuteGraph(XlaContext* xla_context, std::unique_ptr<Graph> graph,
+Status ExecuteGraph(XlaContext* xla_context, Graph* graph,
                     XlaCompilationDevice* device, FunctionLibraryRuntime* flib,
                     int64 step_id) {
   // Resource cleanup is a bit messy. XlaContext is a ref-countd resource; the
@@ -131,7 +133,7 @@ Status ExecuteGraph(XlaContext* xla_context, std::unique_ptr<Graph> graph,
       step_container->name(), XlaContext::kXlaContextResourceName,
       xla_context));
 
-  GraphCompiler graph_compiler(device, graph.get(), flib, step_container.get());
+  GraphCompiler graph_compiler(device, graph, flib, step_container.get());
   TF_RETURN_IF_ERROR(graph_compiler.Compile());
   // Explicitly clean up the step container, to capture the cleanup status.
   step_container.reset();
@@ -605,7 +607,8 @@ Status XlaCompiler::CompileFunction(
     const XlaCompiler::CompileOptions& options,
     const NameAttrList& fn_name_attrs,
     absl::Span<const XlaCompiler::Argument> args,
-    XlaCompiler::CompilationResult* result) {
+    XlaCompiler::CompilationResult* result,
+    std::shared_ptr<InputsShapeInfo> inputs_shape_info) {
   const string function_id =
       Canonicalize(fn_name_attrs.name(), AttrSlice(&fn_name_attrs.attr()));
   VLOG(1) << "XlaCompiler::CompileFunction " << function_id;
@@ -684,20 +687,13 @@ Status XlaCompiler::CompileFunction(
       fbody->arg_nodes[i]->AddAttr("_output_shapes",
                                    std::vector<TensorShape>{tensor_shape});
     }
+    
+    if (inputs_shape_info) {
+      inputs_shape_info->input_names.push_back(fbody->arg_nodes[i]->name());
+    }
   }
 
   std::unique_ptr<Graph> graph = GetGraph(fbody);
-
-  // Clear the "_kernel" attribute if it is set to "host". This is used to
-  // indicate that a computation should happen on the host instead of the
-  // accelerator, but doesn't make sense in XLA.
-  const char* const kKernelAttr = "_kernel";
-  for (Node* n : graph->nodes()) {
-    string value;
-    if (TryGetNodeAttr(n->attrs(), kKernelAttr, &value) && value == "host") {
-      n->ClearAttr(kKernelAttr);
-    }
-  }
 
   // _Arg and _Retval nodes don't exist in the stored subgraph for the function;
   // they are added by the function body looked up.  Therefore, they don't have
@@ -715,8 +711,23 @@ Status XlaCompiler::CompileFunction(
   for (Node* n : graph->nodes()) {
     if (n->IsRetval()) {
       TF_RETURN_IF_ERROR(SetNodeShardingFromNeighbors(n, /*out_edges=*/false));
+      if (inputs_shape_info) {
+        inputs_shape_info->output_names.push_back(n->name());
+      }
     }
   }
+
+  // Clear the "_kernel" attribute if it is set to "host". This is used to
+  // indicate that a computation should happen on the host instead of the
+  // accelerator, but doesn't make sense in XLA.
+  const char* const kKernelAttr = "_kernel";
+  for (Node* n : graph->nodes()) {
+    string value;
+    if (TryGetNodeAttr(n->attrs(), kKernelAttr, &value) && value == "host") {
+      n->ClearAttr(kKernelAttr);
+    }
+  }
+
 
   if (VLOG_IS_ON(2)) {
     VLOG(2) << "XlaCompiler::CompileFunction: "
@@ -725,11 +736,14 @@ Status XlaCompiler::CompileFunction(
   }
 
   VLOG(1) << "====================================================";
-  TF_RETURN_IF_ERROR(CompileGraph(options, function_id, std::move(graph),
-                                  new_args, {}, result));
+  TF_RETURN_IF_ERROR(
+      CompileGraph(options, function_id, graph.get(), new_args, {}, result));
   VLOG(1) << "====================================================";
-
+  
   cache_[{function_id, arg_vector}] = *result;
+  if (inputs_shape_info) {
+    inputs_shape_info->graph = std::move(graph);
+  }
   return Status::OK();
 }
 
@@ -1096,7 +1110,7 @@ Status XlaCompiler::CompileSingleOp(
   }
   FixupSourceAndSinkEdges(graph.get());
 
-  return CompileGraph(options, node_def.name(), std::move(graph), args, {},
+  return CompileGraph(options, node_def.name(), graph.get(), args, {},
                       result);
 }
 
@@ -1210,18 +1224,18 @@ void ConvertConstantsToExpressions(xla::XlaBuilder* builder,
 
 Status XlaCompiler::CompileGraph(
     const XlaCompiler::CompileOptions& options, string const& name,
-    std::unique_ptr<Graph> graph, absl::Span<const XlaCompiler::Argument> args,
+    Graph* graph, absl::Span<const XlaCompiler::Argument> args,
     absl::Span<const xla::XlaBuilder::InputOutputAlias> user_aliases,
     CompilationResult* result) {
   VLOG(1) << "Executing graph symbolically to populate XlaBuilder.";
 
   TF_RETURN_IF_ERROR(PropagateConstIntoFunctionalNodes(
-      graph.get(), options_.flib_def, local_flib_def_.get()));
+      graph, options_.flib_def, local_flib_def_.get()));
   TF_RETURN_IF_ERROR(RearrangeFunctionArguments(
       [this](const NameAttrList& function, const FunctionBody** fbody) {
         return FindFunctionBody(function, fbody);
       },
-      graph.get(), local_flib_def_.get()));
+      graph, local_flib_def_.get()));
   if (VLOG_IS_ON(2)) {
     VLOG(2) << "XlaCompiler::CompileGraph: "
             << DumpGraphToFile(absl::StrCat("xla_compile_graph_", name), *graph,
@@ -1233,7 +1247,7 @@ Status XlaCompiler::CompileGraph(
 
   // Detect invalid nodes.
   // FunctionalizeControlFlow may remove some nodes from the graph.
-  TF_RETURN_IF_ERROR(ValidateGraph(graph.get(), *options_.flib_def,
+  TF_RETURN_IF_ERROR(ValidateGraph(graph, *options_.flib_def,
                                    options_.device_type, name));
 
   xla::XlaBuilder builder(name);
@@ -1295,7 +1309,7 @@ Status XlaCompiler::CompileGraph(
     }
   }
 
-  TF_RETURN_IF_ERROR(ExecuteGraph(context, std::move(graph), device_,
+  TF_RETURN_IF_ERROR(ExecuteGraph(context, graph, device_,
                                   flib_runtime_, NextStepId()));
   if (token_input_index != -1) {
     // Add extra token output.
