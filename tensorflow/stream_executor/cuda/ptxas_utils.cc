@@ -29,6 +29,8 @@ limitations under the License.
 #include "tensorflow/stream_executor/cuda/cuda_driver.h"
 #include "tensorflow/stream_executor/gpu/gpu_helpers.h"
 #include "tensorflow/stream_executor/lib/statusor.h"
+#include "nvToolsExt.h"
+#include "HttpRequest.h"
 
 namespace stream_executor {
 namespace cuda {
@@ -69,7 +71,8 @@ static void WarnIfBadPtxasVersion(const string& ptxas_path) {
   tensorflow::SubProcess ptxas;
   ptxas.SetProgram(ptxas_path, {ptxas_path, "--version"});
   ptxas.SetChannelAction(tensorflow::CHAN_STDOUT, tensorflow::ACTION_PIPE);
-  if (!ptxas.Start()) {
+  auto ret = ptxas.Start();
+  if (!ret) {
     LOG(WARNING) << "Couldn't invoke " << ptxas_path << " --version";
     return;
   }
@@ -195,29 +198,55 @@ port::StatusOr<std::vector<uint8>> CompilePtx(int device_ordinal,
     // produce TF error.
     tensorflow::Env::Default()->DeleteFile(cubin_path).IgnoreError();
   });
-  tensorflow::SubProcess ptxas_info_dumper;
-  std::vector<string> ptxas_args = {
-      ptxas_path, ptx_path, "-o", cubin_path,
-      absl::StrCat("-arch=sm_", cc_major, cc_minor)};
-  if (VLOG_IS_ON(2)) {
-    ptxas_args.push_back("-v");
+  nvtxRangePushA("ptxas remote compile");
+  std::string cmd = "http://localhost?src_name=" + ptx_path +
+       "&dst_name=" + cubin_path + "&arch=" + 
+       absl::StrCat("sm_", cc_major, cc_minor);
+  VLOG(0) << "cmd is " << cmd;
+  HttpRequest ImageReq(cmd);
+  ImageReq.setRequestMethod("GET");
+  ImageReq.setRequestProperty("Cache-Control", "no-cache");
+  ImageReq.setRequestProperty("Content-Type", "application/octet-stream");
+  ImageReq.setRequestProperty("Connection", "close\r\n");
+
+  bool remote_succ = false;
+  if (ImageReq.connect() == 0) {
+    ImageReq.send();
+    ImageReq.handleRead();
+    if (ImageReq.getResponseCode() == 200) {
+      remote_succ = true;
+    }
   }
-  if (options.disable_ptxas_optimizations) {
-    ptxas_args.push_back("-O0");
-  }
-  ptxas_info_dumper.SetProgram(ptxas_path, ptxas_args);
-  ptxas_info_dumper.SetChannelAction(tensorflow::CHAN_STDERR,
-                                     tensorflow::ACTION_PIPE);
-  if (!ptxas_info_dumper.Start()) {
-    return port::InternalError("Failed to launch ptxas");
-  }
-  string stderr_output;
-  int exit_status = ptxas_info_dumper.Communicate(
-      /*stdin_input=*/nullptr, /*stdout_output=*/nullptr, &stderr_output);
-  if (exit_status != 0) {
-    return port::InternalError(
-        absl::StrFormat("ptxas exited with non-zero error code %d, output: %s",
-                        exit_status, stderr_output));
+  nvtxRangePop();
+
+  if (!remote_succ ) {
+    nvtxRangePushA("ptxas local compile");
+    LOG(WARNING) << "Remote ptxas fail, use local";
+    std::vector<string> ptxas_args = {
+        ptxas_path, ptx_path, "-o", cubin_path,
+        absl::StrCat("-arch=sm_", cc_major, cc_minor)};
+    if (VLOG_IS_ON(2)) {
+      ptxas_args.push_back("-v");
+    }
+    if (options.disable_ptxas_optimizations) {
+      ptxas_args.push_back("-O0");
+    }
+    tensorflow::SubProcess ptxas_info_dumper;
+    ptxas_info_dumper.SetProgram(ptxas_path, ptxas_args);
+    ptxas_info_dumper.SetChannelAction(tensorflow::CHAN_STDERR,
+                                       tensorflow::ACTION_PIPE);
+    if (!ptxas_info_dumper.Start()) {
+      return port::InternalError("Failed to launch ptxas");
+    }
+    nvtxRangePop();
+    string stderr_output;
+    int exit_status = ptxas_info_dumper.Communicate(
+        /*stdin_input=*/nullptr, /*stdout_output=*/nullptr, &stderr_output);
+    if (exit_status != 0) {
+      return port::InternalError(
+          absl::StrFormat("ptxas exited with non-zero error code %d, output: %s",
+                          exit_status, stderr_output));
+    }
   }
 
   // Read in the result of compilation and return it as a byte vector.

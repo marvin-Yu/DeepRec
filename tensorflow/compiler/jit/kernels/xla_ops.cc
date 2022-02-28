@@ -45,6 +45,7 @@ limitations under the License.
 #include "tensorflow/core/util/stream_executor_util.h"
 #include "tensorflow/core/grappler/grappler_item.h"
 #include "absl/synchronization/notification.h"
+#include "nvToolsExt.h"
 
 // OP_REQUIRES_OK_RETURN is the same as OP_REQUIRES_OK except that
 // in error case, it returns RET instead of void.
@@ -551,6 +552,7 @@ XlaCompileOp::XlaCompileOp(OpKernelConstruction* ctx)
       must_compile_(MustCompileAttr(ctx)) {}
 
 void XlaCompileOp::Compute(OpKernelContext* ctx) {
+  nvtxRangePushA("XlaCompileOp");
   VLOG(3) << "XlaCompileOp " << def().name()
           << (must_compile_ ? "(must-compile)" : "");
   xla::LocalClient* client;
@@ -619,6 +621,7 @@ void XlaCompileOp::Compute(OpKernelContext* ctx) {
     compilation_successful.scalar<bool>()() = false;
     ctx->set_output(0, Tensor(cpu_allocator, DT_STRING, TensorShape({})));
     ctx->set_output(1, compilation_successful);
+    nvtxRangePop();
     return;
   }
 
@@ -639,6 +642,7 @@ void XlaCompileOp::Compute(OpKernelContext* ctx) {
 
   ctx->set_output(0, compilation_key);
   ctx->set_output(1, compilation_successful);
+  nvtxRangePop();
 }
 
 XlaRunOp::XlaRunOp(OpKernelConstruction* ctx)
@@ -653,6 +657,7 @@ XlaRunOp::XlaRunOp(OpKernelConstruction* ctx)
 void XlaRunOp::InferOutputShape(OpKernelContext* ctx,
     const XlaCompiler::CompilationResult* compile_result,
     std::shared_ptr<InputsShapeInfo> inputs_shape_info) {
+  nvtxRangePushA("InferOutputshape");
   VLOG(1) << "InferInputShape " << inputs_shape_info->DebugString();
   std::shared_ptr<grappler::GraphProperties> 
      graph_properties = inputs_shape_info->graph_properties;
@@ -663,6 +668,7 @@ void XlaRunOp::InferOutputShape(OpKernelContext* ctx,
          inputs_shape_info->inferred_shape_protos);
   inputs_shape_info->shape_infer_succ = s.ok();
   if (!s.ok()) {
+    nvtxRangePop();
     return;
   }
 
@@ -670,9 +676,11 @@ void XlaRunOp::InferOutputShape(OpKernelContext* ctx,
   SetCachedInferShapes(inputs_shape_info->uuid(), inputs_shape_info->inferred_shape_protos);
   OP_REQUIRES(ctx, inputs_shape_info->inferred_shape_protos.size() > 0,
               errors::InvalidArgument("xla auto padding shape inference error, outputs is empty"));
+  nvtxRangePop();
 }
 
 void XlaRunOp::Compute(OpKernelContext* ctx) {
+  nvtxRangePushA("XlaRun");
   VLOG(3) << "XlaRunOp " << def().name();
   Tensor key_tensor = ctx->input(ctx->num_inputs() - 1);
   const XlaExecutableClosureStore::KeyT& key = key_tensor.flat<tstring>()(0);
@@ -772,6 +780,7 @@ void XlaRunOp::Compute(OpKernelContext* ctx) {
           run_result.ConsumeValueOrDie(),
           /*missing_ctx_input_prefix=*/closure.num_constant_args(),
           inputs_shape_info));
+  nvtxRangePop();
 }
 
 REGISTER_KERNEL_BUILDER(Name("XlaLaunch").Device(DEVICE_CPU), XlaLocalLaunchOp);

@@ -369,6 +369,7 @@ cc_library(
         "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:span",
     ],
+    linkopts = ["-L/usr/local/cuda/lib64 -lnvToolsExt"], 
 )
 
 tf_cc_test(

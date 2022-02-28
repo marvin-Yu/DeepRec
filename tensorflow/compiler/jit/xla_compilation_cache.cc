@@ -14,7 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include "tensorflow/compiler/jit/xla_compilation_cache.h"
-
+#include "nvToolsExt.h"
 #include <numeric>
 #include "absl/base/call_once.h"
 #include "absl/strings/str_cat.h"
@@ -309,6 +309,7 @@ Status XlaCompilationCache::CompileImpl(
     xla::LocalExecutable** out_executable,
     std::shared_ptr<InputsShapeInfo> inputs_shape_info) {
   VLOG(2) << "XlaCompilationCache::Compile " << DebugString();
+  nvtxRangePushA("CompileImpl");
 
   if (VLOG_IS_ON(2)) {
     VLOG(2) << "num_inputs=" << args.size();
@@ -468,6 +469,7 @@ Status XlaCompilationCache::CompileImpl(
     *out_compilation_result = &entry->compilation_result;
     *out_executable = entry->executable.get();
   }
+  nvtxRangePop();
   return Status::OK();
 }
 

@@ -10,4 +10,5 @@ tf_cc_binary(
          "//tensorflow/c:c_api_blaze",
          "//tensorflow/compiler/jit:flags"
          ],
+    linkopts = ["-L/usr/local/cuda/lib64 -lnvToolsExt"],
  )

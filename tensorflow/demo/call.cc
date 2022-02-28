@@ -9,6 +9,8 @@
 #include "tensorflow/c/c_api_blaze.h"
 #include "tensorflow/c/c_api_experimental.h"
 #include <chrono>
+#include "nvToolsExt.h"
+#include "tensorflow/core/platform/env.h"
 
 using namespace std;
 using namespace tensorflow;
@@ -108,6 +110,15 @@ void compile_thread(TF_Graph* graph, TF_Session* tf_sess) {
   }
 }
 
+void compile_ptx() {
+  while(true) {
+    nvtxRangePushA("ptxas_in_thread");
+    int ret = std::system("/usr/local/cuda-11.2/bin/ptxas /home/yuxing.hqb/tempfile-t4mtmservice111422414.k2.na61-80fa1700-63649-5d8d1d8cc5d9a -o /home/yuxing.hqb/aaa -arch=sm_75");
+    //std::cout << "ptx compile ======================" <<ret << std::endl;
+    nvtxRangePop();
+    //tensorflow::Env::Default()->SleepForMicroseconds(1000 * 1000);
+  }
+}
 int main() {
   TF_Status* s = TF_NewStatus();
   const std::string tf_graph_path = "/home/yuxing.hqb/python/cnxh_cvr_hash/tf/tf_frozen_graph";
@@ -137,9 +148,11 @@ int main() {
   }
   //std::thread t1(run_thread, graph, tf_sess);
   std::thread t2(compile_thread, graph, tf_sess);
+  //std::thread t3(compile_ptx);
 
   //t1.join();
   t2.join();
+  //t3.join();
   std::cout << "=================";
   TF_DeleteStatus(s);
   return 0;
