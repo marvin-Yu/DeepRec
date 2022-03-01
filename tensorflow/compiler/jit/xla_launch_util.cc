@@ -390,7 +390,9 @@ Status SplitOutputTensor(OpKernelContext* ctx,
     return Status::OK();
   } else if (slice_dim > 0) {
     tensorflow::AllocatorAttributes attr = ctx->output_alloc_attr(output_idx);
-    auto* allocator = ctx->get_allocator(attr);
+    tensorflow::Allocator* allocator;
+    auto st = ctx->get_allocator(attr, &allocator);
+    if (!st.ok()) { return st; }
 
     return functor::DoSlice(ctx, tensor_unsliced, begin, size, 
                               tensor_sliced, allocator, is_cpu_device);

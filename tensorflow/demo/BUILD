@@ -8,7 +8,8 @@ tf_cc_binary(
          "//tensorflow/core:tensorflow",
          "//tensorflow/c:c_api_experimental",
          "//tensorflow/c:c_api_blaze",
-         "//tensorflow/compiler/jit:flags"
+         "//tensorflow/compiler/jit:flags",
+         "@com_google_protobuf//:protobuf"
          ],
-    linkopts = ["-L/usr/local/cuda/lib64 -lnvToolsExt"],
+    linkopts = ["-L/usr/local/cuda-11.2/targets/x86_64-linux/lib/ -lnvToolsExt"],
  )
