@@ -19,11 +19,16 @@ class BlazeXlaPredictor : public BlazePredictor {
                           const GraphDef& graph_def, const std::string& device,
                           const BlazeKernelOptions& options, const string& device_string,
                           const std::vector<DataType>& input_types,
-                          OpKernelConstruction* ctx = nullptr)
+                          OpKernelConstruction* ctx = nullptr,
+			  bool enable_xla_auto_padding=false)
       : BlazePredictor(input_names, output_names, graph_def,
                        device, options, device_string, input_types, ctx) {
         warmuped_ = false;
         warmuping_ = false;
+	enable_xla_auto_padding_ = enable_xla_auto_padding;
+	// xla auto padding do not need warmup
+	if (enable_xla_auto_padding_) warmuped_ = true;
+
       }
 
   ~BlazeXlaPredictor() override {}
@@ -69,6 +74,7 @@ class BlazeXlaPredictor : public BlazePredictor {
   bool warmuping_;
   mutex warmup_mu_;
   mutex batch_size_mu_;
+  bool enable_xla_auto_padding_;
 };
 }
 #endif

@@ -98,6 +98,13 @@ void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
   config->set_allow_soft_placement(true);
   config->mutable_gpu_options()->set_allow_growth(true);
 
+  bool enable_xla_auto_padding = blaze_run_options_.xla_compilation() &&
+	  blaze_run_options_.enable_xla_auto_padding();
+  LOG(INFO) << "enable_xla_auto_padding " << enable_xla_auto_padding;
+  if (enable_xla_auto_padding) {
+    // enable_xla_auto_padding requires disable single threaded executor
+    blaze_run_options_.set_use_single_threaded_executor(false);
+  }
   if (blaze_run_options_.use_single_threaded_executor()) {
     config->mutable_experimental()->set_executor_type("SINGLE_THREADED_EXECUTOR");
   }
@@ -107,7 +114,8 @@ void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
     {
       tensorflow::BuildXlaOpsPassFlags* flags =
           tensorflow::GetBuildXlaOpsPassFlags();
-      flags->tf_xla_enable_lazy_compilation = false;
+      // enable_xla_auto_padding requires lazy compile
+      flags->tf_xla_enable_lazy_compilation = enable_xla_auto_padding;
     }
     {
       tensorflow::MarkForCompilationPassFlags* flags =
@@ -118,7 +126,8 @@ void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
     config->mutable_graph_options()->mutable_optimizer_options()->set_global_jit_level(jitLevel);
     predictor_ = absl::make_unique<BlazeXlaPredictor>(input_names_, output_names_,
                                        graph_def_, device_, blaze_run_options_,
-                                       device_string_, input_types_, context);
+                                       device_string_, input_types_, context,
+				       enable_xla_auto_padding);
   } else {
     predictor_ = absl::make_unique<BlazePredictor>(input_names_, output_names_,
                                     graph_def_, device_, blaze_run_options_,

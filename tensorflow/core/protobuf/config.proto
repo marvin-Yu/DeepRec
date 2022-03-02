@@ -506,7 +506,7 @@ message ConfigProto {
   // enabled, this field is ignored and sessions are always isolated.
   bool isolate_session_state = 15;
 
-  string auto_padding_shape = 160;
+  //bytes auto_padding_shape = 160;
   // Everything inside Experimental is subject to change and is not subject
   // to API stability guarantees in
   // https://www.tensorflow.org/guide/version_compat.
@@ -889,6 +889,7 @@ message BlazeKernelOptions {
   // Disable output padding
   bool disable_output_padding = 15;
   uint64 unit_flops = 16; //override measured values
+  bool enable_xla_auto_padding = 17;
   bool debug_batchsize = 100;
   int64 dump_timeline_interval = 101;
   ConfigProto config_proto = 102;

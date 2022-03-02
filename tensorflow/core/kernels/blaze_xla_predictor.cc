@@ -358,7 +358,7 @@ Status BlazeXlaPredictor::SliceToDynamicCPU(const std::vector<Tensor>& padded_ou
 Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
   // Infer inputs' batchsize
 
-  if (TF_PREDICT_FALSE(!warmuped_)) {
+  if (!enable_xla_auto_padding_ && TF_PREDICT_FALSE(!warmuped_)) {
     if (warmuping_) {
       return errors::Internal("Blaze kernel warmuping");
     }
@@ -380,30 +380,36 @@ Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
   for (int i = 0; i < num_inputs; ++i) {
     inputs.push_back(ctx->input(i));
   }
-  int batchsize = InferBatchSize(inputs);
-  if (batchsize == -1) {
-    return errors::Internal("Cannot infer inputs' batchsize");
-  }
 
-  int pad_to_batchsize = batchsize;
+  int batchsize = -1;
+  int pad_to_batchsize = -1;
   bool found_bs = false;
-  for (int n : batch_sizes_) {
-    if (n >= batchsize) {
-      pad_to_batchsize = n;
-      found_bs = true;
-      break;
+
+  if (!enable_xla_auto_padding_) {
+    batchsize = InferBatchSize(inputs);
+    if (batchsize == -1) {
+      return errors::Internal("Cannot infer inputs' batchsize");
     }
+
+    pad_to_batchsize = batchsize;
+    for (int n : batch_sizes_) {
+      if (n >= batchsize) {
+        pad_to_batchsize = n;
+        found_bs = true;
+        break;
+      }
+    }
+
+    if (TF_PREDICT_FALSE(!found_bs)) {
+      mutex_lock l(batch_size_mu_);
+      pad_to_batchsize = AddNewBatchSize(batchsize);
+    }
+
+     VLOG(1) << "batchsize = " << batchsize
+             << ", pad_to_batchsize = " << pad_to_batchsize;
   }
 
-  if (TF_PREDICT_FALSE(!found_bs)) {
-    mutex_lock l(batch_size_mu_);
-    pad_to_batchsize = AddNewBatchSize(batchsize);
-  }
-
-  VLOG(1) << "batchsize = " << batchsize
-          << ", pad_to_batchsize = " << pad_to_batchsize;
-
-  if (pad_to_batchsize != batchsize) {
+  if (!enable_xla_auto_padding_ && (pad_to_batchsize != batchsize)) {
     // Pad inputs
     std::vector<Tensor> padded_inputs(num_inputs);
     Status status;
