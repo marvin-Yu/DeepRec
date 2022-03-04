@@ -212,12 +212,17 @@ port::StatusOr<std::vector<uint8>> CompilePtx(int device_ordinal,
   ImageReq.setRequestProperty("Connection", "close\r\n");
 
   bool remote_succ = false;
-  if (ImageReq.connect() == 0) {
+  int conn_ret = ImageReq.connect();
+  if (conn_ret == 0) {
     ImageReq.send();
     ImageReq.handleRead();
     if (ImageReq.getResponseCode() == 200) {
       remote_succ = true;
+    } else {
+      VLOG(0) << "Get response failed " << ImageReq.getResponseCode();
     }
+  } else {
+    VLOG(0) << "Connect failed " << conn_ret;
   }
   nvtxRangePop();
 
