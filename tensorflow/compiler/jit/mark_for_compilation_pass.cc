@@ -1777,7 +1777,7 @@ Status MarkForCompilation(
     }
   }
   
-  bool enable_xla_auto_padding = options.session_options->config.enable_xla_auto_padding();
+  bool enable_xla_auto_padding = options.session_options->config.blaze_options().enable_xla_auto_padding();
   if (enable_xla_auto_padding) {
     MarkShapeConsumerOpUncompile(graph);
   }

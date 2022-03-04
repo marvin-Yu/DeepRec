@@ -394,13 +394,13 @@ Status ReplaceNodeWithXlaCompileAndXlaRun(
     requires_compilation = true;
   }
 
-  bool enable_xla_auto_padding = options.session_options->config.enable_xla_auto_padding();
+  bool enable_xla_auto_padding = options.session_options->config.blaze_options().enable_xla_auto_padding();
   VLOG(0) << "enable_xla_auto_padding=" << enable_xla_auto_padding;
   if (enable_xla_auto_padding) {
     // xla padding requires lazy compile
     requires_compilation = false;
   }
-  std::string auto_padding_shape = options.session_options->config.auto_padding_shape();
+  std::string auto_padding_shape = "96,20000,100";// options.session_options->config.auto_padding_shape();
   VLOG(0) << "auto_padding_shape " << auto_padding_shape;
 
   string device_name_str = string(device_info_cache->GetNameFor(device));
