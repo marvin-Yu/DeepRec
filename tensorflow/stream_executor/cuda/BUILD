@@ -97,10 +97,11 @@ cc_library(
 )
 
 cc_library(
-    name = "HttpRequest",
-    srcs = if_cuda_is_configured(["HttpRequest.cc"]),
-    hdrs = if_cuda_is_configured(["HttpRequest.h"]),
+    name = "http_client",
+    srcs = if_cuda_is_configured(["http_client.cc"]),
+    hdrs = if_cuda_is_configured(["http_client.h"]),
     deps = if_cuda_is_configured([
+        "//tensorflow/core:lib",
     ]),
 )
 cc_library(
@@ -109,7 +110,7 @@ cc_library(
     hdrs = if_cuda_is_configured(["ptxas_utils.h"]),
     deps = if_cuda_is_configured([
         ":cuda_driver",
-        ":HttpRequest",
+        ":http_client",
         ":ptxas_wrapper",
         "@com_google_absl//absl/types:span",
         "//tensorflow/stream_executor/gpu:gpu_helpers_header",

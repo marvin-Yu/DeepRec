@@ -160,71 +160,6 @@ class InetAddress
 };
 
 
-class HttpUrl
-{
-public:
-	HttpUrl(std::string& httpUrl)
-	:m_httpUrl(httpUrl),
-	 m_smatch(detachHttpUrl())
-	{
-		std::cout << "URL : " << m_httpUrl;
-	}
-	~HttpUrl(){};
-
-	enum HttpUrlMatch
-	{
-		URL = 0,
-		HOST = 1,
-		URI = 2
-	};
-
-	std::vector<std::string> detachHttpUrl() const
-	{
-	  std::vector<std::string> v;
-	  std::string::size_type pos1, pos2;
-	  pos2 = m_httpUrl.find('/');
-	  assert(std::string::npos != pos2);
-	  pos1 = pos2 + 2;
-	  pos2 = m_httpUrl.find('/', pos1);
-	  assert(std::string::npos != pos2);
-	  v.push_back(m_httpUrl);
-	  v.push_back(m_httpUrl.substr(pos1, pos2 - pos1));
-	  v.push_back(m_httpUrl.substr(pos2 + 1));
-	  std::cout << "detachHttpUrl() url :" << v[0];
-	  std::cout << "detachHttpUrl() host :" << v[1];
-	  std::cout << "detachHttpUrl() uri :" << v[2];
-	  return v;
-	}
-
-	bool HttpUrlToIp(const std::string& host, char* ip) const
-	{
-		struct hostent* phost = NULL;
-
-		phost = gethostbyname(host.c_str());
-	    if (NULL == phost)
-	    {
-	    	std::cout << "HttpUrlToIp(): gethostbyname error : " << errno << " : "<< strerror(errno);
-	    	return false;
-	    	//LOG_SYSERR << "urlToIp(): gethostbyname error";
-	    }
-
-	    inet_ntop(phost->h_addrtype,  phost->h_addr, ip, 17);
-
-	    return true;
-	}
-
-	std::string domain() const
-	{
-		return getHttpUrlSubSeg(HOST);
-	}
-
-	std::string getHttpUrlSubSeg(HttpUrlMatch sub = HOST) const{ return m_smatch[sub]; }
-
-private:
-	std::string m_httpUrl;
-	std::vector<std::string> m_smatch;
-};
-
 
 class HttpRequest
 {
@@ -275,7 +210,7 @@ private:
     void SplitString(const std::string& s, std::vector<std::string>& v, const std::string& c);
 
   Buffer m_buffer;
-	HttpUrl m_httpUrl;
+	std::string m_httpUrl;
 	std::stringstream m_stream;
 	int m_code;
 	int m_sockfd;

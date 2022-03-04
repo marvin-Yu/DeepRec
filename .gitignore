@@ -46,3 +46,4 @@ gradleBuild
 Podfile.lock
 Pods
 xcuserdata
+*.qdrep

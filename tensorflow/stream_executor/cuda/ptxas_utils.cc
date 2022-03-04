@@ -30,7 +30,7 @@ limitations under the License.
 #include "tensorflow/stream_executor/gpu/gpu_helpers.h"
 #include "tensorflow/stream_executor/lib/statusor.h"
 #include "nvToolsExt.h"
-#include "HttpRequest.h"
+#include "http_client.h"
 
 namespace stream_executor {
 namespace cuda {
@@ -199,9 +199,11 @@ port::StatusOr<std::vector<uint8>> CompilePtx(int device_ordinal,
     tensorflow::Env::Default()->DeleteFile(cubin_path).IgnoreError();
   });
   nvtxRangePushA("ptxas remote compile");
-  std::string cmd = "http://localhost?src_name=" + ptx_path +
-       "&dst_name=" + cubin_path + "&arch=" + 
-       absl::StrCat("sm_", cc_major, cc_minor);
+  std::string cmd = 
+       "ptxas_path=" + ptxas_path +
+       "&src_name=" + ptx_path +
+       "&dst_name=" + cubin_path + 
+       "&arch=" + absl::StrCat("sm_", cc_major, cc_minor);
   VLOG(0) << "cmd is " << cmd;
   HttpRequest ImageReq(cmd);
   ImageReq.setRequestMethod("GET");

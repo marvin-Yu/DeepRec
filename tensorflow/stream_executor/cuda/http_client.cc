@@ -8,8 +8,9 @@
 #include <unistd.h>
 #include <map>
 #include <fstream>
-
-#include "HttpRequest.h"
+#include "tensorflow/core/platform/env.h"
+#include "tensorflow/core/util/env_var.h"
+#include "http_client.h"
 
 const std::map<std::string, int>::value_type init_value[] =
 {
@@ -61,7 +62,7 @@ void sockets::fromIpPort(const char* ip, uint16_t port,
   addr->sin_port = hostToNetwork16(port);
   if (::inet_pton(AF_INET, ip, &addr->sin_addr) <= 0)
   {
-    std::cout << "sockets::fromIpPort";
+    VLOG(1) << "sockets::fromIpPort";
   }
 }
 
@@ -84,7 +85,7 @@ void sockets::close(int sockfd)
 {
   if (::close(sockfd) < 0)
   {
-    std::cout << "sockets::close";
+    VLOG(1) << "sockets::close";
   }
 }
 
@@ -124,29 +125,17 @@ HttpRequest::~HttpRequest()
 
 int HttpRequest::connect()
 {
-  char ip[32] = {0};
+  tensorflow::int64 port;
+  tensorflow::ReadInt64FromEnvVar("TF_PTXAS_HTTP_PORT", 8881, &port);
+  VLOG(1) << "TF_PTXAS_HTTP_PORT=" << port;
   while(true)
   {
-    //struct hostent* phost = NULL;
-
-    //phost = gethostbyname(m_httpUrl.domain().c_str());
-    //if (NULL == phost)
-    //{
-    //  std::cout << "HttpUrlToIp(): gethostbyname error : " << errno << " : "<< strerror(errno) << " continue.";
-    //  sockets::delaySecond(1);
-    //  continue;
-    //}
-
-    //inet_ntop(phost->h_addrtype,  phost->h_addr, ip, sizeof ip);
-
-    //std::cout << "HttpRequest::Connector() gethostbyname Successful";
-
-    InetAddress serverAddr = InetAddress("127.0.0.1", 8888);
+    InetAddress serverAddr = InetAddress("127.0.0.1", (int)port);
 
     m_sockfd = sockets::createSocket(serverAddr.family());
-    if(m_sockfd < 0) std::cout << "HttpRequest::connect() : createSocket error";
+    if(m_sockfd < 0) VLOG(1) << "HttpRequest::connect() : createSocket error";
     int ret = sockets::connect(m_sockfd, serverAddr.getSockAddr());
-    std::cout << "sockfd : " << m_sockfd << "sockets::connect ret : " << ret ;
+    VLOG(1) << "sockfd : " << m_sockfd << "sockets::connect ret : " << ret ;
     if (ret != 0) return ret;
 
     int savedErrno = (ret == 0) ? 0 : errno;
@@ -157,10 +146,10 @@ int HttpRequest::connect()
       case EINPROGRESS:
       case EINTR:
       case EISCONN:
-        std::cout << "HttpRequest::connect() sockfd : " << m_sockfd << " Successful";
+        VLOG(1) << "HttpRequest::connect() sockfd : " << m_sockfd << " Successful";
         break;
       default :
-        std::cout << "Connect Error ";
+        VLOG(1) << "Connect Error ";
         sockets::delaySecond(1);
         continue;
     }
@@ -168,7 +157,7 @@ int HttpRequest::connect()
     break;
   }
 
-  std::cout << "HttpRequest::Connector() end" << std::endl;
+  VLOG(1) << "HttpRequest::Connector() end";
   return 0;
 }
 
@@ -177,19 +166,19 @@ void HttpRequest::setRequestMethod(const std::string &method)
 	switch(kRequestMethodMap.at(method))
 	{
 		case HttpRequest::GET :
-			m_stream << "GET " << "/" << m_httpUrl.getHttpUrlSubSeg(HttpUrl::URI) << " HTTP/1.1\r\n";
-			std::cout << m_stream.str().c_str();
+			m_stream << "GET " << "/" << m_httpUrl << " HTTP/1.1\r\n";
+			VLOG(1) << m_stream.str().c_str();
 			break;
 		case HttpRequest::POST :
-			m_stream << "POST "  << "/" << m_httpUrl.getHttpUrlSubSeg(HttpUrl::URI) << " HTTP/1.1\r\n";
-			std::cout << m_stream.str().c_str();
+			m_stream << "POST "  << "/" << m_httpUrl << " HTTP/1.1\r\n";
+			VLOG(1) << m_stream.str().c_str();
 			break;
 		default :
-			std::cout << "No such Method : " << method.c_str();
+			VLOG(1) << "No such Method : " << method.c_str();
 			break;
 	}
 
-	m_stream << "Host: " << m_httpUrl.getHttpUrlSubSeg(HttpUrl::HOST) << "\r\n";
+	m_stream << "Host: " << "localhost" << "\r\n";
 }
 
 
@@ -210,46 +199,46 @@ void HttpRequest::handleRead()
 	ssize_t writtenBytes = 0;
 
 	nread = sockets::read(m_sockfd, m_buffer.beginWrite(), kBufferSize);
-	if(nread < 0) std::cout << "sockets::read";
+	if(nread < 0) VLOG(1) << "sockets::read";
 	m_buffer.hasWritten(nread);
-	std::cout << "sockets::read(): nread: " << nread << " remain: " << m_buffer.writableBytes();
+	VLOG(1) << "sockets::read(): nread: " << nread << " remain: " << m_buffer.writableBytes();
 	size_t remain = kBufferSize - nread;
 	while(remain > 0)
 	{
 		size_t n = sockets::read(m_sockfd, m_buffer.beginWrite(), remain);
-		if(n < 0) std::cout << "sockets::read";
+		if(n < 0) VLOG(1) << "sockets::read";
 		m_buffer.hasWritten(n);
 		if(0 == n)
 		{
-			std::cout << "sockets::read finish";
+			VLOG(1) << "sockets::read finish";
 			break;
 		}
 		remain = remain - n;
 	}
-	//std::cout << m_buffer.peek();
+	//VLOG(1) << m_buffer.peek();
 
 	//for(int i = 0; i < nread; i++) printf("%02x%c",(unsigned char)buffer[i],i==nread - 1 ?'\n':' ');
-	//std::cout << "handleRead Recv Response : \n" << m_buffer.peek();
+	//VLOG(1) << "handleRead Recv Response : \n" << m_buffer.peek();
 	int headsize = 0;
 	std::string line;
 	std::stringstream ss(m_buffer.peek());
 	std::vector<std::string> v;
 	getline(ss, line);
-	//std::cout << line;
+	//VLOG(1) << line;
 	headsize += line.size() + 1;
 	SplitString(line, v, " ");
-	//for(int i = 0; i < v.size(); i++) std::cout << v[i] << std::endl;
+	//for(int i = 0; i < v.size(); i++) VLOG(1) << v[i] << std::endl;
 	m_code = std::stoi(v[1]);
 	if(v[1] != "200")
 	{
-	  std::cout << "Error Http Server Response : " << v[1].c_str();
+	  VLOG(1) << "Error Http Server Response : " << v[1].c_str();
 	}
 
 	do{
 		getline(ss, line);
 		headsize += line.size() + 1;  // + 1('\n')
 		if(!line.empty()) line.erase(line.end()-1); // remove '/r'
-		//std::cout << line;
+		//VLOG(1) << line;
 		v.clear();
 		SplitString(line, v, ":");
 		if(v.size() == 2){
@@ -257,9 +246,9 @@ void HttpRequest::handleRead()
 		}
 	}while(!line.empty());
 
-	std::cout << "Http Head Size is " << headsize;
+	VLOG(1) << "Http Head Size is " << headsize;
 	std::string res(m_buffer.peek(), headsize);
-	std::cout << "Http Response :\n" << res;
+	VLOG(1) << "Http Response :\n" << res;
 	m_buffer.retrieve(headsize);
 
 	m_haveHandleHead = true;
@@ -272,7 +261,7 @@ void HttpRequest::uploadFile(const std::string& file, const std::string& content
 	FILE* fp = fopen(file.c_str(), "rb");
 	if(fp == NULL)
 	{
-		std::cout << "fopen() File :" << file.c_str() << " Errno";
+		VLOG(1) << "fopen() File :" << file.c_str() << " Errno";
 	}
 
 	bool isEnd = false;
@@ -286,7 +275,7 @@ void HttpRequest::uploadFile(const std::string& file, const std::string& content
 		m_buffer.hasWritten(nread);
 		while(m_buffer.writableBytes() > 0)
 		{
-			std::cout << "file read(): nread: " << nread << " remain: " << m_buffer.writableBytes();
+			VLOG(1) << "file read(): nread: " << nread << " remain: " << m_buffer.writableBytes();
 			size_t n = fread(m_buffer.beginWrite(), 1, m_buffer.writableBytes(), fp);
 			m_buffer.hasWritten(n);
 			if(0 == n)
@@ -295,16 +284,16 @@ void HttpRequest::uploadFile(const std::string& file, const std::string& content
 				{
 					fprintf(stderr, "fread failed : %s\n", strerror(err));
 				}
-				std::cout << "sockets::read finish";
+				VLOG(1) << "sockets::read finish";
 				isEnd = true;
 				break;
 			}
 		}
 
 		ssize_t nwrite = sockets::write(m_sockfd, m_buffer.peek(), m_buffer.readableBytes());
-		if(nwrite < 0) std::cout << "sockets::write";
+		if(nwrite < 0) VLOG(1) << "sockets::write";
 		writtenBytes += nwrite;
-		std::cout << "sockets::write nread " << m_buffer.readableBytes() << " nwrite " << nwrite << " writtenBytes " << writtenBytes;
+		VLOG(1) << "sockets::write nread " << m_buffer.readableBytes() << " nwrite " << nwrite << " writtenBytes " << writtenBytes;
 		m_buffer.retrieve(nwrite);
 	}
 
@@ -313,7 +302,7 @@ void HttpRequest::uploadFile(const std::string& file, const std::string& content
 	m_buffer.retrieveAll();
 
 	ssize_t n = sockets::write(m_sockfd, contentEnd.c_str(), contentEnd.size());
-	if(n < 0) std::cout << "sockets::write";
+	if(n < 0) VLOG(1) << "sockets::write";
 }
 
 void HttpRequest::downloadFile(const std::string& file)
@@ -323,35 +312,33 @@ void HttpRequest::downloadFile(const std::string& file)
 	bool isEnd = false;
 	ssize_t nread = 0;
 	ssize_t writtenBytes = 0;
-	bool haveHandleHead = false;
-	bool isDownFile = false;
 
 	std::ofstream output(file, std::ios::binary);
 	if (!output.is_open()){ // 检查文件是否成功打开
-		std::cout << "open file error" << file;
+		VLOG(1) << "open file error" << file;
 	}
 
 	output.write(m_buffer.peek(), m_buffer.readableBytes());
 	writtenBytes += m_buffer.readableBytes();
 	m_buffer.retrieve(m_buffer.readableBytes());
 
-	std::cout << "Content-Length : " << getResponseProperty("Content-Length");
+	VLOG(1) << "Content-Length : " << getResponseProperty("Content-Length");
 
 	while(!isEnd)
 	{
 		nread = sockets::read(m_sockfd, m_buffer.beginWrite(), kBufferSize);
-		if(nread < 0) std::cout << "sockets::read";
+		if(nread < 0) VLOG(1) << "sockets::read";
 		m_buffer.hasWritten(nread);
-		std::cout << "sockets::read(): nread: " << nread << " remain: " << m_buffer.writableBytes() << " writtenBytes: " << writtenBytes;
+		VLOG(1) << "sockets::read(): nread: " << nread << " remain: " << m_buffer.writableBytes() << " writtenBytes: " << writtenBytes;
 		size_t remain = kBufferSize - nread;
 		while(remain > 0)
 		{
 			size_t n = sockets::read(m_sockfd, m_buffer.beginWrite(), remain);
-			if(n < 0) std::cout << "sockets::read";
+			if(n < 0) VLOG(1) << "sockets::read";
 			m_buffer.hasWritten(n);
 			if(0 == n)
 			{
-				std::cout << "sockets::read finish";
+				VLOG(1) << "sockets::read finish";
 				isEnd = true;
 				break;
 			}
@@ -362,7 +349,7 @@ void HttpRequest::downloadFile(const std::string& file)
 		writtenBytes += m_buffer.readableBytes();
 		m_buffer.retrieve(m_buffer.readableBytes());
 	}
-	std::cout << " writtenBytes " << writtenBytes;
+	VLOG(1) << " writtenBytes " << writtenBytes;
 
 	output.close();
 	sockets::close(m_sockfd);

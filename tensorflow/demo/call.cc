@@ -11,6 +11,9 @@
 #include <chrono>
 #include "nvToolsExt.h"
 #include "tensorflow/core/platform/env.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 using namespace std;
 using namespace tensorflow;
@@ -112,14 +115,15 @@ void compile_thread(TF_Graph* graph, TF_Session* tf_sess) {
 
 void compile_ptx() {
   while(true) {
-    nvtxRangePushA("ptxas_in_thread");
+    nvtxRangePushA("ptxas_in_thread1");
     int ret = std::system("/usr/local/cuda-11.2/bin/ptxas /home/yuxing.hqb/tempfile-t4mtmservice111422414.k2.na61-80fa1700-63649-5d8d1d8cc5d9a -o /home/yuxing.hqb/aaa -arch=sm_75");
-    //std::cout << "ptx compile ======================" <<ret << std::endl;
+    std::cout << "compile ptx" << std::endl;
     nvtxRangePop();
     //tensorflow::Env::Default()->SleepForMicroseconds(1000 * 1000);
   }
 }
-int main() {
+
+int main_process() {
   TF_Status* s = TF_NewStatus();
   const std::string tf_graph_path = "/home/yuxing.hqb/python/cnxh_cvr_hash/tf/tf_frozen_graph";
   const std::string device = "/device:GPU:0";
@@ -148,12 +152,34 @@ int main() {
   }
   //std::thread t1(run_thread, graph, tf_sess);
   std::thread t2(compile_thread, graph, tf_sess);
-  //std::thread t3(compile_ptx);
+  std::thread t3(compile_ptx);
 
   //t1.join();
   t2.join();
   //t3.join();
-  std::cout << "=================";
   TF_DeleteStatus(s);
   return 0;
+}
+
+int main() {
+    main_process();
+    //int flag = 0;
+    //pid_t pId = fork();
+    //if (pId == -1) {
+    //    perror("fork error");
+    //    exit(EXIT_FAILURE);
+    //} else if (pId == 0) {
+    //    int myPid = getpid();
+    //    int parentPid = getppid();
+    //    
+    //    printf("Child:SelfID=%d ParentID=%d \n", myPid, parentPid);
+    //    flag = 123;
+    //    printf("Child:flag=%d %p \n", flag, &flag);
+    //    compile_ptx();
+    //    return EXIT_SUCCESS;
+    //} else {
+    //    printf("Parent:SelfID=%d MyChildPID=%d \n", getpid(), pId);
+    //    main_process();
+    //}
+    return 0;
 }
