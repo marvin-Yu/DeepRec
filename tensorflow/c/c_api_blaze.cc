@@ -461,7 +461,7 @@ void TF_EnableXlaAutoPadding(TF_SessionOptions* options,
                          unsigned char enable,
                          unsigned char padding_type) {
   tensorflow::ConfigProto& config = options->options.config;
-  config.mutable_blaze_options()->set_enable_xla_auto_padding(enable);
+  config.set_enable_xla_auto_padding(enable);
 }
 
 bool TF_InitSessionOptionsFromPB(const char* pb_char, TF_SessionOptions* options) {

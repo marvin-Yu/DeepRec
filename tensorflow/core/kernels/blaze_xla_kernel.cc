@@ -99,7 +99,7 @@ void BlazeXlaOp::InitPredictor(OpKernelConstruction* context) {
   config->mutable_gpu_options()->set_allow_growth(true);
 
   bool enable_xla_auto_padding = blaze_run_options_.xla_compilation() &&
-	  blaze_run_options_.enable_xla_auto_padding();
+	  config->enable_xla_auto_padding();
   LOG(INFO) << "enable_xla_auto_padding " << enable_xla_auto_padding;
   if (enable_xla_auto_padding) {
     // enable_xla_auto_padding requires disable single threaded executor

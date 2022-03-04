@@ -889,7 +889,6 @@ message BlazeKernelOptions {
   // Disable output padding
   bool disable_output_padding = 15;
   uint64 unit_flops = 16; //override measured values
-  bool enable_xla_auto_padding = 17;
   bool debug_batchsize = 100;
   int64 dump_timeline_interval = 101;
   ConfigProto config_proto = 102;
