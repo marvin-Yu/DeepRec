@@ -612,7 +612,7 @@ void XlaCompileOp::Compute(OpKernelContext* ctx) {
   }
 
   if (executable == nullptr) {
-    if (inputs_shape_info) {
+    if (inputs_shape_info && !cannot_compile_cluster_) {
       LOG(WARNING) << "Use TF  " << def().name() << " " << inputs_shape_info->uuid();
     }
     Tensor compilation_key(cpu_allocator, DT_STRING, TensorShape({}));

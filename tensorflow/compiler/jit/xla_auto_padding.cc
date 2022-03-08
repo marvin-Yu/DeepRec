@@ -167,6 +167,18 @@ Status XlaAutoPadding::Compile(
     std::string padded_shape = inputs_shape_info->padded_shape_uuid();
     uint64 h = std::hash<string>()(padded_shape);
     mutex_lock lock(compiling_shapes_mu_);
+
+    // Always sync compile first shape
+    if (compiling_shapes_.size() == 0) {
+      LOG(INFO) << name_ << " sync xla compile " 
+                << " " << inputs_shape_info->DebugString();
+      compiling_shapes_.insert(h);
+      return XlaAutoPadding::CompileImpl(
+                         options, function, unconst_args, compile_fn,
+                         compile_options, compile_threshold, 
+                         inputs_shape_info);
+    }
+
     if (compiling_shapes_.find(h) == compiling_shapes_.end()) {
       compiling_shapes_.insert(h);
       compile_thread_pool_->Schedule(fn); 
@@ -176,11 +188,6 @@ Status XlaAutoPadding::Compile(
       VLOG(1) << "Has push shape " << padded_shape << " with hash " << h << " to Compile queue";
     }
   }
-  //auto s = XlaAutoPadding::CompileImpl(
-  //                   options, function, unconst_args, compile_fn,
-  //                   compile_options, compile_threshold, 
-  //                   inputs_shape_info);
-  //if (!s.ok()) return s;
 
   inputs_shape_info->dump_shapes = true;
   return Status::OK();
