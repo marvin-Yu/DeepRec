@@ -400,7 +400,7 @@ Status ReplaceNodeWithXlaCompileAndXlaRun(
     // xla padding requires lazy compile
     requires_compilation = false;
   }
-  std::string auto_padding_shape = "96,20000,100";// options.session_options->config.auto_padding_shape();
+  std::string auto_padding_shape = options.session_options->config.auto_padding_shape();
   VLOG(0) << "auto_padding_shape " << auto_padding_shape;
 
   string device_name_str = string(device_info_cache->GetNameFor(device));

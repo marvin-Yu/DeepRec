@@ -506,7 +506,6 @@ message ConfigProto {
   // enabled, this field is ignored and sessions are always isolated.
   bool isolate_session_state = 15;
 
-  //bytes auto_padding_shape = 160;
   // Everything inside Experimental is subject to change and is not subject
   // to API stability guarantees in
   // https://www.tensorflow.org/guide/version_compat.
@@ -605,6 +604,7 @@ message ConfigProto {
   // so that xla behaives like dynamic padding
   bool enable_xla_auto_padding = 114;
   int32 xla_padding_type = 115;
+  string auto_padding_shape = 116;
   // Next: 17
 }
 
