@@ -71,8 +71,7 @@ static void WarnIfBadPtxasVersion(const string& ptxas_path) {
   tensorflow::SubProcess ptxas;
   ptxas.SetProgram(ptxas_path, {ptxas_path, "--version"});
   ptxas.SetChannelAction(tensorflow::CHAN_STDOUT, tensorflow::ACTION_PIPE);
-  auto ret = ptxas.Start();
-  if (!ret) {
+  if (!ptxas.Start()) {
     LOG(WARNING) << "Couldn't invoke " << ptxas_path << " --version";
     return;
   }
@@ -219,7 +218,10 @@ port::StatusOr<std::vector<uint8>> CompilePtx(int device_ordinal,
     if (ImageReq.getResponseCode() == 200) {
       remote_succ = true;
     } else {
-      VLOG(0) << "Get response failed " << ImageReq.getResponseCode();
+      VLOG(0) << "Get response failed " 
+	      << ImageReq.getResponseCode()
+	      << " " 
+	      << ImageReq.getResponseContent();
     }
   } else {
     VLOG(0) << "Connect failed " << conn_ret;

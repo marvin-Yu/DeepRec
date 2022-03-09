@@ -355,10 +355,46 @@ Status BlazeXlaPredictor::SliceToDynamicCPU(const std::vector<Tensor>& padded_ou
   return Status::OK();
 }
 
-Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
-  // Infer inputs' batchsize
+Status BlazeXlaPredictor::ComputeNoPadding(OpKernelContext* ctx,
+		const std::vector<Tensor>& inputs) {
+  std::vector<Tensor> outputs;
+  std::vector<Tensor> real_inputs(inputs.size());
 
-  if (!enable_xla_auto_padding_ && TF_PREDICT_FALSE(!warmuped_)) {
+  TF_RETURN_IF_ERROR(PrepareInputs(inputs, &real_inputs, ctx));
+  if (ctx->prof_stats()) {
+    RunMetadata metadata;
+    TF_RETURN_IF_ERROR(session_->RunCallable(
+            handle_, real_inputs, &outputs, &metadata));
+    ctx->prof_stats()->flops += metadata.prof_stats().flops();
+    ctx->traced_infos()->prof_stats->flops += metadata.prof_stats().flops();
+  } else {
+    TF_RETURN_IF_ERROR(session_->RunCallable(
+            handle_, real_inputs, &outputs, nullptr));
+  }
+
+  std::vector<Tensor> real_outputs(outputs.size());
+  TF_RETURN_IF_ERROR(PrepareOutputs(outputs, &real_outputs, ctx));
+  for (int i = 0; i < real_outputs.size(); ++i) {
+    ctx->set_output(i, real_outputs[i]);
+  }
+  return Status::OK();
+}
+
+Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
+  // Prepare inputs
+  int num_inputs = ctx->num_inputs();
+  std::vector<Tensor> inputs;
+  inputs.reserve(num_inputs);
+  for (int i = 0; i < num_inputs; ++i) {
+    inputs.push_back(ctx->input(i));
+  }
+
+  if (enable_xla_auto_padding_) {
+    return ComputeNoPadding(ctx, inputs);
+  }
+
+  // Infer inputs' batchsize
+  if (TF_PREDICT_FALSE(!warmuped_)) {
     if (warmuping_) {
       return errors::Internal("Blaze kernel warmuping");
     }
@@ -374,42 +410,30 @@ Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
     warmuping_ = false;
   }
 
-  int num_inputs = ctx->num_inputs();
-  std::vector<Tensor> inputs;
-  inputs.reserve(num_inputs);
-  for (int i = 0; i < num_inputs; ++i) {
-    inputs.push_back(ctx->input(i));
+  int batchsize = InferBatchSize(inputs);
+  if (batchsize == -1) {
+    return errors::Internal("Cannot infer inputs' batchsize");
   }
 
-  int batchsize = -1;
-  int pad_to_batchsize = -1;
+  bool pad_to_batchsize = batchsize;
   bool found_bs = false;
-
-  if (!enable_xla_auto_padding_) {
-    batchsize = InferBatchSize(inputs);
-    if (batchsize == -1) {
-      return errors::Internal("Cannot infer inputs' batchsize");
+  for (int n : batch_sizes_) {
+    if (n >= batchsize) {
+      pad_to_batchsize = n;
+      found_bs = true;
+      break;
     }
-
-    pad_to_batchsize = batchsize;
-    for (int n : batch_sizes_) {
-      if (n >= batchsize) {
-        pad_to_batchsize = n;
-        found_bs = true;
-        break;
-      }
-    }
-
-    if (TF_PREDICT_FALSE(!found_bs)) {
-      mutex_lock l(batch_size_mu_);
-      pad_to_batchsize = AddNewBatchSize(batchsize);
-    }
-
-     VLOG(1) << "batchsize = " << batchsize
-             << ", pad_to_batchsize = " << pad_to_batchsize;
   }
 
-  if (!enable_xla_auto_padding_ && (pad_to_batchsize != batchsize)) {
+  if (TF_PREDICT_FALSE(!found_bs)) {
+    mutex_lock l(batch_size_mu_);
+    pad_to_batchsize = AddNewBatchSize(batchsize);
+  }
+
+   VLOG(1) << "batchsize = " << batchsize
+           << ", pad_to_batchsize = " << pad_to_batchsize;
+
+  if (pad_to_batchsize != batchsize) {
     // Pad inputs
     std::vector<Tensor> padded_inputs(num_inputs);
     Status status;
@@ -451,28 +475,7 @@ Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
       ctx->set_output(i, outputs[i]);
     }
   } else {
-    VLOG(1) << "Skip padding: input bathsize = " << batchsize
-            << ", input pad_to_batchsize = " << pad_to_batchsize;
-    std::vector<Tensor> outputs;
-    std::vector<Tensor> real_inputs(inputs.size());
-
-    TF_RETURN_IF_ERROR(PrepareInputs(inputs, &real_inputs, ctx));
-    if (ctx->prof_stats()) {
-      RunMetadata metadata;
-      TF_RETURN_IF_ERROR(session_->RunCallable(
-              handle_, real_inputs, &outputs, &metadata));
-      ctx->prof_stats()->flops += metadata.prof_stats().flops();
-      ctx->traced_infos()->prof_stats->flops += metadata.prof_stats().flops();
-    } else {
-      TF_RETURN_IF_ERROR(session_->RunCallable(
-              handle_, real_inputs, &outputs, nullptr));
-    }
-
-    std::vector<Tensor> real_outputs(outputs.size());
-    TF_RETURN_IF_ERROR(PrepareOutputs(outputs, &real_outputs, ctx));
-    for (int i = 0; i < real_outputs.size(); ++i) {
-      ctx->set_output(i, real_outputs[i]);
-    }
+    return ComputeNoPadding(ctx, inputs);
   }
   return Status::OK();
 }

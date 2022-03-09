@@ -26,9 +26,6 @@ class BlazeXlaPredictor : public BlazePredictor {
         warmuped_ = false;
         warmuping_ = false;
 	enable_xla_auto_padding_ = enable_xla_auto_padding;
-	// xla auto padding do not need warmup
-	if (enable_xla_auto_padding_) warmuped_ = true;
-
       }
 
   ~BlazeXlaPredictor() override {}
@@ -60,6 +57,8 @@ class BlazeXlaPredictor : public BlazePredictor {
   int InferBatchSize(const std::vector<Tensor>& tensors);
 
   int AddNewBatchSize(int padded_size);
+  Status ComputeNoPadding(OpKernelContext* ctx,
+                    const std::vector<Tensor>& inputs);
   
   Status InitXlaWarmup();
   Status Warmup() override;
