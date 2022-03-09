@@ -415,7 +415,7 @@ Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
     return errors::Internal("Cannot infer inputs' batchsize");
   }
 
-  bool pad_to_batchsize = batchsize;
+  int pad_to_batchsize = batchsize;
   bool found_bs = false;
   for (int n : batch_sizes_) {
     if (n >= batchsize) {
@@ -430,8 +430,8 @@ Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
     pad_to_batchsize = AddNewBatchSize(batchsize);
   }
 
-   VLOG(1) << "batchsize = " << batchsize
-           << ", pad_to_batchsize = " << pad_to_batchsize;
+  VLOG(1) << "batchsize = " << batchsize
+          << ", pad_to_batchsize = " << pad_to_batchsize;
 
   if (pad_to_batchsize != batchsize) {
     // Pad inputs
