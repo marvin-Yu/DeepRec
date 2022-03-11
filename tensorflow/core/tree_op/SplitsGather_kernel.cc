@@ -6,16 +6,40 @@
 using namespace tensorflow;
 
 template <typename T>
+int ValidateRaggedTensor(const typename TTypes<T>::ConstVec& values, 
+                         const typename TTypes<int64>::ConstVec& row_splits) {
+  if (row_splits.dimension(0) == 0) return 1;
+  if (row_splits(0) != 0) return 2;
+  if (row_splits(row_splits.dimension(0)-1) != values.dimension(0)) return 3;
+  return 0;
+}
+
+template <typename T>
 class SplitsGather: public OpKernel {
  public:
   explicit SplitsGather(OpKernelConstruction* context) : OpKernel(context) {}
 
   void Compute(OpKernelContext* context) override {
-    //a list of nodes whose children will be returned
     const auto splits = context->input(0).vec<T>();
 
     const auto indices_values = context->input(1).vec<int64>();
     const auto indices_row_splits = context->input(2).vec<int64>();
+
+    int valid = ValidateRaggedTensor<int64>(indices_values, indices_row_splits);
+    OP_REQUIRES(context, valid == 0, 
+                errors::InvalidArgument("Invalid RaggedTensor input1 indices, code: ", valid));
+
+    OP_REQUIRES(context, splits.dimension(0) == 0 || splits(0) == 0, 
+                errors::InvalidArgument("input splits should NOT contain less than ONE element."));
+    if (splits.dimension(0) <= 1 || indices_row_splits.dimension(0) == 1) {
+      if (VLOG_IS_ON(1)) LOG(WARNING) << this->name() << " void inputs "
+        <<splits.dimension(0)<<":"<<indices_row_splits.dimension(0);
+      Tensor* t;
+      OP_REQUIRES_OK(context, context->allocate_output(0, {0}, &t));
+      OP_REQUIRES_OK(context, context->allocate_output(1, {1}, &t));
+      (t->vec<int64>())(0) = 0;
+      return;
+    }
 
     int num_groups = indices_row_splits.dimension(0) - 1;
 

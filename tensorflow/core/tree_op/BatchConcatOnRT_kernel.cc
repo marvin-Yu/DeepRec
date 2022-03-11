@@ -4,20 +4,53 @@
 using namespace tensorflow;
 
 template <typename T>
+int ValidateRaggedTensor(const typename TTypes<T>::ConstVec& values, 
+                         const typename TTypes<int64>::ConstVec& row_splits) {
+  if (row_splits.dimension(0) == 0) return 1;
+  if (row_splits(0) != 0) return 2;
+  if (row_splits(row_splits.dimension(0)-1) != values.dimension(0)) return 3;
+  return 0;
+}
+
+template <typename T>
 class BatchConcatOnRT: public OpKernel {
  public:
   explicit BatchConcatOnRT(OpKernelConstruction* context) : OpKernel(context) {
   }
   void Compute(OpKernelContext* context) override {
-    //a list of nodes whose children will be returned
     const auto left_values = context->input(0).vec<T>();
     const auto left_row_splits = context->input(1).vec<int64>();
 
     const auto right_values = context->input(2).vec<T>();
     const auto right_row_splits = context->input(3).vec<int64>();
 
-    int num_groups = left_row_splits.dimension(0) - 1;
+    int valid = ValidateRaggedTensor<T>(left_values, left_row_splits);
+    OP_REQUIRES(context, valid == 0, 
+                errors::InvalidArgument("Invalid RaggedTensor input0 left, code: ", valid));
+    valid = ValidateRaggedTensor<T>(right_values, right_row_splits);
+    OP_REQUIRES(context, valid == 0, 
+                errors::InvalidArgument("Invalid RaggedTensor input1 right, code: ", valid));
 
+    //handle void inputs
+    if (left_row_splits.dimension(0) == 1){
+      if (VLOG_IS_ON(1)) LOG(WARNING) << this->name() << " void input0 "
+        <<left_row_splits.dimension(0)<<":"<<right_row_splits.dimension(0);
+      context->set_output(0, context->input(2));
+      context->set_output(1, context->input(3));
+      return;
+    } else if (right_row_splits.dimension(0) == 1) {
+      if (VLOG_IS_ON(1)) LOG(WARNING) << this->name() << " void input1 "
+        <<left_row_splits.dimension(0)<<":"<<right_row_splits.dimension(0);
+      context->set_output(0, context->input(0));
+      context->set_output(1, context->input(1));
+      return;
+    }
+
+    OP_REQUIRES(context, left_row_splits.dimension(0) == right_row_splits.dimension(0), 
+                errors::InvalidArgument("row_splits of two inputs do NOT match: ", 
+                                        left_row_splits.dimension(0) ,"!=", right_row_splits.dimension(0)));
+
+    int num_groups = left_row_splits.dimension(0) - 1;
 
     Tensor *ret_values_tensor;
     Tensor *ret_row_splits_tensor;
