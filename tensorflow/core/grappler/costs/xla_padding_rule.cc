@@ -280,8 +280,17 @@ namespace {
     // if concat dim is 1, then output (2, 6)
 
     if (node.op() != "ConcatV2" && node.op() != "Concat") return false;
-    const Tensor* concat_dim_t = ic->input_tensor(ic->num_inputs() - 1);
-    const int32 concat_dim = concat_dim_t->scalar<int32>()();
+    const int concat_dim_index =
+        node.op() == "Concat" ? 0 : ic->num_inputs() - 1;
+
+    const Tensor* concat_dim_tensor = ic->input_tensor(concat_dim_index);
+    int64 concat_dim;
+    auto s = ic->GetScalarFromTensor(concat_dim_tensor, &concat_dim);
+    if (!s.ok()) {
+      LOG(WARNING) << node.name() << "(" << node.op() << ") get concat dim fail";
+      return false;
+    }
+
     VLOG(1) << node.op() << " dim " << concat_dim;
     for (size_t i = 0; i < diff_dims.size(); i++) {
       const auto& input_dims = diff_dims[i];
@@ -340,9 +349,17 @@ namespace {
     // [(10, 30, 10), (10, 30, 5), (10, 30, 25)]
     
     if (node.op() != "Split" && node.op() != "SplitV") return false;
+    const int concat_dim_index =
+        node.op() == "Split" ? 0 : 2;
  
-    const Tensor* split_dim_t = ic->input_tensor(0);
-    const int32 split_dim = split_dim_t->scalar<int32>()();
+    const Tensor* split_dim_tensor = ic->input_tensor(concat_dim_index);
+    int64 split_dim;
+    auto s = ic->GetScalarFromTensor(split_dim_tensor, &split_dim);
+    if (!s.ok()) {
+      LOG(WARNING) << node.name() << "(" << node.op() << ") get split dim fail";
+      return false;
+    }
+
     // split dim not the dynamic dim of input 1
     CHECK(diff_dims.size() > 0); // This always true, because 
                                   // it will not be here if diff_dims.size() <= 0
@@ -355,30 +372,6 @@ namespace {
         return false;
       }
     }
-    return true;
-  }
-
-  /// DEPRECATED. 
-  /// Pack and Stack add to white list
-  inline bool ValidateStack(const NodeDef& node, 
-      const std::vector<std::vector<int>>& diff_dims, 
-      InferenceContext* ic) {
-    // Stack is supported, becase they dont fuse 
-    // datas together, but keeps datas along their dims
-
-    // How does stack works?
-    // eg: input0 (2, 3), input1(2, 3)
-    // if stack dim is 0, then output (2, 2, 3)
-    // if stack dim is 1, then output (2, 3, 2)
-    if (node.op() != "Stack" && node.op() != "StackV2" && node.op() != "Pack") return false;
-
-    if (node.attr().count("axis") <= 0) {
-      LOG(WARNING) << node.name() << "(" << node.op() << ") has no axis attr";
-      return false;
-    }
-
-    int pack_dim = node.attr().at("axis").i();
-    VLOG(1) << "Pack dim " << pack_dim;
     return true;
   }
 
