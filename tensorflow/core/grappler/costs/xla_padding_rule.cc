@@ -97,6 +97,8 @@ namespace {
   };
   const std::set<std::string> shape_ops = {"Shape", "ShapeN", "Rank","Size", "TensorArraySizeV3"};
   const std::set<std::string> black_list_ops = {
+      "Enter",
+      "DynamicPartition", "DynamicStitch", "NextIteration", "Switch", "LoopCond", "_SwitchN",
       "Bucketize",
       "Case",
       "Pad",
