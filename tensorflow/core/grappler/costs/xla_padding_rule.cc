@@ -82,6 +82,7 @@ namespace {
       "Sinh",
       "Sqrt",
       "Square",
+      "SquaredDifference",
       "Stack",
       "Sub",
       "Tan",
@@ -104,7 +105,6 @@ namespace {
       "Pad",
       "PadV2",
       "PreventGradient",
-      "SquaredDifference",
       "StopGradient",
     "If",  "While", "GatherV2", "Gather", "GatherNd", "Select", "SelectV2", 
     // TODO
