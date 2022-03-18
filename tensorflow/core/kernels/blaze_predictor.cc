@@ -97,9 +97,26 @@ Status BlazePredictor::PrepareGraph(GraphDef& graph_def) {
 
 Status BlazePredictor::MakeCallable() {
   CallableOptions callable_options;
+  std::set<std::string> cpu_inputs;
+  for (const auto& node : graph_def_.node()) {
+    if (node.op() == "Placeholder") {
+      auto it = node.attr().find("dtype");
+      if (it != node.attr().end()) {
+        if (it->second.type() == DT_INT32 || it->second.type() == DT_UINT32) {
+          cpu_inputs.insert(node.name());
+        }
+      }
+    }
+  }
+
   for (const auto& input : input_names_) {
-    callable_options.add_feed(input);
-    callable_options.mutable_feed_devices()->insert({input, device_});
+    if (cpu_inputs.find(input) == cpu_inputs.end()) {
+      callable_options.add_feed(input);
+      callable_options.mutable_feed_devices()->insert({input, device_});
+    } else {
+      callable_options.add_feed(input);
+      callable_options.mutable_feed_devices()->insert({input, "/CPU:0"});
+    }
   }
 
   for (const auto& output : output_names_) {
