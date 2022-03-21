@@ -113,9 +113,11 @@ Status BlazePredictor::MakeCallable() {
     if (cpu_inputs.find(input) == cpu_inputs.end()) {
       callable_options.add_feed(input);
       callable_options.mutable_feed_devices()->insert({input, device_});
+      copyable_.push_back(true);
     } else {
       callable_options.add_feed(input);
       callable_options.mutable_feed_devices()->insert({input, "/CPU:0"});
+      copyable_.push_back(false);
     }
   }
 
@@ -328,6 +330,10 @@ Status BlazePredictor::CopyTensorCPUToGPU(const std::vector<Tensor>& inputs,
     OpKernelContext* ctx) {
 
   for (int i = 0; i < inputs.size(); ++i) {
+    if (!copyable_[i]) {
+      (*real_inputs)[i] = inputs[i];
+      continue;
+    }
     Tensor copyed_tensor(blaze_allocator_, inputs[i].dtype(), inputs[i].shape());
     (*real_inputs)[i] = copyed_tensor;
 

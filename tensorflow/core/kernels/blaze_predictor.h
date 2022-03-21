@@ -94,6 +94,7 @@ class BlazePredictor {
   Allocator* blaze_allocator_;
   stream_executor::Stream* stream_;
   int vgpu_id_;
+  std::vector<bool> copyable_;
 
   std::string session_key_;
   static SessionMap session_map_;
