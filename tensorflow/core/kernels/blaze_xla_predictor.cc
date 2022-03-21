@@ -200,6 +200,8 @@ Status BlazeXlaPredictor::PadToStaticCPUToGPU(const std::vector<Tensor>& inputs,
     }
     pad_to_shape.set_dim(0, first_dim);
     if (!copyable_[i]) {
+      AllocatorAttributes alloc_attrs;
+      alloc_attrs.set_on_host(ctx->input_memory_type(i) == HOST_MEMORY);
       Status allocate_status =
           ctx->allocate_temp(inputs[i].dtype(),
                              pad_to_shape,
