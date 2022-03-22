@@ -4,6 +4,7 @@
 #include "tensorflow/core/kernels/blaze_predictor.h"
 #include "tensorflow/core/platform/stream_executor.h"
 #include "tensorflow/core/platform/protobuf.h"
+#include "tensorflow/core/platform/mutex.h"
 
 #if GOOGLE_CUDA
 #include "tensorflow/core/kernels/gpu_utils.h"
@@ -11,6 +12,9 @@ using tensorflow::se::Event;
 #endif
 namespace tensorflow {
 const int kBlazeStartStepId = 1024;
+
+mutex BlazePredictor::session_mu_;
+BlazePredictor::SessionMap BlazePredictor::session_map_;
 
 BlazePredictor::BlazePredictor(OpKernelConstruction* ctx) : device_type_(ctx->device_type().type()) {
   OP_REQUIRES_OK(ctx, ctx->GetAttr("input_names", &input_names_));
@@ -20,6 +24,20 @@ BlazePredictor::BlazePredictor(OpKernelConstruction* ctx) : device_type_(ctx->de
   OP_REQUIRES_OK(ctx, ctx->GetAttr("InT", &input_types_));
   OP_REQUIRES_OK(ctx, ParseAttr(ctx->def().device()));
   ctx_ = ctx;
+}
+
+BlazePredictor::~BlazePredictor() {
+  if (!session_key_.empty()) {
+    mutex_lock l(session_mu_);
+    auto it = session_map_.find(session_key_); 
+    if (it == session_map_.end()) {
+      LOG(ERROR) << "release session not found in static map, should not happen";
+      return;
+    }
+    if (--(it->second.count) == 0) {
+      session_map_.erase(it);
+    }
+ 	}
 }
 
 Status BlazePredictor::ParseAttr(const std::string& device) {
@@ -123,33 +141,53 @@ Status BlazePredictor::InitSession() {
 
   options.config.MergeFrom(blaze_run_options_.config_proto());
   TF_RETURN_IF_ERROR(GenSessionOptions(options));
-  VLOG(0) << "create session with config " << options.config.DebugString();
-  session_ = std::move(std::unique_ptr<Session>(NewSession(options)));
-  if (session_ == nullptr) {
-    LOG(ERROR) << "create session failed";
-    return errors::Internal("Create session failed");
+  auto status = ctx_->GetAttr("_session_key", &session_key_);
+ 	if (status.ok()) {
+ 	  LOG(INFO) << "_session_key detected, static Session enabled";
+ 	} else {
+ 	  LOG(INFO) << "_session_key not detected, won't use static predictor map";
+ 	  session_key_.clear();
   }
+  {
+    GraphDef graph_def;
+    TF_RETURN_IF_ERROR(PrepareGraph(graph_def));
+ 	  mutex_lock l(session_mu_);
+    auto it = session_map_.find(session_key_);
+    if (it == session_map_.end()) {
+      VLOG(0) << "create session with config " << options.config.DebugString();
+      session_ = std::shared_ptr<Session>(NewSession(options));
+      if (session_ == nullptr) {
+        LOG(ERROR) << "create session failed";
+        return errors::Internal("Create session failed");
+      }
+      auto dir_session = reinterpret_cast<DirectSession*>(session_.get());
+      dir_session->SetStepInitId(kBlazeStartStepId);
+      LOG(INFO) << "Blaze start with step id " << kBlazeStartStepId;
+      LOG(INFO) << "Creat session succ " << this;
 
-  auto dir_session = reinterpret_cast<DirectSession*>(session_.get());
-  dir_session->SetStepInitId(kBlazeStartStepId);
-  LOG(INFO) << "Blaze start with step id " << kBlazeStartStepId;
-  LOG(INFO) << "Creat session succ " << this;
+      auto status = session_->Create(graph_def);
+      if (!status.ok()) {
+        LOG(ERROR) << "create session with GraphDef failed " << status.ToString();
+        return status;
+      }
+      TF_RETURN_IF_ERROR(MakeCallable());
+      LOG(INFO) << "MakeCallable succ " << this;
+      if (!session_key_.empty()) {
+        session_map_.emplace(session_key_, SessionTuple(session_, 1, handle_));
+      }
+    } else {
+      session_ = it->second.session;
+      it->second.count++;
+      handle_ = it->second.handle;
+    }
+    TF_RETURN_IF_ERROR(SetDeviceInfo(ctx_));
 
-  GraphDef graph_def;
-  TF_RETURN_IF_ERROR(PrepareGraph(graph_def));
-
-  auto status = session_->Create(graph_def);
-  if (!status.ok()) {
-    LOG(ERROR) << "create session with GraphDef failed " << status.ToString();
-    return status;
+    auto warm_status = Warmup();
+    if (warm_status != Status::OK()) {
+      return warm_status;
+    }
+    return  Status::OK();
   }
-
-  TF_RETURN_IF_ERROR(MakeCallable());
-  LOG(INFO) << "MakeCallable succ " << this;
-
-  TF_RETURN_IF_ERROR(SetDeviceInfo(ctx_));
- 
-  return Warmup();
 }
 
 Status BlazePredictor::Compute(OpKernelContext* ctx) {

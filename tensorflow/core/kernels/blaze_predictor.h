@@ -37,6 +37,15 @@ namespace tensorflow {
 //Base blaze predictor, for normal run/(mlir)
 class BlazePredictor {
  public:
+  typedef std::shared_ptr<Session> SessionPtr;
+  struct SessionTuple {
+    SessionPtr session;
+    uint32_t count = 0;
+    Session::CallableHandle handle = -1;
+    SessionTuple(const SessionPtr& s, uint32_t c, Session::CallableHandle h) :
+        session(s), count(c), handle(h) {}
+  };
+  typedef std::unordered_map<std::string, SessionTuple> SessionMap;
   BlazePredictor(OpKernelConstruction* ctx);
   BlazePredictor(const std::vector<std::string>& input_names,
                           const std::vector<std::string>& output_names,
@@ -49,7 +58,7 @@ class BlazePredictor {
     blaze_run_options_(options), device_type_(device_string),
     input_types_(input_types), ctx_(ctx) {}
 
-    virtual ~BlazePredictor() {}
+  virtual ~BlazePredictor();
 
   virtual Status Compute(OpKernelContext* ctx);
   virtual void ComputeNull(OpKernelContext* ctx) {}
@@ -75,7 +84,7 @@ class BlazePredictor {
   std::string device_;
   OpKernelConstruction* ctx_;
   //runtime options
-  std::unique_ptr<Session> session_;
+  std::shared_ptr<Session> session_;
   Session::CallableHandle handle_;
 
   //for cpu->gpu
@@ -86,6 +95,10 @@ class BlazePredictor {
   stream_executor::Stream* stream_;
   int vgpu_id_;
 
+  std::string session_key_;
+  static SessionMap session_map_;
+  static mutex session_mu_;
+  
  private:
   Status ParseAttr(const std::string& device);
   virtual Status PrepareData() {
