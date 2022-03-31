@@ -92,6 +92,7 @@ namespace {
       "TruncateMod",
       "TruncatedNormal",
       "ZerosLike",
+      "GatherV2", "Gather", "GatherNd", 
       "_Arg",
       "_HostCast",
       "_Retval",
@@ -106,7 +107,8 @@ namespace {
       "PadV2",
       "PreventGradient",
       "StopGradient",
-    "If",  "While", "GatherV2", "Gather", "GatherNd", "Select", "SelectV2", 
+    "If",  "While", 
+    "Select", "SelectV2", 
     // TODO
     "All", "Any", "ArgMax", "ArgMin", "AvgPool", "AvgPool3D", "BroadcastArgs", "BroadcastGradientArgs",
     "BroadcastTo", "Complex", "ComplexAbs", "ConcatOffset", "Cumprod", "Cumsum", "Diag", "Elu", "Empty",
