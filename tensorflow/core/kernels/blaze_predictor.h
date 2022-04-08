@@ -52,11 +52,7 @@ class BlazePredictor {
                           const GraphDef& graph_def, const std::string& device,
                           const BlazeKernelOptions& options, const string& device_string,
                           const std::vector<DataType>& input_types,
-                          OpKernelConstruction* ctx = nullptr) :
-    input_names_(input_names), output_names_(output_names),
-    graph_def_(graph_def), request_device_(device),
-    blaze_run_options_(options), device_type_(device_string),
-    input_types_(input_types), ctx_(ctx) {}
+                          OpKernelConstruction* ctx = nullptr);
 
   virtual ~BlazePredictor();
 
@@ -94,6 +90,7 @@ class BlazePredictor {
   Allocator* blaze_allocator_;
   stream_executor::Stream* stream_;
   int vgpu_id_;
+  std::vector<bool> copyable_;
 
   std::string session_key_;
   static SessionMap session_map_;
@@ -110,8 +107,10 @@ class BlazePredictor {
   virtual Status MakeCallable();
   virtual Status Warmup();
   void SetDeviceInGraphDef(const std::string device_name, GraphDef* graph_def);
+  void SetCPUDeviceInGraphDef(const std::string device_name, GraphDef* graph_def);
 
   Status SetDeviceInfo(OpKernelConstruction* ctx);
+  Status PrepareCallableOptions(CallableOptions &callable_options);
 
  private:
   const char* const kBlazeRealDevice = "_blaze_real_device";
