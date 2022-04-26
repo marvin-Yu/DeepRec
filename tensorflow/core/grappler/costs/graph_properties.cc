@@ -2042,6 +2042,13 @@ class SymbolicShapeRefiner {
         tensor_proto.tensor_shape().dim_size() > 1) {
       return false;
     }
+    // Skip if vector elements more than 1000, it should not be shape
+    if (tensor_proto.tensor_shape().dim_size() == 1) {
+      if (tensor_proto.tensor_shape().dim(0).size() > 1000) {
+        VLOG(1) << "const value more than 1000, cant be shape";
+        return false;
+      }
+    }
     Tensor tensor;
     if (!tensor.FromProto(tensor_proto)) {
       return false;
