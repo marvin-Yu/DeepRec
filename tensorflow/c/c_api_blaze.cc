@@ -203,6 +203,33 @@ TF_Buffer* TF_ReadMetaGraphDefFromFile(
   }
 }
 
+void TF_UpdateHugeConstPath(TF_Graph* graph,
+                            const char* directory) {
+  mutex_lock l(graph->mu);
+  Graph* g = &(graph->graph);
+
+  VLOG(1) << "TF_UpdateHugeConstPath to path: "<<directory;
+
+  for (Node* n : g->nodes()) {
+    if (n->type_string() == "HugeConst") {
+      std::string original_path;
+      Status status = GetNodeAttr(n->attrs(), "path", &original_path);
+      if (!status.ok()) {
+        LOG(ERROR) << "Get Attr[path] failed in HugeConst Node: "<< n->DebugString();
+        continue;
+      }
+
+      std::string modified_path(directory); 
+      modified_path += original_path.substr(original_path.rfind('/')+1);
+      n->ClearAttr("path");
+      n->AddAttr("path", modified_path);
+
+      VLOG(1) << "Update Attr[path] in HugeConst:" << n->DebugString()
+              << "\nfrom original_path: " << original_path;
+    }
+  }
+}
+
 void TF_GraphSetDevice(TF_Graph* graph, int cpu_id, int gpu_id) {
   mutex_lock l(graph->mu);
   Graph* g = &(graph->graph);
@@ -430,6 +457,13 @@ void TF_EnableGemmOptimization(TF_SessionOptions* options,
   }
 }
 
+void TF_EnableXlaAutoPadding(TF_SessionOptions* options,
+                         unsigned char enable,
+                         unsigned char padding_type) {
+  tensorflow::ConfigProto& config = options->options.config;
+  config.set_enable_xla_auto_padding(enable);
+}
+
 bool TF_InitSessionOptionsFromPB(const char* pb_char, TF_SessionOptions* options) {
   auto& config = options->options.config;
   tensorflow::ConfigProto config_proto;
@@ -566,6 +600,7 @@ inline void GetProfStats(TF_ProfStats* tf_prof_stats,
   if (tf_prof_stats) {
     tf_prof_stats->flops = meta_prof_stats.flops();
     tf_prof_stats->tao_op_calls = meta_prof_stats.tao_op_calls();
+    tf_prof_stats->dump_shapes = meta_prof_stats.dump_shapes();
   }
 }
 

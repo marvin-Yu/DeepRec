@@ -394,6 +394,15 @@ Status ReplaceNodeWithXlaCompileAndXlaRun(
     requires_compilation = true;
   }
 
+  bool enable_xla_auto_padding = options.session_options->config.enable_xla_auto_padding();
+  VLOG(0) << "enable_xla_auto_padding=" << enable_xla_auto_padding;
+  if (enable_xla_auto_padding) {
+    // xla padding requires lazy compile
+    requires_compilation = false;
+  }
+  std::string auto_padding_shape = options.session_options->config.auto_padding_shape();
+  VLOG(0) << "auto_padding_shape " << auto_padding_shape;
+
   string device_name_str = string(device_info_cache->GetNameFor(device));
 
   Status status;
@@ -401,7 +410,6 @@ Status ReplaceNodeWithXlaCompileAndXlaRun(
                    .NewSubScope(n->name())
                    .WithDevice(n->requested_device())
                    .WithAssignedDevice(device_name_str);
-
 
   if (requires_compilation) {
     ops::XlaLaunch xla_launch(root.WithOpName("xla_launch"),
@@ -422,6 +430,8 @@ Status ReplaceNodeWithXlaCompileAndXlaRun(
                                  /*args=*/cluster_info.non_constant_inputs,
                                  /*resources=*/cluster_info.resource_inputs,
                                  /*must_compile=*/requires_compilation,
+                                 enable_xla_auto_padding,
+                                 auto_padding_shape,
                                  cluster_info.function);
     TF_RETURN_IF_ERROR(
         CopyIncomingControlEdges(g, /*from=*/n, /*to=*/xla_compile.key.node()));

@@ -39,6 +39,7 @@ class GpuHostAllocator : public SubAllocator {
   void* Alloc(size_t alignment, size_t num_bytes) override {
     void* ptr = nullptr;
     if (num_bytes > 0) {
+      LOG(INFO) << this << " host alloc " << num_bytes;
       ptr = stream_exec_->HostMemoryAllocate(num_bytes);
       if (ptr == nullptr) {
         LOG(WARNING) << "could not allocate pinned host memory of size: "

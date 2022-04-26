@@ -3698,6 +3698,7 @@ cc_library(
         "//tensorflow/core/topk_op:topk_op",
         "//tensorflow/core/tree_op:tree_op",
         "//tensorflow/core/take_ops:take_ops",
+        # "//tensorflow/core/huge_const_op:huge_const_op",
     ],
 )
 

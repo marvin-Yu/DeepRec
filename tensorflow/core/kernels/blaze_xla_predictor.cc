@@ -199,8 +199,20 @@ Status BlazeXlaPredictor::PadToStaticCPUToGPU(const std::vector<Tensor>& inputs,
       first_dim = (first_dim == 1) ? 1 : pad_to_batchsize;
     }
     pad_to_shape.set_dim(0, first_dim);
-    Tensor padded_tensor(blaze_allocator_, inputs[i].dtype(), pad_to_shape);
-    (*padded_inputs)[i] = padded_tensor;
+    if (!copyable_[i]) {
+      AllocatorAttributes alloc_attrs;
+      alloc_attrs.set_on_host(ctx->input_memory_type(i) == HOST_MEMORY);
+      Status allocate_status =
+          ctx->allocate_temp(inputs[i].dtype(),
+                             pad_to_shape,
+                             &(*padded_inputs)[i], alloc_attrs);
+      if (!allocate_status.ok()) {
+        return allocate_status;
+      }
+    } else {
+      Tensor padded_tensor(blaze_allocator_, inputs[i].dtype(), pad_to_shape);
+      (*padded_inputs)[i] = padded_tensor;
+    }
     const uint8* input_ptr = (uint8*)GetTensorAddress(&inputs[i]);
     uint8* padded_ptr = (uint8*)GetTensorAddress(&(*padded_inputs)[i]);
     uint64 input_size = GetTensorSize(&inputs[i]);
@@ -209,6 +221,31 @@ Status BlazeXlaPredictor::PadToStaticCPUToGPU(const std::vector<Tensor>& inputs,
         input_size == 0 || padded_size == 0) {
       return errors::Internal(
           "Error when getting input address or size");
+    }
+    if (!copyable_[i]) {
+      if (device_type_ == DEVICE_GPU && ctx->input_memory_type(i) == DEVICE_MEMORY) {
+#if GOOGLE_CUDA
+        auto* stream = ctx->op_device_context()->stream();
+        auto input_dev_ptr = AsDeviceMemory(input_ptr, input_size);
+        auto padded_dev_ptr = AsDeviceMemory(padded_ptr, padded_size);
+        if (DataTypeIsInteger(inputs[i].dtype())) {
+          bool copy_status =
+              stream->ThenMemZero(&padded_dev_ptr, padded_size).ok();
+          if (!copy_status) {
+            return errors::Internal("MemZero failed.");
+          }
+        }
+        bool copy_status =
+            stream->ThenMemcpyD2D(&padded_dev_ptr, input_dev_ptr, input_size).ok();
+        if (!copy_status) {
+          return errors::Internal("MemcpyD2D for padding inputs failed.");
+        }
+#endif
+      } else {
+        std::memset(padded_ptr, 0, padded_size);
+        std::memcpy(padded_ptr, input_ptr, input_size);
+      }
+      continue;
     }
 #if GOOGLE_CUDA
       auto padded_dev_ptr = AsDeviceMemory(padded_ptr, padded_size);
@@ -365,7 +402,6 @@ Status BlazeXlaPredictor::SliceToDynamicCPU(const std::vector<Tensor>& padded_ou
 
 Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
   // Infer inputs' batchsize
-
   if (TF_PREDICT_FALSE(!warmuped_)) {
     if (warmuping_) {
       return errors::Internal("Blaze kernel warmuping");

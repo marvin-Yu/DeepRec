@@ -1044,6 +1044,9 @@ Status DirectSession::RunInternal(
   //[PROF-STATS]
   if (enable_prof_stats_ && run_metadata) {
     run_metadata->mutable_prof_stats()->set_flops(args.real_prof_stats.flops);
+    run_metadata->mutable_prof_stats()->set_tao_op_calls(
+        args.real_prof_stats.tao_op_calls);
+    run_metadata->mutable_prof_stats()->set_dump_shapes(args.real_prof_stats.dump_shapes);
   }
 
   if (args.traced_infos) {

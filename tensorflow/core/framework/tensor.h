@@ -644,6 +644,8 @@ class Tensor {
   template <typename T>
   T* base() const;
 
+  bool SameAs(const Tensor& other) const;
+
  private:
   // Returns true if the refcount on buf_ and any possible underlying root
   // buffer is one.

@@ -98,6 +98,7 @@ extern "C" {
 typedef struct TF_ProfStats {
   unsigned long long flops;
   unsigned long long tao_op_calls;
+  bool dump_shapes = false;
 } TF_ProfStats;
 
 TF_CAPI_EXPORT extern TF_Buffer* TF_ReadGraphDefFromFile(
@@ -106,6 +107,10 @@ TF_CAPI_EXPORT extern TF_Buffer* TF_ReadGraphDefFromFile(
 TF_CAPI_EXPORT extern TF_Buffer* TF_ReadMetaGraphDefFromFile(
     const char* graph_def_path,
     TF_Status* status);
+
+TF_CAPI_EXPORT extern void TF_UpdateHugeConstPath(
+    TF_Graph* graph,
+    const char* directory);
 
 // Sets the device attrs of nodes in graph to `device`.
 TF_CAPI_EXPORT extern void TF_GraphSetDevice(TF_Graph* graph,
@@ -146,6 +151,10 @@ TF_CAPI_EXPORT extern void TF_EnableSoftDevicePlacement(
 TF_CAPI_EXPORT extern void TF_EnableGemmOptimization(
     TF_SessionOptions* opt,
     unsigned char enable);
+TF_CAPI_EXPORT extern void TF_EnableXlaAutoPadding(
+    TF_SessionOptions* opt,
+    unsigned char enable,
+    unsigned char padding_type);
 TF_CAPI_EXPORT extern void TF_EnableVirtualGPUDevices(
     TF_SessionOptions* opt,
     int num_virtual_gpus_per_device,

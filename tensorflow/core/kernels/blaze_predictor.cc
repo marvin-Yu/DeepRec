@@ -12,6 +12,7 @@ using tensorflow::se::Event;
 #endif
 namespace tensorflow {
 const int kBlazeStartStepId = 1024;
+const std::string kCpuDeviceName = "/job:localhost/replica:0/task:0/device:CPU:0";
 
 mutex BlazePredictor::session_mu_;
 BlazePredictor::SessionMap BlazePredictor::session_map_;
@@ -24,6 +25,38 @@ BlazePredictor::BlazePredictor(OpKernelConstruction* ctx) : device_type_(ctx->de
   OP_REQUIRES_OK(ctx, ctx->GetAttr("InT", &input_types_));
   OP_REQUIRES_OK(ctx, ParseAttr(ctx->def().device()));
   ctx_ = ctx;
+}
+
+BlazePredictor::BlazePredictor(const std::vector<std::string>& input_names,
+                          const std::vector<std::string>& output_names,
+                          const GraphDef& graph_def, const std::string& device,
+                          const BlazeKernelOptions& options, const string& device_string,
+                          const std::vector<DataType>& input_types,
+                          OpKernelConstruction* ctx) :
+    input_names_(input_names), output_names_(output_names),
+    graph_def_(graph_def), request_device_(device),
+    blaze_run_options_(options), device_type_(device_string),
+    input_types_(input_types), ctx_(ctx) {
+  // rewrite HugeConst
+  std::string root_path;
+  auto status = ctx_->GetAttr("_extra_conf_root_path", &root_path);
+ 	if (status.ok()) {
+    LOG(INFO) << "get _extra_conf_root_path" << root_path;
+ 	  for (int i = 0; i < graph_def_.node_size() ;i++) {
+      auto node = graph_def_.mutable_node(i);
+      if (node->op() == "HugeConst") {
+        auto* attr_map = node->mutable_attr();
+        if (attr_map != nullptr) {
+          auto it = attr_map->find("path");
+          if (it != attr_map->end()) {
+            std::string ad_vec_path = root_path + '/' + it->second.s();
+            it->second.set_s(ad_vec_path);
+            LOG(INFO) << "Update path attr of HugeConst op " << node->name() << " to " << ad_vec_path;
+          }
+        }
+      }
+    }
+  } { LOG(INFO) << "not get _extra_conf_root_path" << root_path; }
 }
 
 BlazePredictor::~BlazePredictor() {
@@ -91,15 +124,41 @@ Status BlazePredictor::PrepareGraph(GraphDef& graph_def) {
   LOG(INFO) << "BlazePredictor will use device " << device_;
   graph_def = graph_def_;
   SetDeviceInGraphDef(device_, &graph_def);
+  SetCPUDeviceInGraphDef(kCpuDeviceName, &graph_def);
 
   return Status::OK();
 }
 
 Status BlazePredictor::MakeCallable() {
   CallableOptions callable_options;
+  TF_RETURN_IF_ERROR(PrepareCallableOptions(callable_options));
+  LOG(INFO) << "create session with callable options " <<
+        callable_options.DebugString();
+  return session_->MakeCallable(callable_options, &handle_);
+}
+
+Status BlazePredictor::PrepareCallableOptions(CallableOptions &callable_options) {
+  std::set<std::string> cpu_inputs;
+  for (const auto& node : graph_def_.node()) {
+    if (node.op() == "Placeholder") {
+      auto it = node.attr().find("dtype");
+      if (it != node.attr().end()) {
+        if (it->second.type() == DT_INT32 || it->second.type() == DT_UINT32) {
+          cpu_inputs.insert(node.name());
+        }
+      }
+    }
+  }
   for (const auto& input : input_names_) {
-    callable_options.add_feed(input);
-    callable_options.mutable_feed_devices()->insert({input, device_});
+    if (cpu_inputs.find(input) == cpu_inputs.end()) {
+      callable_options.add_feed(input);
+      callable_options.mutable_feed_devices()->insert({input, device_});
+      copyable_.push_back(true);
+    } else {
+      callable_options.add_feed(input);
+      callable_options.mutable_feed_devices()->insert({input, kCpuDeviceName});
+      copyable_.push_back(false);
+    }
   }
 
   for (const auto& output : output_names_) {
@@ -107,9 +166,7 @@ Status BlazePredictor::MakeCallable() {
     callable_options.mutable_fetch_devices()->insert({output, device_});
   }
   callable_options.set_fetch_skip_sync(true);
-  LOG(INFO) << "create session with callable options " <<
-      callable_options.DebugString();
-  return session_->MakeCallable(callable_options, &handle_);
+  return Status::OK();
 }
 
 Status BlazePredictor::Warmup() {
@@ -160,6 +217,8 @@ Status BlazePredictor::InitSession() {
         session_map_.emplace(session_key_, SessionTuple(session_, 1, handle_));
       }
     } else {
+      CallableOptions callable_options;
+      TF_RETURN_IF_ERROR(PrepareCallableOptions(callable_options));
       session_ = it->second.session;
       it->second.count++;
       handle_ = it->second.handle;
@@ -218,7 +277,25 @@ void BlazePredictor::SetDeviceInGraphDef(const std::string device_name,
   int node_size = graph_def->node_size();
   for (int i = 0; i < node_size; i++) {
     NodeDef* node = graph_def->mutable_node(i);
+    if (node->device() == "/device:CPU:0") {
+      VLOG(1) << "node " << node->name() << " device /device:CPU:0, do not overwrite to GPU";
+      continue;
+    }
     node->set_device(device_name);
+  }
+  VLOG(2) << "After setting device: \n" << graph_def->DebugString();
+}
+
+void BlazePredictor::SetCPUDeviceInGraphDef(const std::string device_name,
+                                            GraphDef* graph_def) {
+  VLOG(2) << "Before setting device: \n" << graph_def->DebugString();
+  int node_size = graph_def->node_size();
+  for (int i = 0; i < node_size; i++) {
+    NodeDef* node = graph_def->mutable_node(i);
+    if (node->device() == "/device:CPU:0") {
+      VLOG(1) << "node " << node->name() << " device /device:CPU:0, overwrite to " << device_name;
+      node->set_device(device_name);
+    }
   }
   VLOG(2) << "After setting device: \n" << graph_def->DebugString();
 }
@@ -311,6 +388,10 @@ Status BlazePredictor::CopyTensorCPUToGPU(const std::vector<Tensor>& inputs,
     OpKernelContext* ctx) {
 
   for (int i = 0; i < inputs.size(); ++i) {
+    if (!copyable_[i]) {
+      (*real_inputs)[i] = inputs[i];
+      continue;
+    }
     Tensor copyed_tensor(blaze_allocator_, inputs[i].dtype(), inputs[i].shape());
     (*real_inputs)[i] = copyed_tensor;
 
