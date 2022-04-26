@@ -38,6 +38,7 @@ limitations under the License.
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/tracing.h"
 #include "tensorflow/core/profiler/lib/traceme.h"
+#include "tensorflow/core/util/env_var.h"
 #include "tensorflow/stream_executor/platform.h"
 
 namespace xla {
@@ -160,6 +161,10 @@ Status GpuExecutable::ExecuteThunks(
 
   std::map<const Thunk*, std::unique_ptr<se::Event>> thunk_to_finish_event;
   bool scoped_annotation_enabled = ScopedAnnotation::IsEnabled();
+
+  bool sync_env = false;
+  tensorflow::ReadBoolFromEnvVar("TF_GPU_SYNC_EVERY_OP", false, &sync_env);
+
   for (Thunk* thunk : thunk_schedule_->TotalOrder()) {
     // Annotate execution of this op if tracing was enabled when we started
     // running this module.  If tracing is enabled *while* we're running the
@@ -180,7 +185,7 @@ Status GpuExecutable::ExecuteThunks(
       stream->ThenWaitFor(FindOrDie(thunk_to_finish_event, dependency).get());
     }
 
-    VLOG(2) << "Executing the thunk for "
+    VLOG(1) << "Executing the thunk for "
             << thunk->hlo_instruction()->ToString() << " on stream "
             << stream_no;
     Thunk::ExecuteParams thunk_params{
@@ -198,6 +203,17 @@ Status GpuExecutable::ExecuteThunks(
       stream->ThenRecordEvent(finish_event.get());
       thunk_to_finish_event[thunk] = std::move(finish_event);
     }
+    if (sync_env) {
+      Status block_status = stream->BlockHostUntilDone();
+      if (!block_status.ok()) {
+        return InternalError(
+            "Failed to complete all kernels launched on stream %p: %s",
+            stream, block_status.error_message());
+      }
+      VLOG(1) << "End executing the thunk for "
+              << thunk->hlo_instruction()->ToString() << " on stream "
+              << stream_no;
+    }
   }
 
   main_stream->ThenWaitFor(&sub_streams);
@@ -205,7 +221,7 @@ Status GpuExecutable::ExecuteThunks(
   // the profiler state.
   // TODO(b/30100571): we could potentially postpone deallocating the temp
   // buffers until a different computation is executed.
-  if (do_profile || block_host_until_done) {
+  if (sync_env || do_profile || block_host_until_done) {
     Status block_status = main_stream->BlockHostUntilDone();
     if (!block_status.ok()) {
       return InternalError(

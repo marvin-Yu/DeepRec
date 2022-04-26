@@ -164,13 +164,13 @@ port::StatusOr<std::vector<uint8>> CompilePtx(int device_ordinal,
   for (const string& cuda_root :
        tensorflow::CandidateCudaRoots(options.preferred_cuda_dir)) {
     ptxas_path = tensorflow::io::JoinPath(cuda_root, "bin", "ptxas");
-    VLOG(2) << "Looking for ptxas at " << ptxas_path;
+    VLOG(1) << "Looking for ptxas at " << ptxas_path;
     if (env->FileExists(ptxas_path).ok()) {
       break;
     }
   }
   TF_RETURN_IF_ERROR(env->FileExists(ptxas_path));
-  VLOG(2) << "Using ptxas at " << ptxas_path;
+  VLOG(1) << "Using ptxas at " << ptxas_path;
 
   WarnIfBadPtxasVersion(ptxas_path);
 
