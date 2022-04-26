@@ -199,8 +199,20 @@ Status BlazeXlaPredictor::PadToStaticCPUToGPU(const std::vector<Tensor>& inputs,
       first_dim = (first_dim == 1) ? 1 : pad_to_batchsize;
     }
     pad_to_shape.set_dim(0, first_dim);
-    Tensor padded_tensor(blaze_allocator_, inputs[i].dtype(), pad_to_shape);
-    (*padded_inputs)[i] = padded_tensor;
+    if (!copyable_[i]) {
+      AllocatorAttributes alloc_attrs;
+      alloc_attrs.set_on_host(ctx->input_memory_type(i) == HOST_MEMORY);
+      Status allocate_status =
+          ctx->allocate_temp(inputs[i].dtype(),
+                             pad_to_shape,
+                             &(*padded_inputs)[i], alloc_attrs);
+      if (!allocate_status.ok()) {
+        return allocate_status;
+      }
+    } else {
+      Tensor padded_tensor(blaze_allocator_, inputs[i].dtype(), pad_to_shape);
+      (*padded_inputs)[i] = padded_tensor;
+    }
     const uint8* input_ptr = (uint8*)GetTensorAddress(&inputs[i]);
     uint8* padded_ptr = (uint8*)GetTensorAddress(&(*padded_inputs)[i]);
     uint64 input_size = GetTensorSize(&inputs[i]);
@@ -209,6 +221,31 @@ Status BlazeXlaPredictor::PadToStaticCPUToGPU(const std::vector<Tensor>& inputs,
         input_size == 0 || padded_size == 0) {
       return errors::Internal(
           "Error when getting input address or size");
+    }
+    if (!copyable_[i]) {
+      if (device_type_ == DEVICE_GPU && ctx->input_memory_type(i) == DEVICE_MEMORY) {
+#if GOOGLE_CUDA
+        auto* stream = ctx->op_device_context()->stream();
+        auto input_dev_ptr = AsDeviceMemory(input_ptr, input_size);
+        auto padded_dev_ptr = AsDeviceMemory(padded_ptr, padded_size);
+        if (DataTypeIsInteger(inputs[i].dtype())) {
+          bool copy_status =
+              stream->ThenMemZero(&padded_dev_ptr, padded_size).ok();
+          if (!copy_status) {
+            return errors::Internal("MemZero failed.");
+          }
+        }
+        bool copy_status =
+            stream->ThenMemcpyD2D(&padded_dev_ptr, input_dev_ptr, input_size).ok();
+        if (!copy_status) {
+          return errors::Internal("MemcpyD2D for padding inputs failed.");
+        }
+#endif
+      } else {
+        std::memset(padded_ptr, 0, padded_size);
+        std::memcpy(padded_ptr, input_ptr, input_size);
+      }
+      continue;
     }
 #if GOOGLE_CUDA
       auto padded_dev_ptr = AsDeviceMemory(padded_ptr, padded_size);
@@ -363,44 +400,7 @@ Status BlazeXlaPredictor::SliceToDynamicCPU(const std::vector<Tensor>& padded_ou
   return Status::OK();
 }
 
-Status BlazeXlaPredictor::ComputeNoPadding(OpKernelContext* ctx,
-		const std::vector<Tensor>& inputs) {
-  std::vector<Tensor> outputs;
-  std::vector<Tensor> real_inputs(inputs.size());
-
-  TF_RETURN_IF_ERROR(PrepareInputs(inputs, &real_inputs, ctx));
-  if (ctx->prof_stats()) {
-    RunMetadata metadata;
-    TF_RETURN_IF_ERROR(session_->RunCallable(
-            handle_, real_inputs, &outputs, &metadata));
-    ctx->prof_stats()->flops += metadata.prof_stats().flops();
-    ctx->traced_infos()->prof_stats->flops += metadata.prof_stats().flops();
-  } else {
-    TF_RETURN_IF_ERROR(session_->RunCallable(
-            handle_, real_inputs, &outputs, nullptr));
-  }
-
-  std::vector<Tensor> real_outputs(outputs.size());
-  TF_RETURN_IF_ERROR(PrepareOutputs(outputs, &real_outputs, ctx));
-  for (int i = 0; i < real_outputs.size(); ++i) {
-    ctx->set_output(i, real_outputs[i]);
-  }
-  return Status::OK();
-}
-
 Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
-  // Prepare inputs
-  int num_inputs = ctx->num_inputs();
-  std::vector<Tensor> inputs;
-  inputs.reserve(num_inputs);
-  for (int i = 0; i < num_inputs; ++i) {
-    inputs.push_back(ctx->input(i));
-  }
-
-  if (enable_xla_auto_padding_) {
-    return ComputeNoPadding(ctx, inputs);
-  }
-
   // Infer inputs' batchsize
   if (TF_PREDICT_FALSE(!warmuped_)) {
     if (warmuping_) {
@@ -418,6 +418,12 @@ Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
     warmuping_ = false;
   }
 
+  int num_inputs = ctx->num_inputs();
+  std::vector<Tensor> inputs;
+  inputs.reserve(num_inputs);
+  for (int i = 0; i < num_inputs; ++i) {
+    inputs.push_back(ctx->input(i));
+  }
   int batchsize = InferBatchSize(inputs);
   if (batchsize == -1) {
     return errors::Internal("Cannot infer inputs' batchsize");
@@ -483,7 +489,28 @@ Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
       ctx->set_output(i, outputs[i]);
     }
   } else {
-    return ComputeNoPadding(ctx, inputs);
+    VLOG(1) << "Skip padding: input bathsize = " << batchsize
+            << ", input pad_to_batchsize = " << pad_to_batchsize;
+    std::vector<Tensor> outputs;
+    std::vector<Tensor> real_inputs(inputs.size());
+
+    TF_RETURN_IF_ERROR(PrepareInputs(inputs, &real_inputs, ctx));
+    if (ctx->prof_stats()) {
+      RunMetadata metadata;
+      TF_RETURN_IF_ERROR(session_->RunCallable(
+              handle_, real_inputs, &outputs, &metadata));
+      ctx->prof_stats()->flops += metadata.prof_stats().flops();
+      ctx->traced_infos()->prof_stats->flops += metadata.prof_stats().flops();
+    } else {
+      TF_RETURN_IF_ERROR(session_->RunCallable(
+              handle_, real_inputs, &outputs, nullptr));
+    }
+
+    std::vector<Tensor> real_outputs(outputs.size());
+    TF_RETURN_IF_ERROR(PrepareOutputs(outputs, &real_outputs, ctx));
+    for (int i = 0; i < real_outputs.size(); ++i) {
+      ctx->set_output(i, real_outputs[i]);
+    }
   }
   return Status::OK();
 }
