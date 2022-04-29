@@ -5,6 +5,8 @@
 #include "tensorflow/core/platform/stream_executor.h"
 #include "tensorflow/core/platform/protobuf.h"
 #include "tensorflow/core/platform/mutex.h"
+#include "tensorflow/core/util/env_var.h"
+#include "tensorflow/core/lib/strings/base64.h"
 
 #if GOOGLE_CUDA
 #include "tensorflow/core/kernels/gpu_utils.h"
@@ -18,6 +20,7 @@ mutex BlazePredictor::session_mu_;
 BlazePredictor::SessionMap BlazePredictor::session_map_;
 
 BlazePredictor::BlazePredictor(OpKernelConstruction* ctx) : device_type_(ctx->device_type().type()) {
+  ReadInt64FromEnvVar("BLAZE_LOG_LEVEL", 0, &log_level_);
   OP_REQUIRES_OK(ctx, ctx->GetAttr("input_names", &input_names_));
   OP_REQUIRES_OK(ctx, ctx->GetAttr("output_names", &output_names_));
   OP_REQUIRES_OK(ctx, ctx->GetAttr("graph_def", &graph_def_str_));
@@ -37,6 +40,7 @@ BlazePredictor::BlazePredictor(const std::vector<std::string>& input_names,
     graph_def_(graph_def), request_device_(device),
     blaze_run_options_(options), device_type_(device_string),
     input_types_(input_types), ctx_(ctx) {
+  ReadInt64FromEnvVar("BLAZE_LOG_LEVEL", 0, &log_level_);
   // rewrite HugeConst
   std::string root_path;
   auto status = ctx_->GetAttr("_extra_conf_root_path", &root_path);
@@ -234,6 +238,8 @@ Status BlazePredictor::InitSession() {
 }
 
 Status BlazePredictor::Compute(OpKernelContext* ctx) {
+  if (log_level_ > 0) RawInputsDebugLogging(ctx);
+
   int num_inputs = ctx->num_inputs();
   if (num_inputs != input_names_.size()) {
     return errors::Internal("ctx input size ", num_inputs,
@@ -372,6 +378,64 @@ stream_executor::Stream* BlazePredictor::GetStream() const {
   #else
     return nullptr;
   #endif
+}
+
+void BlazePredictor::RawInputsDebugLogging(const OpKernelContext* ctx) const {
+  for (int i = 0; i < ctx->num_inputs(); ++i) {
+
+    const Tensor& input = ctx->input(i);
+
+    const string& name_string = input_names_[i];
+
+    string shape_string;
+    std::stringstream stream;
+    for (int d = 0; d < input.dims(); d++) {
+      stream << input.dim_size(d) << " ";
+    }
+    stream << "(" << input.NumElements() << ")";
+    shape_string = stream.str();
+
+    string dtype_string;
+    switch (input.dtype()) {
+      case DT_HALF:
+        dtype_string = "FP16";
+      case DT_FLOAT:
+        dtype_string = "FP32";
+      case DT_INT64:
+        dtype_string = "INT64";
+      case DT_INT32:
+        dtype_string = "INT32";
+      case DT_INT16:
+        dtype_string = "INT16";
+      case DT_INT8:
+        dtype_string = "INT8";
+      case DT_UINT64:
+        dtype_string = "UINT64";
+      case DT_UINT32:
+        dtype_string = "UINT32";
+      case DT_UINT16:
+        dtype_string = "UINT16";
+      case DT_UINT8:
+        dtype_string = "UINT8";
+      default:
+        dtype_string = "UNKNOWN";
+    }
+
+    string data_string;
+    Status s = Base64Encode(input.tensor_data(), &data_string);
+    if (!s.ok()) {
+      LOG(WARNING) << "Encoding data for input["<<i<<"] failed!\n"
+                   << s.ToString;
+      return;
+    }
+
+    LOG(INFO) << "blaze input blob [" << i << "]:"
+              << " name:" << name_string
+              << " shape: " << shape_string
+              << " type: " << dtype_string
+              << " data: " << data_string;
+
+  }
 }
 
 Status BlazePredictor::PrepareInputs(const std::vector<Tensor>& inputs,

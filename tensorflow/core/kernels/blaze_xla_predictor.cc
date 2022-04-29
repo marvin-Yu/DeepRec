@@ -1,6 +1,5 @@
 #include "tensorflow/core/framework/types.h"
 #include "tensorflow/core/kernels/blaze_xla_predictor.h"
-#include "tensorflow/core/util/env_var.h"
 
 #if GOOGLE_CUDA
 #include "tensorflow/core/kernels/gpu_utils.h"
@@ -417,6 +416,8 @@ Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
     warmuped_ = true;
     warmuping_ = false;
   }
+
+  if (log_level_ > 0) RawInputsDebugLogging(ctx);
 
   int num_inputs = ctx->num_inputs();
   std::vector<Tensor> inputs;
