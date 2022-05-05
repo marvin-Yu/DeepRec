@@ -95,6 +95,7 @@ class BlazePredictor {
   std::string session_key_;
   static SessionMap session_map_;
   static mutex session_mu_;
+  int64 log_level_;
   
  private:
   Status ParseAttr(const std::string& device);
@@ -122,6 +123,7 @@ class BlazePredictor {
                             OpKernelContext* ctx);
 
  protected:
+  void RawInputsDebugLogging(OpKernelContext* ctx) const;
   stream_executor::Stream* GetStream() const;
   Status PrepareInputs(const std::vector<Tensor>& inputs,
       std::vector<Tensor>* real_inputs, OpKernelContext* ctx);
