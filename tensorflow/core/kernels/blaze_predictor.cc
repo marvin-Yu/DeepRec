@@ -380,7 +380,7 @@ stream_executor::Stream* BlazePredictor::GetStream() const {
   #endif
 }
 
-void BlazePredictor::RawInputsDebugLogging(const OpKernelContext* ctx) const {
+void BlazePredictor::RawInputsDebugLogging(OpKernelContext* ctx) const {
   for (int i = 0; i < ctx->num_inputs(); ++i) {
 
     const Tensor& input = ctx->input(i);
@@ -425,7 +425,7 @@ void BlazePredictor::RawInputsDebugLogging(const OpKernelContext* ctx) const {
     Status s = Base64Encode(input.tensor_data(), &data_string);
     if (!s.ok()) {
       LOG(WARNING) << "Encoding data for input["<<i<<"] failed!\n"
-                   << s.ToString;
+                   << s.ToString();
       return;
     }
 
