@@ -384,6 +384,8 @@ void BlazePredictor::RawInputsDebugLogging(OpKernelContext* ctx) const {
   for (int i = 0; i < ctx->num_inputs(); ++i) {
 
     const Tensor& input = ctx->input(i);
+    VLOG(1) << "input ["<<i<<"]:\n"
+            << input.DebugString();
 
     const string& name_string = input_names_[i];
 
