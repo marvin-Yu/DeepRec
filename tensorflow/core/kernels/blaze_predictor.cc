@@ -18,6 +18,7 @@ const std::string kCpuDeviceName = "/job:localhost/replica:0/task:0/device:CPU:0
 
 mutex BlazePredictor::session_mu_;
 BlazePredictor::SessionMap BlazePredictor::session_map_;
+mutex BlazePredictor::log_mu_;
 
 BlazePredictor::BlazePredictor(OpKernelConstruction* ctx) : device_type_(ctx->device_type().type()) {
   ReadInt64FromEnvVar("BLAZE_LOG_LEVEL", 0, &log_level_);
@@ -381,6 +382,8 @@ stream_executor::Stream* BlazePredictor::GetStream() const {
 }
 
 void BlazePredictor::RawInputsDebugLogging(OpKernelContext* ctx) const {
+  mutex_lock l(log_mu_);
+
   for (int i = 0; i < ctx->num_inputs(); ++i) {
 
     const Tensor& input = ctx->input(i);
@@ -424,7 +427,7 @@ void BlazePredictor::RawInputsDebugLogging(OpKernelContext* ctx) const {
     }
 
     string data_string;
-    Status s = Base64Encode(input.tensor_data(), &data_string);
+    Status s = Base64Encode(input.tensor_data(), true, &data_string);
     if (!s.ok()) {
       LOG(WARNING) << "Encoding data for input["<<i<<"] failed!\n"
                    << s.ToString();
