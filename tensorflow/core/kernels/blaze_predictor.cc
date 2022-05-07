@@ -6,7 +6,7 @@
 #include "tensorflow/core/platform/protobuf.h"
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/util/env_var.h"
-#include "tensorflow/core/lib/strings/base64.h"
+#include "tensorflow/core/util/hydra_base64_util.h"
 
 #if GOOGLE_CUDA
 #include "tensorflow/core/kernels/gpu_utils.h"
@@ -426,13 +426,7 @@ void BlazePredictor::RawInputsDebugLogging(OpKernelContext* ctx) const {
         dtype_string = "UNKNOWN";
     }
 
-    string data_string;
-    Status s = Base64Encode(input.tensor_data(), true, &data_string);
-    if (!s.ok()) {
-      LOG(WARNING) << "Encoding data for input["<<i<<"] failed!\n"
-                   << s.ToString();
-      return;
-    }
+    string data_string = hydra::base64_encode((const char*)input.data(), input.TotalBytes());
 
     LOG(INFO) << "blaze input blob [" << i << "]:"
               << " name:" << name_string
