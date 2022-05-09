@@ -400,31 +400,7 @@ void BlazePredictor::RawInputsDebugLogging(OpKernelContext* ctx) const {
     stream << "(" << input.NumElements() << ")";
     shape_string = stream.str();
 
-    string dtype_string;
-    switch (input.dtype()) {
-      case DT_HALF:
-        dtype_string = "FP16";
-      case DT_FLOAT:
-        dtype_string = "FP32";
-      case DT_INT64:
-        dtype_string = "INT64";
-      case DT_INT32:
-        dtype_string = "INT32";
-      case DT_INT16:
-        dtype_string = "INT16";
-      case DT_INT8:
-        dtype_string = "INT8";
-      case DT_UINT64:
-        dtype_string = "UINT64";
-      case DT_UINT32:
-        dtype_string = "UINT32";
-      case DT_UINT16:
-        dtype_string = "UINT16";
-      case DT_UINT8:
-        dtype_string = "UINT8";
-      default:
-        dtype_string = "UNKNOWN";
-    }
+    string dtype_string = DataTypeString(input.dtype());
 
     string data_string = hydra::base64_encode((const char*)input.data(), input.TotalBytes());
 
