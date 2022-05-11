@@ -469,9 +469,11 @@ REGISTER_OP("BatchGatherOnRT")
     .Input("indices_values: int64")
     .Input("indices_row_splits: int64")
     .Output("ret_values: T")
+    .Output("ret_row_splits: int64")
     .Attr("T: {int32, int64}")
     .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
-      c->set_output(0, c->input(2));
+      c->set_output(0, c->MakeShape({c->UnknownDim()}));
+      c->set_output(1, c->input(3));
       return Status::OK();
     });
 
@@ -485,7 +487,7 @@ REGISTER_OP("BatchConcatOnRT")
     .Attr("T: {half, float, double, int32, int64}")
     .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
       c->set_output(0, c->MakeShape({c->UnknownDim()}));
-      c->set_output(1, c->MakeShape({c->UnknownDim()}));
+      c->set_output(1, c->input(3));
       return Status::OK();
     });
 
@@ -618,6 +620,46 @@ REGISTER_OP("BitmapInit")
       TF_RETURN_IF_ERROR(c->Subshape(input, 0, -1, &s));
       TF_RETURN_IF_ERROR(c->Concatenate(s, c->Vector(k_dim), &s));
       c->set_output(0, s);
+      return Status::OK();
+    });
+
+REGISTER_OP("BloomFilterDifference")
+    .Input("idx_next_values: T")
+    .Input("idx_next_row_splits: int64")
+    .Input("idx_flag: Ref (int32)")
+    .Output("c_values: T")
+    .Output("c_row_splits: int64")
+    .Output("idx_flag_new: Ref (int32)")
+    .Attr("bucket: int >= 0 = 0")
+    .Attr("bucket_size: int >= 1")
+    .Attr("T: {int32, int64}")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      ShapeHandle shape;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 1, &shape));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 1, &shape));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &shape));
+      c->set_output(0, c->MakeShape({c->UnknownDim()}));
+      c->set_output(1, c->input(1));
+      c->set_output(2, c->input(2));
+      return Status::OK();
+    });
+
+REGISTER_OP("BitmapRefDifference")
+    .Input("idx_next_values: T")
+    .Input("idx_next_row_splits: int64")
+    .Input("idx_flag: Ref (int32)")
+    .Output("c_values: T")
+    .Output("c_row_splits: int64")
+    .Output("idx_flag_new: Ref (int32)")
+    .Attr("T: {int32, int64}")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      ShapeHandle shape;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 1, &shape));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 1, &shape));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &shape));
+      c->set_output(0, c->MakeShape({c->UnknownDim()}));
+      c->set_output(1, c->input(1));
+      c->set_output(2, c->input(2));
       return Status::OK();
     });
 

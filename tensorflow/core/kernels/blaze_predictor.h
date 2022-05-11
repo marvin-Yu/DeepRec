@@ -37,19 +37,24 @@ namespace tensorflow {
 //Base blaze predictor, for normal run/(mlir)
 class BlazePredictor {
  public:
+  typedef std::shared_ptr<Session> SessionPtr;
+  struct SessionTuple {
+    SessionPtr session;
+    uint32_t count = 0;
+    Session::CallableHandle handle = -1;
+    SessionTuple(const SessionPtr& s, uint32_t c, Session::CallableHandle h) :
+        session(s), count(c), handle(h) {}
+  };
+  typedef std::unordered_map<std::string, SessionTuple> SessionMap;
   BlazePredictor(OpKernelConstruction* ctx);
   BlazePredictor(const std::vector<std::string>& input_names,
                           const std::vector<std::string>& output_names,
                           const GraphDef& graph_def, const std::string& device,
                           const BlazeKernelOptions& options, const string& device_string,
                           const std::vector<DataType>& input_types,
-                          OpKernelConstruction* ctx = nullptr) :
-    input_names_(input_names), output_names_(output_names),
-    graph_def_(graph_def), request_device_(device),
-    blaze_run_options_(options), device_type_(device_string),
-    input_types_(input_types), ctx_(ctx) {}
+                          OpKernelConstruction* ctx = nullptr);
 
-    virtual ~BlazePredictor() {}
+  virtual ~BlazePredictor();
 
   virtual Status Compute(OpKernelContext* ctx);
   virtual void ComputeNull(OpKernelContext* ctx) {}
@@ -75,7 +80,7 @@ class BlazePredictor {
   std::string device_;
   OpKernelConstruction* ctx_;
   //runtime options
-  std::unique_ptr<Session> session_;
+  std::shared_ptr<Session> session_;
   Session::CallableHandle handle_;
 
   //for cpu->gpu
@@ -85,7 +90,13 @@ class BlazePredictor {
   Allocator* blaze_allocator_;
   stream_executor::Stream* stream_;
   int vgpu_id_;
+  std::vector<bool> copyable_;
 
+  std::string session_key_;
+  static SessionMap session_map_;
+  static mutex session_mu_;
+  int64 log_level_;
+  
  private:
   Status ParseAttr(const std::string& device);
   virtual Status PrepareData() {
@@ -97,8 +108,10 @@ class BlazePredictor {
   virtual Status MakeCallable();
   virtual Status Warmup();
   void SetDeviceInGraphDef(const std::string device_name, GraphDef* graph_def);
+  void SetCPUDeviceInGraphDef(const std::string device_name, GraphDef* graph_def);
 
   Status SetDeviceInfo(OpKernelConstruction* ctx);
+  Status PrepareCallableOptions(CallableOptions &callable_options);
 
  private:
   const char* const kBlazeRealDevice = "_blaze_real_device";
@@ -110,6 +123,7 @@ class BlazePredictor {
                             OpKernelContext* ctx);
 
  protected:
+  void RawInputsDebugLogging(OpKernelContext* ctx) const;
   stream_executor::Stream* GetStream() const;
   Status PrepareInputs(const std::vector<Tensor>& inputs,
       std::vector<Tensor>* real_inputs, OpKernelContext* ctx);
