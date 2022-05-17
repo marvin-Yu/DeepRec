@@ -669,6 +669,8 @@ cc_library(
         ":graph_optimizer",
         ":implementation_selector",
         ":gemm_optimizer",
+        ":multi_dnn_switch_optimizer",
+        ":gemm_compression",
         ":loop_optimizer",
         ":memory_optimizer",
         ":model_pruner",
@@ -1262,5 +1264,31 @@ cc_library(
         "//tensorflow/core:framework",
         "//tensorflow/core:graph",
         "//tensorflow/core/grappler:grappler_item",
+    ],
+)
+
+cc_library(
+    name = "multi_dnn_switch_optimizer",
+    srcs = ["multi_dnn_switch_optimizer.cc"],
+    hdrs = ["multi_dnn_switch_optimizer.h",],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":graph_optimizer",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:graph",
+        "//tensorflow/core/grappler:grappler_item",
+    ],
+)
+cc_library(
+    name = "gemm_compression",
+    srcs = ["gemm_compression.cc"],
+    hdrs = ["gemm_compression.h",],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":graph_optimizer",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:graph",
+        "//tensorflow/core/grappler:grappler_item",
+        "//tensorflow/tools/graph_transforms:transform_utils",
     ],
 )
