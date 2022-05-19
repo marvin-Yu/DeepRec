@@ -34,7 +34,7 @@ static const OpTypePattern gemm_compression_pattern =
             {"GatherV2",
               {
                 {"Placeholder"},
-                {"Placeholder"},
+                {"Placeholder|Tile"},
                 {"Const"},
               }
             },
