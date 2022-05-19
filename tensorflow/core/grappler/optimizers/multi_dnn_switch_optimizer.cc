@@ -805,14 +805,14 @@ bool DynamicPartitionToSwitch(Graph* graph, std::vector<std::shared_ptr<
     if (index_cache.find(squeeze_name) == index_cache.end()) {
       // 构建begin const
       string begin_name = info.partition->name() + "/multi_dnn/slice_begin";
-      Tensor t_begin(DT_INT32, TensorShape({1}));
-      auto begin_data = t_begin.tensor<int, 1>();
+      Tensor t_begin(DT_INT64, TensorShape({1}));
+      auto begin_data = t_begin.tensor<int64, 1>();
       begin_data(0) = 0;
       Node* begin_const = CreateConstNode(graph, begin_name, t_begin, info.partition);
       // 构建size const
       string size_name = info.partition->name() + "/multi_dnn/slice_size";
-      Tensor t_size(DT_INT32, TensorShape({1}));
-      auto size_data = t_size.tensor<int, 1>();
+      Tensor t_size(DT_INT64, TensorShape({1}));
+      auto size_data = t_size.tensor<int64, 1>();
       size_data(0) = 1;
       Node* size_const = CreateConstNode(graph, size_name, t_size, info.partition);
       // 构建Slice
@@ -827,7 +827,7 @@ bool DynamicPartitionToSwitch(Graph* graph, std::vector<std::shared_ptr<
                            .Input(slice_inputs[1])
                            .Input(slice_inputs[2])
                            .Attr("T", info.partition->output_type(0))
-                           .Attr("Index", DT_INT32)
+                           .Attr("Index", DT_INT64)
                            .Finalize(&slice_node);
       if (!status.ok()) {
         LOG(ERROR) << "Adding slice nodedef build failed " << status;

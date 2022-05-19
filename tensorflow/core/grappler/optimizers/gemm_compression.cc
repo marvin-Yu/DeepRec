@@ -59,14 +59,14 @@ bool ConstuctSliceOp(const NodeDef& input, Tensor& t_begin, Tensor& t_size,
   string slice_name = prefix + "/slice";
   std::vector<NodeDefBuilder::NodeOut> slice_inputs;
   slice_inputs.emplace_back(input.name(), 0, output_type);
-  slice_inputs.emplace_back(begin_const.name(), 0, DT_INT32);
-  slice_inputs.emplace_back(size_const.name(), 0, DT_INT32);
+  slice_inputs.emplace_back(begin_const.name(), 0, DT_INT64);
+  slice_inputs.emplace_back(size_const.name(), 0, DT_INT64);
   Status status = NodeDefBuilder(slice_name, "Slice")
                                 .Input(slice_inputs[0])
                                 .Input(slice_inputs[1])
                                 .Input(slice_inputs[2])
                                 .Attr("T", output_type)
-                                .Attr("Index", DT_INT32)
+                                .Attr("Index", DT_INT64)
                                 .Finalize(&slice);
   if (!status.ok()) {
     LOG(ERROR) << "Adding slice nodedef build failed " << status;
@@ -183,12 +183,12 @@ bool OptimizeGatherConcatPattern(GraphDef &input_graph_def, GraphDef* output_gra
         VLOG(1) << "get gaterh input dim 1 size:" << size;
         
         // 构建split，拆分权重
-        Tensor t_begin(DT_INT32, TensorShape({2}));
-        auto begin_data = t_begin.tensor<int, 1>();
+        Tensor t_begin(DT_INT64, TensorShape({2}));
+        auto begin_data = t_begin.tensor<int64, 1>();
         begin_data(0) = 0;
         begin_data(1) = 0;
-        Tensor t_size(DT_INT32, TensorShape({2}));
-        auto size_data = t_size.tensor<int, 1>();
+        Tensor t_size(DT_INT64, TensorShape({2}));
+        auto size_data = t_size.tensor<int64, 1>();
         size_data(0) = size;
         size_data(1) = -1;
         NodeDef begin_const_part1;
