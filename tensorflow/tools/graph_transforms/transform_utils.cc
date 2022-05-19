@@ -307,11 +307,11 @@ Status GraphMatcher::GetOpTypeMatches(const OpTypePattern& pattern,
 bool GraphMatcher::DoesOpTypeMatch(
     const NodeDef& node, const OpTypePattern& pattern,
     const std::set<string>& previously_matched_nodes, NodeMatch* match) {
-  VLOG(1) << "Looking at node " << node.DebugString();
-  VLOG(1) << "pattern=" << pattern.DebugString();
-  VLOG(1) << "match=" << match->DebugString();
+  VLOG(2) << "Looking at node " << node.DebugString();
+  VLOG(2) << "pattern=" << pattern.DebugString();
+  VLOG(2) << "match=" << match->DebugString();
   if (previously_matched_nodes.count(node.name())) {
-    VLOG(1) << "node " << node.name() << " has been previously matched";
+    VLOG(2) << "node " << node.name() << " has been previously matched";
     return false;
   }
   bool pattern_matched = false;
