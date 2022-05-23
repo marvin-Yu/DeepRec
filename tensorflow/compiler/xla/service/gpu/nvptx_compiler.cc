@@ -344,24 +344,33 @@ bool MaybeLoadPtxFromFile(const HloModule* module, std::string* ptx) {
 
 // Try to load CUBIN from files defined in the FLAGS. If successful, return true.
 bool MaybeLoadCubinFromFile(string cubin_fullpath, std::vector<uint8>* cubin) {
-    if (!cubin_cache_dir.empty()) {
-        auto env = tensorflow::Env::Default();
-        tensorflow::mutex_lock lock(cubin_cache_mutex);
-        if (env->FileExists(cubin_fullpath).ok()) {
-            VLOG(0) << "RunBackend() - Will load cubin from file: " << cubin_fullpath;
-            string cubin_string;
-            Status ok = (tensorflow::ReadFileToString(tensorflow::Env::Default(),
-                        cubin_fullpath, &cubin_string));
-            if (ok.ok()) {
-              std::vector<uint8> cubin_vector(cubin_string.begin(), cubin_string.end());
-              *cubin = std::move(cubin_vector);
-              return true;
-            } else {
-              VLOG(0) << "read cubin file error, fallback to assemble ptx";
-            }
+  if (!cubin_cache_dir.empty()) {
+    auto env = tensorflow::Env::Default();
+    tensorflow::mutex_lock lock(cubin_cache_mutex);
+    if (env->FileExists(cubin_fullpath).ok()) {
+      VLOG(0) << "RunBackend() - Will load cubin from file: " << cubin_fullpath;
+      string cubin_string;
+      Status ok = (tensorflow::ReadFileToString(tensorflow::Env::Default(),
+                  cubin_fullpath, &cubin_string));
+      if (ok.ok()) {
+        std::vector<uint8> cubin_vector(cubin_string.begin(), cubin_string.end());
+        *cubin = std::move(cubin_vector);
+        if (cubin_vector.size() <= 10) {
+          VLOG(0) << "Cubin size too short, size= " << cubin_vector.size();
+          return false;
         }
+        VLOG(0) << "Load cubin succ";
+        return true;
+      } else {
+        VLOG(0) << "read cubin file error, fallback to assemble ptx";
+	return false;
+      }
     }
+    VLOG(0) << "Cubin file not exit " << cubin_fullpath;
     return false;
+  }
+  VLOG(0) << "Cubin folder not exit or empty. " << cubin_cache_dir;
+  return false;
 
 }
 
@@ -471,7 +480,7 @@ NVPTXCompiler::CompileTargetBinary(const HloModule* module,
     cubin =
         CompilePtxOrGetCachedResult(stream_exec, ptx, compute_capability.first,
                                     compute_capability.second, module->config());
-    if ((!cubin_cache_dir.empty()) && (!env->FileExists(cubin_fullpath).ok())) {
+    if (!cubin_cache_dir.empty()) {
         tensorflow::mutex_lock lock(cubin_cache_mutex);
         VLOG(0) << "Dump " << cubin_filename << " to " << cubin_cache_dir;
         DumpCubinToFileInDir(cubin_cache_dir, cubin_filename, cubin);
@@ -566,7 +575,7 @@ std::vector<uint8> NVPTXCompiler::CompilePtxOrGetCachedResult(
             PtxOptsFromConfig(hlo_module_config));
         if (maybe_cubin.ok()) {
           cache_value->cubin_data = std::move(maybe_cubin).ValueOrDie();
-          VLOG(2) << "Compiled PTX size:" << ptx.size()
+          VLOG(0) << "Compiled PTX size:" << ptx.size()
                   << " CUBIN size: " << cache_value->cubin_data.size();
         } else {
           bool log_warning = true;

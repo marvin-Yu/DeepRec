@@ -24,22 +24,26 @@ public:
   
   // Dumps the arguments to local file
   Status DumpXlaArguments(const std::vector<XlaCompiler::Argument>& args,
-        const uint64 graph_key,
+        const std::map<int, std::string>& args_indexs,
+        const std::string graph_key,
         const string& uuid);
 
   // Parse arguments from local file
   Status ParseFromFile(
         const std::shared_ptr<InputsShapeInfo>& base,
-        const uint64 graph_key,
+        const std::string graph_key,
+        const std::map<std::string, int>& indexs_args,
         std::vector<std::vector<XlaCompiler::Argument>>& args_array,
         std::vector<std::shared_ptr<InputsShapeInfo>>& inputs_shape_info_array);
 
 private:
   // convert xla arguments to proto
   bool AsProto(const std::vector<XlaCompiler::Argument>& args,
+        const std::map<int, std::string>& args_indexs,
         XlaArgumensProto& protos);
   // convert proto to xla arguments
   bool FromProto(const XlaArgumensProto& protos,
+       const std::map<std::string, int>& indexs_args,
        std::vector<XlaCompiler::Argument>& args);
 
   std::shared_ptr<InputsShapeInfo> BuildInputsShapeInfo(

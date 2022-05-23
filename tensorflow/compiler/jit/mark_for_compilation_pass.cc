@@ -118,12 +118,16 @@ class MarkForCompilationPassImpl {
         graph_(graph),
         flib_def_(flib_def),
         env_(env),
+	cluster_sequence_num(0),
         enable_xla_auto_padding_(enable_xla_auto_padding),
-        global_jit_level_(global_jit_level) {}
+        global_jit_level_(global_jit_level) {
+  }
 
   Status Run();
 
  private:
+  std::atomic<int64> cluster_sequence_num;
+  int64 GetNextClusterSequenceNumber() { return cluster_sequence_num++; }
   // Represents a "cluster" or a connected subgraph of a TensorFlow graph.
   class Cluster {
    public:
@@ -832,9 +836,7 @@ Status MarkForCompilationPassImpl::RunEdgeContractionLoop() {
   return Status::OK();
 }
 
-std::atomic<int64> cluster_sequence_num;
 
-int64 GetNextClusterSequenceNumber() { return cluster_sequence_num++; }
 
 Status MarkForCompilationPassImpl::CreateClusters() {
   TF_RET_CHECK(initialized_ && edges_contracted_ && !clusters_created_);
@@ -1873,6 +1875,6 @@ Status MarkForCompilationPass::RunForTest(
 }
 
 namespace testing {
-void ResetClusterSequenceNumber() { cluster_sequence_num = 0; }
+//void ResetClusterSequenceNumber() { cluster_sequence_num = 0; }
 }  // namespace testing
 }  // namespace tensorflow

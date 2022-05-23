@@ -117,7 +117,6 @@ private:
   const int MIN_PAD_VAL = 8;
   std::shared_ptr<XlaArgumentDumper> arg_dumper_;
   std::string name_;
-  mutex graph_key_mu_;
   uint64 graph_key_ = 0;
   XlaCompilationCache* cache_;
   mutex graph_properties_mu_;
@@ -132,6 +131,7 @@ private:
   std::shared_ptr<thread::ThreadPool> compile_thread_pool_ = nullptr;
   void InitShapeInferEntity(
       std::shared_ptr<InputsShapeInfo> inputs_shape_info);
+  Status ParseArgIndex(std::shared_ptr<InputsShapeInfo> inputs_shape_info);
 
   inline std::shared_ptr<InputsShapeInfo>
         PaddingInputs(std::shared_ptr<InputsShapeInfo> inputs);
@@ -145,6 +145,9 @@ private:
   bool has_warmup_ = false;
   mutex warmup_mu_;
   Status SortCaches();
+  std::map<int, std::string> args_indexs_;
+  std::map<std::string, int> indexs_args_;
+  mutex args_indexs_mu_;
 };
 }  // namespace tensorflow
 

@@ -61,8 +61,8 @@ Status XlaAutoPadding::CompileImpl(
                      inputs_shape_info);
   // dump xla arguments for warm up
   if (inputs_shape_info){
-    mutex_lock lock(graph_key_mu_);
-    arg_dumper_->DumpXlaArguments(args, graph_key_, inputs_shape_info->padded_shape_uuid());
+    mutex_lock lock(args_indexs_mu_);
+    arg_dumper_->DumpXlaArguments(args, args_indexs_, name_, inputs_shape_info->padded_shape_uuid());
   }
   return ret;
 }
@@ -75,6 +75,30 @@ Status XlaAutoPadding::FillAndFindCacheShape(
   FillInputShapes(constant_args, variable_args, 
                     ctx, args, inputs_shape_info);
   return GetPaddingCachedShape(inputs_shape_info);
+}
+
+Status XlaAutoPadding::ParseArgIndex(std::shared_ptr<InputsShapeInfo> inputs_shape_info) {
+    mutex_lock lock(args_indexs_mu_);
+    if (inputs_shape_info == nullptr || inputs_shape_info->graph == nullptr) {
+      return errors::InvalidArgument("Invalid argument number");;
+    }
+    for (Node* n : inputs_shape_info->graph->nodes()) {
+      if (n->type_string() != "_Arg") {
+        continue;
+      }
+      int index;
+      TF_RETURN_IF_ERROR(GetNodeAttr(n->attrs(), "index", &index));
+      if (index < 0) {
+        args_indexs_.clear();
+        indexs_args_.clear();
+        return errors::InvalidArgument("Invalid argument number");;
+      }
+
+      VLOG(1) << n->name() << " index " << index;
+      args_indexs_[index] = n->name();
+      indexs_args_[n->name()] = index;
+    }
+    return Status::OK();
 }
 
 Status XlaAutoPadding::Warmup(
@@ -91,17 +115,24 @@ Status XlaAutoPadding::Warmup(
     std::shared_ptr<InputsShapeInfo> inputs_shape_info) {
   has_warmup_ = true;
 
+  if(!ParseArgIndex(inputs_shape_info).ok()) {
+    return Status::OK();
+  }
+
   // Build signature for cluster
-  TF_ASSIGN_OR_RETURN(XlaCompilationCache::Signature signature, XlaCompilationCache::BuildSignatureNoShape(function, args));
-  graph_key_ = tensorflow::Hash64(name_ + "_" + signature.HumanString());
+  TF_ASSIGN_OR_RETURN(XlaCompilationCache::Signature signature, 
+      XlaCompilationCache::BuildSignatureNoShape(function, args));
 
   // Read warmup files
   std::vector<std::vector<XlaCompiler::Argument>> args_array;
   std::vector<std::shared_ptr<InputsShapeInfo>> inputs_shape_info_array;
-  arg_dumper_->ParseFromFile(inputs_shape_info, graph_key_, 
+  {
+    mutex_lock lock(args_indexs_mu_);
+    arg_dumper_->ParseFromFile(inputs_shape_info, name_, indexs_args_, 
                                 args_array, inputs_shape_info_array);
+  }
 
-  LOG(INFO) << name_ << " warmup " << name_ + "_" + signature.HumanString() << " with hash:" << graph_key_
+  LOG(INFO) << name_ << " warmup " << name_ + "_" + signature.HumanString()
             << " cache file size " << args_array.size();
 
   // Warmup by files
@@ -143,14 +174,6 @@ Status XlaAutoPadding::Compile(
 
   // If this is first compile and has warmup file, then dont compile this
   // beacuse first compile is warmup data, the inputs shape has no use
-  {
-    mutex_lock lock(warmup_mu_);
-    if (! has_warmup_) {
-      Warmup(options, function, args, compile_options, compile_fn,
-          compile_threshold, inputs_shape_info);
-      return Status::OK();
-    }
-  }
 
   std::vector<XlaCompiler::Argument> unconst_args;
   unconst_args.reserve(args.size());
@@ -173,10 +196,19 @@ Status XlaAutoPadding::Compile(
       LOG(INFO) << name_ << " sync xla compile " 
                 << " " << inputs_shape_info->DebugString();
       compiling_shapes_.insert(h);
-      return XlaAutoPadding::CompileImpl(
+      auto ret = XlaAutoPadding::CompileImpl(
                          options, function, unconst_args, compile_fn,
                          compile_options, compile_threshold, 
                          inputs_shape_info);
+      {
+        mutex_lock lock(warmup_mu_);
+        if (! has_warmup_) {
+          Warmup(options, function, args, compile_options, compile_fn,
+              compile_threshold, inputs_shape_info);
+          return Status::OK();
+        }
+      }
+      return ret;
     }
 
     if (compiling_shapes_.find(h) == compiling_shapes_.end()) {
@@ -393,11 +425,12 @@ inline void XlaAutoPadding::pad_to_power(int& val,
     const std::vector<std::vector<int>>& shape_rules) {
   for(const auto shape_rule: shape_rules) {
     if (val >= shape_rule[0] && val <= shape_rule[1]) {
-      int div = (val - 1) / shape_rule[2];
-      val = (div + 1) * shape_rule[2];
+      int div = (val - shape_rule[0] - 1) / shape_rule[2];
+      val = (div + 1) * shape_rule[2] + shape_rule[0];
       return;
     }
   }
+
 
   if (val <= 8) {
     val = 8;

@@ -3,6 +3,7 @@ import urlparse, json
 import urllib
 import os
 import traceback
+import subprocess
 
 class GetHandler(BaseHTTPRequestHandler):
 
@@ -44,9 +45,9 @@ class GetHandler(BaseHTTPRequestHandler):
 
         cmd = ptxas_path + " " + src_name + " -o " + dst_name + " -arch="+ arch
         print 'cmd is ', cmd
-        ret = os.system(cmd)
+        ret = subprocess.call(cmd, shell=True)
         if ret != 0:
-          raise Exception('cmd exec error, got ret=', ret)
+          raise Exception('cmd exec error, got ret {}, cmd {}'.format(ret, cmd))
 
         self.send_response(200)
         self.end_headers()
