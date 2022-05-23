@@ -198,10 +198,12 @@ port::StatusOr<std::vector<uint8>> CompilePtx(int device_ordinal,
     tensorflow::Env::Default()->DeleteFile(cubin_path).IgnoreError();
   });
   nvtxRangePushA("ptxas remote compile");
+  std::string disable_ptxas_opt_str = options.disable_ptxas_optimizations ? "true": "false";
   std::string cmd = 
        "ptxas_path=" + ptxas_path +
        "&src_name=" + ptx_path +
        "&dst_name=" + cubin_path + 
+       "&disable_ptxas_optimizations=" + disable_ptxas_opt_str +
        "&arch=" + absl::StrCat("sm_", cc_major, cc_minor);
   VLOG(0) << "cmd is " << cmd;
   HttpRequest ImageReq(cmd);

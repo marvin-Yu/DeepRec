@@ -1875,6 +1875,6 @@ Status MarkForCompilationPass::RunForTest(
 }
 
 namespace testing {
-//void ResetClusterSequenceNumber() { cluster_sequence_num = 0; }
+void ResetClusterSequenceNumber() { }
 }  // namespace testing
 }  // namespace tensorflow

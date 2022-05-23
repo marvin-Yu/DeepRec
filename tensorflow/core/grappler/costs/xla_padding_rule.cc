@@ -83,6 +83,7 @@ namespace {
       "Sqrt",
       "Square",
       "SquaredDifference",
+      "Squeeze",
       "Stack",
       "Sub",
       "Tan",
@@ -115,7 +116,7 @@ namespace {
     "Erf", "Erfc", "Expm1",  "FusedBatchNorm", "FusedBatchNormV2", "FusedBatchNormV3", "Inv", "Invert",
     "InvertPermutation", "IsFinite", "IsInf", "IsNan", "Lgamma", "LogSoftmax", "MaxPool", "MaxPool3D", 
     "MaxPoolV2",   "Range", "ResizeBilinear", "ResizeNearestNeighbor", "Reverse", "ReverseSequence", 
-    "ReverseV2", "RightShift", "SoftmaxCrossEntropyWithLogits", "TopKV2", "Squeeze", 
+    "ReverseV2", "RightShift", "SoftmaxCrossEntropyWithLogits", "TopKV2", 
 
     // unknown ops
     "AdjustContrastv2", "AdjustHue", "AdjustSaturation", "AssignAddVariableOp","AssignSubVariableOp",
@@ -353,10 +354,10 @@ namespace {
     // [(10, 30, 10), (10, 30, 5), (10, 30, 25)]
     
     if (node.op() != "Split" && node.op() != "SplitV") return false;
-    const int concat_dim_index =
+    const int split_dim_index =
         node.op() == "Split" ? 0 : 2;
  
-    const Tensor* split_dim_tensor = ic->input_tensor(concat_dim_index);
+    const Tensor* split_dim_tensor = ic->input_tensor(split_dim_index);
     int64 split_dim;
     auto s = ic->GetScalarFromTensor(split_dim_tensor, &split_dim);
     if (!s.ok()) {
