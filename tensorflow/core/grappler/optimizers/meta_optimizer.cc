@@ -218,9 +218,6 @@ Status MetaOptimizer::InitializeOptimizers(
     optimizers->push_back(
         MakeUnique<LoopOptimizer>(cfg_.loop_optimization(), cpu_device_));
   }
-  if (cfg_.gemm_compression_optimization() != RewriterConfig::OFF) {
-    optimizers->push_back(MakeUnique<GemmCompressionOptimizer>());
-  }
   if (cfg_.dependency_optimization() != RewriterConfig::OFF) {
     optimizers->push_back(
         MakeUnique<DependencyOptimizer>(cfg_.dependency_optimization()));
@@ -230,6 +227,9 @@ Status MetaOptimizer::InitializeOptimizers(
   }
   if (cfg_.multi_dnn_switch_optimization() != RewriterConfig::OFF) {
     optimizers->push_back(MakeUnique<MultiDNNSwitchOptimizer>());
+  }
+  if (cfg_.gemm_compression_optimization() != RewriterConfig::OFF) {
+    optimizers->push_back(MakeUnique<GemmCompressionOptimizer>());
   }
   if (cfg_.tile_equal() == RewriterConfig::ON) {
     optimizers->push_back(MakeUnique<TileOptimizer>());
