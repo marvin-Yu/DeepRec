@@ -6,6 +6,8 @@
 // Description:
 // CudaGraphOp, fetch a cudagraph instance and launch cudagraph async
 
+#ifdef GOOGLE_CUDA
+
 #include <algorithm>
 #include <mutex>
 
@@ -388,3 +390,4 @@ void CudaGraphOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
 
 REGISTER_KERNEL_BUILDER(Name("CudaGraph").Device(DEVICE_GPU), CudaGraphOp);
 }
+#endif  // GOOGLE_CUDA

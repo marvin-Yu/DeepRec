@@ -9,6 +9,7 @@
 
 #ifndef TENSORFLOW_CORE_COMMON_RUNTIME_CUDAGRAPH_MGR_H_
 #define TENSORFLOW_CORE_COMMON_RUNTIME_CUDAGRAPH_MGR_H_
+#ifdef GOOGLE_CUDA
 
 #include <string>
 #include <unordered_map>
@@ -108,4 +109,5 @@ private:
 CudaGraphMgr::~CudaGraphMgr() = default;
 }
 
+#endif   // GOOGLE_CUDA
 #endif // TENSORFLOW_CORE_COMMON_RUNTIME_CUDAGRAPH_MGR_H_

@@ -28,7 +28,9 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/debugger_state_interface.h"
 #include "tensorflow/core/common_runtime/device_factory.h"
 #include "tensorflow/core/common_runtime/device_resolver_local.h"
+#ifdef GOOGLE_CUDA
 #include "tensorflow/core/common_runtime/gpu/gpu_device.h"
+#endif  // GOOGLE_CUDA
 #include "tensorflow/core/common_runtime/executor.h"
 #include "tensorflow/core/common_runtime/executor_factory.h"
 #include "tensorflow/core/common_runtime/function.h"
@@ -685,6 +687,7 @@ Status DirectSession::Run(const NamedTensorList& inputs,
              &run_metadata);
 }
 
+#ifdef GOOGLE_CUDA
 Status DirectSession::RunForCapture(const std::vector<std::pair<string, Tensor> >& inputs,
                                     const std::vector<string>& output_tensor_names,
                                     const std::vector<string>& target_node_names,
@@ -693,6 +696,7 @@ Status DirectSession::RunForCapture(const std::vector<std::pair<string, Tensor> 
   return RunForCapture(RunOptions(), inputs, output_tensor_names, target_node_names,
              &run_metadata, cuda_graph_meta);
 }
+#endif  // GOOGLE_CUDA
 
 Status DirectSession::CreateDebuggerState(
     const CallableOptions& callable_options, int64 global_step,
@@ -1802,6 +1806,7 @@ Status DirectSession::Run(const RunOptions& run_options,
   return Status::OK();
 }
 
+#ifdef GOOGLE_CUDA
 Status DirectSession::RunForCapture(const RunOptions& run_options,
                                     const std::vector<std::pair<string, Tensor> >& inputs,
                                     const std::vector<string>& output_tensor_names,
@@ -1825,7 +1830,6 @@ Status DirectSession::RunForCapture(const RunOptions& run_options,
   }
   metrics::RecordGraphInputTensors(input_size);
 
-#ifdef GOOGLE_CUDA
   // save the host addresses for the inputs
   if(cuda_graph_capture_mode_){
       input_host_address_.clear();
@@ -1837,7 +1841,6 @@ Status DirectSession::RunForCapture(const RunOptions& run_options,
       }  
   }
   num_output_tensors_ = output_tensor_names.size();  
-#endif
 
   // Check if we already have an executor for these arguments.
   ExecutorsAndKeys* executors_and_keys;
@@ -1935,7 +1938,9 @@ Status DirectSession::RunForCapture(const RunOptions& run_options,
   }
   return Status::OK();
 }
+#endif  // GOOGLE_CUDA
 
+#ifdef GOOGLE_CUDA
 bool DirectSession::ExtractOutputMetaInfo(std::vector<Tensor>& outputs, 
                                           CudaGraphMeta* cuda_graph_meta) {
   for (int i = 0; i < outputs.size(); ++i) {
@@ -1976,6 +1981,7 @@ bool DirectSession::ExtractOutputMetaInfo(std::vector<Tensor>& outputs,
   }
   return true;
 }
+#endif  // GOOGLE_CUDA
 
 Status DirectSession::AfterRunAsync(const ::tensorflow::RunOptions& run_options,
                                     const std::vector<string>& output_names,

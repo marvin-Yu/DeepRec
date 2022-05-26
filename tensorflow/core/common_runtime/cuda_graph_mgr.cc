@@ -7,6 +7,7 @@
 // CudaGrpah Manager, singleton
 // capture cudagraph and manage cudagraph instance, streams for launching cudagraph
 
+#ifdef GOOGLE_CUDA
 #include "tensorflow/core/common_runtime/cuda_graph_mgr.h"
 
 #include <string>
@@ -554,3 +555,5 @@ bool CudaGraphMgr::DestoryCudaGraphResource(const std::string& subgraph_name) {
 }
 
 } // tensorflow
+
+#endif  // GOOGLE_CUDA
