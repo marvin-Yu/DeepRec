@@ -33,7 +33,11 @@ static const OpTypePattern gemm_compression_pattern =
           { // input
             {"GatherV2",
               {
-                {"Placeholder"},
+                {"Cast",
+                  {
+                    {"Placeholder"},
+                  }
+                },
                 {"Placeholder|Tile"},
                 {"Const"},
               }

@@ -88,9 +88,9 @@ void GetAllMatchNodes(std::vector<NodeDef>& nodes, std::set<string>& node_set, c
   return;
 }
 
-bool OptimizeGatherConcatPattern(GraphDef &input_graph_def, GraphDef* output_graph_def) {
+bool OptimizeGatherConcatPattern(GraphDef &input_graph_def, GraphDef* output_graph_def
+                                 bool& is_changed) {
   VLOG(1) << "start to optimize gather pattern, " << gemm_compression_pattern.DebugString();
-  bool is_changed = false;
   Status status = ReplaceMatchingOpTypes(
       input_graph_def,
       gemm_compression_pattern,
@@ -104,6 +104,7 @@ bool OptimizeGatherConcatPattern(GraphDef &input_graph_def, GraphDef* output_gra
         const NodeDef& weight_node = match.inputs[1].node;
         const NodeDef& gather_node = match.inputs[0].inputs[0].node;
         const NodeDef& gather_input_node = match.inputs[0].inputs[0].inputs[0].node;
+        const NodeDef& gather_ph_node = match.inputs[0].inputs[0].inputs[0].inputs[0].node;
         const NodeDef& gather_ind_node = match.inputs[0].inputs[0].inputs[1].node;
         const NodeDef& gather_axis_node = match.inputs[0].inputs[0].inputs[2].node;
         VLOG(1) << match.DebugString();
@@ -171,6 +172,7 @@ bool OptimizeGatherConcatPattern(GraphDef &input_graph_def, GraphDef* output_gra
           new_nodes->push_back(new_concat_node);
           new_nodes->push_back(new_identity_node);
           new_nodes->push_back(gather_node);
+          new_nodes->push_back(gather_ph_node);
           new_nodes->push_back(gather_input_node);
           new_nodes->push_back(gather_ind_node);
           new_nodes->push_back(gather_axis_node);
@@ -179,7 +181,7 @@ bool OptimizeGatherConcatPattern(GraphDef &input_graph_def, GraphDef* output_gra
           return Status::OK();
         }
         // 获取输入的shape
-        int size = gather_input_node.attr().at("shape").shape().dim(1).size();
+        int size = gather_ph_node.attr().at("shape").shape().dim(1).size();
         VLOG(1) << "get gaterh input dim 1 size:" << size;
         
         // 构建split，拆分权重
@@ -284,6 +286,7 @@ bool OptimizeGatherConcatPattern(GraphDef &input_graph_def, GraphDef* output_gra
         new_nodes->push_back(begin_const_part2);
         new_nodes->push_back(size_const_part2);
         new_nodes->push_back(weight_node);
+        new_nodes->push_back(gather_ph_node);
         new_nodes->push_back(gather_input_node);
         new_nodes->push_back(gather_ind_node);
         new_nodes->push_back(gather_axis_node);
@@ -294,17 +297,21 @@ bool OptimizeGatherConcatPattern(GraphDef &input_graph_def, GraphDef* output_gra
       {}, output_graph_def);
   if (!status.ok()) {
     LOG(ERROR) << "optimize gather concat failed " << status;
+    return false;
   }
-  return is_changed;
+  return true;
 }
 
-void OptimizeGemmCompression(GraphDef& input_graph, GraphDef* optimized_graph) {
+bool OptimizeGemmCompression(GraphDef& input_graph, GraphDef* optimized_graph) {
   
   while(1) {
-    bool graph_changed = OptimizeGatherConcatPattern(input_graph, optimized_graph);
+    bool graph_changed = false;
+    bool result = OptimizeGatherConcatPattern(input_graph, optimized_graph, graph_changed);
+    if (!result) return false;
     if (!graph_changed) break;
     input_graph = *optimized_graph;
   }
+  return true;
 }
 
 }  // end namespace
@@ -321,7 +328,11 @@ Status GemmCompressionOptimizer::Optimize(Cluster* cluster, const GrapplerItem& 
   VLOG(0) << "GemmCompressionOptimizer is on.";
 
   GraphDef input_graph_def = item.graph;
-  OptimizeGemmCompression(input_graph_def, optimized_graph);
+  if(!OptimizeGemmCompression(input_graph_def, optimized_graph)) {
+    LOG(INFO) << "optimize gemm compression failed";
+    *optimized_graph = item.graph;
+    return Status::OK();
+  }
   *optimized_graph->mutable_versions() = item.graph.versions();
   std::fstream f;
   static int pass = 0;

@@ -1024,7 +1024,11 @@ Status MultiDNNSwitchOptimizer::Optimize(Cluster* cluster, const GrapplerItem& i
     return Status::OK();
   }
 
-  MultiDNNOptimize(&graph);
+  if(!MultiDNNOptimize(&graph)) {
+    LOG(WARNING) << "ConvertGraphDefToGraph failed";
+    *optimized_graph = item.graph;
+    return Status::OK();
+  }
 
   // convert graph to graphdef
   graph.ToGraphDef(optimized_graph);
