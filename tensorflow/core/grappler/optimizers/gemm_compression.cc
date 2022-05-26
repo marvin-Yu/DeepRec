@@ -88,7 +88,7 @@ void GetAllMatchNodes(std::vector<NodeDef>& nodes, std::set<string>& node_set, c
   return;
 }
 
-bool OptimizeGatherConcatPattern(GraphDef &input_graph_def, GraphDef* output_graph_def
+bool OptimizeGatherConcatPattern(GraphDef &input_graph_def, GraphDef* output_graph_def,
                                  bool& is_changed) {
   VLOG(1) << "start to optimize gather pattern, " << gemm_compression_pattern.DebugString();
   Status status = ReplaceMatchingOpTypes(
