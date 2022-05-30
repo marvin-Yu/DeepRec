@@ -470,6 +470,7 @@ Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
       TF_RETURN_IF_ERROR(session_->RunCallable(
               handle_, padded_inputs, &padded_outputs, &metadata));
       ctx->prof_stats()->flops += metadata.prof_stats().flops();
+      ctx->traced_infos()->prof_stats->flops += metadata.prof_stats().flops();
     } else {
       TF_RETURN_IF_ERROR(session_->RunCallable(
               handle_, padded_inputs, &padded_outputs, nullptr));
