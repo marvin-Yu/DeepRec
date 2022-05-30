@@ -96,6 +96,7 @@ class BlazePredictor {
   static SessionMap session_map_;
   static mutex session_mu_;
   int64 log_level_;
+  static mutex log_mu_;
   
  private:
   Status ParseAttr(const std::string& device);
