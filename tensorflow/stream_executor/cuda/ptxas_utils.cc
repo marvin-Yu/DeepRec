@@ -228,6 +228,7 @@ port::StatusOr<std::vector<uint8>> CompilePtx(int device_ordinal,
   } else {
     VLOG(0) << "Connect failed " << conn_ret;
   }
+  ImageReq.close();
   nvtxRangePop();
 
   if (!remote_succ ) {
