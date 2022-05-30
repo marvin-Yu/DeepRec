@@ -265,6 +265,7 @@ Status BlazePredictor::Compute(OpKernelContext* ctx) {
     RunMetadata metadata;
     TF_RETURN_IF_ERROR(session_->RunCallable(handle_, real_inputs, &outputs, &metadata));
     ctx->prof_stats()->flops += metadata.prof_stats().flops();
+    ctx->traced_infos()->prof_stats->flops += metadata.prof_stats().flops();
   } else {
     TF_RETURN_IF_ERROR(session_->RunCallable(handle_, real_inputs, &outputs, nullptr));
   }
