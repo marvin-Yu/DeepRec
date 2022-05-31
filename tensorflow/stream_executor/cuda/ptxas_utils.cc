@@ -29,6 +29,8 @@ limitations under the License.
 #include "tensorflow/stream_executor/cuda/cuda_driver.h"
 #include "tensorflow/stream_executor/gpu/gpu_helpers.h"
 #include "tensorflow/stream_executor/lib/statusor.h"
+#include "nvToolsExt.h"
+#include "http_client.h"
 
 namespace stream_executor {
 namespace cuda {
@@ -162,13 +164,13 @@ port::StatusOr<std::vector<uint8>> CompilePtx(int device_ordinal,
   for (const string& cuda_root :
        tensorflow::CandidateCudaRoots(options.preferred_cuda_dir)) {
     ptxas_path = tensorflow::io::JoinPath(cuda_root, "bin", "ptxas");
-    VLOG(2) << "Looking for ptxas at " << ptxas_path;
+    VLOG(1) << "Looking for ptxas at " << ptxas_path;
     if (env->FileExists(ptxas_path).ok()) {
       break;
     }
   }
   TF_RETURN_IF_ERROR(env->FileExists(ptxas_path));
-  VLOG(2) << "Using ptxas at " << ptxas_path;
+  VLOG(1) << "Using ptxas at " << ptxas_path;
 
   WarnIfBadPtxasVersion(ptxas_path);
 
@@ -195,29 +197,65 @@ port::StatusOr<std::vector<uint8>> CompilePtx(int device_ordinal,
     // produce TF error.
     tensorflow::Env::Default()->DeleteFile(cubin_path).IgnoreError();
   });
-  tensorflow::SubProcess ptxas_info_dumper;
-  std::vector<string> ptxas_args = {
-      ptxas_path, ptx_path, "-o", cubin_path,
-      absl::StrCat("-arch=sm_", cc_major, cc_minor)};
-  if (VLOG_IS_ON(2)) {
-    ptxas_args.push_back("-v");
+  nvtxRangePushA("ptxas remote compile");
+  std::string cmd = 
+       "ptxas_path=" + ptxas_path +
+       "&src_name=" + ptx_path +
+       "&dst_name=" + cubin_path + 
+       "&arch=" + absl::StrCat("sm_", cc_major, cc_minor);
+  VLOG(0) << "cmd is " << cmd;
+  HttpRequest ImageReq(cmd);
+  ImageReq.setRequestMethod("GET");
+  ImageReq.setRequestProperty("Cache-Control", "no-cache");
+  ImageReq.setRequestProperty("Content-Type", "application/octet-stream");
+  ImageReq.setRequestProperty("Connection", "close\r\n");
+
+  bool remote_succ = false;
+  int conn_ret = ImageReq.connect();
+  if (conn_ret == 0) {
+    ImageReq.send();
+    ImageReq.handleRead();
+    if (ImageReq.getResponseCode() == 200) {
+      remote_succ = true;
+    } else {
+      VLOG(0) << "Get response failed " 
+	      << ImageReq.getResponseCode()
+	      << " " 
+	      << ImageReq.getResponseContent();
+    }
+  } else {
+    VLOG(0) << "Connect failed " << conn_ret;
   }
-  if (options.disable_ptxas_optimizations) {
-    ptxas_args.push_back("-O0");
-  }
-  ptxas_info_dumper.SetProgram(ptxas_path, ptxas_args);
-  ptxas_info_dumper.SetChannelAction(tensorflow::CHAN_STDERR,
-                                     tensorflow::ACTION_PIPE);
-  if (!ptxas_info_dumper.Start()) {
-    return port::InternalError("Failed to launch ptxas");
-  }
-  string stderr_output;
-  int exit_status = ptxas_info_dumper.Communicate(
-      /*stdin_input=*/nullptr, /*stdout_output=*/nullptr, &stderr_output);
-  if (exit_status != 0) {
-    return port::InternalError(
-        absl::StrFormat("ptxas exited with non-zero error code %d, output: %s",
-                        exit_status, stderr_output));
+  nvtxRangePop();
+
+  if (!remote_succ ) {
+    nvtxRangePushA("ptxas local compile");
+    LOG(WARNING) << "Remote ptxas fail, use local";
+    std::vector<string> ptxas_args = {
+        ptxas_path, ptx_path, "-o", cubin_path,
+        absl::StrCat("-arch=sm_", cc_major, cc_minor)};
+    if (VLOG_IS_ON(2)) {
+      ptxas_args.push_back("-v");
+    }
+    if (options.disable_ptxas_optimizations) {
+      ptxas_args.push_back("-O0");
+    }
+    tensorflow::SubProcess ptxas_info_dumper;
+    ptxas_info_dumper.SetProgram(ptxas_path, ptxas_args);
+    ptxas_info_dumper.SetChannelAction(tensorflow::CHAN_STDERR,
+                                       tensorflow::ACTION_PIPE);
+    if (!ptxas_info_dumper.Start()) {
+      return port::InternalError("Failed to launch ptxas");
+    }
+    nvtxRangePop();
+    string stderr_output;
+    int exit_status = ptxas_info_dumper.Communicate(
+        /*stdin_input=*/nullptr, /*stdout_output=*/nullptr, &stderr_output);
+    if (exit_status != 0) {
+      return port::InternalError(
+          absl::StrFormat("ptxas exited with non-zero error code %d, output: %s",
+                          exit_status, stderr_output));
+    }
   }
 
   // Read in the result of compilation and return it as a byte vector.

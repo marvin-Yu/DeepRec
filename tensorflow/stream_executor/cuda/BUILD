@@ -97,11 +97,20 @@ cc_library(
 )
 
 cc_library(
+    name = "http_client",
+    srcs = if_cuda_is_configured(["http_client.cc"]),
+    hdrs = if_cuda_is_configured(["http_client.h"]),
+    deps = if_cuda_is_configured([
+        "//tensorflow/core:lib",
+    ]),
+)
+cc_library(
     name = "ptxas_utils",
     srcs = if_cuda_is_configured(["ptxas_utils.cc"]),
     hdrs = if_cuda_is_configured(["ptxas_utils.h"]),
     deps = if_cuda_is_configured([
         ":cuda_driver",
+        ":http_client",
         ":ptxas_wrapper",
         "@com_google_absl//absl/types:span",
         "//tensorflow/stream_executor/gpu:gpu_helpers_header",

@@ -309,6 +309,7 @@ class TensorShape : public TensorShapeBase<TensorShape> {
   bool IsSameSize(const TensorShape& b) const;
   bool operator==(const TensorShape& b) const { return IsSameSize(b); }
   bool operator!=(const TensorShape& b) const { return !IsSameSize(b); }
+  bool operator>(const TensorShape& b) const;
 
   /// Fill `*dsizes` from `*this`.
   /// Notice: Using IndexType=int32 in combination with To32Bit() can

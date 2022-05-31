@@ -92,6 +92,7 @@ class HloPrintOptions {
         indent_amount_(0),
         is_in_nested_computation_(false),
         print_ids_(true),
+        print_const_values_(true),
         print_cluster_id_(true) {}
 
   static HloPrintOptions ShortParsable() {
@@ -141,6 +142,14 @@ class HloPrintOptions {
   // If true, large constants will be printed out.
   HloPrintOptions& set_print_large_constants(bool value) {
     print_large_constants_ = value;
+    return *this;
+  }
+
+  // If true, constansts will be printed out.
+  // Set to false when get signarture of xla compile,
+  // because const values change will make ptx miss
+  HloPrintOptions& set_print_const_values(bool value) {
+    print_const_values_ = value;
     return *this;
   }
 
@@ -237,6 +246,7 @@ class HloPrintOptions {
     return *this;
   }
 
+  bool print_const_values() const { return print_const_values_; }
   bool print_large_constants() const { return print_large_constants_; }
   PrintSubcomputationMode print_subcomputation_mode() const {
     return print_subcomputation_mode_;
@@ -261,6 +271,7 @@ class HloPrintOptions {
   int is_in_nested_computation() const { return is_in_nested_computation_; }
 
  private:
+  bool print_const_values_;
   bool print_large_constants_;
   PrintSubcomputationMode print_subcomputation_mode_;
   bool print_metadata_;

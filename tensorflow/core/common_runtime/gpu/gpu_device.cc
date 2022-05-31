@@ -680,7 +680,9 @@ void BaseGPUDevice::Compute(OpKernel* op_kernel, OpKernelContext* context) {
   ScopedActivateExecutorContext scoped_activation{stream->parent()};
   op_kernel->Compute(context);
   if (context->status().ok()) {
-    if (sync_every_op_) {
+    bool sync_env = false;
+    ReadBoolFromEnvVar("TF_GPU_SYNC_EVERY_OP", false, &sync_env);
+    if (sync_env || sync_every_op_) {
       // Note: GPUUtil::Sync() only syncs the default stream.
       // We need to either sync the stream used by this op, or
       // all streams.  Given that this flag is typically used for

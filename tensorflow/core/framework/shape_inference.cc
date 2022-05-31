@@ -332,6 +332,10 @@ DimensionHandle InferenceContext::NumElements(ShapeHandle s) {
 
 string InferenceContext::DebugString(ShapeHandle s) {
   if (RankKnown(s)) {
+    if (Rank(s) > 32 || Rank(s) < 0) {
+      LOG(ERROR) << "Invalid ShapeHandle with rank " << Rank(s);
+      return "?";
+    }
     std::vector<string> vals;
     for (auto d : s->dims_) vals.push_back(DebugString(d));
     return strings::StrCat("[", absl::StrJoin(vals, ","), "]");
@@ -1316,6 +1320,17 @@ ShapeHandle InferenceContext::ShapeManager::MakeShape(
 ShapeHandle InferenceContext::ShapeManager::UnknownShape() {
   all_shapes_.push_back(new Shape());
   return all_shapes_.back();
+}
+
+void InferenceContext::ShapeManager::Clear() {
+  for (auto* s : all_shapes_){
+     delete s;
+  }
+  for (auto* d : all_dims_) {
+    delete d;
+  }
+  all_shapes_.clear();
+  all_dims_.clear();
 }
 
 }  // namespace shape_inference

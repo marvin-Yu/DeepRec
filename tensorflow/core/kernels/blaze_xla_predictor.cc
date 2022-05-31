@@ -1,6 +1,5 @@
 #include "tensorflow/core/framework/types.h"
 #include "tensorflow/core/kernels/blaze_xla_predictor.h"
-#include "tensorflow/core/util/env_var.h"
 
 #if GOOGLE_CUDA
 #include "tensorflow/core/kernels/gpu_utils.h"
@@ -402,7 +401,6 @@ Status BlazeXlaPredictor::SliceToDynamicCPU(const std::vector<Tensor>& padded_ou
 
 Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
   // Infer inputs' batchsize
-
   if (TF_PREDICT_FALSE(!warmuped_)) {
     if (warmuping_) {
       return errors::Internal("Blaze kernel warmuping");
@@ -418,6 +416,8 @@ Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
     warmuped_ = true;
     warmuping_ = false;
   }
+
+  if (log_level_ > 0) RawInputsDebugLogging(ctx);
 
   int num_inputs = ctx->num_inputs();
   std::vector<Tensor> inputs;
@@ -470,6 +470,7 @@ Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
       TF_RETURN_IF_ERROR(session_->RunCallable(
               handle_, padded_inputs, &padded_outputs, &metadata));
       ctx->prof_stats()->flops += metadata.prof_stats().flops();
+      ctx->traced_infos()->prof_stats->flops += metadata.prof_stats().flops();
     } else {
       TF_RETURN_IF_ERROR(session_->RunCallable(
               handle_, padded_inputs, &padded_outputs, nullptr));

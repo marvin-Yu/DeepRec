@@ -7,9 +7,7 @@ load(
 tf_kernel_library(
     name = "topk_op",
     srcs = [
-      "util.h",
-      "GTopK_kernel.cc",
-      "IdxGTopK_kernel.cc",
+      "BatchTopKOnRT_kernel.cc",
       "BlazeTopK_kernel.cc",
     ],
     visibility = ["//visibility:public"],

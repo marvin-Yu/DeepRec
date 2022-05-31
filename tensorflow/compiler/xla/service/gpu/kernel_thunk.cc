@@ -94,15 +94,22 @@ Status KernelThunk::ExecuteOnStream(const ExecuteParams& params) {
     kernel = it->second.get();
   }
 
-  VLOG(3) << "Launching " << kernel->name();
+  VLOG(1) << "Launching " << kernel->name();
   absl::InlinedVector<se::DeviceMemoryBase, 4> buffer_args;
   for (const BufferAllocation* arg : args_) {
     se::DeviceMemoryBase buf =
         params.buffer_allocations->GetDeviceAddress(arg->index());
-    VLOG(3) << "  Arg: alloc #" << arg->index() << ": " << buf.opaque() << "  ("
+    VLOG(1) << "  Arg: alloc #" << arg->index() << ": " << buf.opaque() << "  ("
             << buf.size() << "B)";
     buffer_args.push_back(buf);
   }
+  VLOG(1) << absl::StrFormat(
+      "Launching kernel %s, before_padding: %d, after_padding: %d, "
+      "blocks: %d, threads: %d, dynamic: %d",
+      kernel->name(), params.before_padding, params.after_padding,
+      launch_dimensions_.block_count(),
+      launch_dimensions_.threads_per_block(),
+      launch_dimensions_.IsBatchDimDynamic());
   auto op_profiler =
       params.profiler->MakeScopedInstructionProfiler(hlo_instruction());
   auto s = ExecuteKernelOnStream(
