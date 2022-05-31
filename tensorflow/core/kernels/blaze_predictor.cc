@@ -6,7 +6,7 @@
 #include "tensorflow/core/platform/protobuf.h"
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/util/env_var.h"
-#include "tensorflow/core/lib/strings/base64.h"
+#include "tensorflow/core/util/hydra_base64_util.h"
 
 #if GOOGLE_CUDA
 #include "tensorflow/core/kernels/gpu_utils.h"
@@ -18,6 +18,7 @@ const std::string kCpuDeviceName = "/job:localhost/replica:0/task:0/device:CPU:0
 
 mutex BlazePredictor::session_mu_;
 BlazePredictor::SessionMap BlazePredictor::session_map_;
+mutex BlazePredictor::log_mu_;
 
 BlazePredictor::BlazePredictor(OpKernelConstruction* ctx) : device_type_(ctx->device_type().type()) {
   ReadInt64FromEnvVar("BLAZE_LOG_LEVEL", 0, &log_level_);
@@ -265,6 +266,7 @@ Status BlazePredictor::Compute(OpKernelContext* ctx) {
     RunMetadata metadata;
     TF_RETURN_IF_ERROR(session_->RunCallable(handle_, real_inputs, &outputs, &metadata));
     ctx->prof_stats()->flops += metadata.prof_stats().flops();
+    ctx->traced_infos()->prof_stats->flops += metadata.prof_stats().flops();
   } else {
     TF_RETURN_IF_ERROR(session_->RunCallable(handle_, real_inputs, &outputs, nullptr));
   }
@@ -381,9 +383,13 @@ stream_executor::Stream* BlazePredictor::GetStream() const {
 }
 
 void BlazePredictor::RawInputsDebugLogging(OpKernelContext* ctx) const {
+  mutex_lock l(log_mu_);
+
   for (int i = 0; i < ctx->num_inputs(); ++i) {
 
     const Tensor& input = ctx->input(i);
+    VLOG(1) << "input ["<<i<<"]:\n"
+            << input.DebugString();
 
     const string& name_string = input_names_[i];
 
@@ -395,39 +401,9 @@ void BlazePredictor::RawInputsDebugLogging(OpKernelContext* ctx) const {
     stream << "(" << input.NumElements() << ")";
     shape_string = stream.str();
 
-    string dtype_string;
-    switch (input.dtype()) {
-      case DT_HALF:
-        dtype_string = "FP16";
-      case DT_FLOAT:
-        dtype_string = "FP32";
-      case DT_INT64:
-        dtype_string = "INT64";
-      case DT_INT32:
-        dtype_string = "INT32";
-      case DT_INT16:
-        dtype_string = "INT16";
-      case DT_INT8:
-        dtype_string = "INT8";
-      case DT_UINT64:
-        dtype_string = "UINT64";
-      case DT_UINT32:
-        dtype_string = "UINT32";
-      case DT_UINT16:
-        dtype_string = "UINT16";
-      case DT_UINT8:
-        dtype_string = "UINT8";
-      default:
-        dtype_string = "UNKNOWN";
-    }
+    string dtype_string = DataTypeString(input.dtype());
 
-    string data_string;
-    Status s = Base64Encode(input.tensor_data(), &data_string);
-    if (!s.ok()) {
-      LOG(WARNING) << "Encoding data for input["<<i<<"] failed!\n"
-                   << s.ToString();
-      return;
-    }
+    string data_string = hydra::base64_encode((const char*)input.data(), input.TotalBytes());
 
     LOG(INFO) << "blaze input blob [" << i << "]:"
               << " name:" << name_string
