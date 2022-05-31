@@ -21,6 +21,7 @@ limitations under the License.
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <pthread.h>
 
 #include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
@@ -51,6 +52,7 @@ limitations under the License.
 #include "tensorflow/core/lib/core/notification.h"
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/core/stringpiece.h"
+#include "tensorflow/core/lib/core/spin_lock.h"
 #include "tensorflow/core/lib/core/threadpool.h"
 #include "tensorflow/core/lib/gtl/flatmap.h"
 #include "tensorflow/core/lib/gtl/flatset.h"
@@ -72,6 +74,7 @@ limitations under the License.
 #include "tensorflow/core/profiler/internal/traceme_recorder.h"
 #include "tensorflow/core/profiler/lib/traceme.h"
 #include "tensorflow/core/util/tensor_slice_reader_cache.h"
+#include "tensorflow/core/util/env_var.h"
 
 namespace tensorflow {
 namespace {
@@ -152,7 +155,9 @@ struct KernelTimer {
 };
 
 struct NodeItem {
-  NodeItem() {}
+  NodeItem() {
+    tensorflow::ReadBoolFromEnvVar("TF_USE_NODE_LOCK", false, &use_node_lock);
+  }
 
   // A graph node.
   const Node* node = nullptr;
@@ -186,6 +191,10 @@ struct NodeItem {
   PendingCounts::Handle pending_id;
 
   const EdgeInfo* output_edge_list() const { return output_edge_base(); }
+
+  mutable spin_lock node_lock;
+
+  bool use_node_lock = false;
 
   // ith output edge.
   const EdgeInfo& output_edge(int i) const {
@@ -987,7 +996,7 @@ class ExecutorState {
     Entry* input_tensors;
 
     // The number of outstanding ops for each iteration.
-    size_t outstanding_ops;
+    std::atomic_int_fast32_t outstanding_ops;
 
     // The number of outstanding frames for each iteration.
     int outstanding_frame_count;
@@ -1154,8 +1163,8 @@ class ExecutorState {
                                               int64 iter, TaggedNodeSeq* ready)
         EXCLUSIVE_LOCKS_REQUIRED(mu) {
       IterationState* istate = GetIteration(iter);
-      istate->outstanding_ops--;
-      if (istate->outstanding_ops != 0) {
+      int outstanding_ops = istate->outstanding_ops.fetch_sub(1);
+      if (outstanding_ops != 1) {
         return false;
       } else {
         return CleanupIterations(gview, iter, ready);
@@ -2342,10 +2351,16 @@ void ExecutorState::PropagateOutputs(const TaggedNode& tagged_node,
     // Fast path for nodes types that don't need special handling
     DCHECK_EQ(input_frame, output_frame);
     // Normal path for most nodes
-    mutex_lock l(input_frame->mu);
-    output_frame->ActivateNodes(item, is_dead, output_iter, outputs, ready);
-    is_frame_done = input_frame->DecrementOutstandingOpsLocked(
-        &impl_->gview_, input_iter, ready);
+    if (item->use_node_lock) {
+      output_frame->ActivateNodes(item, is_dead, output_iter, outputs, ready);
+      is_frame_done = input_frame->DecrementOutstandingOps(
+          &impl_->gview_, input_iter, ready);
+    } else {
+      mutex_lock l(input_frame->mu);
+      output_frame->ActivateNodes(item, is_dead, output_iter, outputs, ready);
+      is_frame_done = input_frame->DecrementOutstandingOpsLocked(
+          &impl_->gview_, input_iter, ready);
+    }
   } else if (item->is_enter) {
     FindOrCreateChildFrame(input_frame, input_iter, node, &output_frame);
     output_iter = 0;
@@ -2822,8 +2837,10 @@ void ExecutorState::DeleteFrame(FrameState* frame, TaggedNodeSeq* ready) {
       for (const Edge* e : node->out_edges()) {
         const Node* dst_node = e->dst();
         
-        const auto dst_pending_id =
-            impl_->gview_.node(dst_node->id())->pending_id;
+        const NodeItem* dst_item = impl_->gview_.node(dst_node->id());
+        const auto dst_pending_id = dst_item->pending_id;
+        auto &node_lock = dst_item->node_lock;
+        bool use_node_lock = dst_item->use_node_lock;
         // TODO(yuanbyu): We don't need this if we require the subgraph
         // given to an executor not to contain a sink node.
         if (dst_node->IsSink()) continue;
@@ -2833,12 +2850,20 @@ void ExecutorState::DeleteFrame(FrameState* frame, TaggedNodeSeq* ready) {
         // We know this is a dead input to dst.
         if (IsMerge(dst_node)) {
           if (e->IsControlEdge()) {
+            std::unique_lock<spin_lock> l(node_lock, std::defer_lock);
+            if (use_node_lock) {
+              l.lock();
+            }
             parent_iter_state->decrement_pending(dst_pending_id, 2);
             int count = parent_iter_state->pending(dst_pending_id);
             int dead_cnt = parent_iter_state->dead_count(dst_pending_id);
             dst_dead = (dead_cnt == dst_node->num_inputs());
             dst_ready = (count == 0) || ((count == 1) && dst_dead);
           } else {
+            std::unique_lock<spin_lock> l(node_lock, std::defer_lock);
+            if (use_node_lock) {
+              l.lock();
+            }
             parent_iter_state->increment_dead_count(dst_pending_id);
             const int dead_cnt = parent_iter_state->dead_count(dst_pending_id);
             dst_dead = (dead_cnt == dst_node->num_inputs());
@@ -2846,6 +2871,10 @@ void ExecutorState::DeleteFrame(FrameState* frame, TaggedNodeSeq* ready) {
                 (parent_iter_state->pending(dst_pending_id) == 1) && dst_dead;
           }
         } else {
+          std::unique_lock<spin_lock> l(node_lock, std::defer_lock);
+          if (use_node_lock) {
+            l.lock();
+          }
           parent_iter_state->increment_dead_count(dst_pending_id);
           dst_ready =
               (parent_iter_state->decrement_pending(dst_pending_id, 1) == 0);
@@ -2906,6 +2935,8 @@ void ExecutorState::FrameState::ActivateNodes(const NodeItem* item,
     const NodeItem* dst_item = gview.node(dst_id);
     const PendingCounts::Handle dst_pending_id = dst_item->pending_id;
     const int src_slot = e.output_slot;
+    auto &node_lock = dst_item->node_lock;
+    bool use_node_lock = dst_item->use_node_lock;
 
     // TODO(yuanbyu): We don't need this if we require the subgraph
     // given to an executor not to contain a sink node.
@@ -2918,6 +2949,10 @@ void ExecutorState::FrameState::ActivateNodes(const NodeItem* item,
     // analysis happy.
     const bool is_control_edge = (src_slot == Graph::kControlSlot);
     bool dst_need_input = !is_control_edge;
+    std::unique_lock<spin_lock> l(node_lock, std::defer_lock);
+    if (use_node_lock) {
+      l.lock();
+    }
     if (dst_item->is_merge) {
       // A merge node is ready if all control inputs have arrived and either
       // a) a live data input becomes available or b) all data inputs are
@@ -3029,7 +3064,7 @@ void ExecutorState::FrameState::AddLoopInv(const NodeItem* item,
 
 bool ExecutorState::FrameState::IsIterationDone(int64 iter) {
   IterationState* iter_state = GetIteration(iter);
-  if (iter_state->outstanding_ops == 0 &&
+  if (iter_state->outstanding_ops.load() == 0 &&
       iter_state->outstanding_frame_count == 0) {
     if (iter == 0) {
       // The enclosing frame has no pending input.

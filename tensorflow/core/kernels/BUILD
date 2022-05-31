@@ -3732,7 +3732,7 @@ tf_kernel_library(
       "co_action_op.h",
       "co_action_op_gpu.cu.cc",
     ],
-    deps = MATH_DEPS,
+    deps = MATH_DEPS + [":eigen_contraction_kernel"],
 )
 
 tf_kernel_library(
@@ -3765,7 +3765,7 @@ tf_kernel_library(
       "indicator_matmul_op.h",
       "indicator_matmul_op_gpu.cu.cc",
     ],
-    deps = MATH_DEPS,
+    deps = MATH_DEPS + [":eigen_contraction_kernel"],
 )
 
 tf_kernel_library(
@@ -3776,7 +3776,7 @@ tf_kernel_library(
         "indicator_batched_small_matmul_op.h",
         "indicator_batched_small_matmul_op_gpu.cu.cc",
     ],
-    deps = MATH_DEPS + [":indicator_matmul_op"],
+    deps = MATH_DEPS + [":indicator_matmul_op"] + [":eigen_contraction_kernel"],
 )
 
 tf_mkl_kernel_library(
