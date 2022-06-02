@@ -37,6 +37,7 @@ limitations under the License.
 #include "tensorflow/core/grappler/optimizers/multi_dnn_switch_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/batch_mat_mul_compatible.h"
 #include "tensorflow/core/grappler/optimizers/gemm_compression.h"
+#include "tensorflow/core/grappler/optimizers/memory_access_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/generic_layout_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/implementation_selector.h"
 #include "tensorflow/core/grappler/optimizers/loop_optimizer.h"
@@ -147,6 +148,7 @@ std::unique_ptr<GraphOptimizer> MetaOptimizer::MakeNewOptimizer(
   MK_OPT("remap", new Remapper(cfg_.remapping()));
   MK_OPT("layout", new GenericLayoutOptimizer());
   MK_OPT("batchmatmul_compatible", new BatchMatMulCompatibleOptimizer());
+  MK_OPT("memory_access", new MemoryAccessOptimizer());
   MK_OPT("gemm_compression", new GemmCompressionOptimizer());
   MK_OPT("gemm", new GemmOptimizer());
   MK_OPT("multi_dnn_switch", new MultiDNNSwitchOptimizer());
@@ -235,6 +237,9 @@ Status MetaOptimizer::InitializeOptimizers(
   }
   if (cfg_.batch_gemm_compatible_optimization() != RewriterConfig::OFF) {
     optimizers->push_back(MakeUnique<BatchMatMulCompatibleOptimizer>());
+  }
+  if (cfg_.memory_access_optimization() != RewriterConfig::OFF) {
+    optimizers->push_back(MakeUnique<MemoryAccessOptimizer>());
   }
   if (cfg_.tile_equal() == RewriterConfig::ON) {
     optimizers->push_back(MakeUnique<TileOptimizer>());
