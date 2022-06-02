@@ -614,23 +614,31 @@ class SubGraphCollection {
       }
     }
     // 删除其他分支节点
-    for (auto& collection : branch_collection_) {
-      for (Node* n : collection->branch_nodes) {
-        if (n == collection->GetReserveNode()) {
-          if (!collection->IsSwitchN()) {
-            continue;
-          }
-        }
-        if (remove_set.find(n) != remove_set.end()) continue;
-        if (n->out_edges().empty()) {
-          graph_->RemoveNode(n);
-          remove_set.insert(n);
-        }
-     }
-    }
+    VLOG(1) << "start remove node ";
     if (merge_->out_edges().empty()) {
       graph_->RemoveNode(merge_);
     }
+    bool deleted = false;
+    do {
+      deleted = false;
+      for (auto& collection : branch_collection_) {
+        for (Node* n : collection->branch_nodes) {
+          if (n == nullptr) continue;
+          if (remove_set.find(n) != remove_set.end()) continue;
+          if (n == collection->GetReserveNode()) {
+            if (!collection->IsSwitchN()) {
+              continue;
+            }
+          }
+          if (n->out_edges().empty()) {
+            deleted = true;
+            VLOG(1) << "remove node " << n->name();
+            graph_->RemoveNode(n);
+            remove_set.insert(n);
+          }
+       }
+      }
+    } while(deleted);
     return true;
   }
   
