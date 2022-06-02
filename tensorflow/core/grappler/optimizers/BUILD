@@ -671,6 +671,7 @@ cc_library(
         ":gemm_optimizer",
         ":multi_dnn_switch_optimizer",
         ":gemm_compression",
+        ":batch_mat_mul_compatible",
         ":loop_optimizer",
         ":memory_optimizer",
         ":model_pruner",
@@ -1290,5 +1291,17 @@ cc_library(
         "//tensorflow/core:graph",
         "//tensorflow/core/grappler:grappler_item",
         "//tensorflow/tools/graph_transforms:transform_utils",
+    ],
+)
+cc_library(
+    name = "batch_mat_mul_compatible",
+    srcs = ["batch_mat_mul_compatible.cc"],
+    hdrs = ["batch_mat_mul_compatible.h",],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":graph_optimizer",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:graph",
+        "//tensorflow/core/grappler:grappler_item",
     ],
 )

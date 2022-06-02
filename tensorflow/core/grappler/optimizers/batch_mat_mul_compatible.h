@@ -13,48 +13,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_GEMM_COMPRESSION_OPTIMIZER_H_
-#define TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_GEMM_COMPRESSION_OPTIMIZER_H_
+#ifndef TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_BATCH_MAT_MUL_COMPATIBLE_OPTIMIZER_H_
+#define TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_BATCH_MAT_MUL_COMPATIBLE_OPTIMIZER_H_
 
-#include "tensorflow/tools/graph_transforms/transform_utils.h"
 #include "tensorflow/core/grappler/optimizers/graph_optimizer.h"
-
-using namespace tensorflow::graph_transforms;
 
 namespace tensorflow {
 namespace grappler {
 
-namespace {
- 
-static const OpTypePattern gemm_compression_pattern =
-    {"MatMul",
-      {
-        {"ConcatV2",
-          { // input
-            {"GatherV2",
-              {
-                {"Cast",
-                  {
-                    {"Placeholder"},
-                  }
-                },
-                {"Placeholder|Tile"},
-                {"Const"},
-              }
-            },
-          } 
-        },
-        {"Merge|Const"},
-      }
-    };
-}  // end namespace
-
-class GemmCompressionOptimizer : public GraphOptimizer {
+class BatchMatMulCompatibleOptimizer : public GraphOptimizer {
  public:
-  GemmCompressionOptimizer() {}
-  ~GemmCompressionOptimizer() override {}
+  BatchMatMulCompatibleOptimizer() {}
+  ~BatchMatMulCompatibleOptimizer() override {}
 
-  string name() const override { return "gemm_compression"; };
+  string name() const override { return "batch_mat_mul_compatible"; };
 
   bool UsesFunctionLibrary() const override { return false; }
 
@@ -68,4 +40,4 @@ class GemmCompressionOptimizer : public GraphOptimizer {
 }  // end namespace grappler
 }  // end namespace tensorflow
 
-#endif  // TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_GEMM_COMPRESSION_OPTIMIZER_H_
+#endif  // TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_BATCH_MAT_MUL_COMPATIBLE_OPTIMIZER_H_

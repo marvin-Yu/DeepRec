@@ -196,5 +196,6 @@ message RewriterConfig {
   // tile equal optimizer
   Toggle tile_equal = 402;
   Toggle multi_dnn_switch_optimization = 502;
+  Toggle batch_gemm_compatible_optimization = 503;
   Toggle gemm_compression_optimization = 505;
 }

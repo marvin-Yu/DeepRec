@@ -147,8 +147,10 @@ bool OptimizeGatherConcatPattern(GraphDef &input_graph_def, GraphDef* output_gra
         }
         // 4. 将concat进行分拆，后续MatMul的权重也要分拆
         DataType output_type = DT_FLOAT;
-        if (weight_node.attr().count("T") != 0) {
-          output_type = weight_node.attr().at("T").type();
+        string type_key = "T";
+        if (weight_node.op() == "Const") type_key = "dtype";
+        if (weight_node.attr().count(type_key) != 0) {
+          output_type = weight_node.attr().at(type_key).type();
         } else {
           invalid = true;
         }
