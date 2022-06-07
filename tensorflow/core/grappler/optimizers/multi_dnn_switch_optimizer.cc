@@ -804,82 +804,49 @@ bool DynamicPartitionToSwitch(Graph* graph, std::vector<std::shared_ptr<
     multi_dnn_info.push_back(info);
     if (VLOG_IS_ON(1)) DebugMultiDNNInfo(info);
   }
+  Node* partition_node = nullptr;
+  for (MultiDNNInfo info:multi_dnn_info) {
+    if (partition_node == nullptr) partition_node = info.partition;
+    else {
+      if (partition_node != info.partition) {
+        LOG(ERROR) << "find different partition nodes:" << partition_node->DebugString()
+                   << " VS " << info.partition->DebugString();
+        return false;
+      }
+    }
+  }
+  // 在线时scene index只需要一个index，因此可以干掉Tile
+  Node* partition_preorder_node = nullptr;
+  if (partition_node->type_string() == "Tile") {
+    partition_node->input_node(0, &partition_preorder_node);
+  }
+  // 由于SwitchN只接收scalar，而传进来的scene是形状为[1]的vector，因此添加一个Squeeze op
+  string squeeze_name = partition_preorder_node->name() + "/multi_dnn/squeeze";
+  Node *squeeze = nullptr;
+  std::vector<NodeDefBuilder::NodeOut> squeeze_inputs;
+  squeeze_inputs.emplace_back(partition_preorder_node->name(), 0, partition_preorder_node->output_type(0));
+  NodeDef squeeze_node;
+  status = NodeDefBuilder(squeeze_name, "Squeeze")
+                       .Input(squeeze_inputs[0])
+                       .Attr("T", partition_preorder_node->output_type(0))
+                       .Attr("squeeze_dims", {0})
+                       .Finalize(&squeeze_node);
+  if (!status.ok()) {
+    LOG(ERROR) << "Adding squeeze nodedef build failed " << status;
+    return false;
+  }
+  squeeze_node.set_device(partition_node->def().device());
+  VLOG(1) << squeeze_node.DebugString();
+  squeeze = graph->AddNode(squeeze_node, &status);
+  if (!status.ok()) {
+    LOG(ERROR) << "Adding squeeze node failed " << status;
+    return false;
+  }
+  squeeze->set_assigned_device_name(partition_node->assigned_device_name());
+  graph->AddEdge(partition_preorder_node, 0, squeeze, 0);
   for (MultiDNNInfo info:multi_dnn_info) {
     VLOG(1) << "start to replace nodes";
     int switch_branch_num = -1;
-    // 构建reduction indices const
-    string squeeze_name = info.partition->name() + "/multi_dnn/squeeze";
-    Node *squeeze = nullptr;
-    if (index_cache.find(squeeze_name) == index_cache.end()) {
-      // 构建begin const
-      string begin_name = info.partition->name() + "/multi_dnn/slice_begin";
-      Tensor t_begin(DT_INT64, TensorShape({1}));
-      auto begin_data = t_begin.tensor<int64, 1>();
-      begin_data(0) = 0;
-      Node* begin_const = CreateConstNode(graph, begin_name, t_begin, info.partition);
-      // 构建size const
-      string size_name = info.partition->name() + "/multi_dnn/slice_size";
-      Tensor t_size(DT_INT64, TensorShape({1}));
-      auto size_data = t_size.tensor<int64, 1>();
-      size_data(0) = 1;
-      Node* size_const = CreateConstNode(graph, size_name, t_size, info.partition);
-      // 构建Slice
-      string slice_name = info.partition->name() + "/multi_dnn/slice";
-      std::vector<NodeDefBuilder::NodeOut> slice_inputs;
-      slice_inputs.emplace_back(info.partition->name(), 0, info.partition->output_type(0));
-      slice_inputs.emplace_back(begin_const->name(), 0, begin_const->output_type(0));
-      slice_inputs.emplace_back(size_const->name(), 0, size_const->output_type(0));
-      NodeDef slice_node;
-      status = NodeDefBuilder(slice_name, "Slice")
-                           .Input(slice_inputs[0])
-                           .Input(slice_inputs[1])
-                           .Input(slice_inputs[2])
-                           .Attr("T", info.partition->output_type(0))
-                           .Attr("Index", DT_INT64)
-                           .Finalize(&slice_node);
-      if (!status.ok()) {
-        LOG(ERROR) << "Adding slice nodedef build failed " << status;
-        return false;
-      }
-      slice_node.set_device(info.partition->def().device());
-      VLOG(1) << slice_node.DebugString();
-      Node *slice = graph->AddNode(slice_node, &status);
-      if (!status.ok()) {
-        LOG(ERROR) << "Adding slice node failed " << status;
-        return false;
-      }
-      slice->set_assigned_device_name(info.partition->assigned_device_name());
-      graph->AddEdge(info.partition, 0, slice, 0);
-      graph->AddEdge(begin_const, 0, slice, 1);
-      graph->AddEdge(size_const, 0, slice, 2);
-      // squeeze
-      string squeeze_name = info.partition->name() + "/multi_dnn/squeeze";
-      std::vector<NodeDefBuilder::NodeOut> squeeze_inputs;
-      squeeze_inputs.emplace_back(slice->name(), 0, slice->output_type(0));
-      NodeDef squeeze_node;
-      status = NodeDefBuilder(squeeze_name, "Squeeze")
-                           .Input(squeeze_inputs[0])
-                           .Attr("T", slice->output_type(0))
-                           .Attr("squeeze_dims", {0})
-                           .Finalize(&squeeze_node);
-      if (!status.ok()) {
-        LOG(ERROR) << "Adding squeeze nodedef build failed " << status;
-        return false;
-      }
-      squeeze_node.set_device(slice->def().device());
-      VLOG(1) << squeeze_node.DebugString();
-      squeeze = graph->AddNode(squeeze_node, &status);
-      if (!status.ok()) {
-        LOG(ERROR) << "Adding squeeze node failed " << status;
-        return false;
-      }
-      squeeze->set_assigned_device_name(slice->assigned_device_name());
-      graph->AddEdge(slice, 0, squeeze, 0);
-      index_cache.insert(std::pair<string, Node*>(squeeze_name, squeeze));
-    } else {
-      squeeze = index_cache.find(squeeze_name)->second;
-      VLOG(1) << "find cache squeeze:" << squeeze->DebugString();
-    }
 
     // 4.DynamicPartition_a替换为_SwitchN
     std::vector<Node*> switch_vector;
@@ -969,6 +936,7 @@ bool DynamicPartitionToSwitch(Graph* graph, std::vector<std::shared_ptr<
     UpdateAllEdge(graph, merge, info.dynamic_stitch);
     graph->RemoveNode(info.dynamic_partition_b);
     graph->RemoveNode(info.dynamic_stitch);
+    graph->RemoveNode(info.partition);
     sub_graph_group.push_back(std::make_shared<SubGraphCollection>(
                               graph, switch_vector, merge, switch_branch_num));
   }
