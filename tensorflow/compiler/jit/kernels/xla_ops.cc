@@ -355,7 +355,7 @@ static Status CompileToLocalExecutable(
     return Status::OK();
   }
  
-  return cache->Compile(options, function, args, compile_options,
+  return cache->Compile(ctx, options, function, args, compile_options,
                         lazy ? CompileMode::kLazy
                              : CompileMode::kStrict,
                         kernel, executable, inputs_shape_info);

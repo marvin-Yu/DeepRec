@@ -353,9 +353,12 @@ port::Status GpuExecutor::LoadModule(const MultiModuleLoaderSpec& spec,
   CUmodule cu_module;
   if (spec.has_cuda_cubin_in_memory()) {
     absl::MutexLock lock{&in_memory_modules_mu_};
+    auto start = tensorflow::Env::Default()->NowMicros();
     TF_RETURN_IF_ERROR(LoadModuleFromCuBin(
         reinterpret_cast<const char*>(spec.cuda_cubin_in_memory().data()),
         &cu_module));
+    VLOG(0) << "LoadModuleFromCuBin cost "
+            << tensorflow::Env::Default()->NowMicros() - start << " us";
     *module_handle = ModuleHandle(const_cast<void *>(
         static_cast<const void *>(spec.cuda_cubin_in_memory().data())));
     return port::Status::OK();
@@ -369,8 +372,11 @@ port::Status GpuExecutor::LoadModule(const MultiModuleLoaderSpec& spec,
     }
 
     absl::MutexLock lock{&in_memory_modules_mu_};
+    auto start = tensorflow::Env::Default()->NowMicros();
     TF_RETURN_IF_ERROR(
         LoadModuleFromPtx(spec.cuda_ptx_in_memory(), &cu_module));
+    VLOG(0) << "LoadModuleFromPtx cost "
+            << tensorflow::Env::Default()->NowMicros() - start << " us";
     *module_handle = ModuleHandle(const_cast<void *>(
         static_cast<const void *>(spec.cuda_ptx_in_memory())));
     return port::Status::OK();

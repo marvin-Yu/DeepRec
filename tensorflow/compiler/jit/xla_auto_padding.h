@@ -32,6 +32,7 @@ public:
     std::shared_ptr<InputsShapeInfo> inputs_shape_info);
 
   Status Compile(
+    OpKernelContext* ctx,
     const XlaCompiler::Options& options, const NameAttrList& function,
     absl::Span<const XlaCompiler::Argument> args,
     const XlaCompiler::CompileOptions& compile_options,
@@ -87,6 +88,7 @@ private:
                 std::shared_ptr<InputsShapeInfo> inputs_shape_info);
 
  Status Warmup(
+    OpKernelContext* ctx,
     const XlaCompiler::Options& options, const NameAttrList& function,
     absl::Span<const XlaCompiler::Argument> args,
     const XlaCompiler::CompileOptions& compile_options,
@@ -99,6 +101,7 @@ private:
     absl::optional<int64> compile_threshold,
     std::shared_ptr<InputsShapeInfo> inputs_shape_info);
 
+ Status InitExecutable(xla::LocalExecutable* executable, OpKernelContext* ctx);
  void FillShapeInferCtx(std::shared_ptr<InputsShapeInfo> inputs_shape_info,
      std::string device) {
    if (device.find("CPU") != device.npos || device.find("cpu") != device.npos) {

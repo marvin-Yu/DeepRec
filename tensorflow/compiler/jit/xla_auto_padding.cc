@@ -101,7 +101,16 @@ Status XlaAutoPadding::ParseArgIndex(std::shared_ptr<InputsShapeInfo> inputs_sha
     return Status::OK();
 }
 
+Status XlaAutoPadding::InitExecutable(xla::LocalExecutable* executable, OpKernelContext* ctx) {
+  se::Stream* stream =
+      ctx->op_device_context() ? ctx->op_device_context()->stream() : nullptr;
+  se::StreamExecutor* executor = stream->parent();
+  executable->executable()->Init(executor);
+  return Status::OK();
+}
+
 Status XlaAutoPadding::Warmup(
+    OpKernelContext* ctx,
     const XlaCompiler::Options& options, const NameAttrList& function,
     absl::Span<const XlaCompiler::Argument> args,
     const XlaCompiler::CompileOptions& compile_options,
@@ -140,12 +149,15 @@ Status XlaAutoPadding::Warmup(
     LOG(INFO) << name_ << " warmup from file " << inputs_shape_info_array[i]->uuid();
     CompileImpl(options, function, args_array[i], compile_fn,
                 compile_options, compile_threshold, inputs_shape_info_array[i]);
+
+    InitExecutable(inputs_shape_info_array[i]->out_executable, ctx); 
   }
   LOG(INFO) << name_ << " warmup from file finish! total cache size=" << args_array.size(); 
   return Status::OK();
 }
 
 Status XlaAutoPadding::Compile(
+    OpKernelContext* ctx,
     const XlaCompiler::Options& options, const NameAttrList& function,
     absl::Span<const XlaCompiler::Argument> args,
     const XlaCompiler::CompileOptions& compile_options,
@@ -203,8 +215,9 @@ Status XlaAutoPadding::Compile(
       {
         mutex_lock lock(warmup_mu_);
         if (! has_warmup_) {
-          Warmup(options, function, args, compile_options, compile_fn,
+          Warmup(ctx, options, function, args, compile_options, compile_fn,
               compile_threshold, inputs_shape_info);
+          VLOG(0) << name_ << " Warmup Finish";
           return Status::OK();
         }
       }

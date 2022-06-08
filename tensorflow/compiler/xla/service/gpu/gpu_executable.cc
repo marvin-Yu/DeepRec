@@ -252,6 +252,10 @@ Status GpuExecutable::ExecuteThunks(
   return Status::OK();
 }
 
+void GpuExecutable::Init(stream_executor::StreamExecutor* executor) {
+  ResolveConstantGlobals(executor);
+}
+
 StatusOr<const GpuExecutable::BufferAllocToDeviceMemoryMap*>
 GpuExecutable::ResolveConstantGlobals(se::StreamExecutor* executor) {
   tensorflow::mutex_lock lock(module_handle_mutex_);
@@ -275,6 +279,7 @@ GpuExecutable::ResolveConstantGlobals(se::StreamExecutor* executor) {
 
   se::ModuleHandle module_handle;
   TF_RETURN_IF_ERROR(executor->LoadModule(module_spec, &module_handle));
+  VLOG(0) << "executor->LoadModule " << this;
 
   for (BufferAllocation::Index i = 0; i < assignment_->Allocations().size();
        ++i) {

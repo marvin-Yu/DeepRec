@@ -90,6 +90,7 @@ class GpuExecutable : public Executable {
   std::shared_ptr<const BufferAssignment> GetBufferAssignment() const {
     return assignment_;
   }
+  void Init(stream_executor::StreamExecutor* executor);
 
  private:
   StatusOr<ScopedShapedBuffer> Execute(
@@ -113,7 +114,6 @@ class GpuExecutable : public Executable {
 
   using BufferAllocToDeviceMemoryMap =
       absl::flat_hash_map<BufferAllocation::Index, se::DeviceMemoryBase>;
-
   // Loads the PTX or CUBIN for this executable into `executor` and resolves the
   // globals corresponding to constant buffers.  Returns a map mapping buffer
   // allocation indices to GPU pointers.
