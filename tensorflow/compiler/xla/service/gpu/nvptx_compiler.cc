@@ -343,7 +343,7 @@ bool MaybeLoadPtxFromFile(const HloModule* module, std::string* ptx) {
 }
 
 // Try to load CUBIN from files defined in the FLAGS. If successful, return true.
-bool MaybeLoadCubinFromFile(string cubin_fullpath, std::vector<uint8>* cubin) {
+bool MaybeLoadCubinFromFile(string cubin_fullpath, std::vector<uint8>& cubin) {
   if (!cubin_cache_dir.empty()) {
     auto env = tensorflow::Env::Default();
     tensorflow::mutex_lock lock(cubin_cache_mutex);
@@ -353,17 +353,20 @@ bool MaybeLoadCubinFromFile(string cubin_fullpath, std::vector<uint8>* cubin) {
       Status ok = (tensorflow::ReadFileToString(tensorflow::Env::Default(),
                   cubin_fullpath, &cubin_string));
       if (ok.ok()) {
-        std::vector<uint8> cubin_vector(cubin_string.begin(), cubin_string.end());
-        *cubin = std::move(cubin_vector);
-        if (cubin_vector.size() <= 10) {
-          VLOG(0) << "Cubin size too short, size= " << cubin_vector.size();
+        cubin.reserve(cubin_string.size());
+        for (const char c: cubin_string) {
+          cubin.push_back((uint8)c);
+        }
+
+        if (cubin.size() <= 10) {
+          VLOG(0) << "Cubin size too short, size= " << cubin.size();
           return false;
         }
         VLOG(0) << "Load cubin succ";
         return true;
       } else {
         VLOG(0) << "read cubin file error, fallback to assemble ptx";
-	return false;
+        return false;
       }
     }
     VLOG(0) << "Cubin file not exit " << cubin_fullpath;
@@ -371,9 +374,7 @@ bool MaybeLoadCubinFromFile(string cubin_fullpath, std::vector<uint8>* cubin) {
   }
   VLOG(0) << "Cubin folder not exit or empty. " << cubin_cache_dir;
   return false;
-
 }
-
 }  // namespace
 
 NVPTXCompiler::NVPTXCompiler()
@@ -476,7 +477,7 @@ NVPTXCompiler::CompileTargetBinary(const HloModule* module,
   string cubin_filename = std::to_string(key) + ".cubin";
   string cubin_fullpath = cubin_cache_dir + "/" + cubin_filename;
   auto env = tensorflow::Env::Default();
-  if (!MaybeLoadCubinFromFile(cubin_fullpath, &cubin)) {
+  if (!MaybeLoadCubinFromFile(cubin_fullpath, cubin)) {
     cubin =
         CompilePtxOrGetCachedResult(stream_exec, ptx, compute_capability.first,
                                     compute_capability.second, module->config());
