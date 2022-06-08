@@ -26,27 +26,45 @@ namespace grappler {
 
 namespace {
 
-static const OpTypePattern gather_matmul_pattern = 
-       {"BatchMatMulV2",
+static const OpTypePattern gather_pattern1 =
+       {"BatchMatMulV2|Mul",
          { // input
            {"GatherV2",
              {
                {"*"},
-               {"Placeholder"},
+               {"Placeholder|Tile"},
                {"Const"},
              }
            },
            {"*"},
          }
        };
-static const OpTypePattern gather_pattern = 
-          {"GatherV2",
-            {
-              {"*"},
-              {"Placeholder|Tile"},
-              {"Const"},
-            }
-          };
+static const OpTypePattern gather_pattern2 =
+       {"BatchMatMulV2|Mul",
+         { // input
+           {"*"},
+           {"GatherV2",
+             {
+               {"*"},
+               {"Placeholder|Tile"},
+               {"Const"},
+             }
+           },
+         }
+       };
+static const OpTypePattern gather_pattern3 =
+       {"MatMul",
+         { // input
+           {"GatherV2",
+             {
+               {"*"},
+               {"Placeholder|Tile"},
+               {"Const"},
+             }
+           },
+           {"*"},
+         }
+       };
 }  // end namespace
 
 class MemoryAccessOptimizer : public GraphOptimizer {
