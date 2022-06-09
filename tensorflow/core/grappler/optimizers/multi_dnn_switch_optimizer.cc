@@ -804,6 +804,10 @@ bool DynamicPartitionToSwitch(Graph* graph, std::vector<std::shared_ptr<
     multi_dnn_info.push_back(info);
     if (VLOG_IS_ON(1)) DebugMultiDNNInfo(info);
   }
+  if (multi_dnn_info.empty()) {
+    VLOG(0) << "not found multi dnn structure";
+    return false;
+  }
   Node* partition_node = nullptr;
   for (MultiDNNInfo info:multi_dnn_info) {
     if (partition_node == nullptr) partition_node = info.partition;
@@ -1001,7 +1005,7 @@ Status MultiDNNSwitchOptimizer::Optimize(Cluster* cluster, const GrapplerItem& i
   }
 
   if(!MultiDNNOptimize(&graph)) {
-    LOG(WARNING) << "ConvertGraphDefToGraph failed";
+    LOG(WARNING) << "optimized multi dnn failed";
     *optimized_graph = item.graph;
     return Status::OK();
   }
