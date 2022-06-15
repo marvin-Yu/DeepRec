@@ -477,15 +477,10 @@ NVPTXCompiler::CompileTargetBinary(const HloModule* module,
   }
 
   string cubin_filename = std::to_string(key) + ".cubin";
-  string cubin_fullpath = cubin_cache_dir + "/" + cubin_filename;
   std::vector<uint8> cubin =
       CompilePtxOrGetCachedResult(stream_exec, ptx, compute_capability.first,
-                                  compute_capability.second, module->config(), cubin_fullpath);
-  if (!cubin_cache_dir.empty()) {
-      tensorflow::mutex_lock lock(cubin_cache_mutex);
-      VLOG(0) << "Dump " << cubin_filename << " to " << cubin_cache_dir;
-      DumpCubinToFileInDir(cubin_cache_dir, cubin_filename, cubin);
-  }
+                                  compute_capability.second, module->config(), 
+								  cubin_cache_dir, cubin_filename);
 
   VLOG(5) << "maybe load cubin size:" << cubin.size();
 
@@ -538,7 +533,7 @@ std::vector<uint8> NVPTXCompiler::CompilePtx(
 std::vector<uint8> NVPTXCompiler::CompilePtxOrGetCachedResult(
     se::StreamExecutor* stream_exec, const string& ptx, int cc_major,
     int cc_minor, const HloModuleConfig& hlo_module_config, 
-    string cubin_fullpath) {
+    string cubin_cache_dir, string cubin_filename) {
   XLA_SCOPED_LOGGING_TIMER("NVPTXCompiler::CompilePtxOrGetCachedResult");
   tensorflow::profiler::TraceMe activity(
       "PTX->CUBIN", tensorflow::profiler::TraceMeLevel::kInfo);
@@ -572,6 +567,7 @@ std::vector<uint8> NVPTXCompiler::CompilePtxOrGetCachedResult(
     if (inserted) {
       CHECK(!cache_value->compilation_done);
       if (!ptx.empty()) {
+        string cubin_fullpath = cubin_cache_dir + "/" + cubin_filename;
         if (!MaybeLoadCubinFromFile(cubin_fullpath, cache_value->cubin_data)) {
           StatusOr<std::vector<uint8>> maybe_cubin = se::cuda::CompilePtx(
               stream_exec->device_ordinal(), cache_ptx->c_str(),
@@ -580,6 +576,11 @@ std::vector<uint8> NVPTXCompiler::CompilePtxOrGetCachedResult(
             cache_value->cubin_data = std::move(maybe_cubin).ValueOrDie();
             VLOG(0) << "Compiled PTX size:" << ptx.size()
                     << " CUBIN size: " << cache_value->cubin_data.size();
+            if (!cubin_cache_dir.empty()) {
+                tensorflow::mutex_lock lock(cubin_cache_mutex);
+                VLOG(0) << "Dump " << cubin_filename << " to " << cubin_cache_dir;
+                DumpCubinToFileInDir(cubin_cache_dir, cubin_filename, cache_value->cubin_data);
+            }
           } else {
             bool log_warning = true;
             if (maybe_cubin.status().code() ==
