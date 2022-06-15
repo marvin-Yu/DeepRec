@@ -5037,7 +5037,6 @@ cc_library(
         ":sparse_tensors_map_ops",
         ":sparse_to_dense_op",
         ":sparse_xent_op",
-        ":blaze_xla_op",
     ],
 )
 
@@ -7528,88 +7527,6 @@ filegroup(
         "blaze_test_data/succ_options",
     ],
     visibility = ["//visibility:public"],
-)
-
-tf_cuda_cc_test(
-    name = "blaze_predictor_test",
-    size = "small",
-    srcs = [
-        "blaze_predictor_test.cc",
-        "blaze_xla_predictor_test.cc",
-    ],
-    linkstatic = tf_kernel_tests_linkstatic(),
-    data = [":blaze_predictor_test_data"],
-    deps = MATH_DEPS + [
-        "blaze_xla_op",
-        ":blaze_predictor",
-        ":collective_ops",
-        ":control_flow_ops",
-        ":cwise_op",
-        ":dense_update_ops",
-        ":fifo_queue_op",
-        ":function_ops",
-        ":identity_n_op",
-        ":identity_op",
-        ":matmul_op",
-        ":ops_util",
-        ":queue_ops",
-        ":session_ops",
-        ":variable_ops",
-        "//tensorflow/cc:cc_ops",
-        "//tensorflow/cc:scope",
-        "//tensorflow/core:direct_session",
-        "//tensorflow/core:ops",
-        "//tensorflow/core:protos_all_cc",
-        "//tensorflow/core:remote_fused_graph_ops_op_lib",
-        "//tensorflow/core:test",
-        "//tensorflow/core:test_main",
-        "//tensorflow/core:testlib",
-    ] + if_cuda(["//tensorflow/core:cuda"]),
-)
-
-tf_cuda_cc_test(
-    name = "blaze_xla_kernel_test",
-    size = "small",
-    srcs = ["blaze_xla_kernel_test.cc"],
-    data = [":blaze_predictor_test_data"],
-    deps = MATH_DEPS + [
-        ":ops_testutil",
-        ":blaze_xla_op",
-        ":blaze_predictor",
-        ":collective_ops",
-        ":control_flow_ops",
-        ":cwise_op",
-        ":dense_update_ops",
-        ":fifo_queue_op",
-        ":function_ops",
-        ":identity_n_op",
-        ":identity_op",
-        ":matmul_op",
-        ":ops_util",
-        ":queue_ops",
-        ":session_ops",
-        ":variable_ops",
-        "//tensorflow/cc:cc_ops",
-        "//tensorflow/cc:scope",
-        "//tensorflow/core:direct_session",
-        "//tensorflow/core:ops",
-        "//tensorflow/core:protos_all_cc",
-        "//tensorflow/core:remote_fused_graph_ops_op_lib",
-        "//tensorflow/core:test",
-        "//tensorflow/core:test_main",
-        "//tensorflow/core:testlib",
-        "//tensorflow/core:core_cpu_internal",
-    ] + if_cuda(["//tensorflow/core:cuda"]),
-)
-
-tf_kernel_library(
-    name = "blaze_xla_op",
-    srcs = [
-        "blaze_xla_kernel.cc",
-    ],
-    deps = [
-        "//tensorflow/core/kernels:blaze_predictor",
-    ],
 )
 
 cc_library(
