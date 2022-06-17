@@ -529,6 +529,10 @@ class SubGraphCollection {
                       .Attr("T", index_->src()->output_type(0))
                       .Finalize(&def);
               });
+    if (switch_n == nullptr) {
+      LOG(ERROR) << "construct SwitchN failed";
+      return false;
+    }
     VLOG(1) << switch_n->DebugString();
     std::vector<Node*> no_ops;
     std::vector<Node*> identity_ops;
@@ -541,12 +545,20 @@ class SubGraphCollection {
         return NodeDefBuilder(no_name, "NoOp")
                               .Finalize(&def);
       });
+      if (no == nullptr) {
+        LOG(ERROR) << "construct NoOp failed";
+        return false;
+      }
       no_ops.push_back(no);
       Node* identity = NodeConstructor(graph_, identity_name, switch_n_[0], [&](NodeDef& def) {
         return NodeDefBuilder(identity_name, "Identity")
-                              .Input({switch_n->name(), i, switch_n->output_type(0)})
+                              .Input(switch_n->name(), i, switch_n->output_type(0))
                               .Finalize(&def);
       });
+      if (identity == nullptr) {
+        LOG(ERROR) << "construct Identity failed";
+        return false;
+      }
       identity_ops.push_back(identity);
     }
     // index-|          |->Identity->NoOp
@@ -598,6 +610,10 @@ class SubGraphCollection {
                                   .Finalize(&def);
           };
           Node* merge = NodeConstructor(graph_, merge_name, switch_n_[0], merge_builder);
+          if (merge == nullptr) {
+            LOG(ERROR) << "construct Merge failed";
+            return false;
+          }
           int port = 0;
           for (int i = 0; i < branch_num_; ++i) {
             graph_->AddControlEdge(no_ops[i], input[i]->src());
@@ -680,25 +696,13 @@ class SubGraphCollection {
 };
 
 Node* CreateConstNode(Graph* graph, string const_name, Tensor &t_const, Node* base) {
-  NodeDefBuilder const_builder(const_name, "Const");
-  NodeDef const_node;
-  Status status = const_builder
-                  .Attr("dtype", t_const.dtype())
-                  .Attr("value", t_const)
-                  .Finalize(&const_node);
-  if (!status.ok()) {
-    LOG(ERROR) << "Const node construction failed with" << status;
-    return false;
-  }
-  const_node.set_device(base->def().device());
-  Node* node = graph->AddNode(const_node, &status);
-  VLOG(1) << "create const node:" << const_node.DebugString();
-  if (!status.ok()) {
-    LOG(ERROR) << "Adding const node failed " << status;
-    return false;
-  }
-  node->set_assigned_device_name(base->assigned_device_name());
-  return node;
+  std::function<Status(NodeDef&)> const_builder = [&](NodeDef& def) {
+    return NodeDefBuilder(const_name, "Const")
+                          .Attr("dtype", t_const.dtype())
+                          .Attr("value", t_const)
+                          .Finalize(&def);
+  };
+  return NodeConstructor(graph, const_name, base, const_builder);
 }
 
 void DebugMultiDNNInfo(MultiDNNInfo &multi_dnn_info) {
@@ -837,63 +841,57 @@ bool DynamicPartitionToSwitch(Graph* graph, std::vector<std::shared_ptr<
       auto begin_data = t_begin.tensor<int64, 1>();
       begin_data(0) = 0;
       Node* begin_const = CreateConstNode(graph, begin_name, t_begin, info.partition);
+      if (begin_const == nullptr) {
+        LOG(ERROR) << "construct begin const failed";
+        return false;
+      }
       // 构建size const
       string size_name = info.partition->name() + "/multi_dnn/slice_size";
       Tensor t_size(DT_INT64, TensorShape({1}));
       auto size_data = t_size.tensor<int64, 1>();
       size_data(0) = 1;
       Node* size_const = CreateConstNode(graph, size_name, t_size, info.partition);
+      if (size_const == nullptr) {
+        LOG(ERROR) << "construct size const failed";
+        return false;
+      }
       // 构建Slice
       string slice_name = info.partition->name() + "/multi_dnn/slice";
       std::vector<NodeDefBuilder::NodeOut> slice_inputs;
       slice_inputs.emplace_back(info.partition->name(), 0, info.partition->output_type(0));
       slice_inputs.emplace_back(begin_const->name(), 0, begin_const->output_type(0));
       slice_inputs.emplace_back(size_const->name(), 0, size_const->output_type(0));
-      NodeDef slice_node;
-      status = NodeDefBuilder(slice_name, "Slice")
-                           .Input(slice_inputs[0])
-                           .Input(slice_inputs[1])
-                           .Input(slice_inputs[2])
-                           .Attr("T", info.partition->output_type(0))
-                           .Attr("Index", DT_INT64)
-                           .Finalize(&slice_node);
-      if (!status.ok()) {
-        LOG(ERROR) << "Adding slice nodedef build failed " << status;
+      Node* slice = NodeConstructor(graph, slice_name, info.partition,
+                    [&](NodeDef& def) {
+                      return NodeDefBuilder(slice_name, "Slice")
+                               .Input(slice_inputs[0])
+                               .Input(slice_inputs[1])
+                               .Input(slice_inputs[2])
+                               .Attr("T", info.partition->output_type(0))
+                               .Attr("Index", DT_INT64)
+                               .Finalize(&def);
+                });
+      if (slice == nullptr) {
+        LOG(ERROR) << "construct slice failed";
         return false;
       }
-      slice_node.set_device(info.partition->def().device());
-      VLOG(1) << slice_node.DebugString();
-      Node *slice = graph->AddNode(slice_node, &status);
-      if (!status.ok()) {
-        LOG(ERROR) << "Adding slice node failed " << status;
-        return false;
-      }
-      slice->set_assigned_device_name(info.partition->assigned_device_name());
       graph->AddEdge(info.partition, 0, slice, 0);
       graph->AddEdge(begin_const, 0, slice, 1);
       graph->AddEdge(size_const, 0, slice, 2);
       // squeeze
       string squeeze_name = info.partition->name() + "/multi_dnn/squeeze";
-      std::vector<NodeDefBuilder::NodeOut> squeeze_inputs;
-      squeeze_inputs.emplace_back(slice->name(), 0, slice->output_type(0));
-      NodeDef squeeze_node;
-      status = NodeDefBuilder(squeeze_name, "Squeeze")
-                           .Input(squeeze_inputs[0])
-                           .Attr("T", slice->output_type(0))
-                           .Attr("squeeze_dims", {0})
-                           .Finalize(&squeeze_node);
-      if (!status.ok()) {
-        LOG(ERROR) << "Adding squeeze nodedef build failed " << status;
+      squeeze = NodeConstructor(graph, squeeze_name, slice,
+                      [&](NodeDef& def) {
+                        return NodeDefBuilder(squeeze_name, "Squeeze")
+                             .Input(slice->name(), 0, slice->output_type(0))
+                             .Attr("T", slice->output_type(0))
+                             .Attr("squeeze_dims", {0})
+                             .Finalize(&def);
+                });
+      if (squeeze == nullptr) {
+        LOG(ERROR) << "construct squeeze failed";
         return false;
       }
-      squeeze_node.set_device(slice->def().device());
-      VLOG(1) << squeeze_node.DebugString();
-      squeeze = graph->AddNode(squeeze_node, &status);
-      if (!status.ok()) {
-        LOG(ERROR) << "Adding squeeze node failed " << status;
-        return false;
-      }
-      squeeze->set_assigned_device_name(slice->assigned_device_name());
       graph->AddEdge(slice, 0, squeeze, 0);
       index_cache.insert(std::pair<string, Node*>(squeeze_name, squeeze));
     } else {
