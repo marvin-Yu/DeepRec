@@ -1939,7 +1939,7 @@ struct UserTracedInfos {
   }
 
   void MergeTo(RunMetadata* run_metadata, const ProfStats& stats) {
-    if (run_metadata) {
+    if (TF_PREDICT_TRUE(run_metadata)) {
       /*
       if (prof_stats) {
         //Todo done flops monitor
@@ -1959,6 +1959,9 @@ struct UserTracedInfos {
       BLAZE_ADD_STATS("blaze_nan_counter", prof_stats->blaze_nan_counter, RunMetadata::BlazeMetrics::GUAGE);
 #undef BLAZE_ADD_STATS
       } */
+      if (TF_PREDICT_TRUE(prof_stats)) {
+        run_metadata->mutable_prof_stats()->set_batch_size(prof_stats->batch_size);
+      }
       if (traced_tensors) {
         for (int i = 0; i < traced_tensors->name_tensors_size(); ++i) {
           auto ts = run_metadata->mutable_traced_tensors()->
