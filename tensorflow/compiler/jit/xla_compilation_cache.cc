@@ -201,6 +201,7 @@ Status XlaCompilationCache::BuildExecutable(
 }
 
 Status XlaCompilationCache::Compile(
+    OpKernelContext* ctx,
     const XlaCompiler::Options& options, const NameAttrList& function,
     absl::Span<const XlaCompiler::Argument> args,
     const XlaCompiler::CompileOptions& compile_options,
@@ -231,7 +232,7 @@ Status XlaCompilationCache::Compile(
                        out_compilation_result, out_executable, nullptr);
   } else {
     VLOG(1) << name_ << " Compile auto padding";
-    return xla_auto_padding_->Compile( options, function, args, compile_options, compile_fn,
+    return xla_auto_padding_->Compile(ctx, options, function, args, compile_options, compile_fn,
                        /*compile_threshold=*/compile_threshold,
                        out_compilation_result, out_executable, inputs_shape_info);
   }

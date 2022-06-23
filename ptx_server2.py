@@ -3,6 +3,7 @@ import urlparse, json
 import urllib
 import os
 import traceback
+import subprocess
 
 class GetHandler(BaseHTTPRequestHandler):
 
@@ -38,15 +39,19 @@ class GetHandler(BaseHTTPRequestHandler):
         ptxas_path = params["ptxas_path"] if "ptxas_path" in params else None
         src_name   = params["src_name"] if "src_name" in params else None
         dst_name   = params["dst_name"] if "dst_name" in params else None
+        disable_ptxas_optimizations   = params["disable_ptxas_optimizations"] \
+                if "disable_ptxas_optimizations" in params else "false"
         arch       = params["arch"] if "arch" in params else None
         if ptxas_path is None or src_name is None or dst_name is None or arch is None:
           raise Exception('ptxas_path src_name dst_name and arch cannot be None')
 
         cmd = ptxas_path + " " + src_name + " -o " + dst_name + " -arch="+ arch
+        if disable_ptxas_optimizations in ["true", "1"]:
+            cmd += " -O0"
         print 'cmd is ', cmd
-        ret = os.system(cmd)
+        ret = subprocess.call(cmd, shell=True)
         if ret != 0:
-          raise Exception('cmd exec error, got ret=', ret)
+          raise Exception('cmd exec error, got ret {}, cmd {}'.format(ret, cmd))
 
         self.send_response(200)
         self.end_headers()
@@ -67,6 +72,9 @@ class GetHandler(BaseHTTPRequestHandler):
 
 if __name__ == '__main__':
     from BaseHTTPServer import HTTPServer
-    server = HTTPServer(('localhost', 8881), GetHandler)
+    port = os.getenv('TF_PTXAS_HTTP_PORT')
+    if port is None:
+        port = 8881
+    server = HTTPServer(('localhost', port), GetHandler)
     print 'Starting server at http://localhost:8881'
     server.serve_forever()

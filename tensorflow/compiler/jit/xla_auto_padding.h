@@ -32,6 +32,7 @@ public:
     std::shared_ptr<InputsShapeInfo> inputs_shape_info);
 
   Status Compile(
+    OpKernelContext* ctx,
     const XlaCompiler::Options& options, const NameAttrList& function,
     absl::Span<const XlaCompiler::Argument> args,
     const XlaCompiler::CompileOptions& compile_options,
@@ -87,6 +88,7 @@ private:
                 std::shared_ptr<InputsShapeInfo> inputs_shape_info);
 
  Status Warmup(
+    OpKernelContext* ctx,
     const XlaCompiler::Options& options, const NameAttrList& function,
     absl::Span<const XlaCompiler::Argument> args,
     const XlaCompiler::CompileOptions& compile_options,
@@ -99,6 +101,7 @@ private:
     absl::optional<int64> compile_threshold,
     std::shared_ptr<InputsShapeInfo> inputs_shape_info);
 
+ Status InitExecutable(xla::LocalExecutable* executable, OpKernelContext* ctx);
  void FillShapeInferCtx(std::shared_ptr<InputsShapeInfo> inputs_shape_info,
      std::string device) {
    if (device.find("CPU") != device.npos || device.find("cpu") != device.npos) {
@@ -117,7 +120,6 @@ private:
   const int MIN_PAD_VAL = 8;
   std::shared_ptr<XlaArgumentDumper> arg_dumper_;
   std::string name_;
-  mutex graph_key_mu_;
   uint64 graph_key_ = 0;
   XlaCompilationCache* cache_;
   mutex graph_properties_mu_;
@@ -132,6 +134,7 @@ private:
   std::shared_ptr<thread::ThreadPool> compile_thread_pool_ = nullptr;
   void InitShapeInferEntity(
       std::shared_ptr<InputsShapeInfo> inputs_shape_info);
+  Status ParseArgIndex(std::shared_ptr<InputsShapeInfo> inputs_shape_info);
 
   inline std::shared_ptr<InputsShapeInfo>
         PaddingInputs(std::shared_ptr<InputsShapeInfo> inputs);
@@ -145,6 +148,9 @@ private:
   bool has_warmup_ = false;
   mutex warmup_mu_;
   Status SortCaches();
+  std::map<int, std::string> args_indexs_;
+  std::map<std::string, int> indexs_args_;
+  mutex args_indexs_mu_;
 };
 }  // namespace tensorflow
 

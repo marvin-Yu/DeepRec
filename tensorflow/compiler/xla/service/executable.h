@@ -128,6 +128,7 @@ class Executable {
       absl::Span<const ShapedBuffer* const> arguments,
       HloExecutionProfile* hlo_execution_profile);
 
+  virtual void Init(stream_executor::StreamExecutor* executor) {};
   // Starts the given program executing on the given stream/executor.
   //
   // `arguments` are ShapeTree containing the input parameters. For each element
