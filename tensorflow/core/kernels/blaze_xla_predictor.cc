@@ -361,6 +361,7 @@ Status BlazeXlaPredictor::SliceToDynamic(const std::vector<Tensor>& padded_outpu
 Status BlazeXlaPredictor::SliceToDynamicCPU(const std::vector<Tensor>& padded_outputs,
                                          int batchsize, int pad_to_batchsize,
                                          std::vector<Tensor>& outputs, OpKernelContext* ctx) {
+#if GOOGLE_CUDA
   for (int i = 0; i < padded_outputs.size(); ++i) {
     VLOG(1) << "Shape of padded_output " << i << ": "
             << padded_outputs[i].shape().DebugString();
@@ -396,6 +397,7 @@ Status BlazeXlaPredictor::SliceToDynamicCPU(const std::vector<Tensor>& padded_ou
 
     outputs.push_back(tensor);
   }
+#endif  // GOOGLE_CUDA
   return Status::OK();
 }
 
