@@ -33,7 +33,7 @@ static void SetNumCudaContexts(int ordinal, int64* num_cuda_contexts) {
   *num_cuda_contexts = 1;
 #ifdef GOOGLE_CUDA
   int64 num_contexts_env;
-  tensorflow::ReadInt64FromEnvVar("TF_NUM_CONTEXTS_PER_GPU", 1, &num_contexts_env);
+  tensorflow::ReadInt64FromEnvVar("TF_NUM_CONTEXTS_PER_GPU", 4, &num_contexts_env);
   if (num_contexts_env > 0) *num_cuda_contexts = num_contexts_env;
   LOG(INFO) << "TF_NUM_CONTEXTS_PER_GPU = " << *num_cuda_contexts;
 #endif  // GOOGLE_CUDA
