@@ -336,13 +336,15 @@ Status GemmCompressionOptimizer::Optimize(Cluster* cluster, const GrapplerItem& 
     return Status::OK();
   }
   *optimized_graph->mutable_versions() = item.graph.versions();
-  std::fstream f;
-  static int pass = 0;
-  f.open("after_gemm_compression_" + std::to_string(pass) + ".pb",
-         std::fstream::out);
-  f << optimized_graph->DebugString();
-  f.close();
-  pass++;
+  if (VLOG_IS_ON(1)) {
+    std::fstream f;
+    static int pass = 0;
+    f.open("after_gemm_compression_" + std::to_string(pass) + ".pb",
+           std::fstream::out);
+    f << optimized_graph->DebugString();
+    f.close();
+    pass++;
+  }
   return Status::OK();
 }
 
