@@ -320,8 +320,8 @@ bool OptimizeGemmCompression(GraphDef& input_graph, GraphDef* optimized_graph) {
 
 Status GemmCompressionOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
                                GraphDef* optimized_graph) {
-  bool optimize = true;
-  ReadBoolFromEnvVar("TF_ENABLE_NATIVE_DELIVERY_OPTIMIZE", true, &optimize);
+  bool optimize = false;
+  ReadBoolFromEnvVar("TF_ENABLE_NATIVE_DELIVERY_OPTIMIZE", false, &optimize);
   if (!optimize) {
     *optimized_graph = item.graph;
     return Status::OK();
