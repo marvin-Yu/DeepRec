@@ -32,19 +32,10 @@ static absl::once_flag flag_init;
 static void SetNumCudaContexts(int ordinal, int64* num_cuda_contexts) {
   *num_cuda_contexts = 1;
 #ifdef GOOGLE_CUDA
-  gpu::GpuDeviceHandle device;
-  if (gpu::GpuDriver::GetDevice(ordinal, &device).ok()) {
-    int cc_major = 0, cc_minor = 0;
-    gpu::GpuDriver::GetComputeCapability(&cc_major, &cc_minor, device);
-    bool use_mps;
-    tensorflow::ReadBoolFromEnvVar("BLAZE_USE_MPS", false, &use_mps);
-    if (use_mps && cc_major >= 7) {
-      int64 num_contexts_env;
-      tensorflow::ReadInt64FromEnvVar("TF_NUM_CONTEXTS_PER_GPU", 4, &num_contexts_env);
-      if (num_contexts_env > 0) *num_cuda_contexts = num_contexts_env;
-      LOG(INFO) << "TF_NUM_CONTEXTS_PER_GPU = " << *num_cuda_contexts;
-    }
-  }
+  int64 num_contexts_env;
+  tensorflow::ReadInt64FromEnvVar("TF_NUM_CONTEXTS_PER_GPU", 4, &num_contexts_env);
+  if (num_contexts_env > 0) *num_cuda_contexts = num_contexts_env;
+  LOG(INFO) << "TF_NUM_CONTEXTS_PER_GPU = " << *num_cuda_contexts;
 #endif  // GOOGLE_CUDA
 }
 }  // end namespace

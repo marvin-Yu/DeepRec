@@ -618,6 +618,15 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+filegroup(
+        name = "libtensorflow_1",
+    srcs = [
+            "//tensorflow:libtensorflow_cc.so.1",
+            "//tensorflow:libtensorflow_framework.so.1",
+           ],
+    visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "tensorflow_headers_lib",
     deps = [

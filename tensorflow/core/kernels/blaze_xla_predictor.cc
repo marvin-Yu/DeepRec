@@ -401,9 +401,34 @@ Status BlazeXlaPredictor::SliceToDynamicCPU(const std::vector<Tensor>& padded_ou
   return Status::OK();
 }
 
+Status BlazeXlaPredictor::ComputeNoPadding(OpKernelContext* ctx,
+		const std::vector<Tensor>& inputs) {
+  std::vector<Tensor> outputs;
+  std::vector<Tensor> real_inputs(inputs.size());
+
+  TF_RETURN_IF_ERROR(PrepareInputs(inputs, &real_inputs, ctx));
+  if (ctx->prof_stats()) {
+    RunMetadata metadata;
+    TF_RETURN_IF_ERROR(session_->RunCallable(
+            handle_, real_inputs, &outputs, &metadata));
+    ctx->prof_stats()->flops += metadata.prof_stats().flops();
+    ctx->traced_infos()->prof_stats->flops += metadata.prof_stats().flops();
+  } else {
+    TF_RETURN_IF_ERROR(session_->RunCallable(
+            handle_, real_inputs, &outputs, nullptr));
+  }
+
+  std::vector<Tensor> real_outputs(outputs.size());
+  TF_RETURN_IF_ERROR(PrepareOutputs(outputs, &real_outputs, ctx));
+  for (int i = 0; i < real_outputs.size(); ++i) {
+    ctx->set_output(i, real_outputs[i]);
+  }
+  return Status::OK();
+}
+
 Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
   // Infer inputs' batchsize
-  if (TF_PREDICT_FALSE(!warmuped_)) {
+  if (!enable_xla_auto_padding_ && TF_PREDICT_FALSE(!warmuped_)) {
     if (warmuping_) {
       return errors::Internal("Blaze kernel warmuping");
     }
@@ -427,6 +452,10 @@ Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
   for (int i = 0; i < num_inputs; ++i) {
     inputs.push_back(ctx->input(i));
   }
+  if (enable_xla_auto_padding_) {
+    return ComputeNoPadding(ctx, inputs);
+  }
+
   int batchsize = InferBatchSize(inputs);
   if (batchsize == -1) {
     return errors::Internal("Cannot infer inputs' batchsize");

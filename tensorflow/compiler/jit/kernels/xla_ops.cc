@@ -355,7 +355,7 @@ static Status CompileToLocalExecutable(
     return Status::OK();
   }
  
-  return cache->Compile(options, function, args, compile_options,
+  return cache->Compile(ctx, options, function, args, compile_options,
                         lazy ? CompileMode::kLazy
                              : CompileMode::kStrict,
                         kernel, executable, inputs_shape_info);
@@ -521,7 +521,7 @@ std::vector<std::vector<int>> EnableXlaPaddingShapeAttr(OpKernelConstruction* ct
     int max = atoi(strs[1].c_str());
     int interval = atoi(strs[2].c_str());
     if (min >= max || 
-        interval >= max - min ||
+        interval > max - min ||
         interval <= 0) {
       LOG(WARNING) << "auto padding shape set error: " << vec;
       continue;

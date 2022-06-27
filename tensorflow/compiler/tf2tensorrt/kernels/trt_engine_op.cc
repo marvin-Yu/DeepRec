@@ -692,7 +692,7 @@ bool TRTEngineOp::ExecuteTrtEngine(OpKernelContext* ctx,
                                                         *stream, nullptr);
   if (!ret) {
     LOG(WARNING) << "Failed to enqueue batch for TRT engine: " << name();
-    return kRetry;
+    return !kRetry;
   }
   // Synchronization will be done by TF.
   return !kRetry;

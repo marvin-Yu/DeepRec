@@ -318,7 +318,10 @@ bool MaybeLoadPtxFromFile(const HloModule* module, std::string* ptx) {
     HloPrintOptions options;
     options.set_print_cluster_id(false);
     options.set_print_metadata(false);
-    options.set_print_const_values(false);
+    bool scalar_const_in_ptx;
+    tensorflow::ReadBoolFromEnvVar("TF_SCALAR_CONST_IN_PTX", true, &scalar_const_in_ptx);
+    options.set_print_const_values(scalar_const_in_ptx);
+
     uint64 key = tensorflow::Hash64(module->ToString(options));
     string filename = ptx_cache_dir + "/" + std::to_string(key) + ".ptx";
     auto env = tensorflow::Env::Default();
@@ -343,28 +346,38 @@ bool MaybeLoadPtxFromFile(const HloModule* module, std::string* ptx) {
 }
 
 // Try to load CUBIN from files defined in the FLAGS. If successful, return true.
-bool MaybeLoadCubinFromFile(string cubin_fullpath, std::vector<uint8>* cubin) {
-    if (!cubin_cache_dir.empty()) {
-        auto env = tensorflow::Env::Default();
-        tensorflow::mutex_lock lock(cubin_cache_mutex);
-        if (env->FileExists(cubin_fullpath).ok()) {
-            VLOG(0) << "RunBackend() - Will load cubin from file: " << cubin_fullpath;
-            string cubin_string;
-            Status ok = (tensorflow::ReadFileToString(tensorflow::Env::Default(),
-                        cubin_fullpath, &cubin_string));
-            if (ok.ok()) {
-              std::vector<uint8> cubin_vector(cubin_string.begin(), cubin_string.end());
-              *cubin = std::move(cubin_vector);
-              return true;
-            } else {
-              VLOG(0) << "read cubin file error, fallback to assemble ptx";
-            }
+bool MaybeLoadCubinFromFile(string cubin_fullpath, std::vector<uint8>& cubin) {
+  if (!cubin_cache_dir.empty()) {
+    auto env = tensorflow::Env::Default();
+    tensorflow::mutex_lock lock(cubin_cache_mutex);
+    if (env->FileExists(cubin_fullpath).ok()) {
+      VLOG(0) << "RunBackend() - Will load cubin from file: " << cubin_fullpath;
+      string cubin_string;
+      Status ok = (tensorflow::ReadFileToString(tensorflow::Env::Default(),
+                  cubin_fullpath, &cubin_string));
+      if (ok.ok()) {
+        cubin.reserve(cubin_string.size());
+        for (const char c: cubin_string) {
+          cubin.push_back((uint8)c);
         }
+
+        if (cubin.size() <= 10) {
+          VLOG(0) << "Cubin size too short, size= " << cubin.size();
+          return false;
+        }
+        VLOG(0) << "Load cubin succ";
+        return true;
+      } else {
+        VLOG(0) << "read cubin file error, fallback to assemble ptx";
+        return false;
+      }
     }
+    VLOG(0) << "Cubin file not exit " << cubin_fullpath;
     return false;
-
+  }
+  VLOG(0) << "Cubin folder not exit or empty. " << cubin_cache_dir;
+  return false;
 }
-
 }  // namespace
 
 NVPTXCompiler::NVPTXCompiler()
@@ -463,20 +476,12 @@ NVPTXCompiler::CompileTargetBinary(const HloModule* module,
     DumpToFileInDirOrStdout(*module, "ptx", ptx);
   }
 
-  std::vector<uint8> cubin;
   string cubin_filename = std::to_string(key) + ".cubin";
-  string cubin_fullpath = cubin_cache_dir + "/" + cubin_filename;
-  auto env = tensorflow::Env::Default();
-  if (!MaybeLoadCubinFromFile(cubin_fullpath, &cubin)) {
-    cubin =
-        CompilePtxOrGetCachedResult(stream_exec, ptx, compute_capability.first,
-                                    compute_capability.second, module->config());
-    if ((!cubin_cache_dir.empty()) && (!env->FileExists(cubin_fullpath).ok())) {
-        tensorflow::mutex_lock lock(cubin_cache_mutex);
-        VLOG(0) << "Dump " << cubin_filename << " to " << cubin_cache_dir;
-        DumpCubinToFileInDir(cubin_cache_dir, cubin_filename, cubin);
-    }
-  }
+  std::vector<uint8> cubin =
+      CompilePtxOrGetCachedResult(stream_exec, ptx, compute_capability.first,
+                                  compute_capability.second, module->config(), 
+								  cubin_cache_dir, cubin_filename);
+
   VLOG(5) << "maybe load cubin size:" << cubin.size();
 
   return std::pair<std::string, std::vector<uint8>>(std::move(ptx),
@@ -527,7 +532,8 @@ std::vector<uint8> NVPTXCompiler::CompilePtx(
 
 std::vector<uint8> NVPTXCompiler::CompilePtxOrGetCachedResult(
     se::StreamExecutor* stream_exec, const string& ptx, int cc_major,
-    int cc_minor, const HloModuleConfig& hlo_module_config) {
+    int cc_minor, const HloModuleConfig& hlo_module_config, 
+    string cubin_cache_dir, string cubin_filename) {
   XLA_SCOPED_LOGGING_TIMER("NVPTXCompiler::CompilePtxOrGetCachedResult");
   tensorflow::profiler::TraceMe activity(
       "PTX->CUBIN", tensorflow::profiler::TraceMeLevel::kInfo);
@@ -561,38 +567,46 @@ std::vector<uint8> NVPTXCompiler::CompilePtxOrGetCachedResult(
     if (inserted) {
       CHECK(!cache_value->compilation_done);
       if (!ptx.empty()) {
-        StatusOr<std::vector<uint8>> maybe_cubin = se::cuda::CompilePtx(
-            stream_exec->device_ordinal(), cache_ptx->c_str(),
-            PtxOptsFromConfig(hlo_module_config));
-        if (maybe_cubin.ok()) {
-          cache_value->cubin_data = std::move(maybe_cubin).ValueOrDie();
-          VLOG(2) << "Compiled PTX size:" << ptx.size()
-                  << " CUBIN size: " << cache_value->cubin_data.size();
-        } else {
-          bool log_warning = true;
-          if (maybe_cubin.status().code() ==
-              tensorflow::error::Code::NOT_FOUND) {
-            // Missing ptxas is expected in some environments where CUDA SDK
-            // binaries are not available. We don't want to spam logs with
-            // identical warnings in this case.
+        string cubin_fullpath = cubin_cache_dir + "/" + cubin_filename;
+        if (!MaybeLoadCubinFromFile(cubin_fullpath, cache_value->cubin_data)) {
+          StatusOr<std::vector<uint8>> maybe_cubin = se::cuda::CompilePtx(
+              stream_exec->device_ordinal(), cache_ptx->c_str(),
+              PtxOptsFromConfig(hlo_module_config));
+          if (maybe_cubin.ok()) {
+            cache_value->cubin_data = std::move(maybe_cubin).ValueOrDie();
+            VLOG(0) << "Compiled PTX size:" << ptx.size()
+                    << " CUBIN size: " << cache_value->cubin_data.size();
+            if (!cubin_cache_dir.empty()) {
+                tensorflow::mutex_lock lock(cubin_cache_mutex);
+                VLOG(0) << "Dump " << cubin_filename << " to " << cubin_cache_dir;
+                DumpCubinToFileInDir(cubin_cache_dir, cubin_filename, cache_value->cubin_data);
+            }
+          } else {
+            bool log_warning = true;
+            if (maybe_cubin.status().code() ==
+                tensorflow::error::Code::NOT_FOUND) {
+              // Missing ptxas is expected in some environments where CUDA SDK
+              // binaries are not available. We don't want to spam logs with
+              // identical warnings in this case.
 
-            // TODO(jlebar): we should implement a LOG_FIRST_N and LOG_EVERY_N
-            // for more general usage.
-            static std::atomic<bool> warning_done(false);
-            log_warning = !warning_done.exchange(true);
-          }
-          if (log_warning) {
-            PrintCantFindCudaMessage(
-                "Can't find ptxas binary in ${CUDA_DIR}/bin.  Will back to the "
-                "GPU driver for PTX -> sass compilation.  This is OK so long "
-                "as you don't see a warning below about an out-of-date driver "
-                "version.",
-                hlo_module_config);
-          }
+              // TODO(jlebar): we should implement a LOG_FIRST_N and LOG_EVERY_N
+              // for more general usage.
+              static std::atomic<bool> warning_done(false);
+              log_warning = !warning_done.exchange(true);
+            }
+            if (log_warning) {
+              PrintCantFindCudaMessage(
+                  "Can't find ptxas binary in ${CUDA_DIR}/bin.  Will back to the "
+                  "GPU driver for PTX -> sass compilation.  This is OK so long "
+                  "as you don't see a warning below about an out-of-date driver "
+                  "version.",
+                  hlo_module_config);
+            }
 
-          // We're going to use the driver to JIT our PTX->SASS, so warn if
-          // the JIT in the driver has known bugs.
-          WarnIfBadDriverJITVersion();
+            // We're going to use the driver to JIT our PTX->SASS, so warn if
+            // the JIT in the driver has known bugs.
+            WarnIfBadDriverJITVersion();
+          }
         }
       }
       cache_value->compilation_done = true;

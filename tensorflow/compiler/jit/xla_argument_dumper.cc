@@ -36,8 +36,14 @@ XlaArgumentDumper::XlaArgumentDumper() {
 
 bool XlaArgumentDumper::AsProto(
     const std::vector<XlaCompiler::Argument>& args,
+    const std::map<int, std::string>& args_indexs,
     XlaArgumensProto& protos) {
-  for (const auto& arg: args) {
+  for (int i = 0; i < args.size(); i++) {
+    const auto& arg = args[i];
+    auto iter = args_indexs.find(i);
+    if (iter == args_indexs.end()) return false;
+
+    const std::string& name = iter->second;
     XlaArgumentProto* proto = protos.add_xla_arguments();
 
     if (arg.kind == XlaCompiler::Argument::kConstant) {
@@ -45,13 +51,16 @@ bool XlaArgumentDumper::AsProto(
       // constant value
       TensorProto* constant_value = proto->mutable_constant_value(); 
       arg.constant_value.AsProtoTensorContent(constant_value);
+      VLOG(1) << name << " is const";
     } else if (arg.kind == XlaCompiler::Argument::kParameter) {
       proto->set_kind(CacheKind::kParameter);
+      VLOG(1) << name << " is arg";
     } else {
       LOG(ERROR) << "Not support xla shape cache! argument type=" << arg.kind;
       return false;
     }
-
+    // name
+    proto->set_name(name);
     // type
     proto->set_type(arg.type);
 
@@ -74,13 +83,14 @@ bool XlaArgumentDumper::AsProto(
 
 Status XlaArgumentDumper::DumpXlaArguments(
     const std::vector<XlaCompiler::Argument>& args,
-    const uint64 graph_key,
+    const std::map<int, std::string>& args_indexs,
+    const std::string graph_key,
     const string& uuid) {
   if(cache_dir_.empty()) return Status::OK();
 
   auto env = tensorflow::Env::Default();
  
-  string dir = tensorflow::io::JoinPath(cache_dir_, std::to_string(graph_key));
+  string dir = tensorflow::io::JoinPath(cache_dir_, graph_key);
   string file_path = tensorflow::io::JoinPath(dir, std::to_string(tensorflow::Hash64(uuid)) + ".shape");
 
   if (env->FileExists(file_path).ok()) {
@@ -98,7 +108,7 @@ Status XlaArgumentDumper::DumpXlaArguments(
   }
 
   XlaArgumensProto proto;
-  if (!AsProto(args, proto)) return errors::Unimplemented("Dump xla shape failed");
+  if (!AsProto(args, args_indexs, proto)) return errors::Unimplemented("Dump xla shape failed");
 
   VLOG(0) << "Dump " << uuid << "; cache dir " << file_path; 
   return WriteTextProto(env, file_path, proto);
@@ -106,7 +116,8 @@ Status XlaArgumentDumper::DumpXlaArguments(
 
 Status XlaArgumentDumper::ParseFromFile(
     const std::shared_ptr<InputsShapeInfo>& base,
-    const uint64 graph_key,
+    const std::string graph_key,
+    const std::map<std::string, int>& indexs_args,
     std::vector<std::vector<XlaCompiler::Argument>>& args_array,
     std::vector<std::shared_ptr<InputsShapeInfo>>& inputs_shape_info_array) {
   if(cache_dir_.empty()) return Status::OK();
@@ -114,19 +125,19 @@ Status XlaArgumentDumper::ParseFromFile(
   args_array.clear();
   inputs_shape_info_array.clear();
   auto env = tensorflow::Env::Default();
-  string dir = tensorflow::io::JoinPath(cache_dir_, std::to_string(graph_key));
+  string dir = tensorflow::io::JoinPath(cache_dir_, graph_key);
   std::vector<string> files;
   if(!env->GetChildren(dir, &files).ok()) return errors::Unimplemented("Get cache files failed", dir);
 
   for (auto file_path: files) {
     file_path = tensorflow::io::JoinPath(dir, file_path);
-    VLOG(1) << "Get file " << file_path;
+    VLOG(0) << "Get file " << file_path;
     XlaArgumensProto protos;
     auto s =tensorflow::ReadTextProto(env, file_path, &protos);
     if (!s.ok()) return s;
 
     std::vector<XlaCompiler::Argument> args;
-    FromProto(protos, args);
+    if(!FromProto(protos, indexs_args, args)) continue;
     inputs_shape_info_array.push_back(BuildInputsShapeInfo(base, args)); 
     args_array.push_back(args);
   }
@@ -159,10 +170,70 @@ std::shared_ptr<InputsShapeInfo> XlaArgumentDumper::BuildInputsShapeInfo(
   return inputs;
 }
 
+std::vector<std::string> split(const std::string& s, const std::string& delim,
+                               const bool keep_empty = true) {
+  using namespace std;
+  vector<string> result;
+  if (delim.empty()) {
+    result.push_back(s);
+    return result;
+  }
+  string::const_iterator substart = s.begin(), subend;
+  while (true) {
+    subend = search(substart, s.end(), delim.begin(), delim.end());
+    if (keep_empty || substart != subend) result.emplace_back(substart, subend);
+    if (subend == s.end()) break;
+    substart = subend + delim.size();
+  }
+  return result;
+}
+
+std::string combine_new_name(const std::vector<std::string> names, int len) {
+  if (names.size() < len) return "";
+  std::string res = "";
+  for (int i = 0; i < len; i++) {
+    res += names[i] + "_";
+  }
+  VLOG(0) << "len " << len << " return name " << res;
+  return res;
+}
+
+int startsWith(string s, string sub){
+  return s.find(sub)==0?1:0;
+}
+
+int get_name_index(std::string name, const std::map<std::string, int>& indexs_args) {
+    int index = -1;
+    auto iter = indexs_args.find(name);
+    if (iter == indexs_args.end()) {
+      VLOG(0) << "Read Xla arg error. cannot find index of " << name;
+      std::vector<std::string> names = split(name, "_");
+      for(int idx = 1; idx < names.size() - 2; idx++) {
+        std::string new_name = combine_new_name(names, names.size() - idx);
+        for(auto it = indexs_args.begin(); it != indexs_args.end(); it++) {
+          VLOG(1) << "Current args is " << it->first << " " << it->second;
+          if (startsWith(it->first, new_name)) {
+            index = it->second;
+            VLOG(0) << "Jinsi find " << name << "(" << new_name  << ") with " 
+		    << it->first << " " << it->second;
+            break;
+          }
+        }
+        if (index >= 0) break;
+      }
+      if (index < 0) return index;
+    } else {
+      index = iter->second;
+    }
+    return index;
+}
+
 bool XlaArgumentDumper::FromProto(
     const XlaArgumensProto& protos,
+    const std::map<std::string, int>& indexs_args,
     std::vector<XlaCompiler::Argument>& args) {
-  args.clear();
+
+  args.resize(protos.xla_arguments_size());
   for (int i = 0; i < protos.xla_arguments_size(); i++) {
     const auto& proto = protos.xla_arguments(i);
     XlaCompiler::Argument arg;
@@ -183,7 +254,16 @@ bool XlaArgumentDumper::FromProto(
       arg.kind = XlaCompiler::Argument::kParameter;
     }
 
-    args.push_back(arg);
+    // name
+    std::string name = proto.name();
+    int index = get_name_index(name, indexs_args);
+    VLOG(1) << name << " index is " << index;
+    if (index < 0) {
+      VLOG(0) << "Parse xla args file fail, cannt find " << name;
+      return false;
+    }
+
+    args[index] = arg;
   } 
   return true;
 }

@@ -65,7 +65,8 @@ class XlaCompilationCache : public ResourceBase {
   // xla::LocalExecutable and sets `out_executable` to point to it. The
   // resulting executable pointer may be null if the computation has no
   // non-constant outputs.
-  Status Compile(const XlaCompiler::Options& options,
+  Status Compile(OpKernelContext* ctx,
+                 const XlaCompiler::Options& options,
                  const NameAttrList& function,
                  absl::Span<const XlaCompiler::Argument> args,
                  const XlaCompiler::CompileOptions& compile_options,

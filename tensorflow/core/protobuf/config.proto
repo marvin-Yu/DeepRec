@@ -740,6 +740,7 @@ message RunMetadata {
     float blaze_latency_ms = 2;
     uint64 tao_op_calls = 3;
     bool dump_shapes = 4;
+    uint64 batch_size = 5;
   }
 
   message BlazeMetrics {
