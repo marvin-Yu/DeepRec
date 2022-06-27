@@ -72,6 +72,7 @@ bool OptimizeBatchMatMul(Graph *graph) {
   for (Node* node : graph->nodes()) {
     nodes[i++] = node;
   }
+  int convert_count = 0;
   for (Node* node : nodes) {
     if (node->type_string() != "BatchMatMul") continue;
     Node *batch_matmul = node;
@@ -85,8 +86,14 @@ bool OptimizeBatchMatMul(Graph *graph) {
       return false;
     }
     v2->set_assigned_device_name(batch_matmul->assigned_device_name());
-    ReplaceNewNode(graph, v2, batch_matmul);
+    status = ReplaceNewNode(graph, v2, batch_matmul);
+    if (!status.ok()) {
+      LOG(ERROR) << "Replacing BatchMatMul to BatchMatMulV2 node failed " << status;
+      return false;
+    }
+    convert_count++;
   }
+  VLOG(0) << "Convert " << convert_count << " BatchMatMul to BatchMatMulV2";
   return true;
 }
 
