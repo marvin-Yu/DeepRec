@@ -391,12 +391,15 @@ class SubGraphCollection {
             visited.insert(e->src()->name());
             match = true;
             break;
+          } else {
+            VLOG(1) << n->name() << " not match with " << e->src()->name() << ", " << diff;
           }
         }
         if (!match) {
           LOG(ERROR) << "cant find any match input to base: " << n->name()
                      << " | " << n->type_string()
                      << ", " << node->def().DebugString();
+          return false;
         }
       }
     }
@@ -470,6 +473,7 @@ class SubGraphCollection {
       if (nodes.size() < branch_num_) {
         LOG(ERROR) << "visit subgraph layer nodes not equal to branch number:"
                    << nodes.size() << " VS " << branch_num_;
+        for (auto n:nodes) VLOG(0) << n->name() << ", " << n->type_string();
         return false;
       }
       std::unique_ptr<BranchNodesCollection> temp(new BranchNodesCollection(nodes));
@@ -1010,16 +1014,6 @@ bool SwitchSubGraphToSwitchWeight(Graph* graph, std::vector<std::shared_ptr<
   return true;
 }
 
-bool MultiDNNOptimize(Graph* graph) {
-  std::vector<std::shared_ptr<SubGraphCollection>> sub_graph_group;
-  if (!DynamicPartitionToSwitch(graph, sub_graph_group)) {
-    return false;
-  }
-  if (!SwitchSubGraphToSwitchWeight(graph, sub_graph_group)) {
-    return false;
-  }
-  return true;
-}
 }  // end namespace
 
 Status MultiDNNSwitchOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
@@ -1051,9 +1045,18 @@ Status MultiDNNSwitchOptimizer::Optimize(Cluster* cluster, const GrapplerItem& i
     return Status::OK();
   }
 
-  if(!MultiDNNOptimize(&graph)) {
-    LOG(WARNING) << "optimized multi dnn failed";
+  std::vector<std::shared_ptr<SubGraphCollection>> sub_graph_group;
+  if (!DynamicPartitionToSwitch(&graph, sub_graph_group)) {
+    LOG(WARNING) << "optimized multi dnn DynamicPartition to Switch failed";
     *optimized_graph = item.graph;
+    return Status::OK();
+  }
+  // convert graph to graphdef
+  graph.ToGraphDef(optimized_graph);
+  *optimized_graph->mutable_versions() = item.graph.versions();
+
+  if (!SwitchSubGraphToSwitchWeight(&graph, sub_graph_group)) {
+    LOG(WARNING) << "optimized multi dnn switch subgraph to switch weight failed";
     return Status::OK();
   }
 
