@@ -52,7 +52,7 @@ Status OptimizePatternFunction(const NodeDef& compute_node,
                                std::vector<NodeDef>* new_nodes,
                                int input_port) {
   bool invalid = false;
-  if (gather_ind_node.name().find("user_offline_indicators") == string::npos) {
+  if (gather_ind_node.name().find("user_creative_indicator") == string::npos) {
     LOG(WARNING) << "gather input indicator placeholder not match:" << gather_ind_node.name();
     invalid = true;
   }
@@ -229,7 +229,7 @@ bool OptimizeMemoryAccess(GraphDef& input_graph, GraphDef* optimized_graph, bool
     bool result = OptimizeGatherPattern(input_graph, optimized_graph, graph_changed, radical);
     if (!result) return false;
     if (!graph_changed) break;
-    input_graph = *optimized_graph;
+    std::swap(input_graph, *optimized_graph);
   }
   return true;
 }

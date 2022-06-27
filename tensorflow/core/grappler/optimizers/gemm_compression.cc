@@ -117,7 +117,7 @@ bool OptimizeGatherConcatPattern(GraphDef &input_graph_def, GraphDef* output_gra
 
         // 3. 检查placeholder和gather axis const 值
         bool invalid = false;
-        if (gather_ind_node.name().find("user_offline_indicators") == string::npos) {
+        if (gather_ind_node.name().find("user_creative_indicator") == string::npos) {
           LOG(WARNING) << "gather input indicator placeholder not match:" << gather_ind_node.name();
           invalid = true;
         }
