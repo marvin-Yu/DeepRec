@@ -108,6 +108,7 @@ namespace {
       "PadV2",
       "PreventGradient",
       "StopGradient",
+      "Where",
     "If",  "While", 
     "Select", "SelectV2", 
     // TODO
