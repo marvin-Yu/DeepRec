@@ -153,11 +153,8 @@ class ReductionOp : public OpKernel {
 
     //[PROF-STATS]
     int64 delta = data.NumElements();
-    if (delta > 0) {
-      ProfStats* prof_stats = ctx->prof_stats();
-      if (prof_stats) {
-        prof_stats->flops += delta;
-      }
+    if (ctx->traced_infos()) {
+      ctx->traced_infos()->RecordFlops(delta, requested_device());
     }
     if (VLOG_IS_ON(1)) {
       LOG(INFO) << "FLOPs = " << delta

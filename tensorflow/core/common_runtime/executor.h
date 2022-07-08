@@ -115,7 +115,7 @@ class Executor {
     //[DYNAMIC-SHAPE]
     uint64 before_padding = 0;
     uint64 after_padding = 0;
-    //[PROF-STATS]
+    //[PROF-STATS] unused, replaced by traced_infos
     ProfStats* prof_stats = nullptr;
     ProfStats real_prof_stats;
     bool enable_prof_stats;

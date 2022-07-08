@@ -101,6 +101,7 @@ Status KernelThunk::ExecuteOnStream(const ExecuteParams& params) {
         params.buffer_allocations->GetDeviceAddress(arg->index());
     VLOG(1) << "  Arg: alloc #" << arg->index() << ": " << buf.opaque() << "  ("
             << buf.size() << "B)";
+    tensor_size_ += buf.size();
     buffer_args.push_back(buf);
   }
   VLOG(1) << absl::StrFormat(

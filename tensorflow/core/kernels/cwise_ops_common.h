@@ -123,13 +123,10 @@ class BinaryOp : public BinaryOpShared {
     int64 delta = 0;
     if (type_string() == "Mul" || type_string() == "Sub" ||
           type_string() == "Add" || type_string() == "AddV2") {
-      delta =  state.out_num_elements;
+      delta = state.out_num_elements;
     }
-    if (delta > 0) {
-      ProfStats* prof_stats = ctx->prof_stats();
-      if (prof_stats) {
-        prof_stats->flops += delta;
-      }
+    if (ctx->traced_infos()) {
+      ctx->traced_infos()->RecordFlops(delta, requested_device());
     }
     if (VLOG_IS_ON(1)) {
       LOG(INFO) << "FLOPs = " << delta
@@ -285,11 +282,8 @@ class UnaryOp : public OpKernel {
     } else if (type_string() == "Rsqrt") {
       delta = 2 * inp.NumElements();
     }
-    if (delta > 0) {
-      ProfStats* prof_stats = ctx->prof_stats();
-      if (prof_stats) {
-        prof_stats->flops += delta;
-      }
+    if (ctx->traced_infos()) {
+      ctx->traced_infos()->RecordFlops(delta, requested_device());
     }
     if (VLOG_IS_ON(1)) {
       LOG(INFO) << "FLOPs = " << delta

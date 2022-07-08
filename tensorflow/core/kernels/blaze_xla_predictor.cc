@@ -260,6 +260,10 @@ Status BlazeXlaPredictor::PadToStaticCPUToGPU(const std::vector<Tensor>& inputs,
       if (!copy_status) {
         return errors::Internal("MemcpyH2D for padding inputs failed.");
       }
+      if (ctx->traced_infos()) {
+        ++ctx->traced_infos()->prof_stats->pcie_h2d_times;
+        ctx->traced_infos()->prof_stats->pcie_h2d_size += input_size;
+      }
 #endif
 
     VLOG(1) << "Shape of padded_input " << i << ": "
@@ -394,10 +398,15 @@ Status BlazeXlaPredictor::SliceToDynamicCPU(const std::vector<Tensor>& padded_ou
     }
     stream->ThenRecordEvent(event.get());
     stream->ThenSynchronizeEvent(event.get());
+    if (ctx->traced_infos()) {
+      ++ctx->traced_infos()->prof_stats->pcie_d2h_times;
+      ctx->traced_infos()->prof_stats->pcie_d2h_size += tmp_size;
+    }
 
     outputs.push_back(tensor);
   }
 #endif  // GOOGLE_CUDA
+
   return Status::OK();
 }
 
@@ -407,12 +416,11 @@ Status BlazeXlaPredictor::ComputeNoPadding(OpKernelContext* ctx,
   std::vector<Tensor> real_inputs(inputs.size());
 
   TF_RETURN_IF_ERROR(PrepareInputs(inputs, &real_inputs, ctx));
-  if (ctx->prof_stats()) {
+  if (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
     RunMetadata metadata;
     TF_RETURN_IF_ERROR(session_->RunCallable(
             handle_, real_inputs, &outputs, &metadata));
-    ctx->prof_stats()->flops += metadata.prof_stats().flops();
-    ctx->traced_infos()->prof_stats->flops += metadata.prof_stats().flops();
+    ctx->traced_infos()->UpdateProfStats(&metadata);
   } else {
     TF_RETURN_IF_ERROR(session_->RunCallable(
             handle_, real_inputs, &outputs, nullptr));
@@ -496,12 +504,11 @@ Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
 
     // Call SessionRun
     std::vector<Tensor> padded_outputs;
-    if (ctx->prof_stats()) {
+    if (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
       RunMetadata metadata;
       TF_RETURN_IF_ERROR(session_->RunCallable(
               handle_, padded_inputs, &padded_outputs, &metadata));
-      ctx->prof_stats()->flops += metadata.prof_stats().flops();
-      ctx->traced_infos()->prof_stats->flops += metadata.prof_stats().flops();
+      ctx->traced_infos()->UpdateProfStats(&metadata);
     } else {
       TF_RETURN_IF_ERROR(session_->RunCallable(
               handle_, padded_inputs, &padded_outputs, nullptr));
@@ -528,12 +535,11 @@ Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
     std::vector<Tensor> real_inputs(inputs.size());
 
     TF_RETURN_IF_ERROR(PrepareInputs(inputs, &real_inputs, ctx));
-    if (ctx->prof_stats()) {
+    if (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
       RunMetadata metadata;
       TF_RETURN_IF_ERROR(session_->RunCallable(
               handle_, real_inputs, &outputs, &metadata));
-      ctx->prof_stats()->flops += metadata.prof_stats().flops();
-      ctx->traced_infos()->prof_stats->flops += metadata.prof_stats().flops();
+      ctx->traced_infos()->UpdateProfStats(&metadata);
     } else {
       TF_RETURN_IF_ERROR(session_->RunCallable(
               handle_, real_inputs, &outputs, nullptr));
@@ -563,3 +569,4 @@ int BlazeXlaPredictor::AddNewBatchSize(int padded_size) {
   return add_size;
 }
 }
+

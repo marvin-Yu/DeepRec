@@ -241,6 +241,7 @@ class SingleThreadedExecutorImpl : public Executor {
     params.after_padding = args.after_padding;
     //[PROF-STATS]
     params.prof_stats = args.prof_stats;
+    params.traced_infos = args.traced_infos;
 
     // Execute the kernels one-at-a-time in topological order.
     for (size_t i = 0; i < kernels_.size(); ++i) {
@@ -269,6 +270,11 @@ class SingleThreadedExecutorImpl : public Executor {
       // Actually execute the kernel.
       device->Compute(kernel_state.kernel, &ctx);
 
+      // Record tensor_size and the number of ops;
+      if (params.traced_infos && params.traced_infos->enable_sampling_prof_stats) {
+        ++params.traced_infos->prof_stats->tensorflow_ops;
+        params.traced_infos->RecordTensorSize(&node_inputs, &ctx, device->device_type());
+      }
       if (!ctx.status().ok()) {
         // On failure, we must manually free all intermediate tensors. We have
         // already freed all the inputs for kernels up to (but not including)

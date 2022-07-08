@@ -35,6 +35,7 @@ struct ThreadPoolDevice;
 }  // namespace Eigen
 
 namespace xla {
+typedef std::shared_ptr<ProfStats> ProfStatsPtr;
 
 class DeviceAssignment;
 class ExecutionProfile;
@@ -68,8 +69,8 @@ class RunId {
 class ExecutableRunOptions {
  public:
 
-  //[PROF-STATS]
-  ProfStats* prof_stats = nullptr;
+  //[PROF-STATS], replaced by traced_infos->prof_stats;
+  ProfStatsPtr prof_stats = nullptr;
   //[DYNAMIC-SHAPE]
   uint64 before_padding = 0;
   uint64 after_padding = 0;
