@@ -407,8 +407,8 @@ void XlaLocalLaunchBase::Compute(OpKernelContext* ctx) {
   //[DYNAMIC-SHAPE]
   run_options.before_padding = ctx->before_padding();
   run_options.after_padding = ctx->after_padding();
-  //[PROF-STATS]
-  run_options.prof_stats = ctx->prof_stats();
+  //[PROF-STATS], replaced by traced_infos->prof_stats;
+  run_options.prof_stats = ctx->prof_stats_ptr();
 
   run_options.set_stream(stream);
   run_options.set_allocator(allocator);
@@ -593,9 +593,9 @@ void XlaCompileOp::Compute(OpKernelContext* ctx) {
       mutex_lock guard(cannot_compile_cluster_mu_);
       cannot_compile_cluster_ = true;
     }
-    if (inputs_shape_info != nullptr && ctx->prof_stats() != nullptr
+    if (inputs_shape_info != nullptr && ctx->prof_stats_ptr() != nullptr
         && inputs_shape_info->dump_shapes) {
-      ctx->prof_stats()->dump_shapes = true;
+      ctx->prof_stats_ptr()->dump_shapes = true;
       VLOG(1) << inputs_shape_info.get() << " dumps " << inputs_shape_info->dump_shapes;
     }
   }
@@ -737,8 +737,8 @@ void XlaRunOp::Compute(OpKernelContext* ctx) {
   //[DYNAMIC-SHAPE]
   run_options.before_padding = ctx->before_padding();
   run_options.after_padding = ctx->after_padding();
-  //[PROF-STATS]
-  run_options.prof_stats = ctx->prof_stats();
+  //[PROF-STATS], replaced by traced_infos->prof_stats;
+  run_options.prof_stats = ctx->prof_stats_ptr();
 
   run_options.set_stream(stream);
   run_options.set_allocator(allocator);

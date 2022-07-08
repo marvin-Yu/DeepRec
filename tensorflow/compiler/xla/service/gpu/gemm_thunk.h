@@ -51,12 +51,18 @@ class GemmThunk : public Thunk {
 
   Status ExecuteOnStream(const ExecuteParams& params) override;
 
-  //[PROF-STATS]
-  void RecordStats(ProfStats* prof_stats) override {
+  //[PROF-STATS], replaced by traced_infos->prof_stats;
+  void RecordStats(ProfStatsPtr prof_stats) override {
+    if (prof_stats == nullptr) {
+      return;
+    }
     if (flops_ > 0) {
-      if (prof_stats) {
-        prof_stats->flops += flops_;
-      }
+      prof_stats->flops += flops_;
+      prof_stats->gpu_flops += flops_;
+    }
+    ++prof_stats->gpu_kernels;
+    if (tensor_size_ > 0) {
+      prof_stats->gpu_tensor_size += tensor_size_;
     }
   }
 

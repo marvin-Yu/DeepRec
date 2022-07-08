@@ -1273,7 +1273,7 @@ class ExecutorState {
   uint64 after_padding_ = 0;
   //[PROF-STATS]
   ProfStats* prof_stats_ = nullptr;
-  TracedInfosPtr traced_infos_;
+  TracedInfosPtr traced_infos_ = nullptr;
   bool trace_tensor_infos_;
 
   const bool vlog_;  // true if VLOG_IS_ON(1). Used to check vlog cheaply.
@@ -1833,7 +1833,10 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
       params.output_attr_array = item.output_attrs();
       params.forward_from_array = item.forward_from();
 
-      
+      // Record the number of tensorflow ops.
+      if (params.traced_infos && params.traced_infos->enable_sampling_prof_stats) {
+        ++params.traced_infos->prof_stats->tensorflow_ops;
+      }
       if (item.kernel_is_async) {
         // Asynchronous computes.
         AsyncOpKernel* async = item.kernel->AsAsync();
@@ -1910,7 +1913,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
       } else {
         // Synchronous computes.
         OpKernelContext ctx(&params, item.num_outputs);
-        
+
         if(tensor_holder){
             ctx.tensor_holder = tensor_holder;
         }
@@ -1921,6 +1924,10 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
         // Get Flops:
         auto flops = ctx.get_flops();
         UpdateFlops(flops);
+        // Record tensor_size;
+        if (params.traced_infos) {
+          params.traced_infos->RecordTensorSize(&inputs, &ctx, device->device_type());
+        }
 
         nodestats::SetOpEnd(stats);
         s = ProcessOutputs(item, &ctx, &outputs, stats);

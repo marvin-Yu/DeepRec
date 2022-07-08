@@ -382,6 +382,11 @@ DirectSession::DirectSession(const SessionOptions& options,
     LOG(ERROR) << status.error_message();
   }
 
+  status = ReadInt64FromEnvVar("SAMPLING_PROF_STATS_STEPS", kProfStatsSampleRatio, &sampling_prof_stats_steps_);
+  if (!status.ok()) {
+    LOG(ERROR) << status.error_message();
+  }
+
   session_handle_ = "direct";
   int devices_added = 0;
   if (options.config.log_device_placement()) {
@@ -821,14 +826,20 @@ Status DirectSession::RunInternal(
 
   //[PROF-STATS]
   args.enable_prof_stats = enable_prof_stats_;
-  if (enable_prof_stats_ || do_trace) {
-    args.prof_stats = &args.real_prof_stats;
+  if (run_metadata) {
+    args.traced_infos = std::make_shared<UserTracedInfos>
+        (enable_prof_stats_, run_options.trace_tensors(), run_options.trace_tensor_infos());
+    // sampling record metrics
+    if (!is_blaze_) {
+      args.traced_infos->enable_sampling_prof_stats =
+          enable_prof_stats_ && ((start_time_usecs % sampling_prof_stats_steps_) == 0);
+    } else {
+      args.traced_infos->enable_sampling_prof_stats = enable_prof_stats_;
+    }
   } else {
-    args.prof_stats = nullptr;
+    args.traced_infos = nullptr;
   }
 
-  args.traced_infos = std::make_shared<UserTracedInfos>
-      (enable_prof_stats_, run_options.trace_tensors(), run_options.trace_tensor_infos());
   bool update_cost_model = false;
   if (options_.config.graph_options().build_cost_model() > 0) {
     const int64 build_cost_model_every =
@@ -1046,15 +1057,8 @@ Status DirectSession::RunInternal(
   }
 
   //[PROF-STATS]
-  if (enable_prof_stats_ && run_metadata) {
-    run_metadata->mutable_prof_stats()->set_flops(args.real_prof_stats.flops);
-    run_metadata->mutable_prof_stats()->set_tao_op_calls(
-        args.real_prof_stats.tao_op_calls);
-    run_metadata->mutable_prof_stats()->set_dump_shapes(args.real_prof_stats.dump_shapes);
-  }
-
   if (args.traced_infos) {
-    args.traced_infos->MergeTo(run_metadata, args.real_prof_stats);
+    args.traced_infos->MergeTo(run_metadata);
   }
 
   // If requested via RunOptions, output the partition graphs.
@@ -1435,11 +1439,7 @@ void DirectSession::RunInternalAsync(
       auto s = this->AfterRunAsync(run_options, output_names, target_nodes,
                                    outputs, frame, run_metadata, start_time_usecs);
       if (args->traced_infos) {
-        args->traced_infos->MergeTo(run_metadata, args->real_prof_stats);
-      }
-      //fixme: move above
-      if (run_metadata && args->enable_prof_stats) {
-        run_metadata->mutable_prof_stats()->set_flops(args->real_prof_stats.flops);
+        args->traced_infos->MergeTo(run_metadata);
       }
       done(s);
       });
@@ -1463,15 +1463,20 @@ void DirectSession::RunInternalAsync(
   args->flops = flops;
 
   const bool do_trace = (run_options.trace_level() > RunOptions::NO_TRACE);
-  if (enable_prof_stats_ || do_trace) {
-    // ToDo move in to traced_infos
-    args->prof_stats = &args->real_prof_stats;
-  } else {
-    args->prof_stats = nullptr;
-  }
 
-  args->traced_infos = std::make_shared<UserTracedInfos>
-      (enable_prof_stats_, run_options.trace_tensors(), run_options.trace_tensor_infos());
+  if (run_metadata) {
+    args->traced_infos = std::make_shared<UserTracedInfos>
+        (enable_prof_stats_, run_options.trace_tensors(), run_options.trace_tensor_infos());
+    // sampling record metrics
+    if (!is_blaze_) {
+      args->traced_infos->enable_sampling_prof_stats =
+          enable_prof_stats_ && ((start_time_usecs % sampling_prof_stats_steps_) == 0);
+    } else {
+      args->traced_infos->enable_sampling_prof_stats = enable_prof_stats_;
+    }
+  } else {
+    args->traced_infos = nullptr;
+  }
 
   bool update_cost_model = false;
   if (options_.config.graph_options().build_cost_model() > 0) {

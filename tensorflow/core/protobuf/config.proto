@@ -741,6 +741,17 @@ message RunMetadata {
     uint64 tao_op_calls = 3;
     bool dump_shapes = 4;
     uint64 batch_size = 5;
+    uint64 tensorflow_ops = 6;
+    uint64 cpu_flops = 7;
+    uint64 cpu_tensor_size = 8;
+    uint64 gpu_flops = 9;
+    uint64 gpu_tensor_size = 10;
+    uint64 gpu_kernels = 11;
+    uint64 pcie_h2d_times = 12;
+    uint64 pcie_h2d_size = 13;
+    uint64 pcie_d2h_times = 14;
+    uint64 pcie_d2h_size = 15;
+    bool sampling_prof_stats = 16;
   }
 
   message BlazeMetrics {

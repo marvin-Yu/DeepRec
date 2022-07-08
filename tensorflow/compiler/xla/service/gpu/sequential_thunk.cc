@@ -37,7 +37,9 @@ Status SequentialThunk::ExecuteOnStream(const ExecuteParams& params) {
   auto op_profiler =
       params.profiler->MakeScopedInstructionProfiler(hlo_instruction());
   for (const auto& thunk : thunks_) {
+    thunk->tensor_size_ = 0;
     TF_RETURN_IF_ERROR(thunk->ExecuteOnStream(params));
+    tensor_size_ += thunk->tensor_size_;
   }
   return Status::OK();
 }

@@ -599,6 +599,16 @@ inline void GetProfStats(TF_ProfStats* tf_prof_stats,
                          const RunMetadata::ProfStats& meta_prof_stats) {
   if (tf_prof_stats) {
     tf_prof_stats->flops = meta_prof_stats.flops();
+    tf_prof_stats->tensorflow_ops = meta_prof_stats.tensorflow_ops();
+    tf_prof_stats->cpu_flops = meta_prof_stats.cpu_flops();
+    tf_prof_stats->cpu_tensor_size = meta_prof_stats.cpu_tensor_size();
+    tf_prof_stats->gpu_flops = meta_prof_stats.gpu_flops();
+    tf_prof_stats->gpu_tensor_size = meta_prof_stats.gpu_tensor_size();
+    tf_prof_stats->gpu_kernels = meta_prof_stats.gpu_kernels();
+    tf_prof_stats->pcie_h2d_times = meta_prof_stats.pcie_h2d_times();
+    tf_prof_stats->pcie_h2d_size = meta_prof_stats.pcie_h2d_size();
+    tf_prof_stats->pcie_d2h_times = meta_prof_stats.pcie_d2h_times();
+    tf_prof_stats->pcie_d2h_size = meta_prof_stats.pcie_d2h_size();
     tf_prof_stats->tao_op_calls = meta_prof_stats.tao_op_calls();
     tf_prof_stats->dump_shapes = meta_prof_stats.dump_shapes();
   }

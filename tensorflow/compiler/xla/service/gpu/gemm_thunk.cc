@@ -56,6 +56,7 @@ Status GemmThunk::ExecuteOnStream(const ExecuteParams &params) {
   se::DeviceMemoryBase rhs_data = get_device_address(rhs_buffer_);
   se::DeviceMemoryBase output_data = get_device_address(output_buffer_);
   flops_ = 0;
+  tensor_size_ = lhs_data.size() + rhs_data.size() + output_data.size();
   return RunGemm(hlo_instruction(), backend_config_, lhs_data, rhs_data,
                  output_data, params.stream, implements_whole_instruction_,
                  params.profiler,

@@ -604,13 +604,14 @@ struct GraphCollector {
   }
 };
 
-class UserTracedInfos;
+struct UserTracedInfos;
 class OpKernelContext {
  public:
   // The first element of a WrappedAllocator is a "base" Allocator and
   // the second element is that Allocator wrapped by a
   // TrackingAllocator
   typedef std::pair<Allocator*, TrackingAllocator*> WrappedAllocator;
+  typedef std::shared_ptr<ProfStats> ProfStatsPtr;
   typedef std::shared_ptr<UserTracedInfos> TracedInfosPtr;
 
   int64_t get_flops() {
@@ -632,10 +633,10 @@ class OpKernelContext {
     //[DYNAMIC-SHAPE]
     uint64 before_padding = 0;
     uint64 after_padding = 0;
-    //[PROF-STATS]
+    //[PROF-STATS] unused, replaced by traced_infos
     ProfStats* prof_stats = nullptr;
+    TracedInfosPtr traced_infos = nullptr;
 
-    TracedInfosPtr traced_infos;
     // The step being executed.
     int64 step_id = 0;
     int64 round_step_id = 0;
@@ -768,10 +769,11 @@ class OpKernelContext {
   //[DYNAMIC-SHAPE]
   uint64 before_padding() const { return params_->before_padding; }
   uint64 after_padding() const { return params_->after_padding; }
-  //[PROF-STATS]
+  //[PROF-STATS] unused, replaced by traced_infos
   ProfStats* prof_stats() const { return params_->prof_stats; };
   TracedInfosPtr traced_infos() const { return params_->traced_infos; }
-
+  ProfStatsPtr prof_stats_ptr() const;
+  
   int64 round_step_id() const { return params_->round_step_id; }
   int64 step_id() const { return params_->step_id; }
 
@@ -1898,13 +1900,18 @@ void CheckNotInComputeAsync(OpKernelContext* ctx,
     }                                                       \
   } while (0)
 
+static const std::unordered_set<std::string> not_require_recording_kernel {
+  "NoOp", "Const", "Identity", "Reshape", "Shape",
+  "_Arg", "_Retval", "_Send", "_HostSend", "Switch",
+  "Merge", "_XlaCompile", "_XlaRun", "XlaLaunch"
+};
 struct UserTracedInfos {
   UserTracedInfos(bool enable_stats = false, bool enable_tensors = false, 
                   bool enable_trace_infos = false) :
       enable_prof_stats(enable_stats), enable_trace_tensors(enable_tensors),
       enable_trace_tensor_infos(enable_trace_infos) {
         if (enable_prof_stats) {
-          prof_stats = std::move(absl::make_unique<ProfStats>());
+          prof_stats = std::move(std::make_shared<ProfStats>());
         }
         if (enable_trace_tensors) {
           traced_tensors = std::move(absl::make_unique<TracedTensors>());
@@ -1920,6 +1927,16 @@ struct UserTracedInfos {
         //ToDo done prof_stas
         prof_stats->flops = run_metadata->prof_stats().flops();
         prof_stats->blaze_latency_ms = run_metadata->prof_stats().blaze_latency_ms();
+        prof_stats->tensorflow_ops = run_metadata->prof_stats().tensorflow_ops();
+        prof_stats->cpu_flops = run_metadata->prof_stats().cpu_flops();
+        prof_stats->cpu_tensor_size = run_metadata->prof_stats().cpu_tensor_size();
+        prof_stats->gpu_flops = run_metadata->prof_stats().gpu_flops();
+        prof_stats->gpu_tensor_size = run_metadata->prof_stats().gpu_tensor_size();
+        prof_stats->gpu_kernels= run_metadata->prof_stats().gpu_kernels();
+        prof_stats->pcie_h2d_times = run_metadata->prof_stats().pcie_h2d_times();
+        prof_stats->pcie_h2d_size = run_metadata->prof_stats().pcie_h2d_size();
+        prof_stats->pcie_d2h_times= run_metadata->prof_stats().pcie_d2h_times();
+        prof_stats->pcie_d2h_size = run_metadata->prof_stats().pcie_d2h_size();
       }
       if (traced_tensors) {
         const auto& tcs = run_metadata->traced_tensors();
@@ -1938,29 +1955,28 @@ struct UserTracedInfos {
     }
   }
 
-  void MergeTo(RunMetadata* run_metadata, const ProfStats& stats) {
+  void MergeTo(RunMetadata* run_metadata) {
     if (TF_PREDICT_TRUE(run_metadata)) {
-      /*
-      if (prof_stats) {
-        //Todo done flops monitor
-#define BLAZE_ADD_STATS(KEY, VALUE, TYPE) { \
-  auto metrics = run_metadata->mutable_blaze_metrics()->Add(); \
-  metrics->set_key(KEY); \
-  metrics->set_value(VALUE); \
-  metrics->set_type(TYPE); \
-}
-      BLAZE_ADD_STATS("blaze_latency_ms", prof_stats->blaze_latency_ms, RunMetadata::BlazeMetrics::GUAGE);
-      BLAZE_ADD_STATS("blaze_flops", prof_stats->flops, RunMetadata::BlazeMetrics::GUAGE);
-      BLAZE_ADD_STATS("blaze_wait_ms", prof_stats->blaze_wait_ms, RunMetadata::BlazeMetrics::GUAGE);
-      BLAZE_ADD_STATS("blaze_batch_size", prof_stats->batch_size, RunMetadata::BlazeMetrics::GUAGE);
-      BLAZE_ADD_STATS("blaze_running_counter", prof_stats->blaze_running_counter, RunMetadata::BlazeMetrics::GUAGE);
-      BLAZE_ADD_STATS("blaze_waiting_counter", prof_stats->blaze_waiting_counter, RunMetadata::BlazeMetrics::GUAGE);
-      BLAZE_ADD_STATS("blaze_nan", prof_stats->blaze_nan, RunMetadata::BlazeMetrics::GUAGE);
-      BLAZE_ADD_STATS("blaze_nan_counter", prof_stats->blaze_nan_counter, RunMetadata::BlazeMetrics::GUAGE);
-#undef BLAZE_ADD_STATS
-      } */
       if (TF_PREDICT_TRUE(prof_stats)) {
+        // always report
         run_metadata->mutable_prof_stats()->set_batch_size(prof_stats->batch_size);
+        run_metadata->mutable_prof_stats()->set_pcie_h2d_times(prof_stats->pcie_h2d_times);
+        run_metadata->mutable_prof_stats()->set_pcie_h2d_size(prof_stats->pcie_h2d_size);
+        run_metadata->mutable_prof_stats()->set_pcie_d2h_times(prof_stats->pcie_d2h_times);
+        run_metadata->mutable_prof_stats()->set_pcie_d2h_size(prof_stats->pcie_d2h_size);
+        run_metadata->mutable_prof_stats()->set_sampling_prof_stats(enable_sampling_prof_stats);
+        // sampling report
+        if (TF_PREDICT_FALSE(enable_sampling_prof_stats)) {
+          run_metadata->mutable_prof_stats()->set_flops(prof_stats->flops);
+          run_metadata->mutable_prof_stats()->set_tensorflow_ops(prof_stats->tensorflow_ops);
+          run_metadata->mutable_prof_stats()->set_cpu_flops(prof_stats->cpu_flops);
+          run_metadata->mutable_prof_stats()->set_cpu_tensor_size(prof_stats->cpu_tensor_size);
+          run_metadata->mutable_prof_stats()->set_gpu_flops(prof_stats->gpu_flops);
+          run_metadata->mutable_prof_stats()->set_gpu_tensor_size(prof_stats->gpu_tensor_size);
+          run_metadata->mutable_prof_stats()->set_gpu_kernels(prof_stats->gpu_kernels);
+          run_metadata->mutable_prof_stats()->set_tao_op_calls(prof_stats->tao_op_calls);
+          run_metadata->mutable_prof_stats()->set_dump_shapes(prof_stats->dump_shapes);
+        }
       }
       if (traced_tensors) {
         for (int i = 0; i < traced_tensors->name_tensors_size(); ++i) {
@@ -1987,16 +2003,113 @@ struct UserTracedInfos {
     return nullptr;
   }
 
-  std::unique_ptr<ProfStats> prof_stats;
+  void UpdateProfStats(RunMetadata* run_metadata) {
+    if (run_metadata == nullptr || prof_stats == nullptr) {
+      return;
+    }
+    prof_stats->flops += run_metadata->prof_stats().flops();
+    prof_stats->tensorflow_ops += run_metadata->prof_stats().tensorflow_ops();
+    prof_stats->cpu_flops += run_metadata->prof_stats().cpu_flops();
+    prof_stats->cpu_tensor_size += run_metadata->prof_stats().cpu_tensor_size();
+    prof_stats->gpu_flops += run_metadata->prof_stats().gpu_flops();
+    prof_stats->gpu_tensor_size += run_metadata->prof_stats().gpu_tensor_size();
+    prof_stats->gpu_kernels += run_metadata->prof_stats().gpu_kernels();
+    prof_stats->pcie_h2d_times += run_metadata->prof_stats().pcie_h2d_times();
+    prof_stats->pcie_h2d_size += run_metadata->prof_stats().pcie_h2d_size();
+    prof_stats->pcie_d2h_times += run_metadata->prof_stats().pcie_d2h_times();
+    prof_stats->pcie_d2h_size += run_metadata->prof_stats().pcie_d2h_size();
+  }
+
+  void RecordFlops(uint64 flops, const string& device) {
+    if (!enable_sampling_prof_stats || flops <= 0) {
+      return;
+    }
+    prof_stats->flops += flops;
+    if (device.find("CPU") != std::string::npos ||
+        device.find("cpu") != std::string::npos) {
+      prof_stats->cpu_flops += flops;
+    } else if(device.find("GPU") != std::string::npos ||
+              device.find("gpu") != std::string::npos) {
+      prof_stats->gpu_flops += flops;
+    }
+ }
+
+  void RecordGpuKernels(const string& kernel_type) {
+    if (!enable_sampling_prof_stats) {
+      return;
+    }
+    if (not_require_recording_kernel.count(kernel_type) == 0) {
+      if (kernel_type == "Softmax") {
+        // Softmax lanuch 3 kernels:
+        // two DoRowReduction<>, GenerateNormalizedProb<>.
+        prof_stats->gpu_kernels += 3;
+      } else if(kernel_type == "Sum" || kernel_type == "BlazeGRU" ||
+                kernel_type == "ParallelIndicatorMatMul") {
+        // BlazeGRU lanuch 2 kernels: GRUPadZeros<>, GRUKernel<>.
+        prof_stats->gpu_kernels += 2;
+      } else {
+        prof_stats->gpu_kernels += 1;
+      }
+    }
+  }
+
+  void RecordSendPcie(OpKernelContext* ctx, Rendezvous::ParsedKey& parsed) {
+    const size_t& input_bytes = ctx->input(0).TotalBytes();
+    if (!enable_sampling_prof_stats || input_bytes <= 0) {
+      return;
+    }
+    const bool src_host =
+      ctx->input_alloc_attr(0).on_host() || parsed.src.type == "CPU";
+    if (src_host) { // HToD
+      ++prof_stats->pcie_h2d_times;
+      prof_stats->pcie_h2d_size += input_bytes;
+    } else {        // DToH
+      ++prof_stats->pcie_d2h_times;
+      prof_stats->pcie_d2h_size += input_bytes;
+    }
+  }
+
+  typedef gtl::InlinedVector<TensorValue, 4> TensorValueVec;
+  void RecordTensorSize(TensorValueVec* inputs, OpKernelContext* ctx,
+                        const string& device_type) {
+    if (!enable_sampling_prof_stats) {
+      return;
+    }
+    // Record number of input bytes;
+    uint64 input_bytes = 0;
+    for (int i = 0; i < ctx->num_inputs(); ++i) {
+      if ((*inputs)[i].tensor != nullptr) {
+        input_bytes += (*inputs)[i].tensor->TotalBytes();
+      }
+    }
+    // Record number of output bytes;
+    uint64 output_bytes = 0;
+    for (int i = 0; i < ctx->num_outputs(); ++i) {
+      if (ctx->mutable_output(i) != nullptr) {
+        output_bytes += ctx->mutable_output(i)->TotalBytes();
+      }
+    }
+    // Update prof_stats
+    if (device_type == DEVICE_GPU) {
+      prof_stats->gpu_tensor_size += input_bytes + output_bytes;
+    } else if(device_type == DEVICE_CPU) {
+      prof_stats->cpu_tensor_size += input_bytes + output_bytes;
+    }
+  }
+
+  std::shared_ptr<ProfStats> prof_stats;
   //blaze input & output tensors
   std::unique_ptr<TracedTensors> traced_tensors;
   //all tensor shapes
   std::unique_ptr<TracedTensors> traced_tensor_infos;
   bool enable_prof_stats;
+  // determine whether to sample record metrics in blaze session.run
+  bool enable_sampling_prof_stats;
   bool enable_trace_tensors;
   bool enable_trace_tensor_infos;
   mutex tensor_info_mu_;
 };
+
 #define OP_REQUIRES_ASYNC_WITH_ARGS(CTX, EXP, STATUS, CALLBACK, ARGS)  \
   do {                                                 \
     if (!TF_PREDICT_TRUE(EXP)) {                       \

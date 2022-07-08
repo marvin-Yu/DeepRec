@@ -359,6 +359,14 @@ Status OpKernelContext::get_allocator(AllocatorAttributes attr, Allocator** res)
   }
 }
 
+typedef std::shared_ptr<ProfStats> ProfStatsPtr;
+ProfStatsPtr OpKernelContext::prof_stats_ptr() const {
+  if (params_->traced_infos) {
+    return params_->traced_infos->prof_stats;
+  }
+  return nullptr;
+}
+
 void OpKernelContext::SetStatus(const Status& status) {
   status_.Update(status);
 }
