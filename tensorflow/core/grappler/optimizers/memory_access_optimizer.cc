@@ -238,8 +238,8 @@ bool OptimizeMemoryAccess(GraphDef& input_graph, GraphDef* optimized_graph, bool
 
 Status MemoryAccessOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
                                GraphDef* optimized_graph) {
-  bool optimize = false;
-  ReadBoolFromEnvVar("TF_ENABLE_NATIVE_DELIVERY_OPTIMIZE", false, &optimize);
+  bool optimize = true;
+  ReadBoolFromEnvVar("TF_ENABLE_ORIGINAL_DELIVERY_OPTIMIZE", true, &optimize);
   if (!optimize) {
     *optimized_graph = item.graph;
     return Status::OK();
@@ -247,7 +247,7 @@ Status MemoryAccessOptimizer::Optimize(Cluster* cluster, const GrapplerItem& ite
 
   VLOG(0) << "MemoryAccessOptimizer is on.";
   bool radical = true;
-  ReadBoolFromEnvVar("TF_ENABLE_NATIVE_DELIVERY_OPTIMIZE_RADICAL", true, &radical);
+  ReadBoolFromEnvVar("TF_ENABLE_ORIGINAL_DELIVERY_OPTIMIZE_RADICAL", true, &radical);
 
   GraphDef input_graph_def = item.graph;
   if (!OptimizeMemoryAccess(input_graph_def, optimized_graph, radical)) {

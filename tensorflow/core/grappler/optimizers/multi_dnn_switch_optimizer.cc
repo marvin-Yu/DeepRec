@@ -1022,8 +1022,8 @@ bool SwitchSubGraphToSwitchWeight(Graph* graph, std::vector<std::shared_ptr<
 
 Status MultiDNNSwitchOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
                                GraphDef* optimized_graph) {
-  bool multi_dnn_switch;
-  ReadBoolFromEnvVar("TF_ENABLE_NATIVE_DELIVERY_OPTIMIZE", false, &multi_dnn_switch);
+  bool multi_dnn_switch = true;
+  ReadBoolFromEnvVar("TF_ENABLE_ORIGINAL_DELIVERY_OPTIMIZE", true, &multi_dnn_switch);
   if (!multi_dnn_switch) {
     *optimized_graph = item.graph;
     return Status::OK();

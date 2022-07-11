@@ -229,17 +229,19 @@ Status MetaOptimizer::InitializeOptimizers(
   if (cfg_.gemm_optimization() == RewriterConfig::ON) {
     optimizers->push_back(MakeUnique<GemmOptimizer>());
   }
-  if (cfg_.multi_dnn_switch_optimization() != RewriterConfig::OFF) {
-    optimizers->push_back(MakeUnique<MultiDNNSwitchOptimizer>());
-  }
-  if (cfg_.gemm_compression_optimization() != RewriterConfig::OFF) {
-    optimizers->push_back(MakeUnique<GemmCompressionOptimizer>());
-  }
-  if (cfg_.batch_gemm_compatible_optimization() != RewriterConfig::OFF) {
-    optimizers->push_back(MakeUnique<BatchMatMulCompatibleOptimizer>());
-  }
-  if (cfg_.memory_access_optimization() != RewriterConfig::OFF) {
-    optimizers->push_back(MakeUnique<MemoryAccessOptimizer>());
+  if (cfg_.original_delivery_optimization() == RewriterConfig::ON) {
+    if (cfg_.multi_dnn_switch_optimization() != RewriterConfig::OFF) {
+      optimizers->push_back(MakeUnique<MultiDNNSwitchOptimizer>());
+    }
+    if (cfg_.gemm_compression_optimization() != RewriterConfig::OFF) {
+      optimizers->push_back(MakeUnique<GemmCompressionOptimizer>());
+    }
+    if (cfg_.batch_gemm_compatible_optimization() != RewriterConfig::OFF) {
+      optimizers->push_back(MakeUnique<BatchMatMulCompatibleOptimizer>());
+    }
+    if (cfg_.memory_access_optimization() != RewriterConfig::OFF) {
+      optimizers->push_back(MakeUnique<MemoryAccessOptimizer>());
+    }
   }
   if (cfg_.tile_equal() == RewriterConfig::ON) {
     optimizers->push_back(MakeUnique<TileOptimizer>());

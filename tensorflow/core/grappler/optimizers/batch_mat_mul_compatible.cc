@@ -102,8 +102,8 @@ bool OptimizeBatchMatMul(Graph *graph) {
 Status BatchMatMulCompatibleOptimizer::Optimize(Cluster* cluster,
                                                 const GrapplerItem& item,
                                                 GraphDef* optimized_graph) {
-  bool replace = false;
-  ReadBoolFromEnvVar("TF_ENABLE_NATIVE_DELIVERY_OPTIMIZE", false, &replace);
+  bool replace = true;
+  ReadBoolFromEnvVar("TF_ENABLE_ORIGINAL_DELIVERY_OPTIMIZE", true, &replace);
   if (!replace) {
     *optimized_graph = item.graph;
     return Status::OK();
