@@ -340,6 +340,7 @@ class SubGraphCollection {
         }
       }
     }
+    return true;
   }
   bool AnyQueueEmpty(std::map<int, std::queue<Node*>>& branch_unvisited_queue) {
     for (auto iter:branch_unvisited_queue) {
@@ -588,7 +589,10 @@ class SubGraphCollection {
         continue;
       }
       // 如果是节点输入有SwitchN，则直接去掉，将其输入连接到SwitchN的第一个输出
-      TryUpdateSwitchNInput(collection->GetReserveNode());
+      if (!TryUpdateSwitchNInput(collection->GetReserveNode())) {
+        LOG(ERROR) << "try update switch input failed";
+        return false;
+      }
       // 如果节点有const输入，则构造结构,其中SwitchN、Identity和NoOp共享
       //        |->Identity->NoOp->const-|
       // SwitchN|->Identity->NoOp->const-|->Merge->Node
