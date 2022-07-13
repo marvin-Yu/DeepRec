@@ -75,11 +75,8 @@ class GRUOp : public OpKernel {
 
     //[PROF-STATS]
     int64 delta = batch_size * rounds * (12 * elts * elts + 25 * elts);
-    if (delta > 0) {
-      ProfStats* prof_stats = context->prof_stats();
-      if (prof_stats) {
-        prof_stats->flops += delta;
-      }
+    if (context->traced_infos()) {
+      context->traced_infos()->RecordFlops(delta, requested_device());
     }
     if (VLOG_IS_ON(1)) {
       LOG(INFO) << "FLOPs = " << delta << ", " << type_string() << ", "

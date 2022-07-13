@@ -678,6 +678,10 @@ void BaseGPUDevice::Compute(OpKernel* op_kernel, OpKernelContext* context) {
     }
   }
   ScopedActivateExecutorContext scoped_activation{stream->parent()};
+  if (context->traced_infos()) {
+    // Record the number of gpu kernels;
+    context->traced_infos()->RecordGpuKernels(op_kernel->type_string());
+  }
   op_kernel->Compute(context);
   if (context->status().ok()) {
     bool sync_env = false;

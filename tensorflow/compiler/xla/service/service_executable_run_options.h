@@ -56,8 +56,8 @@ class ServiceExecutableRunOptions {
                : Status(tensorflow::error::UNIMPLEMENTED, "No stream cache");
   }
 
-  //[PROF-STATS]
-  ProfStats* prof_stats() const { return run_options_.prof_stats; }
+  //[PROF-STATS], replaced by traced_infos->prof_stats;
+  ProfStatsPtr prof_stats() const { return run_options_.prof_stats; }
   //[DYNAMIC-SHAPE]
   uint64 before_padding() const { return run_options_.before_padding; }
   uint64 after_padding() const { return run_options_.after_padding; }

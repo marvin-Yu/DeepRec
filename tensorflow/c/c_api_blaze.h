@@ -97,6 +97,16 @@ extern "C" {
 
 typedef struct TF_ProfStats {
   unsigned long long flops;
+  unsigned long long tensorflow_ops;
+  unsigned long long cpu_flops;
+  unsigned long long cpu_tensor_size;
+  unsigned long long gpu_flops;
+  unsigned long long gpu_tensor_size;
+  unsigned long long gpu_kernels;
+  unsigned long long pcie_h2d_times;
+  unsigned long long pcie_h2d_size;
+  unsigned long long pcie_d2h_times;
+  unsigned long long pcie_d2h_size;
   unsigned long long tao_op_calls;
   bool dump_shapes = false;
 } TF_ProfStats;

@@ -440,7 +440,9 @@ class DirectSession : public Session {
   //[DYNAMIC-SHAPE]
   bool gemm_dynamic_batchsize_ = false;
   //[PROF-STATS]
+  const int kProfStatsSampleRatio = 97;
   bool enable_prof_stats_ = true;
+  int64 sampling_prof_stats_steps_ = kProfStatsSampleRatio;
 
   // If true, blocks until device has finished all queued operations in a step.
   bool sync_on_finish_ = true;

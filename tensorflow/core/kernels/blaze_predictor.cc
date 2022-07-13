@@ -264,11 +264,10 @@ Status BlazePredictor::Compute(OpKernelContext* ctx) {
   std::vector<Tensor> real_inputs(inputs.size());
   TF_RETURN_IF_ERROR(PrepareInputs(inputs, &real_inputs, ctx));
 
-  if (ctx->prof_stats()) {
+  if (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
     RunMetadata metadata;
     TF_RETURN_IF_ERROR(session_->RunCallable(handle_, real_inputs, &outputs, &metadata));
-    ctx->prof_stats()->flops += metadata.prof_stats().flops();
-    ctx->traced_infos()->prof_stats->flops += metadata.prof_stats().flops();
+    ctx->traced_infos()->UpdateProfStats(&metadata);
   } else {
     TF_RETURN_IF_ERROR(session_->RunCallable(handle_, real_inputs, &outputs, nullptr));
   }
@@ -428,7 +427,6 @@ Status BlazePredictor::PrepareInputs(const std::vector<Tensor>& inputs,
 Status BlazePredictor::CopyTensorCPUToGPU(const std::vector<Tensor>& inputs,
     std::vector<Tensor>* real_inputs,
     OpKernelContext* ctx) {
-
   for (int i = 0; i < inputs.size(); ++i) {
     if (!copyable_[i]) {
       (*real_inputs)[i] = inputs[i];
@@ -451,6 +449,10 @@ Status BlazePredictor::CopyTensorCPUToGPU(const std::vector<Tensor>& inputs,
           GetStream()->ThenMemcpy(&real_dev_ptr, input_ptr, input_size).ok();
       if (!copy_status) {
         return errors::Internal("MemcpyH2D for padding inputs failed.");
+      }
+      if (ctx->traced_infos()) {
+        ++ctx->traced_infos()->prof_stats->pcie_h2d_times;
+        ctx->traced_infos()->prof_stats->pcie_h2d_size += input_size;
       }
 #else
       return errors::Internal("CUDA not suaported");
@@ -493,6 +495,10 @@ Status BlazePredictor::CopyTensorGPUToCPU(const std::vector<Tensor>& gpu_tensors
     }
     stream->ThenRecordEvent(event.get());
     stream->ThenSynchronizeEvent(event.get());
+    if (ctx->traced_infos()) {
+      ++ctx->traced_infos()->prof_stats->pcie_d2h_times;
+      ctx->traced_infos()->prof_stats->pcie_d2h_size += tmp_size;
+    }
 #else
     return errors::Internal("cuda not supported");
 #endif

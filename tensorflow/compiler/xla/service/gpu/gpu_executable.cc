@@ -194,8 +194,9 @@ Status GpuExecutable::ExecuteThunks(
 
         &buffer_allocations, stream, run_options->run_options().run_id(),
         &profiler, run_options->run_options().device_assignment()};
+    thunk->tensor_size_ = 0;
     TF_RETURN_IF_ERROR(thunk->ExecuteOnStream(thunk_params));
-    //[PROF-STATS]
+    //[PROF-STATS], replaced by traced_infos->prof_stats;
     thunk->RecordStats(run_options->prof_stats());
     if (thunk_schedule_->Depended(thunk)) {
       auto finish_event = absl::make_unique<se::Event>(main_stream->parent());

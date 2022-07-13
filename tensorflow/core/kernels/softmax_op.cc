@@ -64,11 +64,8 @@ class SoftmaxOp : public OpKernel {
 
     //[PROF-STATS]
     int64 delta = 5 * logits_in.NumElements();
-    if (delta > 0) {
-      ProfStats* prof_stats = context->prof_stats();
-      if (prof_stats) {
-        prof_stats->flops += delta;
-      }
+    if (context->traced_infos()) {
+      context->traced_infos()->RecordFlops(delta, requested_device());
     }
     if (VLOG_IS_ON(1)) {
       LOG(INFO) << "FLOPs = " << delta

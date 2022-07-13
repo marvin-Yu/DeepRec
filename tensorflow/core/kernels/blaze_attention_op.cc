@@ -158,11 +158,8 @@ class BlazeAttentionOp : public OpKernel {
 
     //[PROF-STATS]
     int64 delta = 2 * seq_len * out_shape.num_elements();
-    if (delta > 0) {
-      ProfStats* prof_stats = ctx->prof_stats();
-      if (prof_stats) {
-        prof_stats->flops += delta;
-      }
+    if (ctx->traced_infos()) {
+      ctx->traced_infos()->RecordFlops(delta, requested_device());
     }
     if (VLOG_IS_ON(1)) {
       LOG(INFO) << "FLOPs = " << delta
@@ -239,11 +236,8 @@ class BlazeAttentionIndicatorOp : public OpKernel {
 
     //[PROF-STATS]
     int64 delta = 2 * seq_len * out_shape.num_elements();
-    if (delta > 0) {
-      ProfStats* prof_stats = ctx->prof_stats();
-      if (prof_stats) {
-        prof_stats->flops += delta;
-      }
+    if (ctx->traced_infos()) {
+      ctx->traced_infos()->RecordFlops(delta, requested_device());
     }
     if (VLOG_IS_ON(1)) {
       LOG(INFO) << "FLOPs = " << delta
