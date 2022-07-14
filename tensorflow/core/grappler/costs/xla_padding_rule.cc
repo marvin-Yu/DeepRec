@@ -507,32 +507,32 @@ namespace {
     return true;
   }
 
-    template<typename T>
-    bool HandleSlice(const NodeDef& node,
-                     const std::vector<std::vector<int>>& diff_dims,
-                     const std::vector<int32>& inputs_shape,
-                     const Tensor* begin,
-                     const Tensor* size) {
-      const int input_rank = inputs_shape.size();
-      const gtl::ArraySlice<T> begin_array(begin->flat<T>().data(), input_rank);
-      VLOG(1) << node.op() << " begin " << DebugString<T>(begin_array);
+  template<typename T>
+  bool HandleSlice(const NodeDef& node,
+                   const std::vector<std::vector<int>>& diff_dims,
+                   const std::vector<int32>& inputs_shape,
+                   const Tensor* begin,
+                   const Tensor* size) {
+    const int input_rank = inputs_shape.size();
+    const gtl::ArraySlice<T> begin_array(begin->flat<T>().data(), input_rank);
+    VLOG(1) << node.op() << " begin " << DebugString<T>(begin_array);
 
-      const gtl::ArraySlice<T> size_array(size->flat<T>().data(), input_rank);
-      VLOG(1) << node.op() << " size " << DebugString<T>(size_array);
+    const gtl::ArraySlice<T> size_array(size->flat<T>().data(), input_rank);
+    VLOG(1) << node.op() << " size " << DebugString<T>(size_array);
 
-      CHECK(diff_dims.size() > 0); // This always true, because
-                                   // it will not be here if diff_dims.size() <= 0
-      const auto& input_dims = diff_dims[0];
-      for (int dim: input_dims) {
-        if (begin_array[dim] != 0 || size_array[dim] != inputs_shape[dim]) {
-          LOG(WARNING) << "Validate " << node.name() << "(" << node.op() << ") xla auto padding rule failed; "
-                       << "input padding dim=" << dim
-                       << "and begin=" << begin_array[dim] << " size=" << size_array[dim];
-          return false;
-        }
+    CHECK(diff_dims.size() > 0); // This always true, because
+                                 // it will not be here if diff_dims.size() <= 0
+    const auto& input_dims = diff_dims[0];
+    for (int dim: input_dims) {
+      if (begin_array[dim] != 0 || size_array[dim] != inputs_shape[dim]) {
+        LOG(WARNING) << "Validate " << node.name() << "(" << node.op() << ") xla auto padding rule failed; "
+                     << "input padding dim=" << dim
+                     << "and begin=" << begin_array[dim] << " size=" << size_array[dim];
+        return false;
       }
-      return true;
-    };
+    }
+    return true;
+  }
   inline bool ValidateSlice(const NodeDef& node, 
       const std::vector<std::vector<int>>& diff_dims, 
       InferenceContext* ic) {
