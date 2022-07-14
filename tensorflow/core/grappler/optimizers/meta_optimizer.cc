@@ -34,6 +34,10 @@ limitations under the License.
 #include "tensorflow/core/grappler/optimizers/unfuse_batch_norm_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/function_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/gemm_optimizer.h"
+#include "tensorflow/core/grappler/optimizers/multi_dnn_switch_optimizer.h"
+#include "tensorflow/core/grappler/optimizers/batch_mat_mul_compatible.h"
+#include "tensorflow/core/grappler/optimizers/gemm_compression.h"
+#include "tensorflow/core/grappler/optimizers/memory_access_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/generic_layout_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/implementation_selector.h"
 #include "tensorflow/core/grappler/optimizers/loop_optimizer.h"
@@ -87,6 +91,7 @@ int NumIterations(const RewriterConfig& cfg) {
 // Check if optimizer is allowed to run only once.
 bool IsRunOnceOptimizer(const string& name) {
   return name == "layout" || name == "memory_optimizer" ||
+         name == "multi_dnn_switch" ||
          name == "loop_optimizer" || name == "auto_mixed_precision";
 }
 
@@ -142,7 +147,11 @@ std::unique_ptr<GraphOptimizer> MetaOptimizer::MakeNewOptimizer(
   MK_OPT("shape", new ShapeOptimizer());
   MK_OPT("remap", new Remapper(cfg_.remapping()));
   MK_OPT("layout", new GenericLayoutOptimizer());
+  MK_OPT("batchmatmul_compatible", new BatchMatMulCompatibleOptimizer());
+  MK_OPT("memory_access", new MemoryAccessOptimizer());
+  MK_OPT("gemm_compression", new GemmCompressionOptimizer());
   MK_OPT("gemm", new GemmOptimizer());
+  MK_OPT("multi_dnn_switch", new MultiDNNSwitchOptimizer());
   MK_OPT("auto_mixed_precision",
          new AutoMixedPrecision(cfg_.auto_mixed_precision()));
   MK_OPT("memory", new MemoryOptimizer(RewriterConfig::MANUAL));
@@ -219,6 +228,20 @@ Status MetaOptimizer::InitializeOptimizers(
   }
   if (cfg_.gemm_optimization() == RewriterConfig::ON) {
     optimizers->push_back(MakeUnique<GemmOptimizer>());
+  }
+  if (cfg_.original_delivery_optimization() == RewriterConfig::ON) {
+    if (cfg_.multi_dnn_switch_optimization() != RewriterConfig::OFF) {
+      optimizers->push_back(MakeUnique<MultiDNNSwitchOptimizer>());
+    }
+    if (cfg_.gemm_compression_optimization() != RewriterConfig::OFF) {
+      optimizers->push_back(MakeUnique<GemmCompressionOptimizer>());
+    }
+    if (cfg_.batch_gemm_compatible_optimization() != RewriterConfig::OFF) {
+      optimizers->push_back(MakeUnique<BatchMatMulCompatibleOptimizer>());
+    }
+    if (cfg_.memory_access_optimization() != RewriterConfig::OFF) {
+      optimizers->push_back(MakeUnique<MemoryAccessOptimizer>());
+    }
   }
   if (cfg_.tile_equal() == RewriterConfig::ON) {
     optimizers->push_back(MakeUnique<TileOptimizer>());
@@ -436,10 +459,8 @@ Status MetaOptimizer::OptimizeGraph(Cluster* cluster, const GrapplerItem& item,
         if (fusion_optimizer == nullptr) fusion_optimizer = optimizer.get();
         continue;
       }
-
       TF_RETURN_IF_ERROR(RunOptimizer(optimizer.get(), cluster, &optimized_item,
                                       optimized_graph, &optimization_result));
-
       if (iteration == 0 && optimizer->name() == "model_pruner") {
         CompressConstants(optimized_graph);
       }
@@ -467,7 +488,6 @@ Status MetaOptimizer::OptimizeGraph(Cluster* cluster, const GrapplerItem& item,
       TF_RETURN_IF_ERROR(verifier->Verify(*optimized_graph));
     }
   }
-
   // Run fusion optimizer if requested after all other optimizers since: 1) it
   // doesn't need to be called more than once. 2) we don't want subsequent
   // optimization passes to break the fusion clusters. We could potentially
