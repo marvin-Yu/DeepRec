@@ -1293,7 +1293,7 @@ TEST_F(AutoMixedPrecisionMklTest, AlreadyBf16) {
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
   auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
 
-  AutoMixedPrecision optimizer{AutoMixedPrecisionMode::MKL};
+  AutoMixedPrecision optimizer{AutoMixedPrecisionMode::BF16};
   GraphDef output;
   TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
   VLOG(1) << output.DebugString();
@@ -1336,7 +1336,7 @@ TEST_F(AutoMixedPrecisionMklTest, Simple) {
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
   auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
 
-  AutoMixedPrecision optimizer{AutoMixedPrecisionMode::MKL};
+  AutoMixedPrecision optimizer{AutoMixedPrecisionMode::BF16};
   GraphDef output;
   TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
 
@@ -1407,7 +1407,7 @@ TEST_F(AutoMixedPrecisionMklTest, TensorListSetGet) {
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
   auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
 
-  AutoMixedPrecision optimizer{AutoMixedPrecisionMode::MKL};
+  AutoMixedPrecision optimizer{AutoMixedPrecisionMode::BF16};
   GraphDef output;
   TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
 
@@ -1461,7 +1461,7 @@ TEST_F(AutoMixedPrecisionMklTest, InferFollowUpStreamAllow) {
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
   auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
 
-  AutoMixedPrecision optimizer{AutoMixedPrecisionMode::MKL};
+  AutoMixedPrecision optimizer{AutoMixedPrecisionMode::BF16};
   GraphDef output;
   TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
 
@@ -1502,7 +1502,7 @@ TEST_F(AutoMixedPrecisionMklTest, InferFollowUpStreamDeny) {
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
   auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
 
-  AutoMixedPrecision optimizer{AutoMixedPrecisionMode::MKL};
+  AutoMixedPrecision optimizer{AutoMixedPrecisionMode::BF16};
   GraphDef output;
   TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
 
