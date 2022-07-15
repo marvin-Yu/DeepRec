@@ -64,6 +64,7 @@ limitations under the License.
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/gtl/map_util.h"
 #include "tensorflow/core/platform/cpu_info.h"
+#include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/util/dump_graph.h"
 #include "tensorflow/core/util/env_var.h"
 #include "tensorflow/core/util/ptr_util.h"
@@ -200,7 +201,9 @@ std::unique_ptr<GraphOptimizer> MetaOptimizer::MakeNewOptimizer(
 #ifdef INTEL_MKL
   if (IsMKLEnabled()) {
     MK_OPT("auto_mixed_precision_mkl",
-           new AutoMixedPrecision(AutoMixedPrecisionMode::MKL));
+           new AutoMixedPrecision(AutoMixedPrecisionMode::BF16));
+    MK_OPT("auto_mixed_precision_onednn_bfloat16",
+           new AutoMixedPrecision(AutoMixedPrecisionMode::BF16));
   }
 #endif
   MK_OPT("memory", new MemoryOptimizer(RewriterConfig::MANUAL));
@@ -285,10 +288,21 @@ Status MetaOptimizer::InitializeOptimizers(
     optimizers->push_back(
         MakeUnique<AutoMixedPrecision>(AutoMixedPrecisionMode::CUDA));
   }
-  if (AutoMixedPrecisionEnabled(cfg_.auto_mixed_precision_mkl())) {
+#ifdef INTEL_MKL
+  if (AutoMixedPrecisionEnabled(cfg_.auto_mixed_precision_onednn_bfloat16()) &&
+      IsMKLEnabled()) {
     optimizers->push_back(
-        MakeUnique<AutoMixedPrecision>(AutoMixedPrecisionMode::MKL));
+        MakeUnique<AutoMixedPrecision>(AutoMixedPrecisionMode::BF16));
   }
+  if (AutoMixedPrecisionEnabled(cfg_.auto_mixed_precision_mkl()) &&
+      IsMKLEnabled()) {
+    LOG_FIRST_N(WARNING, 1)
+        << "NOTE: auto_mixed_precision_mkl is deprecated."
+           " Please use auto_mixed_precision_onednn_bfloat16 instead";
+    optimizers->push_back(
+        MakeUnique<AutoMixedPrecision>(AutoMixedPrecisionMode::BF16));
+  }
+#endif  // INTEL_MKL
   if (AutoMixedPrecisionEnabled(cfg_.auto_mixed_precision_cpu())) {
     optimizers->push_back(
         MakeUnique<AutoMixedPrecision>(AutoMixedPrecisionMode::CPU));
@@ -971,6 +985,8 @@ bool MetaOptimizerEnabled(const ConfigProto& cfg) {
          rewrite_cfg.gemm_optimization() != RewriterConfig::OFF ||
          rewrite_cfg.check_nan_optimization() == RewriterConfig::ON ||
          AutoMixedPrecisionEnabled(rewrite_cfg.auto_mixed_precision()) ||
+         AutoMixedPrecisionEnabled(
+             rewrite_cfg.auto_mixed_precision_onednn_bfloat16()) ||
          AutoMixedPrecisionEnabled(rewrite_cfg.auto_mixed_precision_mkl()) ||
          AutoMixedPrecisionEnabled(rewrite_cfg.auto_mixed_precision_cpu()) ||
          !rewrite_cfg.optimizers().empty() ||
