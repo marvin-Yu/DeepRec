@@ -607,6 +607,20 @@ cc_library(
 )
 
 cc_library(
+    name = "tensorflow_cc_lib",
+    srcs = ["//tensorflow:libtensorflow_cc.so",
+           ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "tensorflow_framework_lib",
+    srcs = ["//tensorflow:libtensorflow_framework.so",
+           ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "tensorflow_test_lib",
     srcs = [
             "//tensorflow:libtensorflow_cc.so.1",
