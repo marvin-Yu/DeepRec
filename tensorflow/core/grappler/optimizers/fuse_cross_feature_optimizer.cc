@@ -511,7 +511,7 @@ bool OptimizeCrossFeatureScope(const GrapplerItem& item, GraphDef& input_graph,
 Status FuseCrossFeatureOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
                                GraphDef* optimized_graph) {
   bool cross_feature = true;
-  ReadBoolFromEnvVar("TF_ENABLE_FUSE_CROSS_FEATURE", true, &cross_feature);
+  ReadBoolFromEnvVar("TF_ENABLE_ORIGINAL_DELIVERY_OPTIMIZE", true, &cross_feature);
   if (!cross_feature) {
     *optimized_graph = item.graph;
     return Status::OK();
