@@ -198,6 +198,7 @@ message RewriterConfig {
 
   // original delivery
   Toggle original_delivery_optimization = 500;
+  Toggle fuse_cross_feature_optimization = 501;
   Toggle multi_dnn_switch_optimization = 502;
   Toggle batch_gemm_compatible_optimization = 503;
   Toggle memory_access_optimization = 504;

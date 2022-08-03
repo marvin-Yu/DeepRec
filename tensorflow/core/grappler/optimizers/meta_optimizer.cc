@@ -38,6 +38,7 @@ limitations under the License.
 #include "tensorflow/core/grappler/optimizers/batch_mat_mul_compatible.h"
 #include "tensorflow/core/grappler/optimizers/gemm_compression.h"
 #include "tensorflow/core/grappler/optimizers/memory_access_optimizer.h"
+#include "tensorflow/core/grappler/optimizers/fuse_cross_feature_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/generic_layout_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/implementation_selector.h"
 #include "tensorflow/core/grappler/optimizers/loop_optimizer.h"
@@ -152,6 +153,7 @@ std::unique_ptr<GraphOptimizer> MetaOptimizer::MakeNewOptimizer(
   MK_OPT("gemm_compression", new GemmCompressionOptimizer());
   MK_OPT("gemm", new GemmOptimizer());
   MK_OPT("multi_dnn_switch", new MultiDNNSwitchOptimizer());
+  MK_OPT("fuse_cross_feature", new FuseCrossFeatureOptimizer());
   MK_OPT("auto_mixed_precision",
          new AutoMixedPrecision(cfg_.auto_mixed_precision()));
   MK_OPT("memory", new MemoryOptimizer(RewriterConfig::MANUAL));
@@ -213,6 +215,13 @@ Status MetaOptimizer::InitializeOptimizers(
   }
   if (cfg_.pin_to_host_optimization() == RewriterConfig::ON) {
     optimizers->push_back(MakeUnique<PinToHostOptimizer>());
+  }
+  // implement optimization before arithmetic_optimization
+  // to avoid changing graph structure
+  if (cfg_.original_delivery_optimization() == RewriterConfig::ON) {
+    if (cfg_.fuse_cross_feature_optimization() != RewriterConfig::OFF) {
+      optimizers->push_back(MakeUnique<FuseCrossFeatureOptimizer>());
+    }
   }
   if (cfg_.arithmetic_optimization() != RewriterConfig::OFF) {
     optimizers->push_back(

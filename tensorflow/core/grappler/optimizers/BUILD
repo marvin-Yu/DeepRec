@@ -673,6 +673,7 @@ cc_library(
         ":gemm_compression",
         ":memory_access",
         ":batch_mat_mul_compatible",
+        ":fuse_cross_feature",
         ":loop_optimizer",
         ":memory_optimizer",
         ":model_pruner",
@@ -1317,5 +1318,19 @@ cc_library(
         "//tensorflow/core:graph",
         "//tensorflow/core/grappler:grappler_item",
         "//tensorflow/tools/graph_transforms:transform_utils",
+    ],
+)
+cc_library(
+    name = "fuse_cross_feature",
+    srcs = ["fuse_cross_feature_optimizer.cc"],
+    hdrs = ["fuse_cross_feature_optimizer.h",],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":graph_optimizer",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:graph",
+        "//tensorflow/core/grappler:grappler_item",
+        "//tensorflow/tools/graph_transforms:transform_utils",
+        "//tensorflow/core/grappler/costs:graph_properties",
     ],
 )
