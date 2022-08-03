@@ -18,6 +18,7 @@ limitations under the License.
 #include <fstream>
 #include <queue>
 #include <map>
+#include <algorithm>
 
 #include "tensorflow/core/framework/node_def_builder.h"
 #include "tensorflow/core/graph/graph.h"
@@ -92,10 +93,11 @@ Status OptimizePatternFunction(const NodeDef& compute_node,
     invalid = true;
   }
   if (invalid) {
+    static int index = 0;
     // 不替换时，直接返回，会导致之后每次都匹配到这个不满足条件的pattern，
     // 其余pattern无法继续匹配，因此给这部分子图增加一个Identity，改变图结构
     NodeDef new_identity_node;
-    new_identity_node.set_name(gather_ind_node.name() + "_identity");
+    new_identity_node.set_name(gather_ind_node.name() + "_identity_" + std::to_string(index));
     new_identity_node.set_op("Identity");
     new_identity_node.set_device(gather_node.device());
     new_identity_node.clear_attr();
@@ -113,26 +115,15 @@ Status OptimizePatternFunction(const NodeDef& compute_node,
     new_nodes->push_back(gather_input_node);
     new_nodes->push_back(gather_ind_node);
     new_nodes->push_back(gather_axis_node);
-
+    index++;
     return Status::OK();
   }
-  NodeDef new_node;
-  new_node.set_name(gather_node.name()+"_identity");
-  new_node.set_op("Identity");
-  new_node.set_device(gather_node.device());
-  new_node.clear_attr();
-  (*new_node.mutable_attr())["T"].set_type(output_type);
-  *(new_node.mutable_input()->Add()) = gather_node.input(0);
-  *(new_node.mutable_input()->Add()) = AsControlDependency(gather_node.input(1));
-  *(new_node.mutable_input()->Add()) = AsControlDependency(gather_node.input(2));
-  VLOG(1) << "replace Gather to Identity, " << new_node.DebugString();
   NodeDef new_compute_node;
   new_compute_node.CopyFrom(compute_node);
-  *(new_compute_node.mutable_input(input_port)) = new_node.name();
+  *(new_compute_node.mutable_input(input_port)) = gather_node.input(0);
   new_nodes->push_back(new_compute_node);
   new_nodes->push_back(other_node);
   new_nodes->push_back(gather_node);
-  new_nodes->push_back(new_node);
   new_nodes->push_back(gather_input_node);
   new_nodes->push_back(gather_ind_node);
   new_nodes->push_back(gather_axis_node);
@@ -161,7 +152,7 @@ bool OptimizeGatherPattern(GraphDef &input_graph_def, GraphDef* output_graph_def
                                        gather_input_node, gather_ind_node,
                                        gather_axis_node, new_nodes, 0);
       },
-      {}, output_graph_def);
+      {}, output_graph_def, true);
   if (!status.ok()) {
     LOG(ERROR) << "optimize gather failed " << status;
     return false;
@@ -186,7 +177,7 @@ bool OptimizeGatherPattern(GraphDef &input_graph_def, GraphDef* output_graph_def
                                        gather_input_node, gather_ind_node,
                                        gather_axis_node, new_nodes, 1);
       },
-      {}, output_graph_def);
+      {}, output_graph_def, true);
   if (!status.ok()) {
     LOG(ERROR) << "optimize gather failed " << status;
     return false;
@@ -214,7 +205,7 @@ bool OptimizeGatherPattern(GraphDef &input_graph_def, GraphDef* output_graph_def
                                        gather_input_node, gather_ind_node,
                                        gather_axis_node, new_nodes, 0);
       },
-      {}, output_graph_def);
+      {}, output_graph_def, true);
   if (!status.ok()) {
     LOG(ERROR) << "optimize gather failed " << status;
     return false;

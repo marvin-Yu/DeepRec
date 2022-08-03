@@ -282,15 +282,42 @@ string NodeMatch::DebugString() const {
   return result;
 }
 
-GraphMatcher::GraphMatcher(const GraphDef& graph_def) {
-  SortByExecutionOrder(graph_def, &graph_def_).IgnoreError();
-  MapNamesToNodes(graph_def_, &node_map_);
+GraphMatcher::GraphMatcher(const GraphDef& graph_def,
+                           const bool decrease_node_copy) {
+  decrease_node_copy_ = decrease_node_copy;
+  if (!decrease_node_copy_) {
+    SortByExecutionOrder(graph_def, &graph_def_).IgnoreError();
+  }
+  MapNamesToNodes(graph_def, &node_map_);
 }
 
 Status GraphMatcher::GetOpTypeMatches(const OpTypePattern& pattern,
                                       std::vector<NodeMatch>* matches) {
   std::set<string> matched_nodes;
+  if (decrease_node_copy_) {
+    return errors::Internal("cant get matches with this method when decreasing node copy");
+  }
   for (const NodeDef& node : graph_def_.node()) {
+    // Skip any nodes that are already part of a match.
+    if (matched_nodes.count(node.name())) {
+      continue;
+    }
+    NodeMatch match;
+    if (DoesOpTypeMatch(node, pattern, matched_nodes, &match)) {
+      RecordMatchedNodes(match, &matched_nodes);
+      matches->push_back(match);
+    }
+  }
+  return Status::OK();
+}
+
+Status GraphMatcher::GetOpTypeMatchesDecreaseNodeCopy(
+                                      const GraphDef& graph_def,
+                                      const OpTypePattern& pattern,
+                                      std::vector<NodeMatch>* matches) {
+  std::set<string> matched_nodes;
+
+  for (const NodeDef& node : graph_def.node()) {
     // Skip any nodes that are already part of a match.
     if (matched_nodes.count(node.name())) {
       continue;
@@ -311,7 +338,7 @@ bool GraphMatcher::DoesOpTypeMatch(
   VLOG(2) << "pattern=" << pattern.DebugString();
   VLOG(2) << "match=" << match->DebugString();
   if (previously_matched_nodes.count(node.name())) {
-    VLOG(2) << "node " << node.name() << " has been previously matched";
+    VLOG(1) << "node " << node.name() << " has been previously matched";
     return false;
   }
   bool pattern_matched = false;
@@ -342,17 +369,8 @@ bool GraphMatcher::DoesOpTypeMatch(
     return true;
   }
   if (non_control_inputs.size() != pattern.inputs.size()) {
-    // match the first few inputs for ConcatV2,
-    // because we cant ensure the input count of ConcatV2
-    if (node.op() == "ConcatV2") {
-      if (non_control_inputs.size() < pattern.inputs.size()) {
-        VLOG(1) << "non_control_inputs.size() less than pattern.inputs.size()";
-        return false;
-      }
-    } else {
-      VLOG(1) << "non_control_inputs.size() != pattern.inputs.size()";
-      return false;
-    }
+    VLOG(1) << "non_control_inputs.size() != pattern.inputs.size()";
+    return false;
   }
   for (int i = 0; i < pattern.inputs.size(); ++i) {
     const string& input_node_name = NodeNameFromInput(non_control_inputs[i]);
@@ -373,11 +391,17 @@ Status ReplaceMatchingOpTypes(
     const std::function<Status(const NodeMatch&, const std::set<string>&,
                                const std::set<string>&, std::vector<NodeDef>*)>&
         node_generator,
-    const ReplaceMatchingOpTypesOptions& options, GraphDef* output_graph_def) {
+    const ReplaceMatchingOpTypesOptions& options, GraphDef* output_graph_def,
+    const bool decrease_node_copy) {
   // Start off by retrieving all the matching subgraphs.
-  GraphMatcher matcher(input_graph_def);
+  GraphMatcher matcher(input_graph_def, decrease_node_copy);
   std::vector<NodeMatch> matches;
-  TF_RETURN_IF_ERROR(matcher.GetOpTypeMatches(pattern, &matches));
+  if (decrease_node_copy) {
+    TF_RETURN_IF_ERROR(matcher.GetOpTypeMatchesDecreaseNodeCopy(
+                               input_graph_def, pattern, &matches));
+  } else {
+    TF_RETURN_IF_ERROR(matcher.GetOpTypeMatches(pattern, &matches));
+  }
 
   // Do some housekeeping so we can easily look up the resulting matches given
   // a node name.
@@ -472,7 +496,11 @@ Status ReplaceMatchingOpTypes(
     } else if (!matched_nodes.count(input_node.name())) {
       // This node isn't part of any match, so just copy it over.
       NodeDef* added_node = output_graph_def->mutable_node()->Add();
-      *added_node = input_node;
+      if (decrease_node_copy) {
+        *added_node = std::move(const_cast<NodeDef&>(input_node));
+      } else {
+        *added_node = input_node;
+      }
     } else {
       // Do nothing, because this is an internal part of a matching subgraph,
       // and so will have been replaced by a new replacement subgraph.
