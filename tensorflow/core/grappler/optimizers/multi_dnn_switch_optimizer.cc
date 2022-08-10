@@ -53,6 +53,7 @@ bool OpInputOrderInsensitive(string op) {
   }
   return false;
 }
+
 bool SkipVisitInputOps(string op) {
    static std::unordered_set<string> op_set = {
        "NoOp",
@@ -724,20 +725,6 @@ void DebugMultiDNNInfo(MultiDNNInfo &multi_dnn_info) {
   VLOG(0) << "-------------------------";
 }
 
-Node* GetTargetOpInputNode(Graph *graph, Node *node, string target) {
-  Node* target_node = nullptr;
-  for(auto n:node->in_nodes()) {
-    VLOG(1) << "GetTargetOpInputNode," << node->name() << " input node:" << n->name();
-    if (n->type_string() == target) {
-      if (graph->IsValidNode(n).ok()) {
-        target_node = n;
-      }
-      break;
-    }
-  }
-  return target_node;
-}
-
 Status UpdateAllEdge(Graph* graph, Node* new_src_node, Node* old_dst_node) {
   std::vector<Node*> dst_nodes;
   std::vector<int> dst_inputs;
@@ -1000,6 +987,120 @@ bool DynamicPartitionToSwitch(Graph* graph, std::vector<std::shared_ptr<
   return true;
 }
 
+bool SkipUselessControlflowEdge(const Edge* e) {
+  if (e->src()->IsSource()) {
+    return true;
+  }
+  return false;
+}
+
+bool HasMultiControlflowEdge(Node* node) {
+  bool has_controlflow = false;
+  for (auto e:node->in_edges()) {
+    if (SkipUselessControlflowEdge(e)) continue;
+    if (e->IsControlEdge()) {
+      if (!has_controlflow) {
+        has_controlflow = true;
+      } else {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool ReplaceControlflowToMergeNode(Graph* graph, Node* node) {
+  std::vector<const Edge*> no_ops;
+  std::vector<const Edge*> identity_ops;
+  for (auto e:node->in_edges()) {
+    if (SkipUselessControlflowEdge(e)) continue;
+    if (e->src()->type_string() != "NoOp") {
+      LOG(WARNING) << "const node input controlflow is not NoOp:" << e->DebugString();
+      return false;
+    }
+    Node* no = e->src();
+    if (no->num_inputs() > 1) {
+      LOG(WARNING) << "NoOp node must have 1 input controlflow edge:" << no->DebugString();
+      return false;
+    }
+    no_ops.push_back(e);
+    const Edge* identity;
+    for (auto ex:no->in_edges()) {
+      if (SkipUselessControlflowEdge(e)) continue;
+      if (ex->src()->type_string() != "Identity") {
+        LOG(WARNING) << "NoOp input controlflow is not Identity:" << ex->DebugString();
+        return false;
+      }
+      identity_ops.push_back(ex);
+    }
+  }
+  int in_size = identity_ops.size();
+  if (no_ops.size() != in_size) {
+    LOG(WARNING) << "NoOp nodes not equal to Identity nodes:"
+                 << no_ops.size() << " VS " << in_size;
+    VLOG(0) << node->DebugString();
+    for (auto e:no_ops) {
+      VLOG(0) << e->DebugString();
+    }
+    for (auto e:identity_ops) {
+      VLOG(0) << e->DebugString();
+    }
+    return false;
+  }
+  string merge_name = node->name() + "/merge_switch_subgraph/merge_const";
+  std::vector<NodeDefBuilder::NodeOut> merge_inputs;
+  for (auto e:identity_ops) {
+    merge_inputs.emplace_back(e->src()->name(), 0,
+                              e->src()->output_type(0));
+  }
+  std::function<Status(NodeDef&)> merge_builder = [&](NodeDef& def) {
+    return NodeDefBuilder(merge_name, "Merge")
+                          .Input(merge_inputs)
+                          .Attr("T", identity_ops[0]->src()->output_type(0))
+                          .Attr("N", in_size)
+                          .Finalize(&def);
+  };
+  Node* merge = NodeConstructor(graph, merge_name, identity_ops[0]->src(), merge_builder);
+  if (merge == nullptr) {
+    LOG(ERROR) << "construct Merge failed";
+    return false;
+  }
+  int merge_in_port = 0;
+  for (auto e:identity_ops) {
+    graph->AddEdge(e->src(), 0, merge, merge_in_port);
+    merge_in_port++;
+  }
+  graph->AddControlEdge(merge, node);
+  for (auto e:no_ops) {
+    graph->RemoveEdge(e);
+  }
+  return true;
+}
+
+bool RefineControlflowForMergedConst(Graph* graph) {
+  Status status;
+  std::vector<Node*> nodes(graph->num_nodes());
+  std::map<string, Node*> index_cache;
+  int i = 0;
+  for (Node* node : graph->nodes()) {
+    nodes[i++] = node;
+  }
+  int counter = 0;
+  for (Node* node : nodes) {
+    if (node->type_string() == "Const") {
+      if (HasMultiControlflowEdge(node)) {
+        if (!ReplaceControlflowToMergeNode(graph, node)) {
+          LOG(WARNING) << "refine controlflow for merged const failed";
+          return false;
+        }
+        counter++;
+      }
+    }
+  }
+  VLOG(0) << "convert " << counter << " multi controlflow const to merge structure";
+  return true;
+}
+
 bool SwitchSubGraphToSwitchWeight(Graph* graph, std::vector<std::shared_ptr<
                                                 SubGraphCollection>>& sub_graph_group) {
   Status status;
@@ -1014,6 +1115,13 @@ bool SwitchSubGraphToSwitchWeight(Graph* graph, std::vector<std::shared_ptr<
       return false;
     }
     VLOG(0) << "convert subgraph to switch weight done";
+  }
+  // arithmetic optimization可能会将相同的const合并
+  // 导致多个switch分支出来的控制边连接到同一个const
+  // 从而无法正常调度，导致后续节点状态变成dead
+  // 有相同const被共享，需要增加merge来保证节点正常被调度到
+  if (!RefineControlflowForMergedConst(graph)) {
+    return false;
   }
   return true;
 }
@@ -1072,7 +1180,7 @@ Status MultiDNNSwitchOptimizer::Optimize(Cluster* cluster, const GrapplerItem& i
     std::fstream f;
     f.open("after_multi_dnn_switch_" + std::to_string(pass) + ".pb",
            std::fstream::out);
-    f << optimized_graph->DebugString();
+    f << optimized_graph->SerializeAsString();
     f.close();
   }
   pass++;
