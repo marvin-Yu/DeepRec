@@ -794,7 +794,7 @@ Status GraphExecutionState::BuildGraph(const BuildGraphOptions& options,
 
   Status s = OptimizeGraph(options, &optimized_graph, &optimized_flib);
   if (!s.ok()) {
-    VLOG(2) << "Grappler optimization failed. Error: " << s.error_message();
+    LOG(WARNING) << "Grappler optimization failed. Error: " << s.error_message();
     // Simply copy the original graph and the function library if we couldn't
     // optimize it.
     optimized_graph.reset(new Graph(flib_def_.get()));
