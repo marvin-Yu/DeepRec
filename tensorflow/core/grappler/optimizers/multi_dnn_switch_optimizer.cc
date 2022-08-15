@@ -947,18 +947,29 @@ bool DynamicPartitionToSwitch(Graph* graph, std::vector<std::shared_ptr<
     string merge_name = info.dynamic_stitch->name() + "/multi_dnn/merge";
     NodeDef merge_node;
     std::vector<NodeDefBuilder::NodeOut> merge_inputs;
-    int input_count = 0;
+    std::vector<const Edge*> stitch_inputs;
     for (auto e:info.dynamic_stitch->in_edges()) {
       if (e->src()->type_string() != "DynamicPartition") {
-        merge_inputs.emplace_back(e->src()->name(), e->src_output(),
-                                  e->src()->output_type(0));
-        input_count++;
+        stitch_inputs.emplace_back(e);
       }
     }
-    status =  NodeDefBuilder(merge_name, "Merge")
+    // fix: 遍历stitch输入边，没有按照输入端口保序，
+    // 导致switch权重与实际场景不匹配，且每次顺序都不同，通过主动sort来保序
+    // 但第二阶场景数比较少时一直能够保序
+    std::sort(stitch_inputs.begin(), stitch_inputs.end(),
+        [](const Edge* a, const Edge* b) {
+          return a->dst_input() < b->dst_input();
+        });
+    for (auto e:stitch_inputs) {
+      merge_inputs.emplace_back(e->src()->name(), e->src_output(),
+                                e->src()->output_type(0));
+    }
+    int input_size = stitch_inputs.size();
+
+    status = NodeDefBuilder(merge_name, "Merge")
                             .Input(merge_inputs)
                             .Attr("T", info.dynamic_stitch->output_type(0))
-                            .Attr("N", input_count)
+                            .Attr("N", input_size)
                             .Finalize(&merge_node);
     if (!status.ok()) {
       LOG(ERROR) << "Adding merge nodedef build failed " << status;
@@ -973,10 +984,8 @@ bool DynamicPartitionToSwitch(Graph* graph, std::vector<std::shared_ptr<
     }
     merge->set_assigned_device_name(info.dynamic_stitch->assigned_device_name());
     int port = 0;
-    for (auto e:info.dynamic_stitch->in_edges()) {
-      if (e->src()->type_string() != "DynamicPartition") {
-        graph->AddEdge(e->src(), e->src_output(), merge, port++);
-      }
+    for (auto e:stitch_inputs) {
+      graph->AddEdge(e->src(), e->src_output(), merge, port++);
     }
     UpdateAllEdge(graph, merge, info.dynamic_stitch);
     graph->RemoveNode(info.dynamic_partition_b);
@@ -1142,7 +1151,7 @@ Status MultiDNNSwitchOptimizer::Optimize(Cluster* cluster, const GrapplerItem& i
     std::fstream f;
     f.open("before_multi_dnn_switch_" + std::to_string(pass) + ".pb",
            std::fstream::out);
-    f << item.graph.DebugString();
+    f << item.graph.SerializeAsString();
     f.close();
   }
 
