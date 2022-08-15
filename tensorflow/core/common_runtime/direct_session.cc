@@ -33,6 +33,7 @@ limitations under the License.
 #endif  // GOOGLE_CUDA
 #include "tensorflow/core/common_runtime/executor.h"
 #include "tensorflow/core/common_runtime/executor_factory.h"
+#include "tensorflow/core/kernels/data/single_threaded_executor.h"
 #include "tensorflow/core/common_runtime/function.h"
 #include "tensorflow/core/common_runtime/graph_optimizer.h"
 #include "tensorflow/core/common_runtime/memory_types.h"
@@ -2634,17 +2635,21 @@ Status DirectSession::CreateExecutors(
     item->executor = nullptr;
     item->device = device;
     auto executor_type = options_.config.experimental().executor_type();
-    auto status = NewExecutor(executor_type, params, std::move(partition_graph), &item->executor);
-    if (!status.ok()) {
-      // Fallback to create default executor
-      if (executor_type != "DEFAULT") {
-        LOG(WARNING) << "Try to create " << executor_type << " executor failed. Error: " << status.error_message() << "."
-                     << "Fallback to create default executor.";
+    if (executor_type == "SINGLE_THREADED_EXECUTOR") {
+      auto status = CheckSingleThreadExecutorAvailable(partition_graph.get());
+      if (status.ok()) {
+        TF_RETURN_IF_ERROR(NewExecutor(
+             executor_type, params, std::move(partition_graph), &item->executor));
+      } else {
+        LOG(WARNING) << "Try to create " << executor_type << " executor failed: "
+                     << status.error_message()
+                     << ", Fallback to create default executor.";
         TF_RETURN_IF_ERROR(NewExecutor(
             "DEFAULT", params, std::move(partition_graph), &item->executor));
-      } else {
-        return status;
       }
+    } else {
+      TF_RETURN_IF_ERROR(NewExecutor(
+          executor_type, params, std::move(partition_graph), &item->executor));
     }
   }
 
