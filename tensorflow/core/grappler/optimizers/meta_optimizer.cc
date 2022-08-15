@@ -235,9 +235,6 @@ Status MetaOptimizer::InitializeOptimizers(
     optimizers->push_back(
         MakeUnique<DependencyOptimizer>(cfg_.dependency_optimization()));
   }
-  if (cfg_.gemm_optimization() == RewriterConfig::ON) {
-    optimizers->push_back(MakeUnique<GemmOptimizer>());
-  }
   if (cfg_.original_delivery_optimization() == RewriterConfig::ON) {
     if (cfg_.multi_dnn_switch_optimization() != RewriterConfig::OFF) {
       optimizers->push_back(MakeUnique<MultiDNNSwitchOptimizer>());
@@ -251,6 +248,9 @@ Status MetaOptimizer::InitializeOptimizers(
     if (cfg_.memory_access_optimization() != RewriterConfig::OFF) {
       optimizers->push_back(MakeUnique<MemoryAccessOptimizer>());
     }
+  }
+  if (cfg_.gemm_optimization() == RewriterConfig::ON) {
+    optimizers->push_back(MakeUnique<GemmOptimizer>());
   }
   if (cfg_.tile_equal() == RewriterConfig::ON) {
     optimizers->push_back(MakeUnique<TileOptimizer>());
