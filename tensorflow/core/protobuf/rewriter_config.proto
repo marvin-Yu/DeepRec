@@ -203,4 +203,5 @@ message RewriterConfig {
   Toggle batch_gemm_compatible_optimization = 503;
   Toggle memory_access_optimization = 504;
   Toggle gemm_compression_optimization = 505;
+  Toggle partial_mixed_precision = 506;
 }

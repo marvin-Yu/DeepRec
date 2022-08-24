@@ -39,6 +39,7 @@ limitations under the License.
 #include "tensorflow/core/grappler/optimizers/gemm_compression.h"
 #include "tensorflow/core/grappler/optimizers/memory_access_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/fuse_cross_feature_optimizer.h"
+#include "tensorflow/core/grappler/optimizers/partial_mixed_precision.h"
 #include "tensorflow/core/grappler/optimizers/generic_layout_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/implementation_selector.h"
 #include "tensorflow/core/grappler/optimizers/loop_optimizer.h"
@@ -92,7 +93,7 @@ int NumIterations(const RewriterConfig& cfg) {
 // Check if optimizer is allowed to run only once.
 bool IsRunOnceOptimizer(const string& name) {
   return name == "layout" || name == "memory_optimizer" ||
-         name == "multi_dnn_switch" ||
+         name == "multi_dnn_switch" || name == "partial_mixed_precision" ||
          name == "loop_optimizer" || name == "auto_mixed_precision";
 }
 
@@ -154,6 +155,7 @@ std::unique_ptr<GraphOptimizer> MetaOptimizer::MakeNewOptimizer(
   MK_OPT("gemm", new GemmOptimizer());
   MK_OPT("multi_dnn_switch", new MultiDNNSwitchOptimizer());
   MK_OPT("fuse_cross_feature", new FuseCrossFeatureOptimizer());
+  MK_OPT("partial_mixed_precision", new PartialMixedPrecision());
   MK_OPT("auto_mixed_precision",
          new AutoMixedPrecision(cfg_.auto_mixed_precision()));
   MK_OPT("memory", new MemoryOptimizer(RewriterConfig::MANUAL));
@@ -202,6 +204,13 @@ Status MetaOptimizer::InitializeOptimizers(
   }
   if (cfg_.debug_stripper() == RewriterConfig::ON) {
     optimizers->push_back(MakeUnique<DebugStripper>());
+  }
+  // implement optimization before constant_folding
+  // to fold Cast op after const
+  if (cfg_.original_delivery_optimization() == RewriterConfig::ON) {
+    if (cfg_.partial_mixed_precision() != RewriterConfig::OFF) {
+      optimizers->push_back(MakeUnique<PartialMixedPrecision>());
+    }
   }
   if (cfg_.constant_folding() != RewriterConfig::OFF) {
     optimizers->push_back(

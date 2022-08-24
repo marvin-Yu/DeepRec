@@ -674,6 +674,7 @@ cc_library(
         ":memory_access",
         ":batch_mat_mul_compatible",
         ":fuse_cross_feature",
+        ":partial_mixed_precision",
         ":loop_optimizer",
         ":memory_optimizer",
         ":model_pruner",
@@ -1332,5 +1333,17 @@ cc_library(
         "//tensorflow/core/grappler:grappler_item",
         "//tensorflow/tools/graph_transforms:transform_utils",
         "//tensorflow/core/grappler/costs:graph_properties",
+    ],
+)
+cc_library(
+    name = "partial_mixed_precision",
+    srcs = ["partial_mixed_precision.cc"],
+    hdrs = ["partial_mixed_precision.h",],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":graph_optimizer",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:graph",
+        "//tensorflow/core/grappler:grappler_item",
     ],
 )
