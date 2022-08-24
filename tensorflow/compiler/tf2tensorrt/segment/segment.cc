@@ -428,8 +428,14 @@ void SearchNodesWithRanges(const Graph* graph, const std::vector<string> &ranges
     // BFS search target nodes within convert_ranges
     while (!node_deque.empty()) {
       const Node* curr_node = node_deque.front();
-      visited_node.insert(curr_node);
       node_deque.pop_front();
+      if(visited_node.find(curr_node) != visited_node.end()) {
+        //this node already visited
+        continue;
+      } else {
+        visited_node.insert(curr_node);
+      }
+      
       // skip if it's not GPU node
       std::string tmp_device = curr_node->requested_device().length() <= 5 ? "NOT_SUPPORT": (curr_node->requested_device().substr(curr_node->requested_device().length()-5, 3));
       if (tmp_device != DEVICE_GPU) {
