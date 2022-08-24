@@ -317,6 +317,7 @@ bool GetCoActionPattern(Node* co_action, CoActionPattern& pattern) {
 
 Node* ConstuctPackOp(Graph* graph, Node* co_action,
                      std::vector<const Edge*>& input_edges, string sufix) {
+  string device_name = "/device:CPU:0";
   string pack_name =  co_action->name() + sufix;
   NodeDef pack_node;
   int input_size = input_edges.size();
@@ -335,19 +336,35 @@ Node* ConstuctPackOp(Graph* graph, Node* co_action,
     LOG(ERROR) << "Adding pack nodedef build failed " << status;
     return false;
   }
-  pack_node.set_device(co_action->def().device());
+  pack_node.set_device(device_name);
   VLOG(1) << pack_node.DebugString();
   Node* pack = graph->AddNode(pack_node, &status);
   if (!status.ok()) {
     LOG(ERROR) << "Adding pack node failed " << status;
     return false;
   }
-  pack->set_assigned_device_name(co_action->assigned_device_name());
+  pack->set_assigned_device_name(device_name);
   int port = 0;
   for (auto e:input_edges) {
     graph->AddEdge(e->src(), e->src_output(), pack, port);
     port++;
     graph->RemoveEdge(e);
+  }
+  // 减少embedding H2D拷贝次数，将pack之前的输入设备全部设为CPU
+  std::unordered_set<string> visited;
+  std::queue<Node*> unvisited_queue;
+  unvisited_queue.push(pack);
+  while(!unvisited_queue.empty()) {
+    Node* top = unvisited_queue.front();
+    unvisited_queue.pop();
+    if (visited.count(top->name()) != 0) continue;
+    visited.insert(top->name());
+    VLOG(1) << "set device cpu " << top->name();
+    top->set_assigned_device_name(device_name);
+    for (auto e : top->in_edges()) {
+      if (visited.count(e->src()->name()) != 0) continue;
+      unvisited_queue.push(e->src());
+    }
   }
   return pack;
 }
@@ -522,7 +539,7 @@ Status FuseCrossFeatureOptimizer::Optimize(Cluster* cluster, const GrapplerItem&
     std::fstream f;
     f.open("before_fuse_cross_feature_" + std::to_string(pass) + ".pb",
            std::fstream::out);
-    f << item.graph.DebugString();
+    f << item.graph.SerializeAsString();
     f.close();
   }
 
@@ -538,7 +555,7 @@ Status FuseCrossFeatureOptimizer::Optimize(Cluster* cluster, const GrapplerItem&
     std::fstream f;
     f.open("after_fuse_cross_feature_" + std::to_string(pass) + ".pb",
            std::fstream::out);
-    f << optimized_graph->DebugString();
+    f << optimized_graph->SerializeAsString();
     f.close();
   }
   pass++;
