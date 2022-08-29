@@ -463,6 +463,20 @@ REGISTER_OP("BatchTopKOnRT")
       return Status::OK();
     });
 
+REGISTER_OP("GroupedTopkV2")
+    .Input("indicators: int32")
+    .Input("values: T")
+    .Output("indices: int32")
+    .Attr("T: {float16, float32, float64}")
+    .Attr("desc: bool = true")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      ShapeHandle indicators, values;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 2, &indicators));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 2, &values));
+      c->set_output(0, c->input(0));
+      return Status::OK();
+    });
+
 REGISTER_OP("BatchGatherOnRT")
     .Input("params_values: T")
     .Input("params_row_splits: int64")
