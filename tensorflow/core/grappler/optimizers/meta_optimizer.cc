@@ -94,6 +94,7 @@ int NumIterations(const RewriterConfig& cfg) {
 bool IsRunOnceOptimizer(const string& name) {
   return name == "layout" || name == "memory_optimizer" ||
          name == "multi_dnn_switch" || name == "partial_mixed_precision" ||
+         name == "partial_mixed_precision_second_stage" ||
          name == "loop_optimizer" || name == "auto_mixed_precision";
 }
 
@@ -156,6 +157,7 @@ std::unique_ptr<GraphOptimizer> MetaOptimizer::MakeNewOptimizer(
   MK_OPT("multi_dnn_switch", new MultiDNNSwitchOptimizer());
   MK_OPT("fuse_cross_feature", new FuseCrossFeatureOptimizer());
   MK_OPT("partial_mixed_precision", new PartialMixedPrecision());
+  MK_OPT("partial_mixed_precision_second_stage", new PartialMixedPrecisionSecondStage());
   MK_OPT("auto_mixed_precision",
          new AutoMixedPrecision(cfg_.auto_mixed_precision()));
   MK_OPT("memory", new MemoryOptimizer(RewriterConfig::MANUAL));
@@ -257,9 +259,18 @@ Status MetaOptimizer::InitializeOptimizers(
     if (cfg_.memory_access_optimization() != RewriterConfig::OFF) {
       optimizers->push_back(MakeUnique<MemoryAccessOptimizer>());
     }
+    if (cfg_.dependency_optimization() != RewriterConfig::OFF) {
+      optimizers->push_back(
+          MakeUnique<DependencyOptimizer>(cfg_.dependency_optimization()));
+    }
   }
   if (cfg_.gemm_optimization() == RewriterConfig::ON) {
     optimizers->push_back(MakeUnique<GemmOptimizer>());
+  }
+  if (cfg_.original_delivery_optimization() == RewriterConfig::ON) {
+    if (cfg_.partial_mixed_precision() != RewriterConfig::OFF) {
+      optimizers->push_back(MakeUnique<PartialMixedPrecisionSecondStage>());
+    }
   }
   if (cfg_.tile_equal() == RewriterConfig::ON) {
     optimizers->push_back(MakeUnique<TileOptimizer>());

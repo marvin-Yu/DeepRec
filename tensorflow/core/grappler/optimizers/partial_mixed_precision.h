@@ -37,6 +37,22 @@ class PartialMixedPrecision : public GraphOptimizer {
                 const GraphDef& optimized_graph, double result) override;
 };
 
+class PartialMixedPrecisionSecondStage : public GraphOptimizer {
+ public:
+  PartialMixedPrecisionSecondStage() {}
+  ~PartialMixedPrecisionSecondStage() override {}
+
+  string name() const override { return "partial_mixed_precision_second_stage"; };
+
+  bool UsesFunctionLibrary() const override { return false; }
+
+  Status Optimize(Cluster* cluster, const GrapplerItem& item,
+                  GraphDef* optimized_graph) override;
+
+  void Feedback(Cluster* cluster, const GrapplerItem& item,
+                const GraphDef& optimized_graph, double result) override;
+};
+
 }  // end namespace grappler
 }  // end namespace tensorflow
 
