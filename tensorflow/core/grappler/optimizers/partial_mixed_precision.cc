@@ -352,8 +352,8 @@ Status Collapse(GraphDef* graph) {
           break;
         }
       }
-      VLOG(0) << "remove " << cast_first;
-      VLOG(0) << "remove " << cast_second;
+      VLOG(1) << "remove " << cast_first;
+      VLOG(1) << "remove " << cast_second;
       nodes_removable.insert(cast_first);
       nodes_removable.insert(cast_second);
     }
