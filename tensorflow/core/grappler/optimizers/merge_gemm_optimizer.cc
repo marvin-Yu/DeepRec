@@ -333,7 +333,7 @@ Status MergeGemm(Graph* graph) {
 Status MergeGemmOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
                                GraphDef* optimized_graph) {
   bool opt = true;
-  ReadBoolFromEnvVar("TF_ENABLE_ORIGINAL_DELIVERY_OPTIMIZE_MERGE", true, &opt);
+  ReadBoolFromEnvVar("TF_ENABLE_ORIGINAL_DELIVERY_OPTIMIZE", true, &opt);
   if (!opt) {
     *optimized_graph = item.graph;
     return Status::OK();

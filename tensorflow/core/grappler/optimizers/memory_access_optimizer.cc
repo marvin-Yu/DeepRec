@@ -55,7 +55,7 @@ Status OptimizePatternFunction(const NodeDef& compute_node,
                                int& counter) {
   bool invalid = false;
   if (gather_ind_node.name().find("user_creative_indicator") == string::npos) {
-    LOG(WARNING) << "gather input indicator placeholder not match:" << gather_ind_node.name();
+    VLOG(1) << "gather input indicator placeholder not match:" << gather_ind_node.name();
     invalid = true;
   }
   if (compute_node.op() == "MatMul") {
