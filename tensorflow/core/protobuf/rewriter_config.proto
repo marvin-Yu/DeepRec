@@ -204,4 +204,5 @@ message RewriterConfig {
   Toggle memory_access_optimization = 504;
   Toggle gemm_compression_optimization = 505;
   Toggle partial_mixed_precision = 506;
+  Toggle merge_gemm_optimization = 507;
 }

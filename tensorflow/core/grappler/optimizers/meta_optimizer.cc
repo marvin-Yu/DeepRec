@@ -40,6 +40,7 @@ limitations under the License.
 #include "tensorflow/core/grappler/optimizers/memory_access_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/fuse_cross_feature_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/partial_mixed_precision.h"
+#include "tensorflow/core/grappler/optimizers/merge_gemm_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/generic_layout_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/implementation_selector.h"
 #include "tensorflow/core/grappler/optimizers/loop_optimizer.h"
@@ -212,6 +213,10 @@ Status MetaOptimizer::InitializeOptimizers(
   if (cfg_.original_delivery_optimization() == RewriterConfig::ON) {
     if (cfg_.partial_mixed_precision() != RewriterConfig::OFF) {
       optimizers->push_back(MakeUnique<PartialMixedPrecision>());
+    }
+    if (cfg_.merge_gemm_optimization() != RewriterConfig::OFF)
+    {
+      optimizers->push_back(MakeUnique<MergeGemmOptimizer>());
     }
   }
   if (cfg_.constant_folding() != RewriterConfig::OFF) {
