@@ -210,10 +210,10 @@ Status MetaOptimizer::InitializeOptimizers(
   }
   // implement optimization before constant_folding
   // to fold Cast op after const
+  if (cfg_.partial_mixed_precision() == RewriterConfig::ON) {
+    optimizers->push_back(MakeUnique<PartialMixedPrecision>());
+  }
   if (cfg_.original_delivery_optimization() == RewriterConfig::ON) {
-    if (cfg_.partial_mixed_precision() != RewriterConfig::OFF) {
-      optimizers->push_back(MakeUnique<PartialMixedPrecision>());
-    }
     if (cfg_.merge_gemm_optimization() != RewriterConfig::OFF)
     {
       optimizers->push_back(MakeUnique<MergeGemmOptimizer>());
@@ -272,10 +272,8 @@ Status MetaOptimizer::InitializeOptimizers(
   if (cfg_.gemm_optimization() == RewriterConfig::ON) {
     optimizers->push_back(MakeUnique<GemmOptimizer>());
   }
-  if (cfg_.original_delivery_optimization() == RewriterConfig::ON) {
-    if (cfg_.partial_mixed_precision() != RewriterConfig::OFF) {
-      optimizers->push_back(MakeUnique<PartialMixedPrecisionSecondStage>());
-    }
+  if (cfg_.partial_mixed_precision() == RewriterConfig::ON) {
+    optimizers->push_back(MakeUnique<PartialMixedPrecisionSecondStage>());
   }
   if (cfg_.tile_equal() == RewriterConfig::ON) {
     optimizers->push_back(MakeUnique<TileOptimizer>());

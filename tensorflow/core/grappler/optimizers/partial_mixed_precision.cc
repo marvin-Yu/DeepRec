@@ -191,6 +191,8 @@ TensorShape GetGemmInputConstNumElements(const Node* matmul) {
 
 bool CastGemmFloatToHalf(Graph* graph, std::set<Node*>& candidate) {
   for (auto n:candidate) VLOG(1) << n->type_string() << ", " << n->name();
+
+  std::map<string, Node*> node_cache;
   for (auto n:candidate) {
     const Edge* input;
     n->input_edge(0, &input);
@@ -373,7 +375,8 @@ Status Collapse(GraphDef* graph) {
 Status PartialMixedPrecision::Optimize(Cluster* cluster, const GrapplerItem& item,
                                GraphDef* optimized_graph) {
   bool opt = true;
-  ReadBoolFromEnvVar("TF_ENABLE_ORIGINAL_DELIVERY_OPTIMIZE", true, &opt);
+  ReadBoolFromEnvVar("TF_ENABLE_PARTIAL_MIXED_PRECISION", true, &opt);
+  VLOG(0) << "PartialMixedPrecision is on. :" << opt;
   if (!opt) {
     *optimized_graph = item.graph;
     return Status::OK();
@@ -406,7 +409,7 @@ Status PartialMixedPrecision::Optimize(Cluster* cluster, const GrapplerItem& ite
   }
   graph.ToGraphDef(optimized_graph);
   *optimized_graph->mutable_versions() = item.graph.versions();
-  ReadBoolFromEnvVar("TF_ENABLE_ORIGINAL_DELIVERY_OPTIMIZE_PARTIAL_MIXED_REDICAL", true, &opt);
+  ReadBoolFromEnvVar("TF_ENABLE_PARTIAL_MIXED_PRECISION_REDICAL", true, &opt);
   if (opt) {
     VLOG(0) << "PartialMixedPrecision round 2";
     status = ConvertGemm(&graph);
@@ -438,7 +441,7 @@ void PartialMixedPrecision::Feedback(tensorflow::grappler::Cluster *cluster,
 Status PartialMixedPrecisionSecondStage::Optimize(Cluster* cluster, const GrapplerItem& item,
                                GraphDef* optimized_graph) {
   bool opt = true;
-  ReadBoolFromEnvVar("TF_ENABLE_ORIGINAL_DELIVERY_OPTIMIZE", true, &opt);
+  ReadBoolFromEnvVar("TF_ENABLE_PARTIAL_MIXED_PRECISION", true, &opt);
   if (!opt) {
     *optimized_graph = item.graph;
     return Status::OK();
