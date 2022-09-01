@@ -9,6 +9,7 @@ tf_kernel_library(
     srcs = [
       "BatchTopKOnRT_kernel.cc",
       "BlazeTopK_kernel.cc",
+      "GTopKV2_kernel.cc",
     ],
     visibility = ["//visibility:public"],
     deps = [
