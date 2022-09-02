@@ -67,8 +67,7 @@ Node* NodeConstructor(Graph* graph, string name, const Node* base,
 }
 
 Node* ConstuctCastOp(Graph* graph, const Node* base, int port,
-                     DataType src, DataType dst, string sufix) {
-  string cast_name =  base->name() + sufix;
+                     DataType src, DataType dst, string cast_name) {
   std::function<Status(NodeDef&)> cast_builder = [&](NodeDef& def) {
     return NodeDefBuilder(cast_name, "Cast")
                           .Input({base->name(), port, src})
@@ -196,17 +195,36 @@ bool CastGemmFloatToHalf(Graph* graph, std::set<Node*>& candidate) {
   for (auto n:candidate) {
     const Edge* input;
     n->input_edge(0, &input);
-    Node* input_cast = ConstuctCastOp(graph, input->src(), input->src_output(),
-                                      DT_FLOAT, DT_HALF,
-                                      "/PartialMixedPrecision_cast_float2half");
+    Node* input_cast;
+    string input_cast_name = input->src()->name() + "_" +
+                             std::to_string(input->src_output()) +
+                             "/PartialMixedPrecision_cast_float2half";
+    if (node_cache.find(input_cast_name) == node_cache.end()) {
+      input_cast = ConstuctCastOp(graph, input->src(), input->src_output(),
+                                      DT_FLOAT, DT_HALF, input_cast_name);
+      graph->AddEdge(input->src(), input->src_output(), input_cast, 0);
+      node_cache.insert(std::pair<string, Node*>(input_cast_name, input_cast));
+    } else {
+      VLOG(1) << "find input cast in cache " << input_cast_name;
+      input_cast = node_cache.find(input_cast_name)->second;
+    }
     const Edge* weight;
     n->input_edge(1, &weight);
-    Node* weight_cast = ConstuctCastOp(graph, weight->src(), weight->src_output(),
-                                       DT_FLOAT, DT_HALF,
-                                       "/PartialMixedPrecision_cast_float2half");
-    Node* compute_cast = ConstuctCastOp(graph, n, 0,
-                                       DT_HALF, DT_FLOAT,
-                                       "/PartialMixedPrecision_cast_half2float");
+    Node* weight_cast;
+    string weight_cast_name = weight->src()->name() + "_" +
+                             std::to_string(input->src_output()) +
+                             "/PartialMixedPrecision_cast_float2half";
+    if (node_cache.find(weight_cast_name) == node_cache.end()) {
+      weight_cast = ConstuctCastOp(graph, weight->src(), weight->src_output(),
+                                       DT_FLOAT, DT_HALF, weight_cast_name);
+      graph->AddEdge(weight->src(), weight->src_output(), weight_cast, 0);
+      node_cache.insert(std::pair<string, Node*>(weight_cast_name, weight_cast));
+    } else {
+      VLOG(1) << "find weight cast in cache " << weight_cast_name;
+      weight_cast = node_cache.find(weight_cast_name)->second;
+    }
+    string compute_cast_name = n->name() + "/PartialMixedPrecision_cast_half2float";
+    Node* compute_cast = ConstuctCastOp(graph, n, 0, DT_HALF, DT_FLOAT, compute_cast_name);
     string op_str = n->type_string();
     Node* new_compute;
     if (op_str == "CoAction" || op_str == "CoActionIndicator") {
@@ -217,9 +235,7 @@ bool CastGemmFloatToHalf(Graph* graph, std::set<Node*>& candidate) {
                                      "/PartialMixedPrecision_half_compute");
     }
 
-    graph->AddEdge(input->src(), input->src_output(), input_cast, 0);
     graph->AddEdge(input_cast, 0, new_compute, 0);
-    graph->AddEdge(weight->src(), weight->src_output(), weight_cast, 0);
     graph->AddEdge(weight_cast, 0, new_compute, 1);
     if (op_str == "IndicatorMatMul" || op_str == "CoActionIndicator") {
       const Edge* indice;
@@ -244,7 +260,8 @@ Status ConvertGemm(Graph* graph) {
   for (Node* node : graph->nodes()) {
     nodes[i++] = node;
   }
-  TensorShape max_shape;
+  // skip conversion if num_elements less than 128*128
+  TensorShape max_shape({128, 128});
   std::set<Node*> candidate;
   for (Node* node : nodes) {
     if (node->type_string() != "MatMul") continue;
@@ -257,6 +274,10 @@ Status ConvertGemm(Graph* graph) {
     } else if (shape.num_elements() == max_shape.num_elements()) {
       candidate.insert(node);
     }
+  }
+  if (candidate.empty()) {
+    VLOG(0) << "no candidate gemm, skip conversion";
+    return Status::OK();
   }
   VLOG(0) << "largest weight: " << max_shape.DebugString();
   CastGemmFloatToHalf(graph, candidate);
@@ -341,11 +362,16 @@ Status Collapse(GraphDef* graph) {
     if ((IsCastFloatToHalf(node) && IsCastHalfToFloat(cast_input)) ||
        (IsCastHalfToFloat(node) && IsCastFloatToHalf(cast_input))) {
       const string& cast_first = node->input(0);
+      auto first_outputs = node_map.GetOutputs(cast_first);
+      if (first_outputs.size() != 1) {
+        continue;
+      }
+
       const string& cast_second = node->name();
       auto outputs = node_map.GetOutputs(cast_second);
-      CHECK(outputs.size() == 1)
-          << "There is always only a single output for a Transpose node, "
-          << "due to the way it is added by NodeProcessor.";
+      if (outputs.size() != 1) {
+        continue;
+      }
       NodeDef* output = *outputs.begin();
       string input = node_map.GetNode(cast_first)->input(0);
       for (int i = 0; i < output->input_size(); i++) {
@@ -376,7 +402,6 @@ Status PartialMixedPrecision::Optimize(Cluster* cluster, const GrapplerItem& ite
                                GraphDef* optimized_graph) {
   bool opt = true;
   ReadBoolFromEnvVar("TF_ENABLE_PARTIAL_MIXED_PRECISION", true, &opt);
-  VLOG(0) << "PartialMixedPrecision is on. :" << opt;
   if (!opt) {
     *optimized_graph = item.graph;
     return Status::OK();
@@ -468,10 +493,10 @@ Status PartialMixedPrecisionSecondStage::Optimize(Cluster* cluster, const Grappl
   graph.ToGraphDef(optimized_graph);
   *optimized_graph->mutable_versions() = item.graph.versions();
 
-  VLOG(0) << "Number of nodes before Collapse: " << optimized_graph->node_size();
+  int node_before = optimized_graph->node_size();
   status = Collapse(optimized_graph);
-  VLOG(0) << "Number of nodes after Collapse: " << optimized_graph->node_size();
-  if (VLOG_IS_ON(1)) {
+  VLOG(0) << "Collapse Cast pairs " << node_before << "/" << optimized_graph->node_size();
+  if (VLOG_IS_ON(0)) {
     std::fstream f;
     f.open("after_partial_mixed_precision_" + std::to_string(pass) + ".pb",
            std::fstream::out);
