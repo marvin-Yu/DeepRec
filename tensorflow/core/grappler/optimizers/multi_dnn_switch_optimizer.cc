@@ -819,7 +819,7 @@ bool DynamicPartitionToSwitch(Graph* graph, std::vector<std::shared_ptr<
   }
   if (multi_dnn_info.empty()) {
     VLOG(0) << "not found multi dnn structure";
-    return false;
+    return true;
   } else {
     VLOG(0) << "found " << multi_dnn_info.size() << " multi dnn structure";
   }
@@ -1167,8 +1167,11 @@ Status MultiDNNSwitchOptimizer::Optimize(Cluster* cluster, const GrapplerItem& i
   }
 
   std::vector<std::shared_ptr<SubGraphCollection>> sub_graph_group;
-  if (!DynamicPartitionToSwitch(&graph, sub_graph_group)) {
-    LOG(WARNING) << "optimized multi dnn DynamicPartition to Switch failed";
+  bool result = DynamicPartitionToSwitch(&graph, sub_graph_group);
+  if (!result || sub_graph_group.empty()) {
+    if (!result) {
+      LOG(WARNING) << "optimized multi dnn DynamicPartition to Switch failed";
+    }
     *optimized_graph = item.graph;
     return Status::OK();
   }
