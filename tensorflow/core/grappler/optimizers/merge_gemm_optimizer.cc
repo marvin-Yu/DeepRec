@@ -321,7 +321,15 @@ bool GetSharedInputGemmPattern(const Node* input, SharedInputGemmPattern& patter
 }
 
 bool GetMergeBiasAddPattern(Node* split, MergeBiasAddPattern& pattern) {
+  std::vector<const Edge*> split_out;
   for (auto e:split->out_edges()) {
+    split_out.push_back(e);
+  }
+  std::sort(split_out.begin(), split_out.end(),
+      [](const Edge* a, const Edge* b) {
+        return a->src_output() < b->src_output();
+      });
+  for (auto e:split_out) {
     Node* reshape = e->dst();
     if (reshape->type_string() == "Reshape") {
       Node* shape;
