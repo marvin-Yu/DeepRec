@@ -51,10 +51,14 @@ bool ConstuctSliceOp(const NodeDef& input, Tensor& t_begin, Tensor& t_size,
                      NodeDef& begin_const, NodeDef& size_const, NodeDef& slice) {
   // 构建begin const
   string begin_name = prefix + "/slice_begin";
-  CreateConstNode(begin_const, begin_name, t_begin, input);
+  if (CreateConstNode(begin_const, begin_name, t_begin, input)) {
+    return false;
+  }
   // 构建size const
   string size_name = prefix + "/slice_size";
-  CreateConstNode(size_const, size_name, t_size, input);
+  if (CreateConstNode(size_const, size_name, t_size, input)) {
+    return false;
+  }
   // 构建Slice
   string slice_name = prefix + "/slice";
   std::vector<NodeDefBuilder::NodeOut> slice_inputs;
@@ -199,16 +203,20 @@ bool OptimizeGatherConcatPattern(GraphDef &input_graph_def, GraphDef* output_gra
         NodeDef size_const_part1;
         NodeDef slice_part1;
         // 构建Slice
-        ConstuctSliceOp(weight_node, t_begin, t_size, weight_node.name() + "_part1",
-                        output_type, begin_const_part1, size_const_part1, slice_part1);
+        if (ConstuctSliceOp(weight_node, t_begin, t_size, weight_node.name() + "_part1",
+              output_type, begin_const_part1, size_const_part1, slice_part1)) {
+          return false;
+        }
         begin_data(0) = size;
         size_data(0) = -1;
         NodeDef begin_const_part2;
         NodeDef size_const_part2;
         NodeDef slice_part2;
         // 构建Slice
-        ConstuctSliceOp(weight_node, t_begin, t_size, weight_node.name() + "_part2",
-                        output_type, begin_const_part2, size_const_part2, slice_part2);
+        if (ConstuctSliceOp(weight_node, t_begin, t_size, weight_node.name() + "_part2",
+                        output_type, begin_const_part2, size_const_part2, slice_part2)) {
+          return false;
+        }
 
         // 构建新的ConcatV2
         NodeDef new_concat;

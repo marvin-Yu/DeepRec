@@ -742,7 +742,7 @@ Status UpdateAllEdge(Graph* graph, Node* new_src_node, Node* old_dst_node) {
 }
 
 
-Node* SearchTargetDynamicPartition(Graph *graph, MultiDNNInfo& info,
+void SearchTargetDynamicPartition(Graph *graph, MultiDNNInfo& info,
                                    std::set<Node*> &candidate_node) {
   std::queue<Node*> unvisited_queue;
   std::unordered_set<string> visited;
@@ -773,7 +773,6 @@ Node* SearchTargetDynamicPartition(Graph *graph, MultiDNNInfo& info,
       }
     }
   }
-  return nullptr;
 }
 
 // 两个DynamicPartition，一个可以替换为_SwitchN，另一个与DynamicStitch一起替换为Merge
@@ -939,7 +938,11 @@ bool DynamicPartitionToSwitch(Graph* graph, std::vector<std::shared_ptr<
       switch_n->set_assigned_device_name(dynamic_partition_a->assigned_device_name());
       graph->AddEdge(input_edge->src(), input_edge->src_output(), switch_n, 0);
       graph->AddEdge(squeeze, 0, switch_n, 1);
-      UpdateAllEdge(graph, switch_n, dynamic_partition_a);
+      status = UpdateAllEdge(graph, switch_n, dynamic_partition_a);
+      if (!status.ok()) {
+        LOG(ERROR) << "update DynamicPartition output edge failed " << status;
+        return false;
+      }
       graph->RemoveNode(dynamic_partition_a);
       switch_vector.push_back(switch_n);
     }
@@ -987,7 +990,11 @@ bool DynamicPartitionToSwitch(Graph* graph, std::vector<std::shared_ptr<
     for (auto e:stitch_inputs) {
       graph->AddEdge(e->src(), e->src_output(), merge, port++);
     }
-    UpdateAllEdge(graph, merge, info.dynamic_stitch);
+    status = UpdateAllEdge(graph, merge, info.dynamic_stitch);
+    if (!status.ok()) {
+      LOG(ERROR) << "update DynamicStitch output edge failed " << status;
+      return false;
+    }
     graph->RemoveNode(info.dynamic_partition_b);
     graph->RemoveNode(info.dynamic_stitch);
     sub_graph_group.push_back(std::make_shared<SubGraphCollection>(

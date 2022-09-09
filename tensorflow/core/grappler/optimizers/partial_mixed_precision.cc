@@ -280,7 +280,9 @@ Status ConvertGemm(Graph* graph) {
     return Status::OK();
   }
   VLOG(0) << "largest weight: " << max_shape.DebugString();
-  CastGemmFloatToHalf(graph, candidate);
+  if (CastGemmFloatToHalf(graph, candidate)) {
+    return errors::Internal("cast gemm float to half failed");
+  }
   return Status::OK();
 }
 
@@ -322,7 +324,9 @@ Status ConvertFirstLayerGemm(Graph* graph) {
       candidate.insert(node);
     }
   }
-  CastGemmFloatToHalf(graph, candidate);
+  if (!CastGemmFloatToHalf(graph, candidate)) {
+    return errors::Internal("cast gemm float to half failed");
+  }
   return Status::OK();
 }
 

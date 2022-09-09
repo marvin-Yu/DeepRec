@@ -310,6 +310,7 @@ bool GetCoActionPattern(Node* co_action, CoActionPattern& pattern) {
       pattern.output.push_back(e);
     } else {
       VLOG(0) << "find invalid node:" << e->dst()->DebugString();
+      return false;
     }
   }
   return true;
@@ -432,7 +433,9 @@ Status MergeCoAction(Graph* graph) {
     } else {
       return errors::Internal("CoAction op support 150 and 50 only, but get ", dim_size);
     }
-    GetCoActionPattern(co_action, collection[key]);
+    if (!GetCoActionPattern(co_action, collection[key]) {
+      continue;
+    }
   }
   if (VLOG_IS_ON(1)) DebugCoActionPattern(collection);
   VLOG(0) << "merge CoAction, reserve " << collection.size() << " CoAction/CoActionIndicator";
