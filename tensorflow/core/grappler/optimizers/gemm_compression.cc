@@ -32,7 +32,7 @@ namespace grappler {
 
 namespace {
 
-bool CreateConstNode(NodeDef& def, string const_name, Tensor &t_const, const NodeDef& base) {
+Status CreateConstNode(NodeDef& def, string const_name, Tensor &t_const, const NodeDef& base) {
   NodeDefBuilder const_builder(const_name, "Const");
   Status status = const_builder
                   .Attr("dtype", t_const.dtype())
@@ -40,25 +40,21 @@ bool CreateConstNode(NodeDef& def, string const_name, Tensor &t_const, const Nod
                   .Finalize(&def);
   if (!status.ok()) {
     LOG(ERROR) << "Const node construction failed with" << status;
-    return false;
+    return status;
   }
   def.set_device(base.device());
-  return true;
+  return Status::OK();
 }
 
-bool ConstuctSliceOp(const NodeDef& input, Tensor& t_begin, Tensor& t_size,
+Status ConstuctSliceOp(const NodeDef& input, Tensor& t_begin, Tensor& t_size,
                      string prefix, DataType output_type,
                      NodeDef& begin_const, NodeDef& size_const, NodeDef& slice) {
   // 构建begin const
   string begin_name = prefix + "/slice_begin";
-  if (CreateConstNode(begin_const, begin_name, t_begin, input)) {
-    return false;
-  }
+  TF_RETURN_IF_ERROR(CreateConstNode(begin_const, begin_name, t_begin, input));
   // 构建size const
   string size_name = prefix + "/slice_size";
-  if (CreateConstNode(size_const, size_name, t_size, input)) {
-    return false;
-  }
+  TF_RETURN_IF_ERROR(CreateConstNode(size_const, size_name, t_size, input));
   // 构建Slice
   string slice_name = prefix + "/slice";
   std::vector<NodeDefBuilder::NodeOut> slice_inputs;
@@ -74,11 +70,11 @@ bool ConstuctSliceOp(const NodeDef& input, Tensor& t_begin, Tensor& t_size,
                                 .Finalize(&slice);
   if (!status.ok()) {
     LOG(ERROR) << "Adding slice nodedef build failed " << status;
-    return false;
+    return status;
   }
   slice.set_device(input.device());
   VLOG(1) << slice.DebugString();
-  return true;
+  return Status::OK();
 }
 
 void GetAllMatchNodes(std::vector<NodeDef>& nodes, std::set<string>& node_set, const NodeMatch& match) {
@@ -203,20 +199,18 @@ bool OptimizeGatherConcatPattern(GraphDef &input_graph_def, GraphDef* output_gra
         NodeDef size_const_part1;
         NodeDef slice_part1;
         // 构建Slice
-        if (ConstuctSliceOp(weight_node, t_begin, t_size, weight_node.name() + "_part1",
-              output_type, begin_const_part1, size_const_part1, slice_part1)) {
-          return false;
-        }
+        TF_RETURN_IF_ERROR(ConstuctSliceOp(weight_node, t_begin, t_size,
+                             weight_node.name() + "_part1", output_type,
+                             begin_const_part1, size_const_part1, slice_part1));
         begin_data(0) = size;
         size_data(0) = -1;
         NodeDef begin_const_part2;
         NodeDef size_const_part2;
         NodeDef slice_part2;
         // 构建Slice
-        if (ConstuctSliceOp(weight_node, t_begin, t_size, weight_node.name() + "_part2",
-                        output_type, begin_const_part2, size_const_part2, slice_part2)) {
-          return false;
-        }
+        TF_RETURN_IF_ERROR(ConstuctSliceOp(weight_node, t_begin, t_size,
+                             weight_node.name() + "_part2", output_type,
+                             begin_const_part2, size_const_part2, slice_part2));
 
         // 构建新的ConcatV2
         NodeDef new_concat;

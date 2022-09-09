@@ -433,7 +433,7 @@ Status MergeCoAction(Graph* graph) {
     } else {
       return errors::Internal("CoAction op support 150 and 50 only, but get ", dim_size);
     }
-    if (!GetCoActionPattern(co_action, collection[key]) {
+    if (!GetCoActionPattern(co_action, collection[key])) {
       continue;
     }
   }
