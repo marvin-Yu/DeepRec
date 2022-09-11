@@ -34,6 +34,11 @@ namespace grappler {
 
 namespace {
 
+#define CHECK_NULL(target)   \
+  if (target == nullptr) {   \
+    return errors::Internal("got nullptr!"); \
+  }                          \
+
 struct CoActionPattern {
   std::vector<const Edge*> input_a;
   std::vector<const Edge*> input_b;
@@ -316,7 +321,7 @@ bool GetCoActionPattern(Node* co_action, CoActionPattern& pattern) {
   return true;
 }
 
-Node* ConstuctPackOp(Graph* graph, Node* co_action,
+Node* ConstructPackOp(Graph* graph, Node* co_action,
                      std::vector<const Edge*>& input_edges, string sufix) {
   string device_name = "/device:CPU:0";
   string pack_name =  co_action->name() + sufix;
@@ -335,14 +340,14 @@ Node* ConstuctPackOp(Graph* graph, Node* co_action,
                                 .Finalize(&pack_node);
   if (!status.ok()) {
     LOG(ERROR) << "Adding pack nodedef build failed " << status;
-    return false;
+    return nullptr;
   }
   pack_node.set_device(device_name);
   VLOG(1) << pack_node.DebugString();
   Node* pack = graph->AddNode(pack_node, &status);
   if (!status.ok()) {
     LOG(ERROR) << "Adding pack node failed " << status;
-    return false;
+    return nullptr;
   }
   pack->set_assigned_device_name(device_name);
   int port = 0;
@@ -370,7 +375,7 @@ Node* ConstuctPackOp(Graph* graph, Node* co_action,
   return pack;
 }
 
-Node* ConstuctUnpackOp(Graph* graph, Node* co_action,
+Node* ConstructUnpackOp(Graph* graph, Node* co_action,
                        std::vector<const Edge*>& out_edges, string sufix) {
   string unpack_name =  co_action->name() + sufix;
   NodeDef unpack_node;
@@ -384,14 +389,14 @@ Node* ConstuctUnpackOp(Graph* graph, Node* co_action,
                                 .Finalize(&unpack_node);
   if (!status.ok()) {
     LOG(ERROR) << "Adding unpack nodedef build failed " << status;
-    return false;
+    return nullptr;
   }
   unpack_node.set_device(co_action->def().device());
   VLOG(1) << unpack_node.DebugString();
   Node* unpack = graph->AddNode(unpack_node, &status);
   if (!status.ok()) {
     LOG(ERROR) << "Adding unpack node failed " << status;
-    return false;
+    return nullptr;
   }
   unpack->set_assigned_device_name(co_action->assigned_device_name());
   int port = 0;
@@ -442,13 +447,16 @@ Status MergeCoAction(Graph* graph) {
   for (auto iter:collection) {
     // 1.pack CoAction input
     Node* co_action = (iter.second.co_action)[0];
-    Node* pack_a = ConstuctPackOp(graph, co_action, iter.second.input_a, "/pack_input_a");
-    Node* pack_b = ConstuctPackOp(graph, co_action, iter.second.input_b, "/pack_input_b");
+    Node* pack_a = ConstructPackOp(graph, co_action, iter.second.input_a, "/pack_input_a");
+    CHECK_NULL(pack_a)
+    Node* pack_b = ConstructPackOp(graph, co_action, iter.second.input_b, "/pack_input_b");
+    CHECK_NULL(pack_b)
     // 2.连接Pack到其中一个CoAction op，其他的可以不用了
     graph->AddEdge(pack_a, 0, co_action, 0);
     graph->AddEdge(pack_b, 0, co_action, 1);
     // 3.Unpack为多个输出
-    Node* unpack = ConstuctUnpackOp(graph, co_action, iter.second.output, "/unpack_output");
+    Node* unpack = ConstructUnpackOp(graph, co_action, iter.second.output, "/unpack_output");
+    CHECK_NULL(unpack)
     // 4.删除多余的CoAction
     for (auto n:iter.second.co_action) {
       if (n != co_action) {
