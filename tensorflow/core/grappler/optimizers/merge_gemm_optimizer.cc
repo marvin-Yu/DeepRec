@@ -126,7 +126,7 @@ Node* CreateConstNode(Graph* graph, string const_name, Tensor &t_const, Node* ba
   return NodeConstructor(graph, const_name, base, const_builder);
 }
 
-Node* ConstuctConcatOp(Graph* graph, Node* compute, int64 axis,
+Node* ConstructConcatOp(Graph* graph, Node* compute, int64 axis,
                      std::vector<Node*>& input_nodes, string sufix) {
   // indice const，将二维权重按列concat起来
   string idx_name = compute->name() + sufix + "_indice";
@@ -135,7 +135,7 @@ Node* ConstuctConcatOp(Graph* graph, Node* compute, int64 axis,
   Node* idx_const = CreateConstNode(graph, idx_name, t, compute);
   if (idx_const == nullptr) {
     LOG(ERROR) << "construct indice const failed";
-    return false;
+    return nullptr;
   }
   string concat_name =  compute->name() + sufix;
   int input_size = input_nodes.size();
@@ -164,7 +164,7 @@ Node* ConstuctConcatOp(Graph* graph, Node* compute, int64 axis,
   return concat;
 }
 
-Node* ConstuctSplitOp(Graph* graph, Node* compute, int split_num, int axis,
+Node* ConstructSplitOp(Graph* graph, Node* compute, int split_num, int axis,
                        std::vector<std::vector<const Edge*>>& out_edges, string sufix) {
   // dim const
   string dim_name = compute->name() + sufix + "_split_dim";
@@ -173,7 +173,7 @@ Node* ConstuctSplitOp(Graph* graph, Node* compute, int split_num, int axis,
   Node* dim_const = CreateConstNode(graph, dim_name, t, compute);
   if (dim_const == nullptr) {
     LOG(ERROR) << "construct split dim const failed";
-    return false;
+    return nullptr;
   }
   string split_name =  compute->name() + sufix;
   int out_size = out_edges.size();
@@ -446,10 +446,10 @@ bool MergeGemm(Graph* graph, std::vector<Node*>& new_splits) {
     if (!GetConstTensor(iter.second.weight[0], weight)) {
       return false;
     }
-    Node* merged_weight = ConstuctConcatOp(graph, matmul, weight.dims() - 1,
+    Node* merged_weight = ConstructConcatOp(graph, matmul, weight.dims() - 1,
                                            iter.second.weight, "/merge_weight");
     // 3.split为多个输出
-    Node* split = ConstuctSplitOp(graph, matmul, iter.second.weight.size(),
+    Node* split = ConstructSplitOp(graph, matmul, iter.second.weight.size(),
                                   weight.dims() - 1, iter.second.output,
                                   "/split_output");
     // 4.删除多余节点
@@ -508,7 +508,7 @@ bool MergeBiasAdd(Graph* graph, std::vector<Node*>& new_splits) {
     if (!GetConstTensor(iter.second.bias[0], bias)) {
       return false;
     }
-    Node* merged_bias = ConstuctConcatOp(graph, add, bias.dims() - 1,
+    Node* merged_bias = ConstructConcatOp(graph, add, bias.dims() - 1,
                                            iter.second.bias, "/merge_bias");
     const Edge* input;
     iter.second.split->input_edge(1, &input);
@@ -534,7 +534,7 @@ bool MergeBiasAdd(Graph* graph, std::vector<Node*>& new_splits) {
     graph->UpdateEdge(add, 0, reshape, 0);
     graph->UpdateEdge(new_shape, 0, reshape, 1);
     // 3.split为多个输出
-    Node* split = ConstuctSplitOp(graph, reshape, iter.second.bias.size(),
+    Node* split = ConstructSplitOp(graph, reshape, iter.second.bias.size(),
                                   new_shape_t.NumElements() - 1,
                                   iter.second.output, "/split_output");
     // 4.删除多余节点
