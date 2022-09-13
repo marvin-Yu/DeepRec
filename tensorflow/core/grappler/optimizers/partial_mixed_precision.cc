@@ -500,7 +500,7 @@ Status PartialMixedPrecisionSecondStage::Optimize(Cluster* cluster, const Grappl
   int node_before = optimized_graph->node_size();
   status = Collapse(optimized_graph);
   VLOG(0) << "Collapse Cast pairs " << node_before << "/" << optimized_graph->node_size();
-  if (VLOG_IS_ON(0)) {
+  if (VLOG_IS_ON(1)) {
     std::fstream f;
     f.open("after_partial_mixed_precision_" + std::to_string(pass) + ".pb",
            std::fstream::out);
