@@ -16,10 +16,60 @@ limitations under the License.
 #ifndef TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_MERGE_GEMM_OPTIMIZER_H_
 #define TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_MERGE_GEMM_OPTIMIZER_H_
 
+#include "tensorflow/core/graph/graph.h"
 #include "tensorflow/core/grappler/optimizers/graph_optimizer.h"
 
 namespace tensorflow {
 namespace grappler {
+
+namespace {
+
+struct OpTypePattern {
+  string op;
+  std::vector<OpTypePattern> inputs;
+  string DebugString() const;
+};
+
+// Returns a sub-graph of edges that match a pattern.
+// target node is the src of edge
+struct NodeMatch {
+  const Edge* edge;
+  std::vector<NodeMatch> inputs;
+  string DebugString() const;
+};
+
+static const OpTypePattern attention_path_pattern =
+       {"BatchMatMulV2",
+         {
+           {"Add|AddV2",
+             {
+               {"Softmax",
+                 {
+                   {"BatchMatMulV2",
+                     {
+                       {"BiasAdd"},
+                       {"Split"},
+                     }
+                   },
+                 }
+               },
+               {"Const"},
+             }
+           },
+           {"Split",
+             {
+               {"Const"},
+               {"Reshape",
+                 {
+                   {"*"},
+                   {"Const"},
+                 }
+               },
+             }
+           },
+         }
+       };
+}  // end namespace
 
 class MergeGemmOptimizer : public GraphOptimizer {
  public:
@@ -27,6 +77,22 @@ class MergeGemmOptimizer : public GraphOptimizer {
   ~MergeGemmOptimizer() override {}
 
   string name() const override { return "merge_gemm"; };
+
+  bool UsesFunctionLibrary() const override { return false; }
+
+  Status Optimize(Cluster* cluster, const GrapplerItem& item,
+                  GraphDef* optimized_graph) override;
+
+  void Feedback(Cluster* cluster, const GrapplerItem& item,
+                const GraphDef& optimized_graph, double result) override;
+};
+
+class MergeGemmOptimizerSecondStage : public GraphOptimizer {
+ public:
+  MergeGemmOptimizerSecondStage() {}
+  ~MergeGemmOptimizerSecondStage() override {}
+
+  string name() const override { return "merge_gemm_second_stage"; };
 
   bool UsesFunctionLibrary() const override { return false; }
 
