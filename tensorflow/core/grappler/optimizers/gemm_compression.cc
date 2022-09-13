@@ -308,13 +308,16 @@ bool OptimizeGatherConcatPattern(GraphDef &input_graph_def, GraphDef* output_gra
 
 bool OptimizeGemmCompression(GraphDef& input_graph, GraphDef* optimized_graph) {
   
+  int count = 0;
   while(1) {
     bool graph_changed = false;
     bool result = OptimizeGatherConcatPattern(input_graph, optimized_graph, graph_changed);
     if (!result) return false;
     if (!graph_changed) break;
-    input_graph = *optimized_graph;
+    count++;
+    std::swap(input_graph, *optimized_graph);
   }
+  VLOG(0) << "Compress " << count << " Gather->Concat gemm structure";
   return true;
 }
 
