@@ -18,6 +18,7 @@ limitations under the License.
 #ifdef INTEL_MKL
 
 #include "tensorflow/core/graph/mkl_layout_pass.h"
+#include "tensorflow/core/graph/mkl_layout_pass_lists.h"
 
 #include <algorithm>
 #include <functional>
@@ -3814,6 +3815,10 @@ MklLayoutRewritePass::CheckForQuantizedNodeRewrite(const Node* n) const {
   return nullptr;
 }
 
+bool MklLayoutRewritePass::CheckForRecoOpsListNodeRewrite(const Node* n) const {
+  return MklLayoutPassLists::FinalList().count(n->type_string());
+}
+
 const MklLayoutRewritePass::RewriteInfo*
 MklLayoutRewritePass::CheckForNodeRewrite(const Node* n) const {
   CHECK_NOTNULL(n);
@@ -3865,6 +3870,7 @@ MklLayoutRewritePass::CheckForNodeRewrite(const Node* n) const {
   // We now check if rewrite rule applies for this op. If rewrite rule passes
   // for this op, then we rewrite it to OneDNN op.
   // Find matching RewriteInfo and then check that rewrite rule applies.
+  if (!CheckForRecoOpsListNodeRewrite(n)) return nullptr;
   for (auto ri = rinfo_.cbegin(); ri != rinfo_.cend(); ++ri) {
     if (n->type_string().compare(ri->name) == 0 && ri->rewrite_rule(n)) {
       return &*ri;
