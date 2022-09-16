@@ -1278,6 +1278,7 @@ cc_library(
     hdrs = ["multi_dnn_switch_optimizer.h",],
     visibility = ["//visibility:public"],
     deps = [
+        ":original_delivery_common",
         ":graph_optimizer",
         "//tensorflow/core:framework",
         "//tensorflow/core:graph",
@@ -1290,6 +1291,7 @@ cc_library(
     hdrs = ["gemm_compression.h",],
     visibility = ["//visibility:public"],
     deps = [
+        ":original_delivery_common",
         ":graph_optimizer",
         "//tensorflow/core:framework",
         "//tensorflow/core:graph",
@@ -1328,6 +1330,7 @@ cc_library(
     hdrs = ["fuse_cross_feature_optimizer.h",],
     visibility = ["//visibility:public"],
     deps = [
+        ":original_delivery_common",
         ":graph_optimizer",
         "//tensorflow/core:framework",
         "//tensorflow/core:graph",
@@ -1342,6 +1345,7 @@ cc_library(
     hdrs = ["partial_mixed_precision.h",],
     visibility = ["//visibility:public"],
     deps = [
+        ":original_delivery_common",
         ":graph_optimizer",
         "//tensorflow/core:framework",
         "//tensorflow/core:graph",
@@ -1354,9 +1358,21 @@ cc_library(
     hdrs = ["merge_gemm_optimizer.h",],
     visibility = ["//visibility:public"],
     deps = [
+        ":original_delivery_common",
         ":graph_optimizer",
         "//tensorflow/core:framework",
         "//tensorflow/core:graph",
         "//tensorflow/core/grappler:grappler_item",
+    ],
+)
+cc_library(
+    name = "original_delivery_common",
+    srcs = ["original_delivery_common.cc"],
+    hdrs = ["original_delivery_common.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":graph_optimizer",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:graph",
     ],
 )

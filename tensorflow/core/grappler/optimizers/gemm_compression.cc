@@ -14,11 +14,11 @@ limitations under the License.
 ==============================================================================*/
 
 #include "tensorflow/core/grappler/optimizers/gemm_compression.h"
+#include "tensorflow/core/grappler/optimizers/original_delivery_common.h"
 
 #include <fstream>
 #include <queue>
 #include <map>
-
 #include "tensorflow/core/framework/node_def_builder.h"
 #include "tensorflow/core/graph/graph.h"
 #include "tensorflow/core/graph/graph_constructor.h"
@@ -31,62 +31,6 @@ namespace tensorflow {
 namespace grappler {
 
 namespace {
-
-Status CreateConstNode(NodeDef& def, string const_name, Tensor &t_const, const NodeDef& base) {
-  NodeDefBuilder const_builder(const_name, "Const");
-  Status status = const_builder
-                  .Attr("dtype", t_const.dtype())
-                  .Attr("value", t_const)
-                  .Finalize(&def);
-  if (!status.ok()) {
-    LOG(ERROR) << "Const node construction failed with" << status;
-    return status;
-  }
-  def.set_device(base.device());
-  return Status::OK();
-}
-
-Status ConstuctSliceOp(const NodeDef& input, Tensor& t_begin, Tensor& t_size,
-                     string prefix, DataType output_type,
-                     NodeDef& begin_const, NodeDef& size_const, NodeDef& slice) {
-  // 构建begin const
-  string begin_name = prefix + "/slice_begin";
-  TF_RETURN_IF_ERROR(CreateConstNode(begin_const, begin_name, t_begin, input));
-  // 构建size const
-  string size_name = prefix + "/slice_size";
-  TF_RETURN_IF_ERROR(CreateConstNode(size_const, size_name, t_size, input));
-  // 构建Slice
-  string slice_name = prefix + "/slice";
-  std::vector<NodeDefBuilder::NodeOut> slice_inputs;
-  slice_inputs.emplace_back(input.name(), 0, output_type);
-  slice_inputs.emplace_back(begin_const.name(), 0, DT_INT64);
-  slice_inputs.emplace_back(size_const.name(), 0, DT_INT64);
-  Status status = NodeDefBuilder(slice_name, "Slice")
-                                .Input(slice_inputs[0])
-                                .Input(slice_inputs[1])
-                                .Input(slice_inputs[2])
-                                .Attr("T", output_type)
-                                .Attr("Index", DT_INT64)
-                                .Finalize(&slice);
-  if (!status.ok()) {
-    LOG(ERROR) << "Adding slice nodedef build failed " << status;
-    return status;
-  }
-  slice.set_device(input.device());
-  VLOG(1) << slice.DebugString();
-  return Status::OK();
-}
-
-void GetAllMatchNodes(std::vector<NodeDef>& nodes, std::set<string>& node_set, const NodeMatch& match) {
-  if (!node_set.count(match.node.name())) {
-    nodes.push_back(match.node);
-    node_set.insert(match.node.name());
-  }
-  for (const NodeMatch& input : match.inputs) {
-    GetAllMatchNodes(nodes, node_set, input);
-  }
-  return;
-}
 
 bool OptimizeGatherConcatPattern(GraphDef &input_graph_def, GraphDef* output_graph_def,
                                  bool& is_changed) {
@@ -110,10 +54,6 @@ bool OptimizeGatherConcatPattern(GraphDef &input_graph_def, GraphDef* output_gra
         VLOG(1) << match.DebugString();
         
         Status status;
-        std::vector<NodeDef> match_nodes;
-        std::set<string> node_set;
-        GetAllMatchNodes(match_nodes, node_set, match);
-        VLOG(1) << "match nodes number:" << match_nodes.size();
 
         // 3. 检查placeholder和gather axis const 值
         bool invalid = false;
@@ -195,57 +135,59 @@ bool OptimizeGatherConcatPattern(GraphDef &input_graph_def, GraphDef* output_gra
         auto size_data = t_size.tensor<int64, 1>();
         size_data(0) = size;
         size_data(1) = -1;
+        string slice_name_part1 = weight_node.name() + "_part1";
         NodeDef begin_const_part1;
         NodeDef size_const_part1;
         NodeDef slice_part1;
         // 构建Slice
-        TF_RETURN_IF_ERROR(ConstuctSliceOp(weight_node, t_begin, t_size,
-                             weight_node.name() + "_part1", output_type,
-                             begin_const_part1, size_const_part1, slice_part1));
+        TF_RETURN_IF_ERROR(CreateConstNodeDef(begin_const_part1,
+                             slice_name_part1 + "/slice_begin", t_begin, weight_node));
+        TF_RETURN_IF_ERROR(CreateConstNodeDef(size_const_part1,
+                             slice_name_part1 + "/slice_size", t_size, weight_node));
+        TF_RETURN_IF_ERROR(ConstructSliceNodeDef(slice_part1, weight_node,
+                             begin_const_part1, size_const_part1,
+                             slice_name_part1 + "/slice", output_type));
         begin_data(0) = size;
         size_data(0) = -1;
+        string slice_name_part2 = weight_node.name() + "_part2";
         NodeDef begin_const_part2;
         NodeDef size_const_part2;
         NodeDef slice_part2;
         // 构建Slice
-        TF_RETURN_IF_ERROR(ConstuctSliceOp(weight_node, t_begin, t_size,
-                             weight_node.name() + "_part2", output_type,
-                             begin_const_part2, size_const_part2, slice_part2));
+        TF_RETURN_IF_ERROR(CreateConstNodeDef(begin_const_part2,
+                             slice_name_part2 + "/slice_begin", t_begin, weight_node));
+        TF_RETURN_IF_ERROR(CreateConstNodeDef(size_const_part2,
+                             slice_name_part2 + "/slice_size", t_size, weight_node));
+        TF_RETURN_IF_ERROR(ConstructSliceNodeDef(slice_part2, weight_node,
+                             begin_const_part2, size_const_part2,
+                             slice_name_part2 + "/slice", output_type));
 
         // 构建新的ConcatV2
         NodeDef new_concat;
         std::vector<NodeDefBuilder::NodeOut> concat_inputs;
-        DataType tidx;
+        DataType t_idx = concat_node.attr().at("Tidx").type();
+        DataType t_input = concat_node.attr().at("T").type();
         string idx_name;
         int idx = 0;
         for (string input : concat_node.input()) {
+          // skip first input
           if (idx == 0) {
             idx++;
             continue;
           }
           if (idx == (concat_node.input().size() - 1)) {
-            tidx = concat_node.attr().at("Tidx").type();
             idx_name = input;
           } else {
-            DataType type = concat_node.attr().at("T").type();
-            concat_inputs.emplace_back(input, 0, type);
+            concat_inputs.emplace_back(input, 0, t_input);
           }
           idx++;
         }
         int concat_n = concat_node.attr().at("N").i();
-        // ConcatV2 input和index要分开传入
-        status = NodeDefBuilder(matmul_node.name() + "/concat", "ConcatV2")
-                               .Input(concat_inputs)
-                               .Input({idx_name, 0, tidx})
-                               .Attr("N", concat_n - 1)
-                               .Attr("T", concat_node.attr().at("T").type())
-                               .Attr("Tidx", concat_node.attr().at("Tidx").type())
-                               .Finalize(&new_concat);
-        if (!status.ok()) {
-          LOG(ERROR) << "Adding ConcatV2 nodedef build failed " << status;
-          return status;
-        }
-        new_concat.set_device(matmul_node.device());
+        NodeDefBuilder::NodeOut concat_idx(idx_name, 0, t_idx);
+        TF_RETURN_IF_ERROR(ConstuctConcatNodeDef(new_concat, matmul_node,
+                                     matmul_node.name() + "/concat",
+                                     concat_inputs, concat_idx, concat_n - 1,
+                                     t_input, t_idx));
         // 构建新的MatMul
         NodeDef matmul_part1;
         matmul_part1.CopyFrom(matmul_node);
@@ -262,17 +204,8 @@ bool OptimizeGatherConcatPattern(GraphDef &input_graph_def, GraphDef* output_gra
         add_inputs.emplace_back(matmul_part1.name(), 0, output_type);
         add_inputs.emplace_back(matmul_part2.name(), 0, output_type);
         NodeDef add_node;
-        status = NodeDefBuilder(matmul_node.name(), "Add")
-                                      .Input(add_inputs[0])
-                                      .Input(add_inputs[1])
-                                      .Attr("T", output_type)
-                                      .Finalize(&add_node);
-        if (!status.ok()) {
-          LOG(ERROR) << "Adding add nodedef build failed " << status;
-          return status;
-        }
-        add_node.set_device(matmul_node.device());
-        VLOG(1) << add_node.DebugString();
+        TF_RETURN_IF_ERROR(ConstuctAddNodeDef(add_node, matmul_node, matmul_node.name(),
+                                              add_inputs, output_type));
 
         // 5. 保留匹配的节点
         new_nodes->push_back(add_node);
@@ -341,15 +274,6 @@ Status GemmCompressionOptimizer::Optimize(Cluster* cluster, const GrapplerItem& 
     return Status::OK();
   }
   *optimized_graph->mutable_versions() = item.graph.versions();
-  if (VLOG_IS_ON(1)) {
-    std::fstream f;
-    static int pass = 0;
-    f.open("after_gemm_compression_" + std::to_string(pass) + ".pb",
-           std::fstream::out);
-    f << optimized_graph->DebugString();
-    f.close();
-    pass++;
-  }
   return Status::OK();
 }
 

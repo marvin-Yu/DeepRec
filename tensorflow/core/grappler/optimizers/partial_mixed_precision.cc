@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include "tensorflow/core/grappler/optimizers/partial_mixed_precision.h"
+#include "tensorflow/core/grappler/optimizers/original_delivery_common.h"
 
 #include <fstream>
 #include <queue>
@@ -46,38 +47,6 @@ bool GemmOpSet(string op) {
     return true;
   }
   return false;
-}
-
-Node* NodeConstructor(Graph* graph, string name, const Node* base,
-                     const std::function<Status(NodeDef&)>& node_builder) {
-  NodeDef def;
-  Status status = node_builder(def);
-  if (!status.ok()) {
-    LOG(ERROR) << name << " Adding nodedef build failed " << status;
-    return nullptr;
-  }
-  def.set_device(base->def().device());
-  Node *node = graph->AddNode(def, &status);
-  if (!status.ok()) {
-    LOG(ERROR) << name <<" Adding node failed " << status;
-    return nullptr;
-  }
-  node->set_assigned_device_name(base->assigned_device_name());
-  return node;
-}
-
-Node* ConstuctCastOp(Graph* graph, const Node* base, int port,
-                     DataType src, DataType dst, string cast_name) {
-  std::function<Status(NodeDef&)> cast_builder = [&](NodeDef& def) {
-    return NodeDefBuilder(cast_name, "Cast")
-                          .Input({base->name(), port, src})
-                          .Attr("SrcT", src)
-                          .Attr("DstT", dst)
-                          .Finalize(&def);
-  };
-  Node* cast = NodeConstructor(graph, cast_name, base, cast_builder);
-  VLOG(1) << "cast " << cast->DebugString();
-  return cast;
 }
 
 Node* ConstuctMatMulOp(Graph* graph, const Edge* input,
@@ -119,7 +88,11 @@ Node* ConstuctMatMulOp(Graph* graph, const Edge* input,
                   .Attr("T", DT_HALF)
                   .Finalize(&def);
   };
-  Node* new_matmul = NodeConstructor(graph, name, matmul, matmul_builder);
+  NodeDef def;
+  Status status = NodeDefConstructor(def, matmul->def(), matmul_builder);
+  TF_RETURN_NULL_IF_ERROR(status, "construct matmul def");
+  Node* new_matmul = NodeConstructor(graph, name, matmul, def);
+  TF_RETURN_NULL_IF_NULL(new_matmul, "construct matmul")
   VLOG(1) << "matmul " << new_matmul->DebugString();
   return new_matmul;
 }
@@ -152,7 +125,11 @@ Node* ConstuctCoActionOp(Graph* graph, const Edge* input,
                   .Attr("pow_num", pow_num)
                   .Finalize(&def);
   };
-  Node* new_co_action = NodeConstructor(graph, name, co_action, co_action_builder);
+  NodeDef def;
+  Status status = NodeDefConstructor(def, co_action->def(), co_action_builder);
+  TF_RETURN_NULL_IF_ERROR(status, "construct CoAction def");
+  Node* new_co_action = NodeConstructor(graph, name, co_action, def);
+  TF_RETURN_NULL_IF_NULL(new_co_action, "construct CoAction")
   VLOG(1) << "co_action " << new_co_action->DebugString();
   return new_co_action;
 }
@@ -413,11 +390,8 @@ Status PartialMixedPrecision::Optimize(Cluster* cluster, const GrapplerItem& ite
   static int pass = 0;
   VLOG(0) << "PartialMixedPrecision is on." << pass;
   if (VLOG_IS_ON(1)) {
-    std::fstream f;
-    f.open("before_partial_mixed_precision_" + std::to_string(pass) + ".pb",
-           std::fstream::out);
-    f << item.graph.SerializeAsString();
-    f.close();
+    string file = "before_parial_mixed_precision_" + std::to_string(pass) + ".pb";
+    DumpModelFile(item.graph, file);
   }
 
   FunctionLibraryDefinition flib(OpRegistry::Global(), item.graph.library());
@@ -451,11 +425,8 @@ Status PartialMixedPrecision::Optimize(Cluster* cluster, const GrapplerItem& ite
   }
 
   if (VLOG_IS_ON(1)) {
-    std::fstream f;
-    f.open("after_partial_mixed_precision_" + std::to_string(pass) + ".pb",
-           std::fstream::out);
-    f << optimized_graph->SerializeAsString();
-    f.close();
+    string file = "after_parial_mixed_precision_" + std::to_string(pass) + ".pb";
+    DumpModelFile(*optimized_graph, file);
   }
   pass++;
   return Status::OK();
@@ -501,11 +472,8 @@ Status PartialMixedPrecisionSecondStage::Optimize(Cluster* cluster, const Grappl
   status = Collapse(optimized_graph);
   VLOG(0) << "Collapse Cast pairs " << node_before << "/" << optimized_graph->node_size();
   if (VLOG_IS_ON(1)) {
-    std::fstream f;
-    f.open("after_partial_mixed_precision_" + std::to_string(pass) + ".pb",
-           std::fstream::out);
-    f << optimized_graph->SerializeAsString();
-    f.close();
+    string file = "after_parial_mixed_precision_second" + std::to_string(pass) + ".pb";
+    DumpModelFile(*optimized_graph, file);
   }
   pass++;
   return Status::OK();

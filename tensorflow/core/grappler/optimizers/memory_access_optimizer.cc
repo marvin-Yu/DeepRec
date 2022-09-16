@@ -33,17 +33,6 @@ namespace grappler {
 
 namespace {
 
-void GetAllMatchNodes(std::vector<NodeDef>& nodes, std::set<string>& node_set, const NodeMatch& match) {
-  if (!node_set.count(match.node.name())) {
-    nodes.push_back(match.node);
-    node_set.insert(match.node.name());
-  }
-  for (const NodeMatch& input : match.inputs) {
-    GetAllMatchNodes(nodes, node_set, input);
-  }
-  return;
-}
-
 Status OptimizePatternFunction(const NodeDef& compute_node,
                                const NodeDef& gather_node,
                                const NodeDef& other_node,

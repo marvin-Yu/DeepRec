@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include "tensorflow/core/grappler/optimizers/merge_gemm_optimizer.h"
+#include "tensorflow/core/grappler/optimizers/original_delivery_common.h"
 
 #include <fstream>
 #include <queue>
@@ -31,12 +32,6 @@ namespace tensorflow {
 namespace grappler {
 
 namespace {
-
-#define CHECK_NULL(target) \
-  if (target == nullptr) { \
-    LOG(ERROR) << "nullptr!"; \
-    return false;          \
-  }                        \
 
 bool IsBinaryOp(string op) {
   static std::unordered_set<string> op_set = {
@@ -162,187 +157,6 @@ void DebugAttentionPattern(std::map<std::string, AttentionPattern>& collection) 
     VLOG(0) << "*************************************************";
     iter.second.DebugPattern();
   }
-}
-
-Node* NodeConstructor(Graph* graph, string name, Node* base,
-                     const std::function<Status(NodeDef&)>& node_builder) {
-  NodeDef def;
-  Status status = node_builder(def);
-  if (!status.ok()) {
-    LOG(ERROR) << name << " Adding nodedef build failed " << status;
-    return nullptr;
-  }
-  def.set_device(base->def().device());
-  VLOG(1) << def.DebugString();
-  Node *node = graph->AddNode(def, &status);
-  if (!status.ok()) {
-    LOG(ERROR) << name <<" Adding node failed " << status;
-    return nullptr;
-  }
-  node->set_assigned_device_name(base->assigned_device_name());
-  return node;
-}
-
-Node* CreateConstNode(Graph* graph, string const_name, Tensor &t_const, Node* base) {
-  std::function<Status(NodeDef&)> const_builder = [&](NodeDef& def) {
-    return NodeDefBuilder(const_name, "Const")
-                          .Attr("dtype", t_const.dtype())
-                          .Attr("value", t_const)
-                          .Finalize(&def);
-  };
-  return NodeConstructor(graph, const_name, base, const_builder);
-}
-
-Node* ConstructConcatOp(Graph* graph, Node* compute, int64 axis,
-                     std::vector<Node*>& input_nodes, string sufix) {
-  // indice const，将二维权重按列concat起来
-  string idx_name = compute->name() + sufix + "_indice";
-  Tensor t(DT_INT64, TensorShape({}));
-  t.scalar<int64>()() = axis;
-  Node* idx_const = CreateConstNode(graph, idx_name, t, compute);
-  if (idx_const == nullptr) {
-    LOG(ERROR) << "construct indice const failed";
-    return nullptr;
-  }
-  string concat_name =  compute->name() + sufix;
-  int input_size = input_nodes.size();
-  VLOG(0) << concat_name << ", size:" << input_size;
-  std::vector<NodeDefBuilder::NodeOut> inputs;
-  for (auto n:input_nodes) {
-    inputs.emplace_back(n->name(), 0, compute->output_type(0));
-  }
-  std::function<Status(NodeDef&)> concat_builder = [&](NodeDef& def) {
-    return NodeDefBuilder(concat_name, "ConcatV2")
-                          .Input(inputs)
-                          .Input({idx_name, 0, DT_INT64})
-                          .Attr("N", input_size)
-                          .Attr("T", compute->output_type(0))
-                          .Attr("Tidx", DT_INT64)
-                          .Finalize(&def);
-  };
-  Node* concat = NodeConstructor(graph, concat_name, compute, concat_builder);
-  int port = 0;
-  for (auto n:input_nodes) {
-    graph->AddEdge(n, 0, concat, port);
-    port++;
-  }
-  graph->AddEdge(idx_const, 0, concat, port);
-  graph->UpdateEdge(concat, 0, compute, 1);
-  return concat;
-}
-
-Node* ConstructSplitOp(Graph* graph, Node* compute, int split_num, int axis,
-                       std::vector<std::vector<const Edge*>>& out_edges, string sufix) {
-  // dim const
-  string dim_name = compute->name() + sufix + "_split_dim";
-  Tensor t(DT_INT32, TensorShape({}));
-  t.scalar<int32>()() = axis;
-  Node* dim_const = CreateConstNode(graph, dim_name, t, compute);
-  if (dim_const == nullptr) {
-    LOG(ERROR) << "construct split dim const failed";
-    return nullptr;
-  }
-  string split_name =  compute->name() + sufix;
-  int out_size = out_edges.size();
-  VLOG(1) << split_name << ", size:" << out_size;
-  std::function<Status(NodeDef&)> split_builder = [&](NodeDef& def) {
-    return NodeDefBuilder(split_name, "Split")
-                          .Input({dim_name, 0, DT_INT32})
-                          .Input({compute->name(), 0, compute->output_type(0)})
-                          .Attr("num_split", split_num)
-                          .Attr("T", compute->output_type(0))
-                          .Finalize(&def);
-  };
-  Node* split = NodeConstructor(graph, split_name, compute, split_builder);
-  int port = 0;
-  graph->AddEdge(dim_const, 0, split, 0);
-  graph->AddEdge(compute, 0, split, 1);
-  for (auto set:out_edges) {
-    for (auto e:set) {
-      Status status = graph->UpdateEdge(split, port, e->dst(), e->dst_input());
-      if (!status.ok()) {
-        LOG(WARNING) << "update edge failed: " << status.ToString();
-      }
-    }
-    port++;
-  }
-  return split;
-}
-
-Node* ConstructPackOp(Graph* graph, Node* compute,
-                       std::vector<const Edge*>& input_edges) {
-  string pack_name = compute->name() + "/pack_input";
-  std::vector<NodeDefBuilder::NodeOut> pack_inputs;
-  for (auto e:input_edges) {
-    pack_inputs.emplace_back(e->src()->name(), e->src_output(), compute->output_type(0));
-  }
-  int input_size = input_edges.size();
-  std::function<Status(NodeDef&)> pack_builder = [&](NodeDef& def) {
-    return NodeDefBuilder(pack_name, "Pack")
-                          .Input(pack_inputs)
-                          .Attr("T", compute->output_type(0))
-                          .Attr("N", input_size)
-                          .Attr("axis", 0)
-                          .Finalize(&def);
-  };
-  Node* pack = NodeConstructor(graph, pack_name, compute, pack_builder);
-  int port = 0;
-  for (auto e:input_edges) {
-    graph->AddEdge(e->src(), 0, pack, port);
-    port++;
-  }
-  Status status = graph->UpdateEdge(pack, 0, compute, 0);
-  if (!status.ok()) {
-    LOG(WARNING) << "update edge failed: " << status.ToString();
-  }
-  return pack;
-}
-
-Node* ConstructTransposeOp(Graph* graph, const Edge* e, Tensor& perm_t) {
-  // perm const
-  string perm_name = e->src()->name() + "/perm";
-  Node* perm_const = CreateConstNode(graph, perm_name, perm_t, e->src());
-  if (perm_const == nullptr) {
-    LOG(ERROR) << "construct perm const failed";
-    return nullptr;
-  }
-  string transpose_name = e->src()->name() + "/transpose";
-  std::function<Status(NodeDef&)> builder = [&](NodeDef& def) {
-    return NodeDefBuilder(transpose_name, "Transpose")
-                          .Input({e->src()->name(), e->src_output(),
-                                  e->src()->output_type(0)})
-                          .Input({perm_const->name(), 0, DT_INT32})
-                          .Attr("T", e->src()->output_type(0))
-                          .Attr("Tperm", DT_INT32)
-                          .Finalize(&def);
-  };
-  Node* transpose = NodeConstructor(graph, transpose_name, e->src(), builder);
-  graph->AddEdge(e->src(), e->src_output(), transpose, 0);
-  graph->AddEdge(perm_const, 0, transpose, 1);
-  return transpose;
-}
-
-Node* ConstructReshapeOp(Graph* graph, Node* src, Tensor& shape_t) {
-  // shape const
-  string shape_name = src->name() + "/shape";
-  Node* shape_const = CreateConstNode(graph, shape_name, shape_t, src);
-  if (shape_const == nullptr) {
-    LOG(ERROR) << "construct shape const failed";
-    return nullptr;
-  }
-  string reshape_name = src->name() + "/reshape";
-  std::function<Status(NodeDef&)> reshape_builder = [&](NodeDef& def) {
-    return NodeDefBuilder(reshape_name, "Reshape")
-                          .Input({src->name(), 0, src->output_type(0)})
-                          .Input({shape_const->name(), 0, shape_t.dtype()})
-                          .Attr("T", src->output_type(0))
-                          .Attr("Tshape", shape_t.dtype())
-                          .Finalize(&def);
-  };
-  Node* reshape = NodeConstructor(graph, reshape_name, src, reshape_builder);
-  graph->AddEdge(src, 0, reshape, 0);
-  graph->AddEdge(shape_const, 0, reshape, 1);
-  return reshape;
 }
 
 string OpTypePattern::DebugString() const {
@@ -600,7 +414,7 @@ bool GetMergeBiasAddPattern(Node* split, MergeBiasAddPattern& pattern) {
     }
   }
   pattern.split = split;
-  int num_split = split->def().attr().at("num_split").i();
+  unsigned int num_split = split->def().attr().at("num_split").i();
   if (num_split != pattern.reshape.size() ||
       num_split != pattern.add.size() ||
       num_split != pattern.shape.size() ||
@@ -731,13 +545,15 @@ bool MergeGemm(Graph* graph, std::vector<Node*>& new_splits) {
       return false;
     }
     Node* merged_weight = ConstructConcatOp(graph, matmul, weight.dims() - 1,
-                                           iter.second.weight, "/merge_weight");
-    CHECK_NULL(merged_weight)
+                                            iter.second.weight,
+                                            matmul->name() + "/merge_weight");
+    TF_RETURN_FALSE_IF_NULL(merged_weight, "merge weight")
+    graph->UpdateEdge(merged_weight, 0, matmul, 1);
     // 3.split为多个输出
     Node* split = ConstructSplitOp(graph, matmul, iter.second.weight.size(),
                                   weight.dims() - 1, iter.second.output,
-                                  "/split_output");
-    CHECK_NULL(split)
+                                  matmul->name() + "/split_output");
+    TF_RETURN_FALSE_IF_NULL(split, "split output")
     // 4.删除多余节点
     for (auto n:iter.second.identity) {
       graph->RemoveNode(n);
@@ -748,6 +564,8 @@ bool MergeGemm(Graph* graph, std::vector<Node*>& new_splits) {
       }
     }
     new_splits.push_back(split);
+    VLOG(0) << "merge gemm " << matmul->name() << ", size "
+            << iter.second.weight.size();
   }
   VLOG(0) << "merge gemm done";
   return true;
@@ -795,8 +613,10 @@ bool MergeBiasAdd(Graph* graph, std::vector<Node*>& new_splits) {
       return false;
     }
     Node* merged_bias = ConstructConcatOp(graph, add, bias.dims() - 1,
-                                           iter.second.bias, "/merge_bias");
-    CHECK_NULL(merged_bias)
+                                          iter.second.bias,
+                                          add->name() + "/merge_bias");
+    TF_RETURN_FALSE_IF_NULL(merged_bias, "merge bias")
+    graph->UpdateEdge(merged_bias, 0, add, 1);
     const Edge* input;
     iter.second.split->input_edge(1, &input);
     graph->UpdateEdge(input->src(), input->src_output(), add, 0);
@@ -816,7 +636,7 @@ bool MergeBiasAdd(Graph* graph, std::vector<Node*>& new_splits) {
     }
     string new_shape_name = old_shape->name() + "/merge_shape";
     Node* new_shape = CreateConstNode(graph, new_shape_name, new_shape_t, add);
-    CHECK_NULL(new_shape)
+    TF_RETURN_FALSE_IF_NULL(new_shape, "merge shape")
     VLOG(1) << new_shape->DebugString();
     Node* reshape = iter.second.reshape[0];
     graph->UpdateEdge(add, 0, reshape, 0);
@@ -824,8 +644,9 @@ bool MergeBiasAdd(Graph* graph, std::vector<Node*>& new_splits) {
     // 3.split为多个输出
     Node* split = ConstructSplitOp(graph, reshape, iter.second.bias.size(),
                                   new_shape_t.NumElements() - 1,
-                                  iter.second.output, "/split_output");
-    CHECK_NULL(split)
+                                  iter.second.output,
+                                  reshape->name() + "/split_output");
+    TF_RETURN_FALSE_IF_NULL(split, "split output")
     // 4.删除多余节点
     for (auto n:iter.second.add) {
       if (n != add) {
@@ -838,6 +659,8 @@ bool MergeBiasAdd(Graph* graph, std::vector<Node*>& new_splits) {
       }
     }
     graph->RemoveNode(iter.second.split);
+    VLOG(0) << "merge BiasAdd " << add->name() << ", size "
+            << iter.second.bias.size();
   }
   VLOG(0) << "merge BiasAdd done";
   return true;
@@ -908,7 +731,6 @@ bool MergeAttention(Graph* graph) {
     }
     string new_shape_name = reserve_path.reshape->src()->name() + "/extend_shape";
     Node* new_shape = CreateConstNode(graph, new_shape_name, new_shape_t, old_shape);
-    CHECK_NULL(new_shape)
     graph->UpdateEdge(new_shape, 0, reserve_path.reshape->src(), 1);
 
     // 2.construct new transpose
@@ -919,8 +741,9 @@ bool MergeAttention(Graph* graph) {
     }
     perm_data(0) = reshape_dims - 1;
     perm_data(reshape_dims) = reshape_dims;
-    Node* transpose = ConstructTransposeOp(graph, reserve_path.reshape, perm_t);
-    CHECK_NULL(transpose)
+    string transpose_name = reserve_path.reshape->src()->name() + "/transpose";
+    Node* transpose = ConstructTransposeOp(graph, reserve_path.reshape,
+                                           transpose_name, perm_t);
 
     status = graph->UpdateEdge(transpose, 0, reserve_path.gemm_pre->src(), 1);
     if (!status.ok()) {
@@ -938,9 +761,11 @@ bool MergeAttention(Graph* graph) {
     for (auto path:iter.second.path) {
       in_edges.push_back(reserve_path.gemm_pre_input_a);
     }
-    Node* pack = ConstructPackOp(graph, reserve_path.gemm_pre->src(), in_edges);
-    CHECK_NULL(pack)
-    graph->UpdateEdge(pack, 0, reserve_path.gemm_pre->src(), 0);
+    string pack_name = reserve_path.gemm_pre->src()->name() + "_pack_input";
+    Node* pack = ConstructPackOp(graph, reserve_path.gemm_pre->src(),
+                                 pack_name, in_edges);
+    Status status = graph->UpdateEdge(pack, 0, reserve_path.gemm_pre->src(), 0);
+    TF_RETURN_FALSE_IF_ERROR(status, "update pack output edge")
 
     // 4.re-transpose
     for (auto i = 0; i <= reshape_dims - 2; i++) {
@@ -948,16 +773,18 @@ bool MergeAttention(Graph* graph) {
     }
     perm_data(reshape_dims - 1) = 0;
     perm_data(reshape_dims) = reshape_dims;
-    Node* re_transpose = ConstructTransposeOp(graph, reserve_path.gemm_tail, perm_t);
-    CHECK_NULL(re_transpose)
+    string re_transpose_name = reserve_path.gemm_tail->src()->name() + "/transpose";
+    Node* re_transpose = ConstructTransposeOp(graph, reserve_path.gemm_tail,
+                                              re_transpose_name, perm_t);
 
     // 5.reshape
     Tensor re_shape_t(DT_INT32, {2});
     auto re_shape_data = re_shape_t.flat<int32>();
     re_shape_data(0) = first_dim_size;
     re_shape_data(1) = last_dim_size;
-    Node* re_reshape = ConstructReshapeOp(graph, re_transpose, re_shape_t);
-    CHECK_NULL(re_reshape)
+    string re_shape_name = re_transpose->name() + "/reshape";
+    Node* re_reshape = ConstructReshapeOp(graph, re_transpose,
+                                          re_shape_name, re_shape_t);
     for (auto e:iter.second.output) {
       graph->UpdateEdge(re_reshape, 0, e->dst(), e->dst_input());
     }
@@ -989,11 +816,8 @@ Status MergeGemmOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
   static int pass = 0;
   VLOG(0) << "MergeGemmOptimizer is on." << pass;
   if (VLOG_IS_ON(1)) {
-    std::fstream f;
-    f.open("before_merge_gemm_" + std::to_string(pass) + ".pb",
-           std::fstream::out);
-    f << item.graph.SerializeAsString();
-    f.close();
+    string name = "before_merge_gemm_" + std::to_string(pass) + ".pb";
+    DumpModelFile(*optimized_graph, name);
   }
 
   FunctionLibraryDefinition flib(OpRegistry::Global(), item.graph.library());
@@ -1022,11 +846,8 @@ Status MergeGemmOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
   *optimized_graph->mutable_versions() = item.graph.versions();
 
   if (VLOG_IS_ON(1)) {
-    std::fstream f;
-    f.open("after_merge_gemm_" + std::to_string(pass) + ".pb",
-           std::fstream::out);
-    f << optimized_graph->SerializeAsString();
-    f.close();
+    string name = "after_merge_gemm_" + std::to_string(pass) + ".pb";
+    DumpModelFile(*optimized_graph, name);
   }
   pass++;
   return Status::OK();

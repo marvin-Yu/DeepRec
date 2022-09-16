@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include "tensorflow/core/grappler/optimizers/multi_dnn_switch_optimizer.h"
+#include "tensorflow/core/grappler/optimizers/original_delivery_common.h"
 
 #include <fstream>
 #include <queue>
@@ -219,25 +220,6 @@ int GetNodeConstInputCount(const Node* n) {
   return const_num;
 }
 
-Node* NodeConstructor(Graph* graph, string name, Node* base,
-                     const std::function<Status(NodeDef&)>& node_builder) {
-  NodeDef def;
-  Status status = node_builder(def);
-  if (!status.ok()) {
-    LOG(ERROR) << name << " Adding nodedef build failed " << status;
-    return nullptr;
-  }
-  def.set_device(base->def().device());
-  VLOG(1) << def.DebugString();
-  Node *node = graph->AddNode(def, &status);
-  if (!status.ok()) {
-    LOG(ERROR) << name <<" Adding node failed " << status;
-    return nullptr;
-  }
-  node->set_assigned_device_name(base->assigned_device_name());
-  return node;
-}
-
 class SubGraphCollection {
  public:
   SubGraphCollection(Graph* graph, std::vector<Node*> switch_n, Node* merge, int branch_num) :
@@ -307,7 +289,7 @@ class SubGraphCollection {
     if (inputs[0]->src()->type_string() != "Const") return false;
     // 1.如果不是同一个const节点，则继续判断const值是否相同
     bool same_node = true;
-    for (int i = 1; i < inputs.size(); ++i) {
+    for (unsigned int i = 1; i < inputs.size(); ++i) {
       if (inputs[0]->src()->name() != inputs[i]->src()->name()) same_node = false;
     }
     if (same_node) return true;
@@ -315,7 +297,7 @@ class SubGraphCollection {
     auto type = inputs[0]->src()->def().attr().at("dtype");
     if (check_value_set.find(type.type()) == check_value_set.end()) return false;
     // 2.如果const值都一致，也认为是相同const输入
-    for (int i = 1; i < inputs.size(); ++i) {
+    for (unsigned int i = 1; i < inputs.size(); ++i) {
       string diff;
       if (!CheckNodeMatch(inputs[0]->src(), inputs[i]->src(), &diff,
                           {DT_BOOL, DT_INT32, DT_INT64})) {
@@ -333,11 +315,7 @@ class SubGraphCollection {
           n->input_edge(0, &input);
           Status status = graph_->UpdateEdge(input->src(), input->src_output(),
                                       e->dst(), e->dst_input());
-          if (!status.ok()) {
-            LOG(ERROR) << " update edge failed " << status;
-            return false;
-          }
-
+          TF_RETURN_FALSE_IF_ERROR(status, "update edge")
         }
       }
     }
@@ -353,7 +331,7 @@ class SubGraphCollection {
   }
 
   bool CheckBranchNodesMatch(std::vector<Node*>& nodes) {
-    for (int i = 1; i < nodes.size(); ++i) {
+    for (unsigned int i = 1; i < nodes.size(); ++i) {
       string diff;
       if (!CheckNodeMatch(nodes[0], nodes[i], &diff, {})) {
         LOG(ERROR) << "graph a node not match with graph b node: " << diff;
@@ -498,16 +476,11 @@ class SubGraphCollection {
     for (Node* n : switch_n_) {
       if (index_ == nullptr) {
         status = n->input_edge(1, &index_);
-        if (!status.ok()) {
-          LOG(ERROR) << "get index of SwitchN failed: " << status;
-        }
+        TF_RETURN_FALSE_IF_ERROR(status, "get index of SwitchN")
       } else {
         const Edge* temp = nullptr;
         status = n->input_edge(1, &temp);
-        if (!status.ok()) {
-          LOG(ERROR) << "get index of SwitchN failed: " << status;
-          return false;
-        }
+        TF_RETURN_FALSE_IF_ERROR(status, "get index of SwitchN")
         if(index_->src() != temp->src()) {
           LOG(ERROR) << "index of SwitchN diff: " << index_->src()->name()
                      << " VS " << temp->src()->name();
@@ -535,10 +508,7 @@ class SubGraphCollection {
                       .Attr("T", index_->src()->output_type(0))
                       .Finalize(&def);
               });
-    if (switch_n == nullptr) {
-      LOG(ERROR) << "construct SwitchN failed";
-      return false;
-    }
+    TF_RETURN_FALSE_IF_NULL(switch_n, "construct SwitchN failed")
     VLOG(1) << switch_n->DebugString();
     std::vector<Node*> no_ops;
     std::vector<Node*> identity_ops;
@@ -551,20 +521,15 @@ class SubGraphCollection {
         return NodeDefBuilder(no_name, "NoOp")
                               .Finalize(&def);
       });
-      if (no == nullptr) {
-        LOG(ERROR) << "construct NoOp failed";
-        return false;
-      }
+      TF_RETURN_FALSE_IF_NULL(no, "construct NoOp failed")
       no_ops.push_back(no);
-      Node* identity = NodeConstructor(graph_, identity_name, switch_n_[0], [&](NodeDef& def) {
+      Node* identity = NodeConstructor(graph_, identity_name, switch_n_[0],
+            [&](NodeDef& def) {
         return NodeDefBuilder(identity_name, "Identity")
                               .Input(switch_n->name(), i, switch_n->output_type(0))
                               .Finalize(&def);
       });
-      if (identity == nullptr) {
-        LOG(ERROR) << "construct Identity failed";
-        return false;
-      }
+      TF_RETURN_FALSE_IF_NULL(identity, "construct Identity failed")
       identity_ops.push_back(identity);
     }
     // index-|          |->Identity->NoOp
@@ -619,10 +584,7 @@ class SubGraphCollection {
                                   .Finalize(&def);
           };
           Node* merge = NodeConstructor(graph_, merge_name, switch_n_[0], merge_builder);
-          if (merge == nullptr) {
-            LOG(ERROR) << "construct Merge failed";
-            return false;
-          }
+          TF_RETURN_FALSE_IF_NULL(merge, "construct Merge failed")
           int port = 0;
           for (int i = 0; i < branch_num_; ++i) {
             graph_->AddControlEdge(no_ops[i], input[i]->src());
@@ -630,27 +592,18 @@ class SubGraphCollection {
             port++;
           }
           status = graph_->UpdateEdge(merge, 0, input[0]->dst(), input[0]->dst_input());
-          if (!status.ok()) {
-            LOG(ERROR) << " update edge failed " << status;
-            return false;
-          }
+          TF_RETURN_FALSE_IF_ERROR(status, "update merge edge")
         }
       }
       converted.insert(collection->GetReserveNode()->name());
     }
     const Edge* merge_in;
     status = merge_->input_edge(0, &merge_in);
-    if (!status.ok()) {
-      LOG(ERROR) << "get merge input edge failed " << status;
-      return false;
-    }
+    TF_RETURN_FALSE_IF_ERROR(status, "get merge input edge")
     for (auto e : merge_->out_edges()) {
       status = graph_->UpdateEdge(merge_in->src(), merge_in->src_output(),
                                   e->dst(), e->dst_input());
-      if (!status.ok()) {
-        LOG(ERROR) << "get merge input edge failed " << status;
-        return false;
-      }
+      TF_RETURN_FALSE_IF_ERROR(status, "update merge input edge")
     }
     // 删除其他分支节点
     VLOG(1) << "start remove node ";
@@ -704,16 +657,6 @@ class SubGraphCollection {
   std::vector<std::unique_ptr<BranchNodesCollection>> branch_collection_;
 };
 
-Node* CreateConstNode(Graph* graph, string const_name, Tensor &t_const, Node* base) {
-  std::function<Status(NodeDef&)> const_builder = [&](NodeDef& def) {
-    return NodeDefBuilder(const_name, "Const")
-                          .Attr("dtype", t_const.dtype())
-                          .Attr("value", t_const)
-                          .Finalize(&def);
-  };
-  return NodeConstructor(graph, const_name, base, const_builder);
-}
-
 void DebugMultiDNNInfo(MultiDNNInfo &multi_dnn_info) {
   VLOG(0) << "Dynamic partition a: " << multi_dnn_info.dynamic_partition_a.size();
   for (Node* n : multi_dnn_info.dynamic_partition_a) {
@@ -724,23 +667,6 @@ void DebugMultiDNNInfo(MultiDNNInfo &multi_dnn_info) {
   VLOG(0) << "partition:" << multi_dnn_info.partition->DebugString();
   VLOG(0) << "-------------------------";
 }
-
-Status UpdateAllEdge(Graph* graph, Node* new_src_node, Node* old_dst_node) {
-  std::vector<Node*> dst_nodes;
-  std::vector<int> dst_inputs;
-  std::vector<int> src_outputs;
-  for (const Edge* e : old_dst_node->out_edges()) {
-    dst_nodes.push_back(e->dst());
-    dst_inputs.push_back(e->dst_input());
-    src_outputs.push_back(e->src_output());
-  }
-  for (unsigned int i = 0; i < dst_nodes.size(); i++) {
-    TF_RETURN_IF_ERROR(
-        graph->UpdateEdge(new_src_node, src_outputs[i], dst_nodes[i], dst_inputs[i]));
-  }
-  return Status::OK();
-}
-
 
 void SearchTargetDynamicPartition(Graph *graph, MultiDNNInfo& info,
                                    std::set<Node*> &candidate_node) {
@@ -830,48 +756,18 @@ bool DynamicPartitionToSwitch(Graph* graph, std::vector<std::shared_ptr<
     Node *squeeze = nullptr;
     if (index_cache.find(squeeze_name) == index_cache.end()) {
       // 构建begin const
-      string begin_name = info.partition->name() + "/multi_dnn/slice_begin";
       Tensor t_begin(DT_INT64, TensorShape({1}));
       auto begin_data = t_begin.tensor<int64, 1>();
       begin_data(0) = 0;
-      Node* begin_const = CreateConstNode(graph, begin_name, t_begin, info.partition);
-      if (begin_const == nullptr) {
-        LOG(ERROR) << "construct begin const failed";
-        return false;
-      }
       // 构建size const
-      string size_name = info.partition->name() + "/multi_dnn/slice_size";
       Tensor t_size(DT_INT64, TensorShape({1}));
       auto size_data = t_size.tensor<int64, 1>();
       size_data(0) = 1;
-      Node* size_const = CreateConstNode(graph, size_name, t_size, info.partition);
-      if (size_const == nullptr) {
-        LOG(ERROR) << "construct size const failed";
-        return false;
-      }
-      // 构建Slice
       string slice_name = info.partition->name() + "/multi_dnn/slice";
-      std::vector<NodeDefBuilder::NodeOut> slice_inputs;
-      slice_inputs.emplace_back(info.partition->name(), 0, info.partition->output_type(0));
-      slice_inputs.emplace_back(begin_const->name(), 0, begin_const->output_type(0));
-      slice_inputs.emplace_back(size_const->name(), 0, size_const->output_type(0));
-      Node* slice = NodeConstructor(graph, slice_name, info.partition,
-                    [&](NodeDef& def) {
-                      return NodeDefBuilder(slice_name, "Slice")
-                               .Input(slice_inputs[0])
-                               .Input(slice_inputs[1])
-                               .Input(slice_inputs[2])
-                               .Attr("T", info.partition->output_type(0))
-                               .Attr("Index", DT_INT64)
-                               .Finalize(&def);
-                });
-      if (slice == nullptr) {
-        LOG(ERROR) << "construct slice failed";
-        return false;
-      }
-      graph->AddEdge(info.partition, 0, slice, 0);
-      graph->AddEdge(begin_const, 0, slice, 1);
-      graph->AddEdge(size_const, 0, slice, 2);
+      Node* slice = ConstructSliceOp(graph, info.partition, 0, slice_name,
+                                     t_begin, t_size);
+      TF_RETURN_FALSE_IF_NULL(slice, "construct slice")
+
       // squeeze
       string squeeze_name = info.partition->name() + "/multi_dnn/squeeze";
       squeeze = NodeConstructor(graph, squeeze_name, slice,
@@ -881,11 +777,8 @@ bool DynamicPartitionToSwitch(Graph* graph, std::vector<std::shared_ptr<
                              .Attr("T", slice->output_type(0))
                              .Attr("squeeze_dims", {0})
                              .Finalize(&def);
-                });
-      if (squeeze == nullptr) {
-        LOG(ERROR) << "construct squeeze failed";
-        return false;
-      }
+      });
+      TF_RETURN_FALSE_IF_NULL(squeeze, "construct squeeze")
       graph->AddEdge(slice, 0, squeeze, 0);
       index_cache.insert(std::pair<string, Node*>(squeeze_name, squeeze));
     } else {
@@ -899,7 +792,8 @@ bool DynamicPartitionToSwitch(Graph* graph, std::vector<std::shared_ptr<
       std::vector<NodeDefBuilder::NodeOut> switch_inputs;
       const Edge *input_edge = nullptr;
       dynamic_partition_a->input_edge(0, &input_edge);
-      switch_inputs.emplace_back(input_edge->src()->name(), 0, input_edge->src()->output_type(0));
+      switch_inputs.emplace_back(input_edge->src()->name(), 0,
+                                 input_edge->src()->output_type(0));
       switch_inputs.emplace_back(squeeze->name(), 0, squeeze->output_type(0));
       std::set<int> src_output;
       for (auto e:dynamic_partition_a->out_edges()) {
@@ -907,7 +801,7 @@ bool DynamicPartitionToSwitch(Graph* graph, std::vector<std::shared_ptr<
       }
       int num_partitions = dynamic_partition_a->def().attr().at("num_partitions").i();
       if (src_output.size() != num_partitions) {
-        LOG(ERROR) << "dynamic partition real output num not equal num_partitions attr: "
+        LOG(ERROR) << "DynamicPartition output num not equal num_partitions attr: "
                    << src_output.size() << " VS " << num_partitions;
         return false;
       }
@@ -917,38 +811,25 @@ bool DynamicPartitionToSwitch(Graph* graph, std::vector<std::shared_ptr<
         return false;
       }
       switch_branch_num = num_partitions;
-      NodeDef switch_node;
-      status = NodeDefBuilder(switch_name, "_SwitchN")
+      Node* switch_n = NodeConstructor(graph, switch_name, dynamic_partition_a,
+              [&](NodeDef& def) {
+        return NodeDefBuilder(switch_name, "_SwitchN")
                              .Input(switch_inputs[0])
                              .Input(switch_inputs[1])
                              .Attr("num_outs", dynamic_partition_a->num_outputs())
                              .Attr("T", dynamic_partition_a->output_type(0))
-                             .Finalize(&switch_node);
-      if (!status.ok()) {
-        LOG(ERROR) << "Adding _SwitchN nodedef build failed " << status;
-        return false;
-      }
-      switch_node.set_device(dynamic_partition_a->def().device());
-      VLOG(1) << switch_node.DebugString();
-      Node* switch_n = graph->AddNode(switch_node, &status);
-      if (!status.ok()) {
-        LOG(ERROR) << "Adding switch node failed " << status;
-        return false;
-      }
-      switch_n->set_assigned_device_name(dynamic_partition_a->assigned_device_name());
+                             .Finalize(&def);
+      });
+      TF_RETURN_FALSE_IF_NULL(switch_n, "construct _SwitchN")
       graph->AddEdge(input_edge->src(), input_edge->src_output(), switch_n, 0);
       graph->AddEdge(squeeze, 0, switch_n, 1);
       status = UpdateAllEdge(graph, switch_n, dynamic_partition_a);
-      if (!status.ok()) {
-        LOG(ERROR) << "update DynamicPartition output edge failed " << status;
-        return false;
-      }
+      TF_RETURN_FALSE_IF_ERROR(status, "update DynamicPartition output edge")
       graph->RemoveNode(dynamic_partition_a);
       switch_vector.push_back(switch_n);
     }
     // 5.DynamicPartition_b+DynamicStitch替换为Merge
     string merge_name = info.dynamic_stitch->name() + "/multi_dnn/merge";
-    NodeDef merge_node;
     std::vector<NodeDefBuilder::NodeOut> merge_inputs;
     std::vector<const Edge*> stitch_inputs;
     for (auto e:info.dynamic_stitch->in_edges()) {
@@ -968,24 +849,15 @@ bool DynamicPartitionToSwitch(Graph* graph, std::vector<std::shared_ptr<
                                 e->src()->output_type(0));
     }
     int input_size = stitch_inputs.size();
-
-    status = NodeDefBuilder(merge_name, "Merge")
+    Node* merge = NodeConstructor(graph, merge_name, info.dynamic_stitch,
+              [&](NodeDef& def) {
+      return NodeDefBuilder(merge_name, "Merge")
                             .Input(merge_inputs)
                             .Attr("T", info.dynamic_stitch->output_type(0))
                             .Attr("N", input_size)
-                            .Finalize(&merge_node);
-    if (!status.ok()) {
-      LOG(ERROR) << "Adding merge nodedef build failed " << status;
-      return false;
-    }
-    merge_node.set_device(info.dynamic_stitch->def().device());
-    VLOG(1) << merge_node.DebugString();
-    Node* merge = graph->AddNode(merge_node, &status);
-    if (!status.ok()) {
-      LOG(ERROR) << "Adding merge node failed " << status;
-      return false;
-    }
-    merge->set_assigned_device_name(info.dynamic_stitch->assigned_device_name());
+                            .Finalize(&def);
+    });
+    TF_RETURN_FALSE_IF_NULL(merge, "construct merge")
     int port = 0;
     for (auto e:stitch_inputs) {
       graph->AddEdge(e->src(), e->src_output(), merge, port++);
@@ -1076,11 +948,9 @@ bool ReplaceControlflowToMergeNode(Graph* graph, Node* node) {
                           .Attr("N", in_size)
                           .Finalize(&def);
   };
-  Node* merge = NodeConstructor(graph, merge_name, identity_ops[0]->src(), merge_builder);
-  if (merge == nullptr) {
-    LOG(ERROR) << "construct Merge failed";
-    return false;
-  }
+  Node* merge = NodeConstructor(graph, merge_name,
+                                identity_ops[0]->src(), merge_builder);
+  TF_RETURN_FALSE_IF_NULL(merge, "construct merge")
   int merge_in_port = 0;
   for (auto e:identity_ops) {
     graph->AddEdge(e->src(), 0, merge, merge_in_port);
@@ -1155,11 +1025,8 @@ Status MultiDNNSwitchOptimizer::Optimize(Cluster* cluster, const GrapplerItem& i
   static int pass = 0;
   VLOG(0) << "MultiDNNSwitchOptimizer is on." << pass;
   if (VLOG_IS_ON(1)) {
-    std::fstream f;
-    f.open("before_multi_dnn_switch_" + std::to_string(pass) + ".pb",
-           std::fstream::out);
-    f << item.graph.SerializeAsString();
-    f.close();
+    string file = "before_multi_dnn_switch_" + std::to_string(pass) + ".pb";
+    DumpModelFile(item.graph, file);
   }
 
   // convert graphdef to graph
@@ -1196,11 +1063,8 @@ Status MultiDNNSwitchOptimizer::Optimize(Cluster* cluster, const GrapplerItem& i
   *optimized_graph->mutable_versions() = item.graph.versions();
 
   if (VLOG_IS_ON(1)) {
-    std::fstream f;
-    f.open("after_multi_dnn_switch_" + std::to_string(pass) + ".pb",
-           std::fstream::out);
-    f << optimized_graph->SerializeAsString();
-    f.close();
+    string file = "after_multi_dnn_switch_" + std::to_string(pass) + ".pb";
+    DumpModelFile(*optimized_graph, file);
   }
   pass++;
   return Status::OK();
