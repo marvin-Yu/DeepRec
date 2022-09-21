@@ -759,7 +759,7 @@ bool MergeAttention(Graph* graph) {
     // 3.Pack BiasAdd
     std::vector<const Edge*> in_edges;
     for (auto path:iter.second.path) {
-      in_edges.push_back(reserve_path.gemm_pre_input_a);
+      in_edges.push_back(path.gemm_pre_input_a);
     }
     string pack_name = reserve_path.gemm_pre->src()->name() + "_pack_input";
     Node* pack = ConstructPackOp(graph, reserve_path.gemm_pre->src(),
