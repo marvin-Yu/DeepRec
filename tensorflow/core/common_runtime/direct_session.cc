@@ -2648,8 +2648,18 @@ Status DirectSession::CreateExecutors(
             "DEFAULT", params, std::move(partition_graph), &item->executor));
       }
     } else {
-      TF_RETURN_IF_ERROR(NewExecutor(
-          executor_type, params, std::move(partition_graph), &item->executor));
+      auto status = NewExecutor(executor_type, params, std::move(partition_graph), &item->executor);
+      if (!status.ok()) {
+        // Fallback to create default executor
+        if (executor_type != "DEFAULT") {
+          LOG(WARNING) << "Try to create " << executor_type << " executor failed. Error: " << status.error_message() << "."
+                      << "Fallback to create default executor.";
+          TF_RETURN_IF_ERROR(NewExecutor(
+              "DEFAULT", params, std::move(partition_graph), &item->executor));
+        } else {
+          return status;
+        }
+      }
     }
   }
 
