@@ -185,7 +185,7 @@ bool DoesOpTypeMatch(const Edge* edge, const OpTypePattern& pattern,
   Node* node = edge->src();
   VLOG(1) << "Looking at node " << node->DebugString();
   VLOG(1) << "pattern=" << pattern.DebugString();
-  VLOG(1) << "match=" << match->DebugString();
+  // VLOG(2) << "match=" << match->DebugString();
   bool pattern_matched = false;
   if (pattern.op == "*") {
     pattern_matched = true;

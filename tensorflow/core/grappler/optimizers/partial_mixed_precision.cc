@@ -381,8 +381,9 @@ Status Collapse(GraphDef* graph) {
 
 Status PartialMixedPrecision::Optimize(Cluster* cluster, const GrapplerItem& item,
                                GraphDef* optimized_graph) {
-  bool opt = true;
-  ReadBoolFromEnvVar("TF_ENABLE_PARTIAL_MIXED_PRECISION", true, &opt);
+  bool opt = false;
+  // maybe lead to nan, default off
+  ReadBoolFromEnvVar("TF_ENABLE_PARTIAL_MIXED_PRECISION_MAX", false, &opt);
   if (!opt) {
     *optimized_graph = item.graph;
     return Status::OK();
@@ -412,7 +413,8 @@ Status PartialMixedPrecision::Optimize(Cluster* cluster, const GrapplerItem& ite
   }
   graph.ToGraphDef(optimized_graph);
   *optimized_graph->mutable_versions() = item.graph.versions();
-  ReadBoolFromEnvVar("TF_ENABLE_PARTIAL_MIXED_PRECISION_REDICAL", true, &opt);
+  // maybe lead to nan, default off
+  ReadBoolFromEnvVar("TF_ENABLE_PARTIAL_MIXED_PRECISION_SECOND", false, &opt);
   if (opt) {
     VLOG(0) << "PartialMixedPrecision round 2";
     status = ConvertGemm(&graph);

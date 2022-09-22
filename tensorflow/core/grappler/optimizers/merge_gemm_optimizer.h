@@ -36,6 +36,9 @@ struct NodeMatch {
   const Edge* edge;
   std::vector<NodeMatch> inputs;
   string DebugString() const;
+  NodeMatch() {
+    edge = nullptr;
+  }
 };
 
 static const OpTypePattern attention_path_pattern =
@@ -69,6 +72,7 @@ static const OpTypePattern attention_path_pattern =
            },
          }
        };
+
 }  // end namespace
 
 class MergeGemmOptimizer : public GraphOptimizer {
