@@ -23,7 +23,8 @@ namespace grappler {
 
 class MultiDNNSwitchOptimizer : public GraphOptimizer {
  public:
-  MultiDNNSwitchOptimizer() {}
+  explicit MultiDNNSwitchOptimizer(const string& skip_branchs = "")
+   : skip_branchs_str_(skip_branchs) {}
   ~MultiDNNSwitchOptimizer() override {}
 
   string name() const override { return "multi_dnn_switch"; };
@@ -35,6 +36,8 @@ class MultiDNNSwitchOptimizer : public GraphOptimizer {
 
   void Feedback(Cluster* cluster, const GrapplerItem& item,
                 const GraphDef& optimized_graph, double result) override;
+ private:
+  string skip_branchs_str_;
 };
 
 }  // end namespace grappler

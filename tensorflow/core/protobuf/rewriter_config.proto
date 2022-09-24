@@ -205,4 +205,6 @@ message RewriterConfig {
   Toggle gemm_compression_optimization = 505;
   Toggle partial_mixed_precision = 506;
   Toggle merge_gemm_optimization = 507;
+  // skip branch
+  string multi_dnn_skip_branchs = 508;
 }
