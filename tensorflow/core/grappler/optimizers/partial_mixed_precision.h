@@ -13,21 +13,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_MULTI_DNN_SWITCH_OPTIMIZER_H_
-#define TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_MULTI_DNN_SWITCH_OPTIMIZER_H_
+#ifndef TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_PARTIAL_MIXED_PRECISION_H_
+#define TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_PARTIAL_MIXED_PRECISION_H_
 
 #include "tensorflow/core/grappler/optimizers/graph_optimizer.h"
 
 namespace tensorflow {
 namespace grappler {
 
-class MultiDNNSwitchOptimizer : public GraphOptimizer {
+class PartialMixedPrecision : public GraphOptimizer {
  public:
-  explicit MultiDNNSwitchOptimizer(const string& skip_branchs = "")
-   : skip_branchs_str_(skip_branchs) {}
-  ~MultiDNNSwitchOptimizer() override {}
+  PartialMixedPrecision() {}
+  ~PartialMixedPrecision() override {}
 
-  string name() const override { return "multi_dnn_switch"; };
+  string name() const override { return "partial_mixed_precision"; };
 
   bool UsesFunctionLibrary() const override { return false; }
 
@@ -36,11 +35,25 @@ class MultiDNNSwitchOptimizer : public GraphOptimizer {
 
   void Feedback(Cluster* cluster, const GrapplerItem& item,
                 const GraphDef& optimized_graph, double result) override;
- private:
-  string skip_branchs_str_;
+};
+
+class PartialMixedPrecisionSecondStage : public GraphOptimizer {
+ public:
+  PartialMixedPrecisionSecondStage() {}
+  ~PartialMixedPrecisionSecondStage() override {}
+
+  string name() const override { return "partial_mixed_precision_second_stage"; };
+
+  bool UsesFunctionLibrary() const override { return false; }
+
+  Status Optimize(Cluster* cluster, const GrapplerItem& item,
+                  GraphDef* optimized_graph) override;
+
+  void Feedback(Cluster* cluster, const GrapplerItem& item,
+                const GraphDef& optimized_graph, double result) override;
 };
 
 }  // end namespace grappler
 }  // end namespace tensorflow
 
-#endif  // TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_MULTI_DNN_SWITCH_OPTIMIZER_H_
+#endif // TENSORFLOW_CORE_GRAPPLER_OPTIMIZERS_PARTIAL_MIXED_PRECISION_H_

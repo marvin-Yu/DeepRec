@@ -18,6 +18,7 @@ limitations under the License.
 #include <fstream>
 #include <queue>
 #include <map>
+#include <algorithm>
 
 #include "tensorflow/core/framework/node_def_builder.h"
 #include "tensorflow/core/graph/graph.h"
@@ -32,17 +33,6 @@ namespace grappler {
 
 namespace {
 
-void GetAllMatchNodes(std::vector<NodeDef>& nodes, std::set<string>& node_set, const NodeMatch& match) {
-  if (!node_set.count(match.node.name())) {
-    nodes.push_back(match.node);
-    node_set.insert(match.node.name());
-  }
-  for (const NodeMatch& input : match.inputs) {
-    GetAllMatchNodes(nodes, node_set, input);
-  }
-  return;
-}
-
 Status OptimizePatternFunction(const NodeDef& compute_node,
                                const NodeDef& gather_node,
                                const NodeDef& other_node,
@@ -50,10 +40,11 @@ Status OptimizePatternFunction(const NodeDef& compute_node,
                                const NodeDef& gather_ind_node,
                                const NodeDef& gather_axis_node,
                                std::vector<NodeDef>* new_nodes,
-                               int input_port) {
+                               int input_port,
+                               int& counter) {
   bool invalid = false;
   if (gather_ind_node.name().find("user_creative_indicator") == string::npos) {
-    LOG(WARNING) << "gather input indicator placeholder not match:" << gather_ind_node.name();
+    VLOG(1) << "gather input indicator placeholder not match:" << gather_ind_node.name();
     invalid = true;
   }
   if (compute_node.op() == "MatMul") {
@@ -86,16 +77,17 @@ Status OptimizePatternFunction(const NodeDef& compute_node,
   }
   // 将Gather替换为Identity，dependency optimization会优化掉
   DataType output_type = DT_FLOAT;
-  if (gather_node.attr().count("Tparams") != 0) {
-    output_type = gather_node.attr().at("Tparams").type();
+  if (gather_node.attr().count("Tindices") != 0) {
+    output_type = gather_node.attr().at("Tindices").type();
   } else {
     invalid = true;
   }
   if (invalid) {
+    static int index = 0;
     // 不替换时，直接返回，会导致之后每次都匹配到这个不满足条件的pattern，
     // 其余pattern无法继续匹配，因此给这部分子图增加一个Identity，改变图结构
     NodeDef new_identity_node;
-    new_identity_node.set_name(gather_ind_node.name() + "_identity");
+    new_identity_node.set_name(gather_ind_node.name() + "_identity_" + std::to_string(index));
     new_identity_node.set_op("Identity");
     new_identity_node.set_device(gather_node.device());
     new_identity_node.clear_attr();
@@ -113,40 +105,30 @@ Status OptimizePatternFunction(const NodeDef& compute_node,
     new_nodes->push_back(gather_input_node);
     new_nodes->push_back(gather_ind_node);
     new_nodes->push_back(gather_axis_node);
-
+    index++;
     return Status::OK();
   }
-  NodeDef new_node;
-  new_node.set_name(gather_node.name()+"_identity");
-  new_node.set_op("Identity");
-  new_node.set_device(gather_node.device());
-  new_node.clear_attr();
-  (*new_node.mutable_attr())["T"].set_type(output_type);
-  *(new_node.mutable_input()->Add()) = gather_node.input(0);
-  *(new_node.mutable_input()->Add()) = AsControlDependency(gather_node.input(1));
-  *(new_node.mutable_input()->Add()) = AsControlDependency(gather_node.input(2));
-  VLOG(1) << "replace Gather to Identity, " << new_node.DebugString();
   NodeDef new_compute_node;
   new_compute_node.CopyFrom(compute_node);
-  *(new_compute_node.mutable_input(input_port)) = new_node.name();
+  *(new_compute_node.mutable_input(input_port)) = gather_node.input(0);
   new_nodes->push_back(new_compute_node);
   new_nodes->push_back(other_node);
   new_nodes->push_back(gather_node);
-  new_nodes->push_back(new_node);
   new_nodes->push_back(gather_input_node);
   new_nodes->push_back(gather_ind_node);
   new_nodes->push_back(gather_axis_node);
+  counter++;
 
   return Status::OK();
 }
 
 bool OptimizeGatherPattern(GraphDef &input_graph_def, GraphDef* output_graph_def,
-                           bool& is_changed, bool radical) {
+                           bool& is_changed, int& counter, bool radical) {
   VLOG(1) << "start to optimize gather pattern, " << gather_pattern1.DebugString();
   Status status = ReplaceMatchingOpTypes(
       input_graph_def,
       gather_pattern1,
-      [&is_changed](const NodeMatch& match, const std::set<string>& input_nodes,
+      [&is_changed, &counter](const NodeMatch& match, const std::set<string>& input_nodes,
                     const std::set<string>& output_nodes,
                     std::vector<NodeDef>* new_nodes) {
         const NodeDef& compute_node = match.node;
@@ -156,12 +138,13 @@ bool OptimizeGatherPattern(GraphDef &input_graph_def, GraphDef* output_graph_def
         const NodeDef& gather_ind_node = match.inputs[0].inputs[1].node;
         const NodeDef& gather_axis_node = match.inputs[0].inputs[2].node;
         VLOG(1) << match.DebugString();
+        is_changed = true;
         
         return OptimizePatternFunction(compute_node, gather_node, other_node,
                                        gather_input_node, gather_ind_node,
-                                       gather_axis_node, new_nodes, 0);
+                                       gather_axis_node, new_nodes, 0, counter);
       },
-      {}, output_graph_def);
+      {}, output_graph_def, true);
   if (!status.ok()) {
     LOG(ERROR) << "optimize gather failed " << status;
     return false;
@@ -171,7 +154,7 @@ bool OptimizeGatherPattern(GraphDef &input_graph_def, GraphDef* output_graph_def
   status = ReplaceMatchingOpTypes(
       input_graph_def,
       gather_pattern2,
-      [&is_changed](const NodeMatch& match, const std::set<string>& input_nodes,
+      [&is_changed, &counter](const NodeMatch& match, const std::set<string>& input_nodes,
                     const std::set<string>& output_nodes,
                     std::vector<NodeDef>* new_nodes) {
         const NodeDef& compute_node = match.node;
@@ -184,9 +167,9 @@ bool OptimizeGatherPattern(GraphDef &input_graph_def, GraphDef* output_graph_def
         is_changed = true;
         return OptimizePatternFunction(compute_node, gather_node, other_node,
                                        gather_input_node, gather_ind_node,
-                                       gather_axis_node, new_nodes, 1);
+                                       gather_axis_node, new_nodes, 1, counter);
       },
-      {}, output_graph_def);
+      {}, output_graph_def, true);
   if (!status.ok()) {
     LOG(ERROR) << "optimize gather failed " << status;
     return false;
@@ -199,7 +182,7 @@ bool OptimizeGatherPattern(GraphDef &input_graph_def, GraphDef* output_graph_def
   status = ReplaceMatchingOpTypes(
       input_graph_def,
       gather_pattern3,
-      [&is_changed](const NodeMatch& match, const std::set<string>& input_nodes,
+      [&is_changed, &counter](const NodeMatch& match, const std::set<string>& input_nodes,
                     const std::set<string>& output_nodes,
                     std::vector<NodeDef>* new_nodes) {
         const NodeDef& compute_node = match.node;
@@ -212,9 +195,9 @@ bool OptimizeGatherPattern(GraphDef &input_graph_def, GraphDef* output_graph_def
         is_changed = true;
         return OptimizePatternFunction(compute_node, gather_node, other_node,
                                        gather_input_node, gather_ind_node,
-                                       gather_axis_node, new_nodes, 0);
+                                       gather_axis_node, new_nodes, 0, counter);
       },
-      {}, output_graph_def);
+      {}, output_graph_def, true);
   if (!status.ok()) {
     LOG(ERROR) << "optimize gather failed " << status;
     return false;
@@ -223,14 +206,15 @@ bool OptimizeGatherPattern(GraphDef &input_graph_def, GraphDef* output_graph_def
 }
 
 bool OptimizeMemoryAccess(GraphDef& input_graph, GraphDef* optimized_graph, bool radical) {
-  
+  int counter = 0;
   while(1) {
     bool graph_changed = false;
-    bool result = OptimizeGatherPattern(input_graph, optimized_graph, graph_changed, radical);
+    bool result = OptimizeGatherPattern(input_graph, optimized_graph, graph_changed, counter, radical);
     if (!result) return false;
     if (!graph_changed) break;
     std::swap(input_graph, *optimized_graph);
   }
+  VLOG(0) << "remove " << counter << " useless Gather node";
   return true;
 }
 

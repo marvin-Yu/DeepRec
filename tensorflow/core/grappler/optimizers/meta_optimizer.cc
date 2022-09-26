@@ -38,6 +38,9 @@ limitations under the License.
 #include "tensorflow/core/grappler/optimizers/batch_mat_mul_compatible.h"
 #include "tensorflow/core/grappler/optimizers/gemm_compression.h"
 #include "tensorflow/core/grappler/optimizers/memory_access_optimizer.h"
+#include "tensorflow/core/grappler/optimizers/fuse_cross_feature_optimizer.h"
+#include "tensorflow/core/grappler/optimizers/partial_mixed_precision.h"
+#include "tensorflow/core/grappler/optimizers/merge_gemm_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/generic_layout_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/implementation_selector.h"
 #include "tensorflow/core/grappler/optimizers/loop_optimizer.h"
@@ -91,7 +94,9 @@ int NumIterations(const RewriterConfig& cfg) {
 // Check if optimizer is allowed to run only once.
 bool IsRunOnceOptimizer(const string& name) {
   return name == "layout" || name == "memory_optimizer" ||
-         name == "multi_dnn_switch" ||
+         name == "multi_dnn_switch" || name == "partial_mixed_precision" ||
+         name == "partial_mixed_precision_second_stage" ||
+         name == "merge_gemm" || name == "merge_gemm_second_stage" ||
          name == "loop_optimizer" || name == "auto_mixed_precision";
 }
 
@@ -152,6 +157,11 @@ std::unique_ptr<GraphOptimizer> MetaOptimizer::MakeNewOptimizer(
   MK_OPT("gemm_compression", new GemmCompressionOptimizer());
   MK_OPT("gemm", new GemmOptimizer());
   MK_OPT("multi_dnn_switch", new MultiDNNSwitchOptimizer());
+  MK_OPT("fuse_cross_feature", new FuseCrossFeatureOptimizer());
+  MK_OPT("partial_mixed_precision", new PartialMixedPrecision());
+  MK_OPT("partial_mixed_precision_second_stage", new PartialMixedPrecisionSecondStage());
+  MK_OPT("merge_gemm", new MergeGemmOptimizer());
+  MK_OPT("merge_gemm_second_stage", new MergeGemmOptimizerSecondStage());
   MK_OPT("auto_mixed_precision",
          new AutoMixedPrecision(cfg_.auto_mixed_precision()));
   MK_OPT("memory", new MemoryOptimizer(RewriterConfig::MANUAL));
@@ -201,6 +211,17 @@ Status MetaOptimizer::InitializeOptimizers(
   if (cfg_.debug_stripper() == RewriterConfig::ON) {
     optimizers->push_back(MakeUnique<DebugStripper>());
   }
+  // implement optimization before constant_folding
+  // to fold Cast op after const
+  if (cfg_.partial_mixed_precision() == RewriterConfig::ON) {
+    optimizers->push_back(MakeUnique<PartialMixedPrecision>());
+  }
+  if (cfg_.original_delivery_optimization() == RewriterConfig::ON) {
+    if (cfg_.merge_gemm_optimization() != RewriterConfig::OFF)
+    {
+      optimizers->push_back(MakeUnique<MergeGemmOptimizer>());
+    }
+  }
   if (cfg_.constant_folding() != RewriterConfig::OFF) {
     optimizers->push_back(
         MakeUnique<ConstantFolding>(cfg_.constant_folding(), cpu_device_));
@@ -214,6 +235,13 @@ Status MetaOptimizer::InitializeOptimizers(
   if (cfg_.pin_to_host_optimization() == RewriterConfig::ON) {
     optimizers->push_back(MakeUnique<PinToHostOptimizer>());
   }
+  // implement optimization before arithmetic_optimization
+  // to avoid changing graph structure
+  if (cfg_.original_delivery_optimization() == RewriterConfig::ON) {
+    if (cfg_.fuse_cross_feature_optimization() != RewriterConfig::OFF) {
+      optimizers->push_back(MakeUnique<FuseCrossFeatureOptimizer>());
+    }
+  }
   if (cfg_.arithmetic_optimization() != RewriterConfig::OFF) {
     optimizers->push_back(
         MakeUnique<ArithmeticOptimizer>(cfg_.arithmetic_optimization()));
@@ -226,12 +254,14 @@ Status MetaOptimizer::InitializeOptimizers(
     optimizers->push_back(
         MakeUnique<DependencyOptimizer>(cfg_.dependency_optimization()));
   }
-  if (cfg_.gemm_optimization() == RewriterConfig::ON) {
-    optimizers->push_back(MakeUnique<GemmOptimizer>());
-  }
   if (cfg_.original_delivery_optimization() == RewriterConfig::ON) {
     if (cfg_.multi_dnn_switch_optimization() != RewriterConfig::OFF) {
-      optimizers->push_back(MakeUnique<MultiDNNSwitchOptimizer>());
+      if (cfg_.multi_dnn_skip_branchs().empty()) {
+        optimizers->push_back(MakeUnique<MultiDNNSwitchOptimizer>());
+      } else {
+        optimizers->push_back(MakeUnique<MultiDNNSwitchOptimizer>(
+              cfg_.multi_dnn_skip_branchs()));
+      }
     }
     if (cfg_.gemm_compression_optimization() != RewriterConfig::OFF) {
       optimizers->push_back(MakeUnique<GemmCompressionOptimizer>());
@@ -242,6 +272,20 @@ Status MetaOptimizer::InitializeOptimizers(
     if (cfg_.memory_access_optimization() != RewriterConfig::OFF) {
       optimizers->push_back(MakeUnique<MemoryAccessOptimizer>());
     }
+    if (cfg_.dependency_optimization() != RewriterConfig::OFF) {
+      optimizers->push_back(
+          MakeUnique<DependencyOptimizer>(cfg_.dependency_optimization()));
+    }
+    if (cfg_.merge_gemm_optimization() != RewriterConfig::OFF)
+    {
+      optimizers->push_back(MakeUnique<MergeGemmOptimizerSecondStage>());
+    }
+  }
+  if (cfg_.gemm_optimization() == RewriterConfig::ON) {
+    optimizers->push_back(MakeUnique<GemmOptimizer>());
+  }
+  if (cfg_.partial_mixed_precision() == RewriterConfig::ON) {
+    optimizers->push_back(MakeUnique<PartialMixedPrecisionSecondStage>());
   }
   if (cfg_.tile_equal() == RewriterConfig::ON) {
     optimizers->push_back(MakeUnique<TileOptimizer>());

@@ -161,13 +161,18 @@ struct NodeMatch {
 // Utility class to spot subgraphs matching particular patterns.
 class GraphMatcher {
  public:
-  GraphMatcher(const GraphDef& graph_def);
+  GraphMatcher(const GraphDef& graph_def, const bool decrease_node_copy = false);
 
   // Sorts the input nodes into execution order, and then skips any previously
   // matches so that no node appears in more than one match. The NodeDef
   // pointers contained in the results are owned by the GraphMatcher object, and
   // so will be invalid after its lifetime.
   Status GetOpTypeMatches(const OpTypePattern& pattern,
+                          std::vector<NodeMatch>* matches);
+
+  Status GetOpTypeMatchesDecreaseNodeCopy(
+                          const GraphDef& graph_def,
+                          const OpTypePattern& pattern,
                           std::vector<NodeMatch>* matches);
 
  private:
@@ -177,6 +182,7 @@ class GraphMatcher {
 
   GraphDef graph_def_;
   std::map<string, const NodeDef*> node_map_;
+  bool decrease_node_copy_;
 };
 
 struct ReplaceMatchingOpTypesOptions {
@@ -200,7 +206,8 @@ Status ReplaceMatchingOpTypes(
     const std::function<Status(const NodeMatch&, const std::set<string>&,
                                const std::set<string>&, std::vector<NodeDef>*)>&
         node_generator,
-    const ReplaceMatchingOpTypesOptions& options, GraphDef* output_graph_def);
+    const ReplaceMatchingOpTypesOptions& options, GraphDef* output_graph_def,
+    const bool decrease_node_copy = false);
 
 // Returns a list of the unique nodes found in this match.
 void MatchedNodesAsArray(const NodeMatch& match, std::vector<NodeDef>* result);
