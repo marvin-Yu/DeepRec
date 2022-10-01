@@ -512,8 +512,15 @@ Status MetaOptimizer::OptimizeGraph(Cluster* cluster, const GrapplerItem& item,
         if (fusion_optimizer == nullptr) fusion_optimizer = optimizer.get();
         continue;
       }
+      auto t0 = std::chrono::steady_clock::now();
       TF_RETURN_IF_ERROR(RunOptimizer(optimizer.get(), cluster, &optimized_item,
                                       optimized_graph, &optimization_result));
+      auto tt = std::chrono::duration_cast<std::chrono::microseconds>
+                (std::chrono::steady_clock::now() - t0).count();
+      if (tt > 1000000) {
+        LOG(INFO) << "iteration " << iteration << ", " << optimizer->name()
+                  << " use time: " << tt << " us" << std::endl;
+      }
       if (iteration == 0 && optimizer->name() == "model_pruner") {
         CompressConstants(optimized_graph);
       }
