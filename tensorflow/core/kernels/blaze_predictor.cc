@@ -154,6 +154,9 @@ Status BlazePredictor::PrepareCallableOptions(CallableOptions &callable_options)
           cpu_inputs.insert(node.name());
         }
       }
+      if (node.device() == "/device:CPU:0") {
+        cpu_inputs.insert(node.name());
+      }
     }
   }
   for (const auto& input : input_names_) {
