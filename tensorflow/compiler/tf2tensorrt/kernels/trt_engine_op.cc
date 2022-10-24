@@ -42,6 +42,7 @@ limitations under the License.
 #include "tensorflow/core/platform/stream_executor.h"
 #include "tensorflow/core/platform/thread_annotations.h"
 #include "tensorflow/core/platform/types.h"
+#include "tensorflow/core/util/env_var.h"
 #include "tensorflow/stream_executor/lib/statusor.h"
 
 #if GOOGLE_CUDA
@@ -312,6 +313,11 @@ TRTEngineOp::TRTEngineOp(OpKernelConstruction* context)
       StrAppend(&s, i, " ");
     }
     VLOG(0) << s;
+  }
+  Status status =
+      ReadInt64FromEnvVar("TF_CONTEXT_NUM_PER_TRT_ENGINE", 4, &context_num_per_trt_engine);
+  if (!status.ok()) {
+    LOG(ERROR) << status.error_message();
   }
 }
 
