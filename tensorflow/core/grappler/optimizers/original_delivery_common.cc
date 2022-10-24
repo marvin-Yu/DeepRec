@@ -356,6 +356,35 @@ Node* ConstuctCastOp(Graph* graph, const Node* base, int port,
   return cast;
 }
 
+Status ConstructExpandDimsNodeDef(NodeDef& def, const NodeDef& base, string name,
+                                 NodeDefBuilder::NodeOut& input,
+                                 NodeDefBuilder::NodeOut& dim,
+                                 DataType t_type, DataType t_dim) {
+  std::function<Status(NodeDef&)> builder = [&](NodeDef& def) {
+    return NodeDefBuilder(name, "ExpandDims")
+                          .Input(input)
+                          .Input(dim)
+                          .Attr("T", t_type)
+                          .Attr("Tdim", t_dim)
+                          .Finalize(&def);
+  };
+  TF_RETURN_IF_ERROR(NodeDefConstructor(def, base, builder));
+  return Status::OK();
+}
+
+Status ConstructSqueezeNodeDef(NodeDef& def, const NodeDef& base, string name,
+                                 NodeDefBuilder::NodeOut& input,
+                                 DataType t_type) {
+  std::function<Status(NodeDef&)> builder = [&](NodeDef& def) {
+    return NodeDefBuilder(name, "Squeeze")
+                          .Input(input)
+                          .Attr("T", t_type)
+                          .Finalize(&def);
+  };
+  TF_RETURN_IF_ERROR(NodeDefConstructor(def, base, builder));
+  return Status::OK();
+}
+
 Status UpdateAllEdge(Graph* graph, Node* new_src_node, Node* old_dst_node) {
   std::vector<Node*> dst_nodes;
   std::vector<int> dst_inputs;
