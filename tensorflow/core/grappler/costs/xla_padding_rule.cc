@@ -97,6 +97,8 @@ namespace {
       "_Arg",
       "_HostCast",
       "_Retval",
+      "Prod",
+      "Shape", "ShapeN", "Rank","Size", "TensorArraySizeV3",
   };
   const std::set<std::string> shape_ops = {"Shape", "ShapeN", "Rank","Size", "TensorArraySizeV3"};
   const std::set<std::string> black_list_ops = {
@@ -132,7 +134,7 @@ namespace {
     "MatrixBandPart", "MatrixDiag", "MatrixDiagPart", "MatrixDiagPartV2", "MatrixDiagV2", "MatrixInverse", 
     "MatrixSetDiag", "MatrixSetDiagV2", "MatrixTriangularSolve", "MirrorPad",  "NextAfter", "NonMaxSuppressionV4", 
     "OneHot", "ParallelDynamicStitch", "ParameterizedTruncatedNormal",  "PlaceholderWithDefault", 
-    "Prod", "Qr", "QuantizeAndDequantizeV2", "QuantizeAndDequantizeV3", "RFFT", "RFFT2D", "RFFT3D", 
+    "Qr", "QuantizeAndDequantizeV2", "QuantizeAndDequantizeV3", "RFFT", "RFFT2D", "RFFT3D",
     "RGBToHSV", "RandomShuffle", "RandomStandardNormal", "RandomUniform", "RandomUniformInt", "ReadVariableOp",
     "Reciprocal", "ReciprocalGrad", "ResourceApplyAdaMax", "ResourceApplyAdadelta", "ResourceApplyAdagrad", 
     "ResourceApplyAdagradDA", "ResourceApplyAdagradV2", "ResourceApplyAdam", "ResourceApplyAddSign", 
@@ -186,7 +188,15 @@ namespace {
   /****            Add new Op rules Here *****************/
   /********************************************************/
   /********************************************************/
- 
+
+#define CHECK_TENSOR_NULL(INPUT, NODE)              \
+  if (INPUT == nullptr) {                           \
+    LOG(WARNING) << "Validate " << NODE.name()      \
+                 << "(" << NODE.op() << ")"         \
+                 << " input tensor is nullptr";   \
+    return true;                                    \
+  }
+
   inline bool ValidateSoftmax(const NodeDef& node, 
       const std::vector<std::vector<int>>& diff_dims, 
       InferenceContext* ic) {
@@ -250,6 +260,7 @@ namespace {
     int input_dim = inputs_shape.size();
 
     const Tensor* reduce_dim = ic->input_tensor(1);
+    CHECK_TENSOR_NULL(reduce_dim, node);
     auto reduce_array = reduce_dim->flat<int>();
     for (int i = 0; i < reduce_dim->NumElements(); i++) {
       int dim = reduce_array(i);
@@ -297,6 +308,7 @@ namespace {
         node.op() == "Concat" ? 0 : ic->num_inputs() - 1;
 
     const Tensor* concat_dim_tensor = ic->input_tensor(concat_dim_index);
+    CHECK_TENSOR_NULL(concat_dim_tensor, node);
     int64 concat_dim;
     auto s = ic->GetScalarFromTensor(concat_dim_tensor, &concat_dim);
     if (!s.ok()) {
@@ -366,6 +378,7 @@ namespace {
         node.op() == "Split" ? 0 : 2;
  
     const Tensor* split_dim_tensor = ic->input_tensor(split_dim_index);
+    CHECK_TENSOR_NULL(split_dim_tensor, node);
     int64 split_dim;
     auto s = ic->GetScalarFromTensor(split_dim_tensor, &split_dim);
     if (!s.ok()) {
@@ -407,7 +420,7 @@ namespace {
 
     if (node.op() != "Reshape") return false;
     CHECK(diff_dims.size() == 2) << node.op() << " must have 2 inputs but get " << diff_dims.size();
-   
+
     // Input shape unchange, return
     if (diff_dims[0].size() == 0) return true;
     if (diff_dims[0].size() > 1) {
@@ -430,6 +443,7 @@ namespace {
     // Get the mul of reshape dims before and after dynamic dim
     int shape_cumprod_pre_dynamic_dim = 1, shape_cumprod_post_dynamic_dim = 1;
     const Tensor* reshape_vals = ic->input_tensor(1);
+    CHECK_TENSOR_NULL(reshape_vals, node);
     const int reshape_vals_count = InferenceContext::Value(ic->input(1), 0);
     const gtl::ArraySlice<int> reshape_array(reshape_vals->flat<int>().data(), reshape_vals_count);
     VLOG(1) << node.op() << " Dims " << DebugString(reshape_array);
@@ -490,6 +504,7 @@ namespace {
 
     const int input_dims = InferenceContext::Rank(ic->input(0));
     const Tensor* multiples = ic->input_tensor(1);
+    CHECK_TENSOR_NULL(multiples, node);
     const gtl::ArraySlice<int> multiples_array(multiples->flat<int>().data(), input_dims);
     VLOG(1) << node.op() << " Dims " << DebugString(multiples_array);
 
@@ -562,6 +577,8 @@ namespace {
     const std::vector<int32> inputs_shape = InferenceContext::Dims(ic->input(0));
     const Tensor* begin = ic->input_tensor(1);
     const Tensor* size = ic->input_tensor(2);
+    CHECK_TENSOR_NULL(begin, node);
+    CHECK_TENSOR_NULL(size, node);
 
     if (begin->dtype() == DT_INT32) {
       return HandleSlice<int>(node, diff_dims, inputs_shape, begin, size);
@@ -615,14 +632,17 @@ namespace {
     const int input_rank = inputs_shape.size();
 
     const Tensor* begin = ic->input_tensor(1);
+    CHECK_TENSOR_NULL(begin, node);
     const gtl::ArraySlice<int> begin_array(begin->flat<int>().data(), input_rank);
     VLOG(1) << "begin " << DebugString(begin_array);
 
     const Tensor* end = ic->input_tensor(2);
+    CHECK_TENSOR_NULL(end, node);
     const gtl::ArraySlice<int> end_array(end->flat<int>().data(), input_rank);
     VLOG(1) << "end " << DebugString(end_array);
 
     const Tensor* strides = ic->input_tensor(3);
+    CHECK_TENSOR_NULL(strides, node);
     const gtl::ArraySlice<int> strides_array(strides->flat<int>().data(), input_rank);
     VLOG(1) << "strides " << DebugString(strides_array);
 

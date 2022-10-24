@@ -605,6 +605,7 @@ message ConfigProto {
   bool enable_xla_auto_padding = 114;
   int32 xla_padding_type = 115;
   string auto_padding_shape = 116;
+  bool enable_xla_fusion_shape = 117;
   // Next: 17
 }
 
