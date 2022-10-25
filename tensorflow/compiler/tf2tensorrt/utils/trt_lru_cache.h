@@ -126,7 +126,7 @@ struct VectorTensorShapeHasher {
 #if GOOGLE_TENSORRT
 
 
-static const int context_num_per_trt_engine = 4;
+static int64 context_num_per_trt_engine = 4;
 
 struct EngineContext {
   EngineContext() {}  // Creates an empty context.
@@ -135,6 +135,7 @@ struct EngineContext {
       : cuda_engine(std::move(input_cuda_engine)) {
         for (int i = 0; i < context_num_per_trt_engine; i++) {
           execution_contexts.emplace_back(TrtUniquePtrType<nvinfer1::IExecutionContext>(cuda_engine->createExecutionContext()));
+          mus.emplace_back();
         }
       }
   EngineContext(
@@ -148,7 +149,7 @@ struct EngineContext {
   TrtUniquePtrType<nvinfer1::IExecutionContext> execution_context
       GUARDED_BY(mu);
 
-  mutex mus[context_num_per_trt_engine];
+  std::vector<mutex> mus;
   std::vector<TrtUniquePtrType<nvinfer1::IExecutionContext>> execution_contexts;
 };
 
