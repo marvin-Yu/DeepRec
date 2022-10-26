@@ -269,6 +269,8 @@ bool IsFuseRecv(const NodeDef& node) {
    return op == "_FuseRecv";
 }
 
+bool IsGather(const NodeDef& node) { return node.op() == "Gather" || node.op() == "GatherV2"; }
+
 bool IsGreater(const NodeDef& node) { return node.op() == "Greater"; }
 
 bool IsGreaterEqual(const NodeDef& node) { return node.op() == "GreaterEqual"; }

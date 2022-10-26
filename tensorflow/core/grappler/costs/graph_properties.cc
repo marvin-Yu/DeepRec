@@ -1805,11 +1805,23 @@ class SymbolicShapeRefiner {
         for (int i = 0; i < c->inference_context->num_inputs(); ++i) {
           c->output_tensors_as_shapes[i] = c->inference_context->input(i);
         }
-      } else if (node.op() == "ConcatV2") {
+      } else if (IsConcat(node)) {
         bool valid = true;
         ShapeHandle result;
         for (int i = 0; i < ic->num_inputs() - 1; ++i) {
           ShapeHandle input = ic->input_tensors_as_shapes()[i];
+          if (!ic->RankKnown(input)) {
+            const Tensor* t = ic->input_tensor(i);
+            if (t && (t->dtype() == DT_INT32 || t->dtype() == DT_INT64)) {
+              auto input_array = t->flat<int>();
+              std::vector<DimensionHandle> dims;
+              for (int j = 0; j < t->NumElements(); ++j) {
+                auto value = input_array(j);
+                dims.push_back(ic->MakeDim(value));
+              }
+              input = ic->MakeShape(dims);
+            }
+          }
           if (!ic->RankKnown(input)) {
             valid = false;
             break;
@@ -1903,8 +1915,11 @@ class SymbolicShapeRefiner {
             node.attr().at("new_axis_mask").i() != 0) {
           valid = false;
         }
-        if (node.attr().count("shrink_axis_mask") > 0 &&
-            node.attr().at("shrink_axis_mask").i() != 0) {
+        int shrink_axis_mask = 0;
+        if (node.attr().count("shrink_axis_mask") > 0) {
+          shrink_axis_mask = node.attr().at("shrink_axis_mask").i();
+        }
+        if (shrink_axis_mask < 0 || shrink_axis_mask > 1) {
           valid = false;
         }
         int begin_mask = 0;
@@ -1931,6 +1946,10 @@ class SymbolicShapeRefiner {
                 (slice_end->dtype() == DT_INT32 ? slice_end->flat<int32>()(0)
                                                 : slice_end->flat<int64>()(0));
           }
+          if (shrink_axis_mask == 1) {
+            if (begin < 0) begin = begin + ic->Rank(input);
+            end = begin + 1;
+          }
           int64 stride = slice_stride->dtype() == DT_INT32
                              ? slice_stride->flat<int32>()(0)
                              : slice_stride->flat<int64>()(0);
@@ -1938,6 +1957,47 @@ class SymbolicShapeRefiner {
           TF_RETURN_IF_ERROR(ic->Subshape(input, begin, end, stride, &result));
           c->output_tensors_as_shapes.resize(1);
           c->output_tensors_as_shapes[0] = result;
+        }
+      } else if (IsProd(node)) {
+        const ShapeHandle& input = ic->input_tensors_as_shapes()[0];
+        int32 input_rank = ic->Rank(input);
+        if (input_rank >= 1) {
+          DimensionHandle out_dim = ic->Dim(input, 0);
+          for (int i = 1; i < input_rank; ++i) {
+            TF_RETURN_IF_ERROR(ic->Multiply(out_dim, ic->Dim(input, i), &out_dim));
+            if (!ic->ValueKnown(out_dim)) {
+              break;
+            }
+          }
+          if (ic->ValueKnown(out_dim)) {
+            std::vector<DimensionHandle> dims(1, out_dim);
+            c->output_tensors_as_shapes.resize(1);
+            c->output_tensors_as_shapes[0] = ic->MakeShape(dims);
+          }
+        }
+      } else if (IsGather(node)) {
+        const ShapeHandle& params = ic->input_tensors_as_shapes()[0];
+        int32 params_rank = ic->Rank(params);
+        const Tensor* indices = ic->input_tensor(1);
+        if (params_rank >= 1 && indices != nullptr &&
+            (indices->dtype() == DT_INT32 || indices->dtype() == DT_INT64)) {
+          auto indices_array = indices->flat<int>();
+          std::vector<DimensionHandle> dims;
+          for(int i = 0; i < indices->NumElements(); ++i) {
+            int index = indices_array(i);
+            if (index < 0 || index >= params_rank) {
+              break;
+            }
+            DimensionHandle param = ic->Dim(params, index);
+            if (!ic->ValueKnown(param)) {
+              break;
+            }
+            dims.push_back(param);
+          }
+          if (dims.size() == indices->NumElements()) {
+            c->output_tensors_as_shapes.resize(1);
+            c->output_tensors_as_shapes[0] = ic->MakeShape(dims);
+          }
         }
       }
     }

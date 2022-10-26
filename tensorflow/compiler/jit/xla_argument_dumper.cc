@@ -137,6 +137,10 @@ Status XlaArgumentDumper::ParseFromFile(
     if (!s.ok()) return s;
 
     std::vector<XlaCompiler::Argument> args;
+    if (protos.xla_arguments_size() != indexs_args.size()) {
+      VLOG(0) << "Gets an error cache files with different arguments size " << file_path;
+      continue;
+    }
     if(!FromProto(protos, indexs_args, args)) continue;
     inputs_shape_info_array.push_back(BuildInputsShapeInfo(base, args)); 
     args_array.push_back(args);
@@ -258,7 +262,7 @@ bool XlaArgumentDumper::FromProto(
     std::string name = proto.name();
     int index = get_name_index(name, indexs_args);
     VLOG(1) << name << " index is " << index;
-    if (index < 0) {
+    if (index < 0 || index >= args.size()) {
       VLOG(0) << "Parse xla args file fail, cannt find " << name;
       return false;
     }

@@ -1731,6 +1731,9 @@ bool PostOrderTrace(Node* n) {
 
   n->AddAttr(kXlaDisableByPadding, false);
   for (const Edge* e: n->out_edges()) {
+    if (e->IsControlEdge()) {
+      continue;
+    }
     Node& dst = *e->dst();
     auto output_type = GetNodeDataType(&dst);
     if (output_type == DT_INT32 || output_type == DT_INT64) {
@@ -1745,14 +1748,37 @@ bool PostOrderTrace(Node* n) {
   return true;
 }
 
+bool CheckSourceNodeIsArgs(Node* n) {
+  if (n == nullptr) {
+    return false;
+  }
+  for (const Edge* e: n->in_edges()) {
+    Node& src = *e->src();
+    if (src.type_string() == "_Arg") {
+      return true;
+    }
+    // auto_mixed_precision: _Arg -> Cast -> Shape
+    if (src.type_string() == "Cast") {
+      return CheckSourceNodeIsArgs(&src);
+    }
+  }
+  return false;
+}
+
 // Mark the shape sensitive op(such as tf.shape, tf.size)
 // uncompile by xla, becase it will produce const input for cluster.
 // We remove tf.shape and all its consumer util the op's input are
 // not shape related(espically the input is not int32 type)
 
-void MarkShapeConsumerOpUncompile(Graph* graph) {
+void MarkShapeConsumerOpUncompile(Graph* graph, bool enable_xla_fusion_shape) {
   for (Node* n : graph->nodes()) {
     if (!XlaPaddingRule::IsShapeSensitiveOp(n->type_string())) {
+      continue;
+    }
+    if (enable_xla_fusion_shape && !CheckSourceNodeIsArgs(n)) {
+      VLOG(0) << "ShapeOpCompile find node " << n->name()
+              << "(" << n->type_string() << ")"
+              << " because source node is not args";
       continue;
     }
     VLOG(1) << "MarkShapeConsumerOpUncompile find node " << n->name() 
@@ -1780,8 +1806,10 @@ Status MarkForCompilation(
   }
   bool enable_xla_auto_padding = options.session_options->config.enable_xla_auto_padding();
   VLOG(0) << "enable_xla_auto_padding " << enable_xla_auto_padding;
+  bool enable_xla_fusion_shape = options.session_options->config.enable_xla_fusion_shape();
+  VLOG(0) << "enable_xla_fusion_shape " << enable_xla_fusion_shape;
   if (enable_xla_auto_padding) {
-    MarkShapeConsumerOpUncompile(graph);
+    MarkShapeConsumerOpUncompile(graph, enable_xla_fusion_shape);
   }
  
   return MarkForCompilationPassImpl{debug_options, graph, flib_def,
