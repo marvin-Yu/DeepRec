@@ -97,7 +97,7 @@ Status ConstructTransposeNodeDef(NodeDef& def, const NodeDef& base, string name,
                                  NodeDefBuilder::NodeOut& input,
                                  NodeDefBuilder::NodeOut& perm,
                                  DataType t_input, DataType t_perm);
-Node* ConstructTransposeOp(Graph* graph, const Edge* in_edge,
+Node* ConstructTransposeOp(Graph* graph, Node* in_node, int port,
                            string name, Tensor& perm_t);
 
 Status ConstructReshapeNodeDef(NodeDef& def, const NodeDef& base, string name,
