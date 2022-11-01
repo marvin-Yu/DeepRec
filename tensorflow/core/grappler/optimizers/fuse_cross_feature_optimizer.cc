@@ -34,6 +34,8 @@ namespace grappler {
 
 namespace {
 
+const std::string kCpuDeviceName = "/job:localhost/replica:0/task:0/device:CPU:0";
+
 #define CHECK_NULL(target)   \
   if (target == nullptr) {   \
     return errors::Internal("got nullptr!"); \
@@ -425,7 +427,7 @@ bool GetCoActionPattern(Node* co_action, CoActionPattern& pattern) {
 
 Node* ConstructPackOp(Graph* graph, Node* co_action,
                      std::vector<const Edge*>& input_edges, string sufix) {
-  string device_name = "/device:CPU:0";
+  const string device_name = kCpuDeviceName;
   string pack_name =  co_action->name() + sufix;
   NodeDef pack_node;
   int input_size = input_edges.size();
