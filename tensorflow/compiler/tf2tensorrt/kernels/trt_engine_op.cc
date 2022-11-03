@@ -838,6 +838,40 @@ StatusOr<EngineContext*> TRTEngineOp::GetEngine(
 
     VLOG(1) << "Added new engine to cache of " << name()
             << ". Cache size: " << cache.size();
+    // do not pad batch size 1 for performance
+    if (engine_batch_size > 1) {
+      // all engine_pad_to_batches will be built when the first TRTEngine built.
+      std::vector<TensorShape> pad_input_shapes(engine_input_shapes);
+      for (auto pad_batch_size : engine_pad_to_batches_) {
+        for (auto& shape : pad_input_shapes) {
+          shape.set_dim(0, pad_batch_size);
+        }
+        if (cache.count(pad_input_shapes)) {
+          continue;
+        }
+        TrtUniquePtrType<nvinfer1::ICudaEngine> pad_engine;
+        std::vector<PartialTensorShape> pad_partial_shapes(pad_input_shapes.begin(),
+                                                           pad_input_shapes.end());
+        auto status = convert::ConvertGraphDefToEngine(
+            segment_graph_, precision_mode_, pad_batch_size, workspace_size_,
+            pad_partial_shapes, &logger, allocator, calibrator_.get(), &pad_engine, use_calibration_,
+            /*convert_successfully=*/nullptr,
+            /*total_flops=*/nullptr);
+        if (!status.ok()) {
+          LOG(WARNING) << "Engine creation for " << name() << " failed with pad_to_batches shape: "
+                       << TensorShapeUtils::ShapeListString(pad_input_shapes) << ". Reason: " << status;
+          cache.emplace(pad_input_shapes, absl::make_unique<EngineContext>());
+        } else {
+          LOG(INFO) << "Building a new additional TensorRT engine for "
+                    << name() << " with pad_to_batches shape: "
+                    << TensorShapeUtils::ShapeListString(pad_input_shapes)
+                    << ", inserted to TRTEngineCacheResource " << cache_res
+                    << ". Cache size " << cache.size() + 1;
+          cache.emplace(pad_input_shapes,
+                        absl::make_unique<EngineContext>(std::move(pad_engine)));
+        }
+      }
+    }
   }
   VLOG(4) << "TRT pad inputs, engine/actual batch_sizes: "
           << engine_input_shapes[0].dim_size(0) << "/" << input_shapes[0].dim_size(0)
