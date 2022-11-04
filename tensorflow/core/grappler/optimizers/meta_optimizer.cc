@@ -265,12 +265,9 @@ Status MetaOptimizer::InitializeOptimizers(
   }
   if (cfg_.original_delivery_optimization() == RewriterConfig::ON) {
     if (cfg_.multi_dnn_switch_optimization() != RewriterConfig::OFF) {
-      if (cfg_.multi_dnn_skip_branchs().empty()) {
-        optimizers->push_back(MakeUnique<MultiDNNSwitchOptimizer>());
-      } else {
-        optimizers->push_back(MakeUnique<MultiDNNSwitchOptimizer>(
-              cfg_.multi_dnn_skip_branchs()));
-      }
+      optimizers->push_back(MakeUnique<MultiDNNSwitchOptimizer>(
+                            cfg_.multi_dnn_selected_branchs(),
+                            cfg_.multi_dnn_skip_branchs()));
     }
     if (cfg_.gemm_compression_optimization() != RewriterConfig::OFF) {
       optimizers->push_back(MakeUnique<GemmCompressionOptimizer>());
