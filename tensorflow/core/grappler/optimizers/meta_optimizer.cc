@@ -98,6 +98,9 @@ bool IsRunOnceOptimizer(const string& name) {
          name == "multi_dnn_switch" || name == "partial_mixed_precision" ||
          name == "partial_mixed_precision_second_stage" ||
          name == "merge_gemm" || name == "merge_gemm_second_stage" ||
+         name == "memory_access" || name == "fold_continuous_fc" ||
+         name == "fuse_cross_feature" || name == "gemm_compression" ||
+         name == "batch_mat_mul_compatible" ||
          name == "loop_optimizer" || name == "auto_mixed_precision";
 }
 
