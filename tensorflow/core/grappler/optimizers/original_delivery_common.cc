@@ -29,6 +29,7 @@ Status NodeDefConstructor(NodeDef& def, const NodeDef& base,
 }
 
 Node* NodeConstructor(Graph* graph, string name, const Node* base, const NodeDef& def) {
+  TF_RETURN_NULL_IF_NULL(base, "node constructor base is nullptr")
   Status status;
   Node *node = graph->AddNode(def, &status);
   TF_RETURN_NULL_IF_ERROR(status, name)
@@ -38,6 +39,7 @@ Node* NodeConstructor(Graph* graph, string name, const Node* base, const NodeDef
 
 Node* NodeConstructor(Graph* graph, string name, Node* base,
                      const std::function<Status(NodeDef&)>& node_builder) {
+  TF_RETURN_NULL_IF_NULL(base, "node constructor base is nullptr")
   NodeDef def;
   Status status = node_builder(def);
   TF_RETURN_NULL_IF_ERROR(status, name)
