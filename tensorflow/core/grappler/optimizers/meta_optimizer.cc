@@ -41,6 +41,7 @@ limitations under the License.
 #include "tensorflow/core/grappler/optimizers/fuse_cross_feature_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/partial_mixed_precision.h"
 #include "tensorflow/core/grappler/optimizers/merge_gemm_optimizer.h"
+#include "tensorflow/core/grappler/optimizers/fold_continuous_fc.h"
 #include "tensorflow/core/grappler/optimizers/generic_layout_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/implementation_selector.h"
 #include "tensorflow/core/grappler/optimizers/loop_optimizer.h"
@@ -97,6 +98,9 @@ bool IsRunOnceOptimizer(const string& name) {
          name == "multi_dnn_switch" || name == "partial_mixed_precision" ||
          name == "partial_mixed_precision_second_stage" ||
          name == "merge_gemm" || name == "merge_gemm_second_stage" ||
+         name == "memory_access" || name == "fold_continuous_fc" ||
+         name == "fuse_cross_feature" || name == "gemm_compression" ||
+         name == "batch_mat_mul_compatible" ||
          name == "loop_optimizer" || name == "auto_mixed_precision";
 }
 
@@ -217,6 +221,14 @@ Status MetaOptimizer::InitializeOptimizers(
     optimizers->push_back(MakeUnique<PartialMixedPrecision>());
   }
   if (cfg_.original_delivery_optimization() == RewriterConfig::ON) {
+    if (cfg_.fold_continuous_fc_optimization() != RewriterConfig::OFF)
+    {
+      optimizers->push_back(MakeUnique<FoldContinuousFCOptimizer>());
+    }
+    if (cfg_.constant_folding() != RewriterConfig::OFF) {
+      optimizers->push_back(
+          MakeUnique<ConstantFolding>(cfg_.constant_folding(), cpu_device_));
+    }
     if (cfg_.merge_gemm_optimization() != RewriterConfig::OFF)
     {
       optimizers->push_back(MakeUnique<MergeGemmOptimizer>());
@@ -256,12 +268,9 @@ Status MetaOptimizer::InitializeOptimizers(
   }
   if (cfg_.original_delivery_optimization() == RewriterConfig::ON) {
     if (cfg_.multi_dnn_switch_optimization() != RewriterConfig::OFF) {
-      if (cfg_.multi_dnn_skip_branchs().empty()) {
-        optimizers->push_back(MakeUnique<MultiDNNSwitchOptimizer>());
-      } else {
-        optimizers->push_back(MakeUnique<MultiDNNSwitchOptimizer>(
-              cfg_.multi_dnn_skip_branchs()));
-      }
+      optimizers->push_back(MakeUnique<MultiDNNSwitchOptimizer>(
+                            cfg_.multi_dnn_selected_branchs(),
+                            cfg_.multi_dnn_skip_branchs()));
     }
     if (cfg_.gemm_compression_optimization() != RewriterConfig::OFF) {
       optimizers->push_back(MakeUnique<GemmCompressionOptimizer>());
@@ -503,8 +512,15 @@ Status MetaOptimizer::OptimizeGraph(Cluster* cluster, const GrapplerItem& item,
         if (fusion_optimizer == nullptr) fusion_optimizer = optimizer.get();
         continue;
       }
+      auto t0 = std::chrono::steady_clock::now();
       TF_RETURN_IF_ERROR(RunOptimizer(optimizer.get(), cluster, &optimized_item,
                                       optimized_graph, &optimization_result));
+      auto tt = std::chrono::duration_cast<std::chrono::microseconds>
+                (std::chrono::steady_clock::now() - t0).count();
+      if (tt > 1000000) {
+        LOG(INFO) << "iteration " << iteration << ", " << optimizer->name()
+                  << " use time: " << tt << " us" << std::endl;
+      }
       if (iteration == 0 && optimizer->name() == "model_pruner") {
         CompressConstants(optimized_graph);
       }

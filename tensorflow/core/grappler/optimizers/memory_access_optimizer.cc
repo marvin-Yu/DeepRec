@@ -43,7 +43,8 @@ Status OptimizePatternFunction(const NodeDef& compute_node,
                                int input_port,
                                int& counter) {
   bool invalid = false;
-  if (gather_ind_node.name().find("user_creative_indicator") == string::npos) {
+  if (gather_ind_node.name().find("user_creative_indicator") == string::npos &&
+      gather_ind_node.name().find("user_ad_indicator") == string::npos) {
     VLOG(1) << "gather input indicator placeholder not match:" << gather_ind_node.name();
     invalid = true;
   }

@@ -34,6 +34,8 @@ namespace grappler {
 
 namespace {
 
+const std::string kCpuDeviceName = "/job:localhost/replica:0/task:0/device:CPU:0";
+
 #define CHECK_NULL(target)   \
   if (target == nullptr) {   \
     return errors::Internal("got nullptr!"); \
@@ -81,7 +83,7 @@ bool ReplaceCoAction(GraphDef &input_graph_def, GraphDef* output_graph_def, int&
       [&is_changed, &count](const NodeMatch& match, const std::set<string>& input_nodes,
          const std::set<string>& output_nodes,
          std::vector<NodeDef>* new_nodes) {
-        VLOG(1) << "-------------------------";
+        VLOG(1) << "match co aciton-------------------------";
         // 1. 匹配到pattern
         // 2. 获取有用的节点
         //    输入节点是StridedSlice和Reshape
@@ -104,16 +106,23 @@ bool ReplaceCoAction(GraphDef &input_graph_def, GraphDef* output_graph_def, int&
         const NodeDef& strideslice2_node = match.inputs[0].inputs[0].inputs[0].inputs[1].inputs[0].node;
         // [-1, 5, 4] -> [-1 , 1, 5, 4]
         const NodeDef& reshape_const_node = match.inputs[0].inputs[0].inputs[0].inputs[1].inputs[1].node;
-        
+
         std::vector<NodeDef> match_nodes;
         std::set<string> node_set;
         GetAllMatchNodes(match_nodes, node_set, match);
         VLOG(1) << "match nodes number:" << match_nodes.size();
 
         // 3. 检查placeholder和Reshape shape const 值
-        if (gather_ind_node.name().find("user_creative_indicator") == string::npos &&
-            gather_ind_node.name().find("nick_cate_indicators") == string::npos) {
-            VLOG(0) << "gather input indicator placeholder not match:" << gather_ind_node.name();
+        string indicator_name = gather_ind_node.name();
+        if (gather_ind_node.op() == "GatherV2") {
+          indicator_name = gather_ind_node.input(0);
+        }
+        VLOG(1) << "indicator is " << indicator_name;
+        if (indicator_name.find("user_creative_indicator") == string::npos &&
+            indicator_name.find("user_ad_indicator") == string::npos &&
+            indicator_name.find("cate_ad_indicator") == string::npos &&
+            indicator_name.find("nick_cate_indicators") == string::npos) {
+            VLOG(0) << "gather input indicator placeholder not match:" << indicator_name;
             new_nodes->insert(new_nodes->end(), match_nodes.begin(), match_nodes.end());
             return Status::OK();
         }
@@ -147,7 +156,8 @@ bool ReplaceCoAction(GraphDef &input_graph_def, GraphDef* output_graph_def, int&
 
         // 4. 创建Co_action算子, 改造算子语义，支持三维输入，模型第二维Parallel是1，省去reshape成四维的逻辑
         NodeDef co_action_node;
-        if (gather_ind_node.name().find("nick_cate_indicators") != string::npos) {
+        if (indicator_name.find("nick_cate_indicators") != string::npos ||
+            indicator_name.find("cate_ad_indicator") != string::npos) {
           co_action_node.set_op("CoActionIndicator");
         } else {
           co_action_node.set_op("CoAction");
@@ -156,9 +166,14 @@ bool ReplaceCoAction(GraphDef &input_graph_def, GraphDef* output_graph_def, int&
         co_action_node.set_device(concat_node.device());
         AddNodeInput(strideslice1_node.name(), &co_action_node);
         AddNodeInput(reshape_node.name(), &co_action_node);
-        if (gather_ind_node.name().find("nick_cate_indicators") != string::npos) {
+        if (indicator_name.find("nick_cate_indicators") != string::npos ||
+            indicator_name.find("cate_ad_indicator") != string::npos) {
           AddNodeInput(gather_ind_node.name(), &co_action_node);
-          CopyNodeAttr(gather_ind_node, "dtype", "Tindices", &co_action_node);
+          if (gather_ind_node.op() == "GatherV2") {
+            CopyNodeAttr(gather_ind_node, "Tindices", "Tindices", &co_action_node);
+          } else {
+            CopyNodeAttr(gather_ind_node, "dtype", "Tindices", &co_action_node);
+          }
         }
         SetNodeAttr("pow_num", 2, &co_action_node);
         CopyNodeAttr(concat_node, "T", "T", &co_action_node);
@@ -221,6 +236,95 @@ bool ReplaceCoAction(GraphDef &input_graph_def, GraphDef* output_graph_def, int&
 
 }
 
+bool MergeAdCreativeGather(GraphDef &input_graph_def, GraphDef* output_graph_def, int& count) {
+  VLOG(1) << "start to replace co_action model, " << cross_feature_creative_pattern.DebugString();
+  bool is_changed = false;
+  Status status = ReplaceMatchingOpTypes(
+      input_graph_def,
+      cross_feature_creative_pattern,
+      [&is_changed, &count](const NodeMatch& match, const std::set<string>& input_nodes,
+         const std::set<string>& output_nodes,
+         std::vector<NodeDef>* new_nodes) {
+        VLOG(1) << "match creative cross pattern-------------------------";
+        const NodeDef& concat_node = match.node;
+        const NodeDef& gather_slice = match.inputs[0].inputs[0].inputs[0].inputs[0].node;
+        const NodeDef& gather_slice_ind = match.inputs[0].inputs[0].inputs[0].inputs[0].inputs[1].node;
+        const NodeDef& gather_mul = match.inputs[1].inputs[0].inputs[0].inputs[0].node;
+        const NodeDef& gather_mul_ind = match.inputs[1].inputs[0].inputs[0].inputs[0].inputs[1].node;
+        // user stridedslice
+        const NodeDef& slice_user = match.inputs[0].inputs[0].inputs[0].inputs[0].inputs[0].node;
+        const NodeDef& gather_user = match.inputs[0].inputs[0].inputs[0].inputs[0].inputs[0].inputs[0].node;
+        const NodeDef& gather_user_input = match.inputs[0].inputs[0].inputs[0].inputs[0].inputs[0].inputs[0].inputs[0].node;
+        const NodeDef& gather_user_ind = match.inputs[0].inputs[0].inputs[0].inputs[0].inputs[0].inputs[0].inputs[1].node;
+        const NodeDef& gather_user_axis = match.inputs[0].inputs[0].inputs[0].inputs[0].inputs[0].inputs[0].inputs[2].node;
+        const NodeDef& matmul_slice = match.inputs[0].inputs[0].inputs[0].node;
+        const NodeDef& matmul_mul = match.inputs[1].inputs[0].inputs[0].node;
+
+        std::vector<NodeDef> match_nodes;
+        std::set<string> node_set;
+        GetAllMatchNodes(match_nodes, node_set, match);
+        VLOG(1) << "match nodes number:" << match_nodes.size();
+
+        bool valid = true;
+        // 3. 检查placeholder和Reshape shape const 值
+        if (gather_user_ind.name().find("user_ad_indicator") == string::npos &&
+            gather_user_ind.name().find("cate_ad_indicator") == string::npos) {
+          VLOG(0) << "gather user input indicator placeholder not match:" << gather_user_ind.name();
+          valid = false;
+        }
+        if (gather_slice_ind.name().find("ad_creative_indicator") == string::npos) {
+          VLOG(0) << "gather ad to creative indicator placeholder not match:" << gather_slice_ind.name();
+          valid = false;
+        }
+        if (gather_mul_ind.name().find("ad_creative_indicator") == string::npos) {
+          VLOG(0) << "gather ad to creative indicator placeholder not match:" << gather_mul_ind.name();
+          valid = false;
+        }
+        if (!valid) {
+          new_nodes->insert(new_nodes->end(), match_nodes.begin(), match_nodes.end());
+          return Status::OK();
+        }
+
+        NodeDef new_matmul_slice;
+        new_matmul_slice.CopyFrom(matmul_slice);
+        *(new_matmul_slice.mutable_input(0)) = gather_slice.input(0);
+        new_nodes->push_back(new_matmul_slice);
+        NodeDef new_matmul_mul;
+        new_matmul_mul.CopyFrom(matmul_mul);
+        *(new_matmul_mul.mutable_input(0)) = gather_mul.input(0);
+        new_nodes->push_back(new_matmul_mul);
+        NodeDef new_gather_indicator;
+        new_gather_indicator.CopyFrom(gather_slice);
+        CopyNodeAttr(gather_user, "Tindices", "Tparams", &new_gather_indicator);
+        *(new_gather_indicator.mutable_input(0)) = gather_user_ind.name();
+        new_nodes->push_back(new_gather_indicator);
+        NodeDef new_gather_user;
+        new_gather_user.CopyFrom(gather_user);
+        *(new_gather_user.mutable_input(1)) = new_gather_indicator.name();
+        new_nodes->push_back(new_gather_user);
+        // 6. 保留匹配的节点
+        for (auto& iter:match_nodes) {
+          if (iter.name() != matmul_slice.name() &&
+              iter.name() != matmul_mul.name() &&
+              iter.name() != gather_mul.name() &&
+              iter.name() != gather_slice.name() &&
+              iter.name() != gather_user.name()) {
+            new_nodes->push_back(iter);
+          }
+        }
+
+        is_changed = true;
+        count++;
+        return Status::OK();
+      },
+      {}, output_graph_def, true);
+  if (!status.ok()) {
+    LOG(ERROR) << "replace cross feature failed " << status;
+  }
+  return is_changed;
+
+}
+
 Node* GetTargetOpInputNode(Graph *graph, Node* node, string target) {
   Node* target_node = nullptr;
   for(auto n:node->in_nodes()) {
@@ -246,7 +350,7 @@ int GetTargetOpInputPort(Node* node, string target) {
   return port;
 }
 
-Status RemoveGather(Graph* graph) {
+Status RemoveGather(Graph* graph, std::set<string>& skip_merge_nodes) {
   bool changed = false;
   std::vector<Node*> nodes(graph->num_nodes());
   int i = 0;
@@ -258,6 +362,7 @@ Status RemoveGather(Graph* graph) {
   for (Node* node : nodes) {
     if (node->type_string() != "CoAction" &&
         node->type_string() != "CoActionIndicator") continue;
+    if (skip_merge_nodes.find(node->name()) != skip_merge_nodes.end()) continue;
     Node *co_action = node;
     Node *strided_slice = GetTargetOpInputNode(graph, co_action, "StridedSlice");
     if (strided_slice == nullptr) {
@@ -269,13 +374,12 @@ Status RemoveGather(Graph* graph) {
       LOG(WARNING) << "StridedSlice node cant find input Gather";
       continue;
     }
-    Node* ind = GetTargetOpInputNode(graph, gather, "Placeholder");
-    if (ind == nullptr) {
-      ind = GetTargetOpInputNode(graph, gather, "Tile");
-      if (ind == nullptr) {
-        LOG(WARNING) << "Gather node cant find input indicator";
-        continue;
-      }
+    Node* ind_placeholder = GetTargetOpInputNode(graph, gather, "Placeholder");
+    Node* ind_tile = GetTargetOpInputNode(graph, gather, "Tile");
+    Node* ind_gather = GetTargetOpInputNode(graph, gather, "GatherV2");
+    if (ind_placeholder == nullptr && ind_tile == nullptr && ind_gather == nullptr) {
+      LOG(WARNING) << "Gather node cant find input indicator";
+      continue;
     }
     const Edge* in_edge = nullptr;
     gather->input_edge(0, &in_edge);
@@ -323,7 +427,7 @@ bool GetCoActionPattern(Node* co_action, CoActionPattern& pattern) {
 
 Node* ConstructPackOp(Graph* graph, Node* co_action,
                      std::vector<const Edge*>& input_edges, string sufix) {
-  string device_name = "/device:CPU:0";
+  const string device_name = kCpuDeviceName;
   string pack_name =  co_action->name() + sufix;
   NodeDef pack_node;
   int input_size = input_edges.size();
@@ -408,7 +512,7 @@ Node* ConstructUnpackOp(Graph* graph, Node* co_action,
   return unpack;
 }
 
-Status MergeCoAction(Graph* graph) {
+Status MergeCoAction(Graph* graph, std::set<string>& skip_merge_nodes) {
   bool changed = false;
   std::vector<Node*> nodes(graph->num_nodes());
   int i = 0;
@@ -421,6 +525,7 @@ Status MergeCoAction(Graph* graph) {
   for (Node* node : nodes) {
     if (node->type_string() != "CoAction" &&
         node->type_string() != "CoActionIndicator") continue;
+    if (skip_merge_nodes.find(node->name()) != skip_merge_nodes.end()) continue;
     Node* co_action = node;
     const Node* input_a;
     co_action->input_node(0, &input_a);
@@ -463,12 +568,13 @@ Status MergeCoAction(Graph* graph) {
         graph->RemoveNode(n);
       }
     }
+    skip_merge_nodes.insert(co_action->name());
   }
   return Status::OK();
 }
 
 bool OptimizeCrossFeatureScope(const GrapplerItem& item, GraphDef& input_graph,
-                               GraphDef* optimized_graph) {
+                               GraphDef* optimized_graph, std::set<string>& skip_merge_nodes) {
   bool changed = false;
   int count = 0;
   // 1.替换低效结构为CoAtion算子
@@ -494,7 +600,7 @@ bool OptimizeCrossFeatureScope(const GrapplerItem& item, GraphDef& input_graph,
     LOG(WARNING) << "ConvertGraphDefToGraph failed: " << status.ToString();
     return false;
   }
-  status = RemoveGather(&graph);
+  status = RemoveGather(&graph, skip_merge_nodes);
   if (!status.ok()) {
     LOG(WARNING) << " remove gather failed: " << status.ToString();
     return false;
@@ -525,12 +631,14 @@ bool OptimizeCrossFeatureScope(const GrapplerItem& item, GraphDef& input_graph,
     LOG(WARNING) << "ConvertGraphDefToGraph failed: " << status.ToString();
     return false;
   }
-  status = MergeCoAction(&new_graph);
+  status = MergeCoAction(&new_graph, skip_merge_nodes);
   if (!status.ok()) {
     LOG(WARNING) << " merge CoAction failed: " << status.ToString();
     return false;
   }
   new_graph.ToGraphDef(optimized_graph);
+
+  if (!changed) return false;
   return true;
 }
 
@@ -555,9 +663,29 @@ Status FuseCrossFeatureOptimizer::Optimize(Cluster* cluster, const GrapplerItem&
   }
 
   GraphDef input_graph_def = item.graph;
-  if(!OptimizeCrossFeatureScope(item, input_graph_def, optimized_graph)) {
+  std::set<string> skip_merge_nodes;
+  if (!OptimizeCrossFeatureScope(item, input_graph_def, optimized_graph, skip_merge_nodes)) {
     *optimized_graph = item.graph;
     return Status::OK();
+  }
+  input_graph_def = *optimized_graph;
+  int count = 0;
+  bool changed = false;
+  while(1) {
+    if (MergeAdCreativeGather(input_graph_def, optimized_graph, count)) {
+      changed = true;
+      std::swap(input_graph_def, *optimized_graph);
+    } else {
+      break;
+    }
+  }
+  VLOG(0) << "Merge " << count << " ad-creative Gather";
+  input_graph_def = *optimized_graph;
+  GraphDef temp_graph_def = *optimized_graph;
+  if (changed) {
+    if(!OptimizeCrossFeatureScope(item, input_graph_def, optimized_graph, skip_merge_nodes)) {
+      *optimized_graph = temp_graph_def;
+    }
   }
 
   *optimized_graph->mutable_versions() = item.graph.versions();

@@ -676,6 +676,7 @@ cc_library(
         ":fuse_cross_feature",
         ":partial_mixed_precision",
         ":merge_gemm_optimizer",
+        ":fold_continuous_fc",
         ":loop_optimizer",
         ":memory_optimizer",
         ":model_pruner",
@@ -1363,6 +1364,21 @@ cc_library(
         "//tensorflow/core:framework",
         "//tensorflow/core:graph",
         "//tensorflow/core/grappler:grappler_item",
+    ],
+)
+cc_library(
+    name = "fold_continuous_fc",
+    srcs = ["fold_continuous_fc.cc"],
+    hdrs = ["fold_continuous_fc.h",],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":original_delivery_common",
+        ":graph_optimizer",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:graph",
+        "//tensorflow/core/grappler:grappler_item",
+        "//tensorflow/tools/graph_transforms:transform_utils",
+        "//tensorflow/core/grappler/costs:graph_properties",
     ],
 )
 cc_library(
