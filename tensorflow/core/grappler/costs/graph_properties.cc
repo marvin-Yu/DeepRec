@@ -541,6 +541,9 @@ bool IsWhiteListedOpTypeForEvaluateNode(const string& op_type) {
   return kOpTpeWhitelist->find(op_type) != kOpTpeWhitelist->end();
 }
 
+// reduce optimization latency
+static std::map<std::string, Tensor> big_const_tensors_map_;
+
 // Processes symbolic shapes.
 // Each symbolic shape or dimension is represented by a handle. Unlike the TF
 // shape refiner which creates new handles every time it processes an unknown
@@ -833,15 +836,27 @@ class SymbolicShapeRefiner {
     if (!IsConstant(*node)) return false;
 
     InferenceContext* ic = c->inference_context.get();
-    auto iter = const_tensors_map_.find(node->name());
-    if (iter != const_tensors_map_.end()) {
-      const TensorShape& shape = iter->second.shape();
+    auto set_output = [ic](const TensorShape& shape) {
       std::vector<DimensionHandle> dims;
       for (int i = 0; i < shape.dims(); i++) {
         int64 size = shape.dim_size(i);
         dims.push_back(size < 0 ? ic->UnknownDim() : ic->MakeDim(size));
       }
       ic->set_output(0, ic->MakeShape(dims));
+    };
+    auto iter = const_tensors_map_.find(node->name());
+    if (iter != const_tensors_map_.end()) {
+      const TensorShape& shape = iter->second.shape();
+      set_output(shape);
+    } else {
+      const auto dtype = node->attr().at("dtype").type();
+      auto shape = TensorShape(node->attr().at("value").tensor().tensor_shape());
+      std::string key = shape.DebugString() + std::to_string(dtype);
+      auto iter_big_const = big_const_tensors_map_.find(key);
+      if (iter_big_const != big_const_tensors_map_.end()) {
+        const TensorShape& shape = iter_big_const->second.shape();
+        set_output(shape);
+      }
     }
 
     MaybeUpdateNodeContextOutput(*node, false, c);
@@ -922,6 +937,16 @@ class SymbolicShapeRefiner {
       //
       const TensorProto* tensor_proto = ctx->input_tensor_protos[dst_input];
       if (tensor_proto == nullptr) continue;
+      if (src_is_const[dst_input]) {
+        const auto dtype = tensor_proto->dtype();
+        auto shape = TensorShape(tensor_proto->tensor_shape());
+        std::string key = shape.DebugString() + std::to_string(dtype);
+        auto iter = big_const_tensors_map_.find(key);
+        if (iter != big_const_tensors_map_.end()) {
+          input_tensors[dst_input] = &(iter->second);
+          continue;
+        }
+      }
       
       if (!src_is_const[dst_input] && 
           tensor_proto->dtype() != DT_INT32 && 
@@ -934,7 +959,19 @@ class SymbolicShapeRefiner {
 
       // Cache node value if const inputs, since const input does not change
       if (src_is_const[dst_input]) {
-        const_tensors_map_[src_name] = tensor_values[dst_input];
+        DataType dtype = tensor_values[dst_input].dtype();
+        if (dtype == DT_FLOAT || dtype == DT_HALF) {
+          TensorShape shape = tensor_values[dst_input].shape();
+          if (shape.num_elements() > 1024) {
+            std::string key = shape.DebugString() + std::to_string(dtype);
+            big_const_tensors_map_[key] = tensor_values[dst_input];
+            VLOG(1) << "cache big const:" << key << ", with " << src_name;
+          } else {
+            const_tensors_map_[src_name] = tensor_values[dst_input];
+          }
+        } else {
+          const_tensors_map_[src_name] = tensor_values[dst_input];
+        }
       }
     }
     ic->set_input_tensors(input_tensors);

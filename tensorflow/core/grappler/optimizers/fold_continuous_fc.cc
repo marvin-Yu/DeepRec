@@ -124,7 +124,7 @@ bool OptimizeContinuousFCPattern(GraphDef &input_graph_def, GraphDef* output_gra
         count++;
         return Status::OK();
       },
-      {}, output_graph_def);
+      {}, output_graph_def, true);
   if (!status.ok()) {
     LOG(ERROR) << "optimize continuous fc failed " << status;
     return false;

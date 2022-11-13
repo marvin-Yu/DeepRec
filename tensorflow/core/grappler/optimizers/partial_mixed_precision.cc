@@ -49,6 +49,15 @@ bool GemmOpSet(string op) {
   return false;
 }
 
+bool BinaryOpSet(string op) {
+  static std::unordered_set<string> op_set = {
+      "Add",
+      "Mul"};
+  if (op_set.find(op) != op_set.end()) {
+    return true;
+  }
+  return false;
+}
 Node* ConstuctMatMulOp(Graph* graph, const Edge* input,
                        const Edge* weight, string sufix) {
   const Node* matmul = input->dst();
@@ -134,35 +143,44 @@ Node* ConstuctCoActionOp(Graph* graph, const Edge* input,
   return new_co_action;
 }
 
-Node* SearchGemmInputConstNode(const Node* matmul) {
-  Node* weight;
-  matmul->input_node(1, &weight);
-  if (weight->type_string() == "Identity") {
-    Node* const_weight;
-    weight->input_node(0, &const_weight);
-    if (const_weight->type_string() == "Const") {
-      return const_weight;
-    }
-  } else if (weight->type_string() == "Const") {
-    return weight;
-  }
-  return nullptr;
-}
-
-TensorShape GetGemmInputConstNumElements(const Node* matmul) {
-  Node* weight = SearchGemmInputConstNode(matmul);
-  if (weight != nullptr) {
-    DataType type = weight->def().attr().at("dtype").type();
+TensorShape GetFloatConstTensorShape(const Node* node) {
+  if (node != nullptr) {
+    if (node->type_string() != "Const") return TensorShape({});
+    DataType type = node->def().attr().at("dtype").type();
     if (type != DT_FLOAT) return TensorShape({});
-    const auto& tensor_proto = weight->def().attr().at("value").tensor();
-    Tensor tensor;
-    if (!tensor.FromProto(tensor_proto)) {
-      LOG(WARNING) << "Cannot parse weight tensor proto: " << weight->name();
-      return TensorShape({});
-    }
-    return tensor.shape();
+    const auto& tensor_proto = node->def().attr().at("value").tensor();
+    return TensorShape(tensor_proto.tensor_shape());
   }
   return TensorShape({});
+}
+
+TensorShape GetGemmInputConstTensorShape(const Node* matmul) {
+  Node* weight;
+  matmul->input_node(1, &weight);
+  auto SearchConst = [](const Node* node) -> const Node* {
+    if (node->type_string() == "Identity") {
+      const Node* const_weight;
+      node->input_node(0, &const_weight);
+      if (const_weight->type_string() == "Const") {
+        return const_weight;
+      }
+    } else if (node->type_string() == "Const") {
+      return node;
+    }
+    return nullptr;
+  };
+  if (BinaryOpSet(weight->type_string())) {
+    const Node* in1;
+    weight->input_node(0, &in1);
+    const Node* const1 = SearchConst(in1);
+    TensorShape shape1 = GetFloatConstTensorShape(const1);
+    const Node* in2;
+    weight->input_node(1, &in2);
+    const Node* const2 = SearchConst(in2);
+    TensorShape shape2 = GetFloatConstTensorShape(const1);
+    return shape1.num_elements() > shape2.num_elements ? shape1 : shape2;
+  }
+  return GetFloatConstTensorShape(SearchConst(weight));
 }
 
 bool CastGemmFloatToHalf(Graph* graph, std::set<Node*>& candidate) {
@@ -243,7 +261,7 @@ Status ConvertGemm(Graph* graph) {
   for (Node* node : nodes) {
     if (node->type_string() != "MatMul") continue;
     if (node->def().attr().at("T").type() == DT_HALF) continue;
-    TensorShape shape = GetGemmInputConstNumElements(node);
+    TensorShape shape = GetGemmInputConstTensorShape(node);
     if (shape.num_elements() > max_shape.num_elements()) {
       max_shape = shape;
       candidate.clear();
