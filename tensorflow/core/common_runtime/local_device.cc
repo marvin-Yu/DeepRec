@@ -72,9 +72,16 @@ struct LocalDevice::EigenThreadPoolInfo {
 
   explicit EigenThreadPoolInfo(const SessionOptions& options, int numa_node,
                                Allocator* allocator) {
-    // Use session setting if specified.
-    int32 intra_op_parallelism_threads =
-        options.config.intra_op_parallelism_threads();
+    //Use gloabl setting form enviroment
+    static int global_env_num_threads = NumIntraOpThreadsFromEnvironmentHighPripority();
+    int32 intra_op_parallelism_threads = 0;
+    if (global_env_num_threads == 0) {
+      // Use session setting if specified.
+      intra_op_parallelism_threads =
+          options.config.intra_op_parallelism_threads();
+    } else {
+      intra_op_parallelism_threads = global_env_num_threads;
+    }
     // If no session setting, use environment setting.
     if (intra_op_parallelism_threads == 0) {
       static int env_num_threads = NumIntraOpThreadsFromEnvironment();
