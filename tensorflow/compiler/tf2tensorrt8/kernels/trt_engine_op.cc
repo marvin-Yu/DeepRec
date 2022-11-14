@@ -1281,6 +1281,40 @@ StatusOr<std::pair<EngineContext*, int>> TRTEngineOp::GetEngine(
     if (flops_ != total_flops) {
       flops_ = total_flops;
     }
+    // do not pad batch size 1 for performance
+    if (engine_batch_size > 1) {
+      // all engine_pad_to_batches will be built when the first TRTEngine built.
+      std::vector<TensorShape> pad_input_shapes(engine_input_shapes);
+      for (auto pad_batch_size : engine_pad_to_batches_) {
+        for (auto& shape : pad_input_shapes) {
+          shape.set_dim(0, pad_batch_size);
+        }
+        if (cache.count(pad_input_shapes)) {
+          continue;
+        }
+        auto pad_result = BuildEngine(pad_input_shapes, pad_batch_size,
+                                      use_calibration_, calibrator_.get(), cache_res,
+                                      /*total_flops=*/nullptr);
+        if (!pad_result.ok()) {
+          LOG(WARNING) << "Engine creation for " << name() << " failed with pad_to_batches shape: "
+                       << TensorShapeUtils::ShapeListString(pad_input_shapes);
+        } else {
+          LOG(INFO) << "Building a new additional TensorRT engine for "
+                    << name() << " with pad_to_batches shape: "
+                    << TensorShapeUtils::ShapeListString(pad_input_shapes)
+                    << ", inserted to TRTEngineCacheResource " << cache_res
+                    << ". Cache size " << cache.size() + 1;
+          TrtUniquePtrType<nvinfer1::ICudaEngine> pad_engine =
+              std::move(pad_result.ValueOrDie());
+          std::vector<ExecutionContext> pad_exec_contexts;
+          TF_RETURN_IF_ERROR(cache_res->profiles_.CreateExecutionContexts(
+              pad_engine.get(), &pad_exec_contexts));
+          cache.emplace(pad_input_shapes,
+                        absl::make_unique<EngineContext>(std::move(pad_engine),
+                                                         std::move(pad_exec_contexts)));
+        }
+      }
+    }
   }
   VLOG(4) << "TRT pad inputs, engine/actual batch_sizes: "
           << engine_input_shapes[0].dim_size(0) << "/" << input_concrete_shapes[0].dim_size(0)
