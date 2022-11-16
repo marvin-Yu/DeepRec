@@ -10,7 +10,7 @@ load(
 )
 load(
     "@local_config_tensorrt//:build_defs.bzl",
-    "if_tensorrt",
+    "if_tensorrt_v6",
 )
 
 package(
@@ -28,7 +28,7 @@ tf_cuda_library(
     deps = [
         "//tensorflow/compiler/tf2tensorrt:trt_logging",
         "//tensorflow/compiler/tf2tensorrt:trt_plugins",
-    ] + if_tensorrt([
+    ] + if_tensorrt_v6([
         "@local_config_tensorrt//:tensorrt",
     ]) + tf_custom_op_library_additional_deps(),
 )

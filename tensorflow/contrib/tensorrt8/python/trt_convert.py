@@ -18,7 +18,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from tensorflow.python.compiler.tensorrt import trt_convert
+from tensorflow.python.compiler.tensorrt8 import trt_convert
 
 
 def create_inference_graph(

@@ -149,7 +149,12 @@ load(
     "tf_gpu_tests_tags",
 )
 load("@local_config_cuda//cuda:build_defs.bzl", "if_cuda")
-load("@local_config_tensorrt//:build_defs.bzl", "if_tensorrt")
+load(
+    "@local_config_tensorrt//:build_defs.bzl",
+    "if_tensorrt",
+    "if_tensorrt_v6",
+    "if_tensorrt_v8"
+)
 load("@io_bazel_rules_closure//closure:defs.bzl", "closure_proto_library")
 load(
     "//third_party/mkl:build_defs.bzl",
@@ -515,6 +520,7 @@ cc_library(
     visibility = [
         ":__subpackages__",
         "//tensorflow/c:__subpackages__",
+        "//tensorflow/compiler:__subpackages__",
     ],
     deps = [
         ":error_codes_proto_cc",
@@ -1451,9 +1457,12 @@ cc_library(
     ] + if_mkl([
         ":mkl_array_ops_op_lib",
         ":mkl_nn_ops_op_lib",
-    ]) + if_tensorrt([
+   ]) + if_tensorrt_v6([
         "//tensorflow/compiler/tf2tensorrt:trt_engine_resource_ops_op_lib",
         "//tensorflow/compiler/tf2tensorrt:trt_op_libs",
+   ]) + if_tensorrt_v8([
+        "//tensorflow/compiler/tf2tensorrt8:trt_engine_resource_ops_op_lib",
+        "//tensorflow/compiler/tf2tensorrt8:trt_op_libs",
     ]) + tf_additional_cloud_op_deps(),
     alwayslink = 1,
 )
@@ -1655,9 +1664,12 @@ cc_library(
         "//tensorflow/core/grappler/optimizers:gpu_swapping_ops",
     ]) + if_nccl([
         "//tensorflow/core/kernels:nccl_kernels",
-    ]) + if_tensorrt([
+    ]) + if_tensorrt_v6([
         "//tensorflow/compiler/tf2tensorrt:trt_engine_resource_op_kernels",
         "//tensorflow/compiler/tf2tensorrt:trt_op_kernels",
+    ]) + if_tensorrt_v8([
+        "//tensorflow/compiler/tf2tensorrt8:trt_engine_resource_op_kernels",
+        "//tensorflow/compiler/tf2tensorrt8:trt_op_kernels",
     ]),
 )
 

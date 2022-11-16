@@ -11,7 +11,7 @@ load("//tensorflow:tensorflow.bzl", "cuda_py_test")
 load("//tensorflow:tensorflow.bzl", "cuda_py_tests")
 load(
     "@local_config_tensorrt//:build_defs.bzl",
-    "if_tensorrt",
+    "if_tensorrt_v6",
 )
 
 package(

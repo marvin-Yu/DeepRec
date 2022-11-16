@@ -19,5 +19,5 @@ from __future__ import division
 from __future__ import print_function
 
 # pylint: disable=unused-import,wildcard-import
-from tensorflow.contrib.tensorrt.python import *
+from tensorflow.contrib.tensorrt8.python import *
 # pylint: enable=unused-import,wildcard-import

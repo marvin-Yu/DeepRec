@@ -13,14 +13,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "tensorflow/contrib/tensorrt/shape_fn/trt_shfn.h"
+#include "tensorflow/contrib/tensorrt8/shape_fn/trt_shfn.h"
 
 #include <string>
 #include <vector>
 
 #if GOOGLE_CUDA
 #if GOOGLE_TENSORRT
-#include "tensorflow/compiler/tf2tensorrt/utils/trt_logger.h"
+#include "tensorflow/compiler/tf2tensorrt8/utils/trt_logger.h"
 #include "tensorflow/core/lib/core/errors.h"
 #include "third_party/tensorrt/NvInfer.h"
 
