@@ -31,15 +31,118 @@ struct OpTypePattern {
 };
 
 // Returns a sub-graph of edges that match a pattern.
-// target node is the src of edge
-struct NodeMatch {
+// target node is the src of edge, edge->src() == node
+struct EdgeMatch {
   const Edge* edge;
-  std::vector<NodeMatch> inputs;
+  Node* node;
+  std::vector<EdgeMatch> inputs;
   string DebugString() const;
-  NodeMatch() {
+  EdgeMatch() {
     edge = nullptr;
   }
 };
+
+static const OpTypePattern multi_head_pattern =
+       {"BatchMatMulV2",
+         {
+           {"BiasAdd",
+             {
+               {"Reshape",
+                 {
+                   {"MatMul",
+                     {
+                       {"Reshape",
+                         {
+                           {"*"},
+                           {"Const"}
+                         }
+                       },
+                       {"Const"}
+                     }
+                   },
+                   {"Const"},
+                 }
+               },
+               {"Const"},
+             }
+           },
+           {"BiasAdd",
+             {
+               {"Reshape",
+                 {
+                   {"MatMul",
+                     {
+                       {"Reshape",
+                         {
+                           {"*"},
+                           {"Const"}
+                         }
+                       },
+                       {"Const"}
+                     }
+                   },
+                   {"Const"},
+                 }
+               },
+               {"Const"},
+             }
+           },
+         }
+       };
+
+static const OpTypePattern multi_head_gather_pattern =
+       {"BatchMatMulV2",
+         {
+           {"BiasAdd",
+             {
+               {"Reshape",
+                 {
+                   {"MatMul",
+                     {
+                       {"Reshape",
+                         {
+                           {"*"},
+                           {"Const"}
+                         }
+                       },
+                       {"Const"}
+                     }
+                   },
+                   {"Const"},
+                 }
+               },
+               {"Const"},
+             }
+           },
+           {"GatherV2",
+             {
+               {"BiasAdd",
+                 {
+                   {"Reshape",
+                     {
+                       {"MatMul",
+                         {
+                           {"Reshape",
+                             {
+                               {"*"},
+                               {"Const"}
+                             }
+                           },
+                           {"Const"}
+                         }
+                       },
+                       {"Const"},
+                     }
+                   },
+                   {"Const"},
+                 }
+               },
+               {"Placeholder"},
+               {"Const"},
+             }
+           },
+         }
+       };
 
 static const OpTypePattern attention_path_pattern =
        {"BatchMatMulV2",
@@ -50,8 +153,28 @@ static const OpTypePattern attention_path_pattern =
                  {
                    {"BatchMatMulV2",
                      {
-                       {"BiasAdd"},
-                       {"Split"},
+                       {"Split",  // query
+                         {
+                           {"Const"},
+                           {"Reshape",
+                             {
+                               {"*"},
+                               {"Const"},
+                             }
+                           },
+                         }
+                       },
+                       {"Split",   // fact
+                         {
+                           {"Const"},
+                           {"Reshape",
+                             {
+                               {"*"},
+                               {"Const"},
+                             }
+                           },
+                         }
+                       },
                      }
                    },
                  }
@@ -59,17 +182,7 @@ static const OpTypePattern attention_path_pattern =
                {"Const"},
              }
            },
-           {"Split",
-             {
-               {"Const"},
-               {"Reshape",
-                 {
-                   {"*"},
-                   {"Const"},
-                 }
-               },
-             }
-           },
+           {"Split"},  // fact
          }
        };
 

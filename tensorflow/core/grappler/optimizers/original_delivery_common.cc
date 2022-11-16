@@ -29,6 +29,7 @@ Status NodeDefConstructor(NodeDef& def, const NodeDef& base,
 }
 
 Node* NodeConstructor(Graph* graph, string name, const Node* base, const NodeDef& def) {
+  TF_RETURN_NULL_IF_NULL(base, "node constructor base is nullptr")
   Status status;
   Node *node = graph->AddNode(def, &status);
   TF_RETURN_NULL_IF_ERROR(status, name)
@@ -38,6 +39,7 @@ Node* NodeConstructor(Graph* graph, string name, const Node* base, const NodeDef
 
 Node* NodeConstructor(Graph* graph, string name, Node* base,
                      const std::function<Status(NodeDef&)>& node_builder) {
+  TF_RETURN_NULL_IF_NULL(base, "node constructor base is nullptr")
   NodeDef def;
   Status status = node_builder(def);
   TF_RETURN_NULL_IF_ERROR(status, name)
@@ -160,7 +162,7 @@ Status ConstuctAddNodeDef(NodeDef& def, const NodeDef& base, string name,
                           std::vector<NodeDefBuilder::NodeOut>& inputs,
                           DataType t_input) {
   std::function<Status(NodeDef&)> add_builder = [&](NodeDef& def) {
-    return NodeDefBuilder(base.name(), "Add")
+    return NodeDefBuilder(name, "Add")
                           .Input(inputs[0])
                           .Input(inputs[1])
                           .Attr("T", t_input)
@@ -272,24 +274,23 @@ Status ConstructTransposeNodeDef(NodeDef& def, const NodeDef& base, string name,
   return Status::OK();
 }
 
-Node* ConstructTransposeOp(Graph* graph, const Edge* in_edge,
+Node* ConstructTransposeOp(Graph* graph, Node* in_node, int port,
                            string name, Tensor& perm_t) {
   // perm const
   string perm_name = name + "_perm";
-  Node* perm_const = CreateConstNode(graph, perm_name, perm_t, in_edge->src());
+  Node* perm_const = CreateConstNode(graph, perm_name, perm_t, in_node);
   TF_RETURN_NULL_IF_NULL(perm_const, "construct perm const node")
 
   NodeDef def;
-  NodeDefBuilder::NodeOut input(in_edge->src()->name(), in_edge->src_output(),
-                                in_edge->src()->output_type(0));
+  NodeDefBuilder::NodeOut input(in_node->name(), port, in_node->output_type(0));
   NodeDefBuilder::NodeOut perm(perm_const->name(), 0, DT_INT32);
-  Status status = ConstructTransposeNodeDef(def, in_edge->src()->def(), name,input,
-                                            perm, in_edge->src()->output_type(0),
+  Status status = ConstructTransposeNodeDef(def, in_node->def(), name,input,
+                                            perm, in_node->output_type(0),
                                             perm_t.dtype());
   TF_RETURN_NULL_IF_ERROR(status, name)
-  Node* transpose = NodeConstructor(graph, name, in_edge->src(), def);
+  Node* transpose = NodeConstructor(graph, name, in_node, def);
   TF_RETURN_NULL_IF_NULL(transpose, "construct transpose node")
-  graph->AddEdge(in_edge->src(), in_edge->src_output(), transpose, 0);
+  graph->AddEdge(in_node, port, transpose, 0);
   graph->AddEdge(perm_const, 0, transpose, 1);
   return transpose;
 }
@@ -354,6 +355,35 @@ Node* ConstuctCastOp(Graph* graph, const Node* base, int port,
   TF_RETURN_NULL_IF_NULL(cast, "construct cast node")
   VLOG(1) << "cast " << cast->DebugString();
   return cast;
+}
+
+Status ConstructExpandDimsNodeDef(NodeDef& def, const NodeDef& base, string name,
+                                 NodeDefBuilder::NodeOut& input,
+                                 NodeDefBuilder::NodeOut& dim,
+                                 DataType t_type, DataType t_dim) {
+  std::function<Status(NodeDef&)> builder = [&](NodeDef& def) {
+    return NodeDefBuilder(name, "ExpandDims")
+                          .Input(input)
+                          .Input(dim)
+                          .Attr("T", t_type)
+                          .Attr("Tdim", t_dim)
+                          .Finalize(&def);
+  };
+  TF_RETURN_IF_ERROR(NodeDefConstructor(def, base, builder));
+  return Status::OK();
+}
+
+Status ConstructSqueezeNodeDef(NodeDef& def, const NodeDef& base, string name,
+                                 NodeDefBuilder::NodeOut& input,
+                                 DataType t_type) {
+  std::function<Status(NodeDef&)> builder = [&](NodeDef& def) {
+    return NodeDefBuilder(name, "Squeeze")
+                          .Input(input)
+                          .Attr("T", t_type)
+                          .Finalize(&def);
+  };
+  TF_RETURN_IF_ERROR(NodeDefConstructor(def, base, builder));
+  return Status::OK();
 }
 
 Status UpdateAllEdge(Graph* graph, Node* new_src_node, Node* old_dst_node) {

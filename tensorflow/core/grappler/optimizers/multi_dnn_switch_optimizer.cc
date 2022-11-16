@@ -235,11 +235,11 @@ class SubGraphCollection {
     int reserve_branch;
     Node* reserve_node;
 
-    BranchNodesCollection(std::map<int, Node*>& nodes) {
+    BranchNodesCollection(int reserve_index, std::map<int, Node*>& nodes) {
       const_input_has_controlflow = false;
       branch_nodes = nodes;
-      reserve_branch = branch_nodes.begin()->first;
-      reserve_node = branch_nodes.begin()->second;
+      reserve_branch = reserve_index;
+      reserve_node = branch_nodes[reserve_index];
     }
 
     void SetBranchNodesConstInput() {
@@ -295,9 +295,17 @@ class SubGraphCollection {
 
   int GetBranchNum() {return branch_num_;}
 
+  void SetReserveBranchIndex(int index) {
+    if (reserve_branch_index_ == -1) {
+      reserve_branch_index_ = index;
+    }
+  }
+
   bool InputsAreSameConst(std::map<int, const Edge*>& inputs) {
     auto begin = inputs.begin();
     if (begin->second->src()->type_string() != "Const") return false;
+    // 如果只有一个const，就不需要switch 权重了
+    if (inputs.size() == 1) return true;
     // 1.如果不是同一个const节点，则继续判断const值是否相同
     bool same_node = true;
     auto it = begin;
@@ -334,6 +342,16 @@ class SubGraphCollection {
     }
     return true;
   }
+
+  bool AllQueueEmpty(std::map<int, std::queue<Node*>>& branch_unvisited_queue) {
+    for (auto iter:branch_unvisited_queue) {
+      if (!iter.second.empty()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   bool AnyQueueEmpty(std::map<int, std::queue<Node*>>& branch_unvisited_queue) {
     for (auto iter:branch_unvisited_queue) {
       if (iter.second.empty()) {
@@ -344,6 +362,7 @@ class SubGraphCollection {
   }
 
   bool CheckBranchNodesMatch(std::map<int, Node*>& nodes) {
+    if (nodes.size() == 1) return true;
     auto begin = nodes.begin();
     auto it = begin++;
     for (; it != nodes.end(); ++it) {
@@ -401,37 +420,81 @@ class SubGraphCollection {
     return true;
   }
 
-  bool IsSkipBranch (int index) {
-    return skip_branchs_.find(index) != skip_branchs_.end();
+  bool IsReserveBranch (int index) {
+    return reserve_branchs_.find(index) != reserve_branchs_.end();
   }
 
-  bool CollecteBranchNodes(const string& skip_branchs_str) {
-    for (auto x : str_util::Split(skip_branchs_str, ",")) {
+  void ParseBranchsString(const string& branchs_str, std::set<int>& branchs) {
+    if (branchs_str == "") return;
+    for (auto x : str_util::Split(branchs_str, ",")) {
       int index = atoi(x.c_str());
       if (index >= branch_num_) {
-        LOG(ERROR) << "set skip branch index beyound branch num:"
-                   << index << " VS " << branch_num_;
+        LOG(ERROR) << "set branch index beyound branch num:"
+                   << branchs_str << " VS branch number " << branch_num_;
       } else {
-        skip_branchs_.insert(index);
+        branchs.insert(index);
       }
     }
-    if (skip_branchs_.size() == branch_num_) {
-      LOG(ERROR) << "skip all branch!? branch num:" << branch_num_
-                 << "skip string: " << skip_branchs_str;
+    return;
+  }
+
+  bool CheckSwitchNValid(Node* node) {
+    bool valid = false;
+    for (Node* n : switch_n_) {
+      if (n == node) {
+        valid = true;
+        break;
+      }
+    }
+    if (!valid) {
+      LOG(ERROR) << "find strange SwitchN node! " << node->DebugString();
+      return false;
+    }
+    return true;
+  }
+  bool CollecteBranchNodes(const string& selected_branchs_str, const string& skip_branchs_str) {
+    std::set<int> selected_branchs;
+    std::set<int> skip_branchs;
+    ParseBranchsString(selected_branchs_str, selected_branchs);
+    ParseBranchsString(skip_branchs_str, skip_branchs);
+    if (selected_branchs.empty()) {
+      for (int i = 0; i < branch_num_; i++) {
+        if (skip_branchs.find(i) == skip_branchs.end()) {
+          reserve_branchs_.insert(i);
+        }
+      }
+    } else {
+      reserve_branchs_ = selected_branchs;
+    }
+    if (reserve_branchs_.empty()) {
+      LOG(ERROR) << "skip all branch? branch num:" << branch_num_
+                 << ", selected string: " << selected_branchs_str
+                 << ", skip string: " << skip_branchs_str;
+      return false;
     }
     Status status;
     std::map<int, std::queue<Node*>> branch_unvisited_queue;
+    std::map<int, std::queue<Node*>> abandon_unvisited_queue;
     if (merge_->num_inputs() != branch_num_) {
       LOG(ERROR) << "merge input count not equals to branch num:"
                  << merge_->num_inputs() << " VS " << branch_num_;
+      return false;
     }
+    string reserve_branchs_str = absl::StrCat("total branchs: ",
+                                     std::to_string(branch_num_), " reserve branchs:");
+    for (int b : reserve_branchs_) {
+      SetReserveBranchIndex(b);
+      reserve_branchs_str = absl::StrCat(reserve_branchs_str, " ", std::to_string(b));
+    }
+    VLOG(0) << reserve_branchs_str;
     for (auto e : merge_->in_edges()) {
-      if (IsSkipBranch(e->dst_input())) {
+      if (!IsReserveBranch(e->dst_input())) {
+        abandon_unvisited_queue[e->dst_input()].push(e->src());
         VLOG(1) << "skip branch " << e->dst_input();
-        continue;
+      } else {
+        branch_unvisited_queue[e->dst_input()].push(e->src());
+        VLOG(1) << "merge input edge: " << e->dst_input() << ":" << e->src()->name();
       }
-      branch_unvisited_queue[e->dst_input()].push(e->src());
-      VLOG(1) << "merge input edge: " << e->dst_input() << ":" << e->src()->name();
     }
     std::set<string> visited;
     while(!AnyQueueEmpty(branch_unvisited_queue)) {
@@ -449,17 +512,7 @@ class SubGraphCollection {
         nodes[iter.first] = top;
         // SwitchN为界，不再追溯前序节点
         if (top->type_string() == "_SwitchN") {
-          bool valid = false;
-          for (Node* n : switch_n_) {
-            if (n == top) {
-              valid = true;
-              break;
-            }
-          }
-          if (!valid) {
-            LOG(ERROR) << "find strange SwitchN node! " << top->DebugString();
-            return false;
-          }
+          if (!CheckSwitchNValid(top)) return false;
           continue;
         }
         same_order.clear();
@@ -485,16 +538,17 @@ class SubGraphCollection {
         }
       }
       if (nodes.empty()) continue;
-      if (nodes.size() != (branch_num_ - skip_branchs_.size())) {
+      if (nodes.size() != reserve_branchs_.size()) {
         LOG(ERROR) << "visit subgraph layer nodes not equal to branch number:"
-                   << nodes.size() << " VS " << branch_num_;
+                   << nodes.size() << " VS " << reserve_branchs_.size();
         for (auto iter : nodes) {
           VLOG(0) << "branch index " << iter.first << ": "
                   << iter.second->name() << ", " << iter.second->type_string();
         }
         return false;
       }
-      std::unique_ptr<BranchNodesCollection> temp(new BranchNodesCollection(nodes));
+      std::unique_ptr<BranchNodesCollection> temp(
+                      new BranchNodesCollection(reserve_branch_index_, nodes));
       branch_collection_.push_back(std::move(temp));
       if (!CheckBranchNodesMatch(nodes)) {
         LOG(ERROR) << "not all nodes match: ";
@@ -510,6 +564,34 @@ class SubGraphCollection {
         return false;
       }
     }
+    // we can't ensure that abandon branchs have the same graph structure with reserved branchs
+    // so we have to collect abandon branchs' nodes separately
+    while(!AllQueueEmpty(abandon_unvisited_queue)) {
+      for (auto& iter:abandon_unvisited_queue) {
+        if (iter.second.empty()) continue;
+        Node* top = iter.second.front();
+        iter.second.pop();
+        if (visited.find(top->name()) != visited.end() &&
+          top->type_string() != "_SwitchN") {
+          continue;
+        }
+        visited.insert(top->name());
+        abandon_branchs_[iter.first].push_back(top);
+        VLOG(1) << "visit node: " << top->name() << ", " << top->type_string()
+                << ", has input num: " << top->num_inputs();
+        if (top->type_string() == "_SwitchN") {
+          if (!CheckSwitchNValid(top)) return false;
+          continue;
+        }
+        for (auto e : top->in_edges()) {
+          if(SkipVisitInputOps(e->src()->type_string())) continue;
+          VLOG(1) << iter.first << " push input: " << e->src()->name()
+                  << ", " << e->src()->type_string();
+          iter.second.push(e->src());
+        }
+      }
+    }
+
     VLOG(1) << "got SwitchN size: " << switch_n_.size();
     for (Node* n : switch_n_) {
       if (index_ == nullptr) {
@@ -551,7 +633,7 @@ class SubGraphCollection {
     std::map<int, Node*> no_ops;
     std::map<int, Node*> identity_ops;
     for (int i = 0; i < branch_num_; ++i) {
-      if (IsSkipBranch(i)) continue;
+      if (!IsReserveBranch(i)) continue;
       string no_name = switch_n_[0]->name() + "/merge_switch_subgraph/input_control_node_"
                        + std::to_string(i);
       string identity_name = switch_n_[0]->name() + "/merge_switch_subgraph/pivot_"
@@ -582,7 +664,7 @@ class SubGraphCollection {
     graph_->AddEdge(index_->src(), index_->src_output(), switch_n, 0);
     graph_->AddEdge(index_->src(), index_->src_output(), switch_n, 1);
     for (int i = 0; i < branch_num_; ++i) {
-      if (IsSkipBranch(i)) continue;
+      if (!IsReserveBranch(i)) continue;
       graph_->AddEdge(switch_n, i, identity_ops[i], 0);
       graph_->AddControlEdge(identity_ops[i], no_ops[i]);
     }
@@ -617,11 +699,12 @@ class SubGraphCollection {
             merge_inputs.emplace_back(e->src()->name(), e->src_output(),
                                       e->src()->output_type(0));
           }
-          int merge_attr_n = branch_num_ - skip_branchs_.size();
+          int merge_attr_n = reserve_branchs_.size();
           std::function<Status(NodeDef&)> merge_builder = [&](NodeDef& def) {
+            DataType type = input[collection->GetReserveBranch()]->src()->output_type(0);
             return NodeDefBuilder(merge_name, "Merge")
                                   .Input(merge_inputs)
-                                  .Attr("T", input[0]->src()->output_type(0))
+                                  .Attr("T", type)
                                   .Attr("N", merge_attr_n)
                                   .Finalize(&def);
           };
@@ -630,7 +713,7 @@ class SubGraphCollection {
           int port = 0;
 
           for (int i = 0; i < branch_num_; ++i) {
-            if (IsSkipBranch(i)) continue;
+            if (!IsReserveBranch(i)) continue;
             graph_->AddControlEdge(no_ops[i], input[i]->src());
             graph_->AddEdge(input[i]->src(), input[i]->src_output(), merge, port);
             port++;
@@ -644,7 +727,7 @@ class SubGraphCollection {
       converted.insert(collection->GetReserveNode()->name());
     }
     const Edge* merge_in;
-    status = merge_->input_edge(0, &merge_in);
+    status = merge_->input_edge(reserve_branch_index_, &merge_in);
     TF_RETURN_FALSE_IF_ERROR(status, "get merge input edge")
     for (auto e : merge_->out_edges()) {
       status = graph_->UpdateEdge(merge_in->src(), merge_in->src_output(),
@@ -678,6 +761,21 @@ class SubGraphCollection {
        }
       }
     } while(deleted);
+    do {
+      deleted = false;
+      for (auto& iter : abandon_branchs_) {
+        for (auto n : iter.second) {
+          if (n == nullptr) continue;
+          if (remove_set.find(n) != remove_set.end()) continue;
+          if (n->out_edges().empty()) {
+            deleted = true;
+            VLOG(1) << "remove node " << n->name();
+            graph_->RemoveNode(n);
+            remove_set.insert(n);
+          }
+       }
+      }
+    } while(deleted);
     return true;
   }
 
@@ -702,7 +800,9 @@ class SubGraphCollection {
   //        |-->target3
   int branch_num_;
   std::vector<std::unique_ptr<BranchNodesCollection>> branch_collection_;
-  std::set<int> skip_branchs_;
+  std::map<int, std::vector<Node*>> abandon_branchs_;
+  std::set<int> reserve_branchs_;
+  int reserve_branch_index_ = -1;
 };
 
 void DebugMultiDNNInfo(MultiDNNInfo &multi_dnn_info) {
@@ -1035,13 +1135,14 @@ bool RefineControlflowForMergedConst(Graph* graph) {
   return true;
 }
 
-bool SwitchSubGraphToSwitchWeight(Graph* graph, const string& skip_branchs_str,
-                std::vector<std::shared_ptr<SubGraphCollection>>& sub_graph_group) {
+bool SwitchSubGraphToSwitchWeight(
+         Graph* graph, const string& selected_branchs_str, const string& skip_branchs_str,
+         std::vector<std::shared_ptr<SubGraphCollection>>& sub_graph_group) {
   Status status;
-  VLOG(0) << "skip branchs " << skip_branchs_str;
+  VLOG(0) << "config selected branchs " << selected_branchs_str <<", skip branchs " << skip_branchs_str;
   for (std::shared_ptr<SubGraphCollection>& collection : sub_graph_group) {
     // 1.先将_SwitchN到Merge之间的branch子图遍历，收集到计算节点和Const信息
-    if (!collection->CollecteBranchNodes(skip_branchs_str)) {
+    if (!collection->CollecteBranchNodes(selected_branchs_str, skip_branchs_str)) {
       collection->DebugBranchNodesCollection();
       return false;
     }
@@ -1102,7 +1203,8 @@ Status MultiDNNSwitchOptimizer::Optimize(Cluster* cluster, const GrapplerItem& i
   graph.ToGraphDef(optimized_graph);
   *optimized_graph->mutable_versions() = item.graph.versions();
 
-  if (!SwitchSubGraphToSwitchWeight(&graph, skip_branchs_str_, sub_graph_group)) {
+  if (!SwitchSubGraphToSwitchWeight(&graph, selected_branchs_str_,
+                                    skip_branchs_str_, sub_graph_group)) {
     LOG(WARNING) << "optimized multi dnn switch subgraph to switch weight failed";
     return Status::OK();
   }

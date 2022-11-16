@@ -207,4 +207,6 @@ message RewriterConfig {
   Toggle merge_gemm_optimization = 507;
   // skip branch
   string multi_dnn_skip_branchs = 508;
+  string multi_dnn_selected_branchs = 510;
+  Toggle fold_continuous_fc_optimization = 509;
 }

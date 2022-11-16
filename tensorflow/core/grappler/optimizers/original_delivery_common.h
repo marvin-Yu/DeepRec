@@ -97,7 +97,7 @@ Status ConstructTransposeNodeDef(NodeDef& def, const NodeDef& base, string name,
                                  NodeDefBuilder::NodeOut& input,
                                  NodeDefBuilder::NodeOut& perm,
                                  DataType t_input, DataType t_perm);
-Node* ConstructTransposeOp(Graph* graph, const Edge* in_edge,
+Node* ConstructTransposeOp(Graph* graph, Node* in_node, int port,
                            string name, Tensor& perm_t);
 
 Status ConstructReshapeNodeDef(NodeDef& def, const NodeDef& base, string name,
@@ -112,6 +112,15 @@ Status ConstructCastNodeDef(NodeDef& def, const NodeDef& base, string name,
 
 Node* ConstuctCastOp(Graph* graph, const Node* base, int port,
                      DataType src, DataType dst, string cast_name);
+
+Status ConstructExpandDimsNodeDef(NodeDef& def, const NodeDef& base, string name,
+                                 NodeDefBuilder::NodeOut& input,
+                                 NodeDefBuilder::NodeOut& dim,
+                                 DataType t_type, DataType t_dim);
+
+Status ConstructSqueezeNodeDef(NodeDef& def, const NodeDef& base, string name,
+                                 NodeDefBuilder::NodeOut& input,
+                                 DataType t_type);
 
 Status UpdateAllEdge(Graph* graph, Node* new_src_node, Node* old_dst_node);
 

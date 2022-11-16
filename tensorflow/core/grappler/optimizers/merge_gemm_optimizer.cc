@@ -42,98 +42,29 @@ bool IsBinaryOp(string op) {
   return false;
 }
 
-struct SharedInputGemmPattern {
-  const Node* input;
-  std::vector<Node*> reshape;
-  std::vector<Node*> identity;
-  std::vector<Node*> weight;
-  std::vector<Node*> matmul;
-  std::vector<std::vector<const Edge*>> output;
-  void DebugPattern() {
-    VLOG(0) << "input:" << input->DebugString();
-    VLOG(0) << "reshape:";
-    for (auto n:reshape) VLOG(0) << n->DebugString();
-    VLOG(0) << "weight:";
-    for (auto n:weight) VLOG(0) << n->DebugString();
-    VLOG(0) << "identity:";
-    for (auto n:identity) VLOG(0) << n->DebugString();
-    VLOG(0) << "matmul:";
-    for (auto n:matmul) VLOG(0) << n->DebugString();
-    VLOG(0) << "output:";
-    for (auto set:output) {
-      for (auto e:set) VLOG(0) << e->DebugString();
-    }
-  }
-};
-
-void DebugSharedInputGemmPattern(std::map<std::string, SharedInputGemmPattern>& collection) {
-  for (auto iter:collection) {
-    VLOG(0) << iter.first << ", parallel path size: " << iter.second.matmul.size();
-    VLOG(0) << "*************************************************";
-    iter.second.DebugPattern();
-  }
-}
-
-struct MergeBiasAddPattern {
-  Node* split;
-  std::vector<Node*> reshape;
-  std::vector<Node*> shape;
-  std::vector<Node*> add;
-  std::vector<Node*> bias;
-  std::vector<std::vector<const Edge*>> output;
-  void DebugPattern() {
-    VLOG(0) << "split:" << split->DebugString();
-    VLOG(0) << "reshape:";
-    for (auto n:reshape) VLOG(0) << n->DebugString();
-    VLOG(0) << "shape:";
-    for (auto n:shape) VLOG(0) << n->DebugString();
-    VLOG(0) << "add:";
-    for (auto n:add) VLOG(0) << n->DebugString();
-    VLOG(0) << "bias:";
-    for (auto n:bias) VLOG(0) << n->DebugString();
-    VLOG(0) << "output:";
-    for (auto set:output) {
-      for (auto e:set) VLOG(0) << e->DebugString();
-    }
-  }
-};
-
-void DebugMergeBiasAddPattern(std::map<std::string, MergeBiasAddPattern>& collection) {
-  for (auto iter:collection) {
-    VLOG(0) << iter.first << ", parallel path size: " << iter.second.add.size();
-    VLOG(0) << "*************************************************";
-    iter.second.DebugPattern();
-  }
-}
-
 struct AttentionPattern {
   Node* concat;
   struct PathPattern {
-    const Edge* gemm_pre_input_a;
-    const Edge* gemm_pre_input_b;
-    const Edge* gemm_pre;
-    const Edge* softmax;
-    const Edge* add;
-    const Edge* add_y;
-    const Edge* gemm_tail;
-    const Edge* split;
-    const Edge* split_dim;
-    const Edge* shape;
-    const Edge* reshape;
-    const Edge* input;
+    Node* query_split;
+    const Edge* query_split_edge;
+    Node* query_shape;
+    Node* query_reshape;
+    Node* query_input;
+    Node* fact_split;
+    const Edge* fact_split_edge;
+    Node* fact_shape;
+    Node* fact_reshape;
+    Node* fact_input;
+    Node* gemm_pre;
+    Node* softmax;
+    Node* add;
+    Node* add_y;
+    Node* gemm_tail;
     void DebugPattern() {
-      VLOG(0) << "input:" << input->src()->DebugString();
-      VLOG(0) << "shape:" << shape->src()->DebugString();
-      VLOG(0) << "reshape:" << reshape->src()->DebugString();
-      VLOG(0) << "split:" << split->src()->DebugString();
-      VLOG(0) << "split_dim:" << split_dim->src()->DebugString();
-      VLOG(0) << "input a:" << gemm_pre_input_a->src()->DebugString();
-      VLOG(0) << "input b:" << gemm_pre_input_b->src()->DebugString();
-      VLOG(0) << "gemm_pre:" << gemm_pre->src()->DebugString();
-      VLOG(0) << "softmax:" << softmax->src()->DebugString();
-      VLOG(0) << "add:" << add->src()->DebugString();
-      VLOG(0) << "add y:" << add_y->src()->DebugString();
-      VLOG(0) << "gemm_tail:" << gemm_tail->src()->DebugString();
+      VLOG(0) << "query split:" << query_split_edge->DebugString();
+      VLOG(0) << "query shape:" << query_shape->DebugString();
+      VLOG(0) << "fact split:" << fact_split_edge->DebugString();
+      VLOG(0) << "fact shape:" << fact_shape->DebugString();
     }
   };
   std::vector<PathPattern> path;
@@ -168,11 +99,11 @@ string OpTypePattern::DebugString() const {
   return result;
 }
 
-string NodeMatch::DebugString() const {
+string EdgeMatch::DebugString() const {
   string result = "{";
   if (edge != nullptr && edge->src() != nullptr) result += edge->src()->DebugString();
   result += ", {";
-  for (const NodeMatch& input : inputs) {
+  for (const EdgeMatch& input : inputs) {
     result += input.DebugString() + ",";
   }
   result += "}}";
@@ -180,8 +111,8 @@ string NodeMatch::DebugString() const {
 }
 
 // target node is the src of edge
-bool DoesOpTypeMatch(const Edge* edge, const OpTypePattern& pattern,
-                     NodeMatch* match) {
+bool DoesEdgeMatchOpType(const Edge* edge, const OpTypePattern& pattern,
+                         EdgeMatch* match) {
   Node* node = edge->src();
   VLOG(1) << "Looking at node " << node->DebugString();
   VLOG(1) << "pattern=" << pattern.DebugString();
@@ -202,6 +133,7 @@ bool DoesOpTypeMatch(const Edge* edge, const OpTypePattern& pattern,
     return false;
   }
   match->edge = edge;
+  match->node = node;
   // Ignore any control inputs for pattern-matching purposes
   std::vector<const Edge*> non_control_inputs;
   for (auto input : node->in_edges()) {
@@ -225,9 +157,9 @@ bool DoesOpTypeMatch(const Edge* edge, const OpTypePattern& pattern,
   for (int i = 0; i < pattern.inputs.size(); ++i) {
     const Edge* input_edge = non_control_inputs[i];
     const OpTypePattern& input_pattern = pattern.inputs[i];
-    match->inputs.push_back(NodeMatch());
-    NodeMatch* input_match = &(match->inputs.back());
-    if (!DoesOpTypeMatch(input_edge, input_pattern, input_match)) {
+    match->inputs.push_back(EdgeMatch());
+    EdgeMatch* input_match = &(match->inputs.back());
+    if (!DoesEdgeMatchOpType(input_edge, input_pattern, input_match)) {
       if (IsBinaryOp(node->type_string())) {
         VLOG(1) << "uncertain binary op input order, reverse check";
         reverse_check = true;
@@ -242,14 +174,20 @@ bool DoesOpTypeMatch(const Edge* edge, const OpTypePattern& pattern,
     for (int i = 0; i < pattern.inputs.size(); ++i) {
       const Edge* input_edge = non_control_inputs[pattern.inputs.size()-1-i];
       const OpTypePattern& input_pattern = pattern.inputs[i];
-      match->inputs.push_back(NodeMatch());
-      NodeMatch* input_match = &(match->inputs.back());
-      if (!DoesOpTypeMatch(input_edge, input_pattern, input_match)) {
+      match->inputs.push_back(EdgeMatch());
+      EdgeMatch* input_match = &(match->inputs.back());
+      if (!DoesEdgeMatchOpType(input_edge, input_pattern, input_match)) {
         return false;
       }
     }
   }
   return true;
+}
+
+bool DoesEdgeMatchOpType(const Node* node, const OpTypePattern& pattern,
+                         EdgeMatch* match) {
+  if (node->out_edges().size() < 1) return false;
+  return DoesEdgeMatchOpType(*(node->out_edges().begin()), pattern, match);
 }
 
 bool GetConstTensor(const Node* node, Tensor& tensor) {
@@ -286,7 +224,8 @@ bool IsSameConst(std::vector<Node*>& nodes, bool check_value) {
         return false;
       }
       if (base.shape().DebugString() != cmp.shape().DebugString()) {
-        VLOG(0) << "const shape not match";
+        VLOG(0) << "const shape not match: " << base.shape().DebugString()
+                << " VS " << cmp.shape().DebugString();
         return false;
       }
       if (check_value) {
@@ -297,167 +236,184 @@ bool IsSameConst(std::vector<Node*>& nodes, bool check_value) {
   return true;
 }
 
-bool GetSharedInputGemmPattern(const Node* input, SharedInputGemmPattern& pattern) {
-  if (input->out_edges().size() < 2) {
-    VLOG(1) << "num output less 2";
-    return false;
-  }
-  if (input->type_string() == "Split") {
-    return false;
-  }
-  for (auto e:input->out_edges()) {
-    if (e->src_output() > 0) {
-      return false;
-    }
-  }
-  pattern.input = input;
-  for (auto n:input->out_nodes()) {
-    if (n->type_string() == "Reshape") {
-      pattern.reshape.push_back(n);
-    } else {
-      VLOG(1) << "find invalid node:" << n->DebugString();
-      continue;
-    }
-  }
-  for (auto reshape:pattern.reshape) {
-    for (auto n:reshape->out_nodes()) {
-      if (n->type_string() == "MatMul") {
-        pattern.matmul.push_back(n);
-      } else {
-        VLOG(1) << "find invalid node:" << n->DebugString();
-        return false;
-      }
-    }
-  }
-  for (auto n:pattern.matmul) {
-    Node* weight;
-    n->input_node(1, &weight);
-    if (weight->type_string() == "Identity") {
-      pattern.identity.push_back(weight);
-      Node* const_weight;
-      weight->input_node(0, &const_weight);
-      if (const_weight->type_string() == "Const") {
-        pattern.weight.push_back(const_weight);
-      } else {
-        VLOG(0) << "find invalid node:" << const_weight->DebugString();
-        return false;
-      }
-    } else if (weight->type_string() == "Const") {
-      pattern.weight.push_back(weight);
-    } else {
-      VLOG(0) << "find invalid node:" << weight->DebugString();
-      return false;
-    }
-    std::vector<const Edge*> out_edges;
-    for (auto e:n->out_edges()) {
-      out_edges.push_back(e);
-    }
-    pattern.output.push_back(std::move(out_edges));
-  }
-  if (pattern.matmul.size() < 2) {
-    VLOG(1) << "matmul op less 2";
-    return false;
-  }
-  if (pattern.matmul.size() != pattern.weight.size()) {
-    VLOG(0) << "matmul op not equal to weight: "
-            << pattern.matmul.size() << " VS " << pattern.weight.size();
-    return false;
-  }
-  if (!IsSameConst(pattern.weight, false)) {
-    VLOG(0) << "pattern weight not same";
-    return false;
-  }
-  return true;
-}
+struct MultiHeadPattern {
+  std::vector<Node*> batch_matmul;
 
-bool GetMergeBiasAddPattern(Node* split, MergeBiasAddPattern& pattern) {
-  std::vector<const Edge*> split_out;
-  for (auto e:split->out_edges()) {
-    split_out.push_back(e);
-  }
-  std::sort(split_out.begin(), split_out.end(),
-      [](const Edge* a, const Edge* b) {
-        return a->src_output() < b->src_output();
-      });
-  for (auto e:split_out) {
-    Node* reshape = e->dst();
-    if (reshape->type_string() == "Reshape") {
-      Node* shape;
-      reshape->input_node(1, &shape);
-      pattern.reshape.push_back(reshape);
-      pattern.shape.push_back(shape);
-    } else {
-      VLOG(0) << "not reshape";
-      return false;
+  struct QKVPattern {
+    Node* input;
+    std::vector<Node*> arr_shape1;
+    std::vector<Node*> arr_reshape1;
+    std::vector<Node*> arr_weight;
+    std::vector<Node*> arr_matmul;
+    std::vector<Node*> arr_shape2;
+    std::vector<Node*> arr_reshape2;
+    std::vector<Node*> arr_bias;
+    std::vector<Node*> arr_add;
+    std::vector<Node*> arr_gather;
+    std::vector<Node*> arr_gather_ind;
+    std::vector<std::vector<const Edge*>> outputs;
+    QKVPattern() {
+      input = nullptr;
     }
-    for (auto e:reshape->out_edges()) {
-      Node* add = e->dst();
-      if (add->type_string() != "BiasAdd" &&
-          add->type_string() != "Add" &&
-          add->type_string() != "AddV2") {
-        VLOG(0) << "not add " << add->DebugString();
-        return false;
+
+    void DebugPattern(string prefix) {
+      VLOG(0) << prefix << " input:" << input->DebugString();
+      VLOG(0) << prefix << " head count:" << arr_matmul.size();
+    }
+
+    bool PushQKVPattern(EdgeMatch* match) {
+      if (input == nullptr) {
+        input = match->inputs[0].inputs[0].inputs[0].inputs[0].node;
+      } else {
+        Node* new_input = match->inputs[0].inputs[0].inputs[0].inputs[0].node;
+        if (new_input != input) {
+          LOG(WARNING) << "qkv input not match: " << input->name()
+                       << input->name();
+          return false;
+        }
       }
-      Node* bias;
-      add->input_node(1, &bias);
-      if (bias->type_string() != "Const") {
-        VLOG(0) << "not const";
-        return false;
-      }
-      pattern.add.push_back(add);
-      pattern.bias.push_back(bias);
+      arr_shape1.push_back(match->inputs[0].inputs[0].inputs[0].inputs[1].node);
+      arr_reshape1.push_back(match->inputs[0].inputs[0].inputs[0].node);
+      arr_weight.push_back(match->inputs[0].inputs[0].inputs[1].node);
+      arr_matmul.push_back(match->inputs[0].inputs[0].node);
+      arr_shape2.push_back(match->inputs[0].inputs[1].node);
+      arr_reshape2.push_back(match->inputs[0].node);
+      arr_bias.push_back(match->inputs[1].node);
+      arr_add.push_back(match->node);
       std::vector<const Edge*> out_edges;
-      for (auto e:add->out_edges()) {
+      for (auto e:match->node->out_edges()) {
         out_edges.push_back(e);
       }
-      pattern.output.push_back(std::move(out_edges));
+      outputs.push_back(std::move(out_edges));
+      return true;
     }
-  }
-  pattern.split = split;
-  unsigned int num_split = split->def().attr().at("num_split").i();
-  if (num_split != pattern.reshape.size() ||
-      num_split != pattern.add.size() ||
-      num_split != pattern.shape.size() ||
-      num_split != pattern.bias.size()) {
-    LOG(WARNING) << "split output size not equal to parallel";
-    return false;
+
+    bool MergeQKV(Graph* graph) {
+      // 1.concat weight input
+      // 2.连接concat到其中一个matmul op，其余删除
+      if (!IsSameConst(arr_weight, false) || !IsSameConst(arr_bias, false)) {
+        DebugPattern("weight/bias not same");
+        return false;
+      }
+      if (!IsSameConst(arr_shape2, true)) {
+        DebugPattern("shape before bias add not same");
+        return false;
+      }
+
+      Node* matmul = arr_matmul[0];
+      Tensor t_weight;
+      if (!GetConstTensor(arr_weight[0], t_weight)) {
+        return false;
+      }
+      Node* merged_weight = ConstructConcatOp(graph, matmul, t_weight.dims() - 1, arr_weight,
+                                              matmul->name() + "/merge_weight");
+      TF_RETURN_FALSE_IF_NULL(merged_weight, "merge weight")
+      graph->UpdateEdge(merged_weight, 0, matmul, 1);
+      // 3.concat bias
+      Node* add = arr_add[0];
+      Tensor t_bias;
+      if (!GetConstTensor(arr_bias[0], t_bias)) {
+        return false;
+      }
+      if (t_bias.dims() != 1) {
+        LOG(WARNING) << "bias dim not equals to 1: " << t_bias.shape().DebugString();
+        return false;
+      }
+      Node* merged_bias = ConstructConcatOp(graph, add, t_bias.dims() - 1,
+                                            arr_bias, add->name() + "/merge_bias");
+      TF_RETURN_FALSE_IF_NULL(merged_bias, "merge bias")
+      graph->UpdateEdge(merged_bias, 0, add, 1);
+      graph->UpdateEdge(matmul, 0, add, 0);
+      // 2.构建新的shape
+      Node* old_shape = arr_shape2[0];
+      Tensor new_shape_t;
+      if (!GetConstTensor(old_shape, new_shape_t)) {
+        return false;
+      }
+      int change_dim = new_shape_t.NumElements() - 1;
+      if (new_shape_t.dtype() == DT_INT32) {
+        auto data = new_shape_t.flat<int32>();
+        data(change_dim) = data(change_dim) * arr_add.size();
+
+      } else {
+        auto data = new_shape_t.flat<int64>();
+        data(change_dim) = data(change_dim) * arr_add.size();
+      }
+      string new_shape_name = old_shape->name() + "/merge_shape";
+      Node* new_shape = CreateConstNode(graph, new_shape_name, new_shape_t, add);
+      TF_RETURN_FALSE_IF_NULL(new_shape, "merge shape")
+      VLOG(1) << new_shape->DebugString();
+      Node* reshape = arr_reshape2[0];
+      graph->UpdateEdge(add, 0, reshape, 0);
+      graph->UpdateEdge(new_shape, 0, reshape, 1);
+      // 3.split为多个输出
+      Node* split = ConstructSplitOp(graph, reshape, arr_bias.size(),
+                                    new_shape_t.NumElements() - 1,
+                                    outputs, reshape->name() + "/split_output");
+      TF_RETURN_FALSE_IF_NULL(split, "split output")
+      // 4.删除多余节点
+      for (auto n:arr_matmul) {
+        if (n != matmul) {
+          graph->RemoveNode(n);
+        }
+      }
+      for (auto n:arr_add) {
+        if (n != add) {
+          graph->RemoveNode(n);
+        }
+      }
+      for (auto n:arr_reshape2) {
+        if (n != reshape) {
+          graph->RemoveNode(n);
+        }
+      }
+      VLOG(0) << "merge qkv " << input->name() << ", size "
+              << arr_bias.size();
+      return true;
+    }
+  };
+
+  QKVPattern query;
+  QKVPattern fact;
+
+  bool MatchedGatherPattern() {
+    return fact.arr_gather.size() > 0;
   }
 
-  if (!IsSameConst(pattern.bias, false)) {
-    return false;
+  bool PushMultiHeadPattern(EdgeMatch& match, bool matched_gather) {
+    EdgeMatch* query_match = &(match.inputs[0]);
+    EdgeMatch* fact_match;
+    if (matched_gather) {
+      fact_match = &(match.inputs[1].inputs[0]);
+      fact.arr_gather.push_back(match.inputs[1].node);
+      fact.arr_gather_ind.push_back(match.inputs[1].inputs[1].node);
+    } else {
+      fact_match = &(match.inputs[1]);
+    }
+    VLOG(1) << "push qkv pattern, match gather pattern:" << matched_gather;
+    query.PushQKVPattern(query_match);
+    fact.PushQKVPattern(fact_match);
+    batch_matmul.push_back(match.node);
+    return true;
   }
-  if (!IsSameConst(pattern.shape, true)) {
-    return false;
+
+  bool DoMerge(Graph* graph) {
+    bool result = query.MergeQKV(graph);
+    fact.MergeQKV(graph);
+    return true;
   }
-  Node* bias = pattern.bias[0];
-  Tensor bias_t;
-  if (!GetConstTensor(bias, bias_t)) {
-    return false;
+  void DebugPattern() {
+    VLOG(0) << "match gather pattenr: " << MatchedGatherPattern();
+    query.DebugPattern("query");
+    fact.DebugPattern("fact");
   }
-  if (bias_t.dims() != 1) {
-    LOG(WARNING) << "bias dim not equals to 1: " << bias_t.shape().DebugString();
-    return false;
+};
+
+void DebugMultiHeadPattern(std::map<std::string, MultiHeadPattern>& collection) {
+  for (auto iter:collection) {
+    VLOG(0) << iter.first << "   ******************************************";
+    iter.second.DebugPattern();
   }
-  Node* shape = pattern.shape[0];
-  Tensor shape_t;
-  if (!GetConstTensor(shape, shape_t)) {
-    return false;
-  }
-  int change_dim = shape_t.NumElements() - 1;
-  int dim_last;
-  if (shape_t.dtype() == DT_INT32) {
-    auto data = shape_t.flat<int32>();
-    dim_last = data(change_dim);
-  } else {
-    auto data = shape_t.flat<int64>();
-    dim_last = data(change_dim);
-  }
-  if (dim_last != bias_t.NumElements()) {
-    LOG(WARNING) << "reshape not match with bias: " << shape_t.DebugString()
-                 << " VS " << bias_t.shape().DebugString();
-    return false;
-  }
-  return true;
 }
 
 bool GetAttentionPattern(Node* concat, AttentionPattern& pattern) {
@@ -465,27 +421,32 @@ bool GetAttentionPattern(Node* concat, AttentionPattern& pattern) {
     if (e->src()->type_string() == "Const") continue;
     if (e->src()->type_string() != "BatchMatMulV2") return false;
     pattern.concat = concat;
-    NodeMatch match;
-    if (DoesOpTypeMatch(e, attention_path_pattern, &match)) {
+    EdgeMatch match;
+    if (DoesEdgeMatchOpType(e, attention_path_pattern, &match)) {
       VLOG(1) << "match attention path!!";
       AttentionPattern::PathPattern path_pattern;
-      path_pattern.gemm_tail = match.edge;
-      path_pattern.add = match.inputs[0].edge;
-      path_pattern.softmax = match.inputs[0].inputs[0].edge;
-      path_pattern.add_y = match.inputs[0].inputs[1].edge;
-      path_pattern.gemm_pre = match.inputs[0].inputs[0].inputs[0].edge;
-      // biasAdd
-      path_pattern.gemm_pre_input_a = match.inputs[0].inputs[0].inputs[0].inputs[0].edge;
-      // Split
-      path_pattern.gemm_pre_input_b = match.inputs[0].inputs[0].inputs[0].inputs[1].edge;
-      path_pattern.split = match.inputs[1].edge;
-      path_pattern.split_dim = match.inputs[1].inputs[0].edge;
-      path_pattern.reshape = match.inputs[1].inputs[1].edge;
-      path_pattern.input = match.inputs[1].inputs[1].inputs[0].edge;
-      path_pattern.shape = match.inputs[1].inputs[1].inputs[1].edge;
+      path_pattern.gemm_tail = match.node;
+      path_pattern.add = match.inputs[0].node;
+      path_pattern.softmax = match.inputs[0].inputs[0].node;
+      path_pattern.add_y = match.inputs[0].inputs[1].node;
+      path_pattern.gemm_pre = match.inputs[0].inputs[0].inputs[0].node;
+      // query split
+      path_pattern.query_split = match.inputs[0].inputs[0].inputs[0].inputs[0].node;
+      path_pattern.query_split_edge = match.inputs[0].inputs[0].inputs[0].inputs[0].edge;
+      path_pattern.query_reshape = match.inputs[0].inputs[0].inputs[0].inputs[0].inputs[1].node;
+      path_pattern.query_input = match.inputs[0].inputs[0].inputs[0].inputs[0].inputs[1].inputs[0].node;
+      path_pattern.query_shape = match.inputs[0].inputs[0].inputs[0].inputs[0].inputs[1].inputs[1].node;
+      // fact Split
+      path_pattern.fact_split = match.inputs[0].inputs[0].inputs[0].inputs[1].node;
+      path_pattern.fact_split_edge = match.inputs[0].inputs[0].inputs[0].inputs[0].edge;
+      path_pattern.fact_reshape = match.inputs[0].inputs[0].inputs[0].inputs[1].inputs[1].node;
+      path_pattern.fact_input = match.inputs[0].inputs[0].inputs[0].inputs[1].inputs[1].inputs[0].node;
+      path_pattern.fact_shape = match.inputs[0].inputs[0].inputs[0].inputs[1].inputs[1].inputs[1].node;
       pattern.path.push_back(std::move(path_pattern));
-      if (path_pattern.split->src() != path_pattern.gemm_pre_input_b->src() ||
-          path_pattern.split->src_output() != path_pattern.gemm_pre_input_b->src_output()) {
+      if (path_pattern.query_split_edge->src_output() != path_pattern.fact_split_edge->src_output()) {
+        LOG(WARNING) << "query split port not equal to fact:"
+                     << path_pattern.query_split_edge->DebugString()
+                     << path_pattern.fact_split_edge->DebugString();
         return false;
       }
     } else {
@@ -496,173 +457,84 @@ bool GetAttentionPattern(Node* concat, AttentionPattern& pattern) {
   for (auto e:concat->out_edges()) {
     pattern.output.push_back(e);
   }
-  pattern.split = pattern.path[0].split->src();
-  for (auto path:pattern.path) {
-    if (pattern.split != path.split->src()) {
-     VLOG(0) << "split not same: "
-             << pattern.split->DebugString()
-             << " VS " << path.split->src()->DebugString();
+  for (int i = 1; i < pattern.path.size(); ++i) {
+    if (pattern.path[0].query_split != pattern.path[i].query_split) {
+     VLOG(0) << "query split not same: "
+             << pattern.path[0].query_split->DebugString()
+             << " VS " << pattern.path[i].query_split->DebugString();
+       return false;
+    }
+    if (pattern.path[0].fact_split != pattern.path[i].fact_split) {
+     VLOG(0) << "fact split not same: "
+             << pattern.path[0].fact_split->DebugString()
+             << " VS " << pattern.path[i].fact_split->DebugString();
        return false;
     }
   }
   return true;
 }
 
-bool MergeGemm(Graph* graph, std::vector<Node*>& new_splits) {
-  std::vector<Node*> nodes(graph->num_nodes());
-  int i = 0;
-  Status status;
-  for (Node* node : graph->nodes()) {
-    nodes[i++] = node;
+void GetMultiHeadPattern(const Node* batch_matmul,
+                         std::map<std::string, MultiHeadPattern>& collection) {
+  EdgeMatch match_multi_head;
+  EdgeMatch match_multi_head_gather;
+  EdgeMatch* match = &match_multi_head_gather;
+  bool matched_gather = false;
+  Node* fact_input;
+  if (DoesEdgeMatchOpType(batch_matmul, multi_head_gather_pattern, match)) {
+    matched_gather = true;
+    fact_input = match->inputs[1].inputs[0].inputs[0].inputs[0].inputs[0].inputs[0].node;
+  } else if (DoesEdgeMatchOpType(batch_matmul, multi_head_pattern, &match_multi_head)) {
+    match = &match_multi_head;
+    fact_input = match->inputs[1].inputs[0].inputs[0].inputs[0].inputs[0].node;
+  } else {
+    return;
   }
-  std::map<std::string, SharedInputGemmPattern> collection;
-  VLOG(1) << "start to merge gemm node, " << nodes.size();
-  for (Node* node : nodes) {
-    if (node->type_string() != "MatMul") continue;
-    Node* gemm = node;
-    const Node* reshape;
-    gemm->input_node(0, &reshape);
-    if (reshape->type_string() != "Reshape") continue;
-    const Node* input_a;
-    reshape->input_node(0, &input_a);
-    std::string key = input_a->name();
-    SharedInputGemmPattern pattern;
-    if (collection.find(key) != collection.end()) {
-      continue;
+ 
+  string key = fact_input->name();
+  if (collection.find(key) != collection.end()) {
+    if (!collection[key].PushMultiHeadPattern(*match, matched_gather)) {
+      LOG(WARNING) << "push multi-head pattern faild: " << key;
     }
-    if (GetSharedInputGemmPattern(input_a, pattern)) {
-      VLOG(1) << "find " << key;
-      collection[key] = std::move(pattern);
+  } else {
+    MultiHeadPattern pattern;
+    if (!pattern.PushMultiHeadPattern(*match, matched_gather)) {
+      LOG(WARNING) << "push multi-head pattern faild: " << key;
     }
+    collection[key] = std::move(pattern);
   }
-  if (VLOG_IS_ON(1)) DebugSharedInputGemmPattern(collection);
-  for (auto iter:collection) {
-    // 1.concat weight input
-    // 2.连接concat到其中一个matmul op，其余删除
-    Node* matmul = (iter.second.matmul)[0];
-    Tensor weight;
-    if (!GetConstTensor(iter.second.weight[0], weight)) {
-      return false;
-    }
-    Node* merged_weight = ConstructConcatOp(graph, matmul, weight.dims() - 1,
-                                            iter.second.weight,
-                                            matmul->name() + "/merge_weight");
-    TF_RETURN_FALSE_IF_NULL(merged_weight, "merge weight")
-    graph->UpdateEdge(merged_weight, 0, matmul, 1);
-    // 3.split为多个输出
-    Node* split = ConstructSplitOp(graph, matmul, iter.second.weight.size(),
-                                  weight.dims() - 1, iter.second.output,
-                                  matmul->name() + "/split_output");
-    TF_RETURN_FALSE_IF_NULL(split, "split output")
-    // 4.删除多余节点
-    for (auto n:iter.second.identity) {
-      graph->RemoveNode(n);
-    }
-    for (auto n:iter.second.matmul) {
-      if (n != matmul) {
-        graph->RemoveNode(n);
-      }
-    }
-    new_splits.push_back(split);
-    VLOG(0) << "merge gemm " << matmul->name() << ", size "
-            << iter.second.weight.size();
-  }
-  VLOG(0) << "merge gemm done";
-  return true;
 }
 
-// merge reshape and biasadd after splited matmul
-//         MatMul                     MatMul
-//           |                          | concat const
-//         Split                        | /
-//         /   \  shape              BiasAdd
-//        /     \ /                     | new shape
-//  Reshape   Reshape        -->        | /
-//     | const1  | const2            Reshape
-//     | /       |  /                   |
-//  BiasAdd   BiasAdd                 Split
-//     |         |                    /  \
-//   out1       out2                out1 out2
-bool MergeBiasAdd(Graph* graph, std::vector<Node*>& new_splits) {
+// merge gemm,reshape and biasadd
+//   Reshape   Reshape
+//     |         |                     MatMul
+//     |         |                       | concat const
+//   MatMul    MatMul                    | /
+//     | shape   | shape              BiasAdd
+//     | /       | /                     | new shape
+//  Reshape   Reshape        -->         | /
+//     | const1  | const2             Reshape
+//     | /       |  /                    |
+//  BiasAdd   BiasAdd                  Split
+//     |         |                      /  \
+//   out1       out2                  out1 out2
+bool MergeMultiHead(Graph* graph) {
   std::vector<Node*> nodes(graph->num_nodes());
   int i = 0;
   Status status;
   for (Node* node : graph->nodes()) {
     nodes[i++] = node;
   }
-  VLOG(1) << "start to merge BiasAdd node, " << nodes.size();
-  std::map<std::string, MergeBiasAddPattern> collection;
-  for (auto split:new_splits) {
-    std::string key = split->name();
-    if (collection.find(key) != collection.end()) {
-      continue;
-    }
-    MergeBiasAddPattern pattern;
-    if (GetMergeBiasAddPattern(split, pattern)) {
-      VLOG(1) << "find " << key;
-      collection[key] = std::move(pattern);
-    }
+  std::map<std::string, MultiHeadPattern> collection;
+  VLOG(1) << "start to merge multi-head, " << nodes.size();
+  for (Node* node : nodes) {
+    if (node->type_string() != "BatchMatMulV2") continue;
+    GetMultiHeadPattern(node, collection);
   }
-
-  if (VLOG_IS_ON(1)) DebugMergeBiasAddPattern(collection);
+  if (VLOG_IS_ON(1)) DebugMultiHeadPattern(collection);
   for (auto iter:collection) {
-    // 1.concat多路bias
-    Node* add = iter.second.add[0];
-    Tensor bias;
-    if (!GetConstTensor(iter.second.bias[0], bias)) {
-      return false;
-    }
-    Node* merged_bias = ConstructConcatOp(graph, add, bias.dims() - 1,
-                                          iter.second.bias,
-                                          add->name() + "/merge_bias");
-    TF_RETURN_FALSE_IF_NULL(merged_bias, "merge bias")
-    graph->UpdateEdge(merged_bias, 0, add, 1);
-    const Edge* input;
-    iter.second.split->input_edge(1, &input);
-    graph->UpdateEdge(input->src(), input->src_output(), add, 0);
-    // 2.构建新的shape
-    Node* old_shape = iter.second.shape[0];
-    Tensor new_shape_t;
-    if (!GetConstTensor(old_shape, new_shape_t)) {
-      return false;
-    }
-    int change_dim = new_shape_t.NumElements() - 1;
-    if (new_shape_t.dtype() == DT_INT32) {
-      auto data = new_shape_t.flat<int32>();
-      data(change_dim) = data(change_dim) * iter.second.add.size();
-    } else {
-      auto data = new_shape_t.flat<int64>();
-      data(change_dim) = data(change_dim) * iter.second.add.size();
-    }
-    string new_shape_name = old_shape->name() + "/merge_shape";
-    Node* new_shape = CreateConstNode(graph, new_shape_name, new_shape_t, add);
-    TF_RETURN_FALSE_IF_NULL(new_shape, "merge shape")
-    VLOG(1) << new_shape->DebugString();
-    Node* reshape = iter.second.reshape[0];
-    graph->UpdateEdge(add, 0, reshape, 0);
-    graph->UpdateEdge(new_shape, 0, reshape, 1);
-    // 3.split为多个输出
-    Node* split = ConstructSplitOp(graph, reshape, iter.second.bias.size(),
-                                  new_shape_t.NumElements() - 1,
-                                  iter.second.output,
-                                  reshape->name() + "/split_output");
-    TF_RETURN_FALSE_IF_NULL(split, "split output")
-    // 4.删除多余节点
-    for (auto n:iter.second.add) {
-      if (n != add) {
-        graph->RemoveNode(n);
-      }
-    }
-    for (auto n:iter.second.reshape) {
-      if (n != reshape) {
-        graph->RemoveNode(n);
-      }
-    }
-    graph->RemoveNode(iter.second.split);
-    VLOG(0) << "merge BiasAdd " << add->name() << ", size "
-            << iter.second.bias.size();
+    iter.second.DoMerge(graph);
   }
-  VLOG(0) << "merge BiasAdd done";
   return true;
 }
 
@@ -703,85 +575,107 @@ bool MergeAttention(Graph* graph) {
       std::sort(pattern.path.begin(), pattern.path.end(),
           [](AttentionPattern::PathPattern& a,
              AttentionPattern::PathPattern& b) {
-            return a.split->src_output() < b.split->src_output();
+            return a.query_split_edge->src_output() < b.query_split_edge->src_output();
           });
       collection[key] = std::move(pattern);
     }
   }
   if (VLOG_IS_ON(1)) DebugAttentionPattern(collection);
   for (auto iter:collection) {
+    auto handle_pre_gemm_input = [](Graph* graph, Node* old_shape, Node* reshape,
+                                    Node* gemm_pre, Node* gemm_tail,
+                                    int& first_dim_size, int& last_dim_size,
+                                    int& reshape_dims, int parallel, int port)->bool {
+      // 1.constrcut new shape
+      Tensor old_shape_t;
+      if (!GetConstTensor(old_shape, old_shape_t)) {
+        return false;
+      }
+      reshape_dims = old_shape_t.NumElements();
+      Tensor new_shape_t(old_shape_t.dtype(), {reshape_dims + 1});
+      // [-1, seq_len, dim*p] -> [-1, seq_len, p, dim]
+      if (new_shape_t.dtype() == DT_INT32) {
+        SetShapeTensor<int32>(old_shape_t, new_shape_t, reshape_dims,
+                              last_dim_size, first_dim_size, parallel);
+      } else {
+        SetShapeTensor<int64>(old_shape_t, new_shape_t, reshape_dims,
+                              last_dim_size, first_dim_size, parallel);
+      }
+      string new_shape_name = reshape->name() + "/extend_shape";
+      Node* new_shape = CreateConstNode(graph, new_shape_name, new_shape_t, old_shape);
+      graph->UpdateEdge(new_shape, 0, reshape, 1);
+
+      // 2.construct new transpose
+      Tensor perm_t(DT_INT32, {reshape_dims + 1});
+      auto perm_data = perm_t.flat<int32>();
+      for (auto i = 1; i <= reshape_dims - 1; i++) {
+        perm_data(i) = i - 1;
+      }
+      perm_data(0) = reshape_dims - 1;
+      perm_data(reshape_dims) = reshape_dims;
+      string transpose_name = reshape->name() + "/transpose";
+      Node* transpose = ConstructTransposeOp(graph, reshape, 0,
+                                             transpose_name, perm_t);
+      Status status = graph->UpdateEdge(transpose, 0, gemm_pre, port);
+      TF_RETURN_FALSE_IF_ERROR(status, "update edge failed")
+      // query out not feed to last gemm
+      if (port == 1) {
+        status = graph->UpdateEdge(transpose, 0, gemm_tail, port);
+        TF_RETURN_FALSE_IF_ERROR(status, "update edge failed")
+      }
+      return true;
+    };
     int parallel = iter.second.path.size();
     AttentionPattern::PathPattern& reserve_path = iter.second.path[0];
-    // 1.constrcut new shape
-    Node* old_shape = reserve_path.shape->src();
-    Tensor old_shape_t;
-    if (!GetConstTensor(old_shape, old_shape_t)) {
+    int query_first_dim_size = 0;
+    int query_last_dim_size = 0;
+    int query_reshape_dims = 0;
+    if (!handle_pre_gemm_input(graph, reserve_path.query_shape,
+                               reserve_path.query_reshape,
+                               reserve_path.gemm_pre,
+                               reserve_path.gemm_tail,
+                               query_first_dim_size, query_last_dim_size,
+                               query_reshape_dims, parallel, 0)) {
       return false;
     }
-    int reshape_dims = old_shape_t.NumElements();
-    int first_dim_size;
-    int last_dim_size;
-    Tensor new_shape_t(old_shape_t.dtype(), {reshape_dims + 1});
-    if (new_shape_t.dtype() == DT_INT32) {
-      SetShapeTensor<int32>(old_shape_t, new_shape_t, reshape_dims,
-                            last_dim_size, first_dim_size, parallel);
-    } else {
-      SetShapeTensor<int64>(old_shape_t, new_shape_t, reshape_dims,
-                            last_dim_size, first_dim_size, parallel);
-    }
-    string new_shape_name = reserve_path.reshape->src()->name() + "/extend_shape";
-    Node* new_shape = CreateConstNode(graph, new_shape_name, new_shape_t, old_shape);
-    graph->UpdateEdge(new_shape, 0, reserve_path.reshape->src(), 1);
-
-    // 2.construct new transpose
-    Tensor perm_t(DT_INT32, {reshape_dims + 1});
-    auto perm_data = perm_t.flat<int32>();
-    for (auto i = 1; i <= reshape_dims - 1; i++) {
-      perm_data(i) = i - 1;
-    }
-    perm_data(0) = reshape_dims - 1;
-    perm_data(reshape_dims) = reshape_dims;
-    string transpose_name = reserve_path.reshape->src()->name() + "/transpose";
-    Node* transpose = ConstructTransposeOp(graph, reserve_path.reshape,
-                                           transpose_name, perm_t);
-
-    status = graph->UpdateEdge(transpose, 0, reserve_path.gemm_pre->src(), 1);
-    if (!status.ok()) {
-      LOG(WARNING) << "update edge failed: " << status.ToString();
+    int fact_first_dim_size = 0;
+    int fact_last_dim_size = 0;
+    int fact_reshape_dims = 0;
+    if (!handle_pre_gemm_input(graph, reserve_path.fact_shape,
+                               reserve_path.fact_reshape,
+                               reserve_path.gemm_pre,
+                               reserve_path.gemm_tail,
+                               fact_first_dim_size, fact_last_dim_size,
+                               fact_reshape_dims, parallel, 1)) {
       return false;
     }
-    status = graph->UpdateEdge(transpose, 0, reserve_path.gemm_tail->src(), 1);
-    if (!status.ok()) {
-      LOG(WARNING) << "update edge failed: " << status.ToString();
+    if (query_first_dim_size != fact_first_dim_size ||
+        query_last_dim_size != query_last_dim_size ||
+        query_reshape_dims != fact_reshape_dims) {
+      LOG(WARNING) << "query first/last/reshape dim size not equal with fact"
+                   << query_first_dim_size << " VS " << fact_first_dim_size
+                   << query_last_dim_size << " VS " << fact_last_dim_size
+                   << query_reshape_dims << " VS " << fact_reshape_dims;
       return false;
     }
-
-    // 3.Pack BiasAdd
-    std::vector<const Edge*> in_edges;
-    for (auto path:iter.second.path) {
-      in_edges.push_back(path.gemm_pre_input_a);
-    }
-    string pack_name = reserve_path.gemm_pre->src()->name() + "_pack_input";
-    Node* pack = ConstructPackOp(graph, reserve_path.gemm_pre->src(),
-                                 pack_name, in_edges);
-    Status status = graph->UpdateEdge(pack, 0, reserve_path.gemm_pre->src(), 0);
-    TF_RETURN_FALSE_IF_ERROR(status, "update pack output edge")
 
     // 4.re-transpose
-    for (auto i = 0; i <= reshape_dims - 2; i++) {
+    Tensor perm_t(DT_INT32, {fact_reshape_dims + 1});
+    auto perm_data = perm_t.flat<int32>();
+    for (auto i = 0; i <= fact_reshape_dims - 2; i++) {
       perm_data(i) = i + 1;
     }
-    perm_data(reshape_dims - 1) = 0;
-    perm_data(reshape_dims) = reshape_dims;
-    string re_transpose_name = reserve_path.gemm_tail->src()->name() + "/transpose";
-    Node* re_transpose = ConstructTransposeOp(graph, reserve_path.gemm_tail,
+    perm_data(fact_reshape_dims - 1) = 0;
+    perm_data(fact_reshape_dims) = fact_reshape_dims;
+    string re_transpose_name = reserve_path.gemm_tail->name() + "/transpose";
+    Node* re_transpose = ConstructTransposeOp(graph, reserve_path.gemm_tail, 0,
                                               re_transpose_name, perm_t);
 
     // 5.reshape
     Tensor re_shape_t(DT_INT32, {2});
     auto re_shape_data = re_shape_t.flat<int32>();
-    re_shape_data(0) = first_dim_size;
-    re_shape_data(1) = last_dim_size;
+    re_shape_data(0) = fact_first_dim_size;
+    re_shape_data(1) = fact_last_dim_size;
     string re_shape_name = re_transpose->name() + "/reshape";
     Node* re_reshape = ConstructReshapeOp(graph, re_transpose,
                                           re_shape_name, re_shape_t);
@@ -791,12 +685,13 @@ bool MergeAttention(Graph* graph) {
 
     // 6.delete node
     for (int i = 1; i < iter.second.path.size(); i++) {
-      graph->RemoveNode(iter.second.path[i].gemm_pre->src());
-      graph->RemoveNode(iter.second.path[i].softmax->src());
-      graph->RemoveNode(iter.second.path[i].add->src());
-      graph->RemoveNode(iter.second.path[i].gemm_tail->src());
+      graph->RemoveNode(iter.second.path[i].gemm_pre);
+      graph->RemoveNode(iter.second.path[i].softmax);
+      graph->RemoveNode(iter.second.path[i].add);
+      graph->RemoveNode(iter.second.path[i].gemm_tail);
     }
-    graph->RemoveNode(iter.second.split);
+    graph->RemoveNode(iter.second.path[0].query_split);
+    graph->RemoveNode(iter.second.path[0].fact_split);
     graph->RemoveNode(iter.second.concat);
   }
   VLOG(0) << "merge " << collection.size() << " attention pattern";
@@ -813,13 +708,7 @@ Status MergeGemmOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
     *optimized_graph = item.graph;
     return Status::OK();
   }
-  static int pass = 0;
-  VLOG(0) << "MergeGemmOptimizer is on." << pass;
-  if (VLOG_IS_ON(1)) {
-    string name = "before_merge_gemm_" + std::to_string(pass) + ".pb";
-    DumpModelFile(*optimized_graph, name);
-  }
-
+  VLOG(0) << "MergeGemmOptimizer is on.";
   FunctionLibraryDefinition flib(OpRegistry::Global(), item.graph.library());
   Graph graph(flib);
   Status status = ConvertGraphDefToGraph(GraphConstructorOptions(),
@@ -830,26 +719,14 @@ Status MergeGemmOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
     return Status::OK();
   }
   std::vector<Node*> new_splits;
-  if (!MergeGemm(&graph, new_splits)) {
-    LOG(WARNING) << " merge gemm failed";
+  if (!MergeMultiHead(&graph)) {
+    LOG(WARNING) << " merge multi head failed";
     *optimized_graph = item.graph;
     return Status::OK();
   }
   graph.ToGraphDef(optimized_graph);
   *optimized_graph->mutable_versions() = item.graph.versions();
 
-  if (!MergeBiasAdd(&graph, new_splits)) {
-    LOG(WARNING) << " merge BiasAdd failed";
-    return Status::OK();
-  }
-  graph.ToGraphDef(optimized_graph);
-  *optimized_graph->mutable_versions() = item.graph.versions();
-
-  if (VLOG_IS_ON(1)) {
-    string name = "after_merge_gemm_" + std::to_string(pass) + ".pb";
-    DumpModelFile(*optimized_graph, name);
-  }
-  pass++;
   return Status::OK();
 }
 
@@ -886,6 +763,11 @@ Status MergeGemmOptimizerSecondStage::Optimize(Cluster* cluster, const GrapplerI
   }
   graph.ToGraphDef(optimized_graph);
   *optimized_graph->mutable_versions() = item.graph.versions();
+  if (VLOG_IS_ON(1)) {
+    string name = "after_merge_gemm_" + std::to_string(pass) + ".pb";
+    DumpModelFile(*optimized_graph, name);
+  }
+  pass++;
 
   return Status::OK();
 }

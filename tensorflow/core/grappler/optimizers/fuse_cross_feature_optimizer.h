@@ -40,7 +40,7 @@ static const OpTypePattern cross_feature_pattern =
                           {"GatherV2", // need
                             { // input.input.input.input.input.input
                               {"*"}, // need
-                              {"Placeholder|Tile"}, // need
+                              {"Placeholder|Tile|GatherV2"}, // need
                               {"Const"} // need
                             }
                           },
@@ -72,6 +72,78 @@ static const OpTypePattern cross_feature_pattern =
                         {
                           {"StridedSlice"}, // same 2
                           {"StridedSlice"}, // same 3
+                        }
+                      },
+                      {"Reshape"}, // need
+                    }
+                  },
+                }
+              },
+              {"Const"}, // not need
+            }
+          },
+          {"Const"}, // not need
+        }
+      };
+static const OpTypePattern cross_feature_creative_pattern =
+      {"ConcatV2|Concat",                // concat, base node
+        { // input
+          {"Sum",
+            { // input.input
+              {"Tanh",
+                { // input.input.input
+                  {"BatchMatMul|BatchMatMulV2",
+                    { // input.input.input.input, auto gather to creative
+                      {"GatherV2",
+                        {
+                          // input.input.input.input.input
+                          {"StridedSlice", // same 1, need
+                            { // input.input.input.input.input.input
+                              {"GatherV2", // need
+                                { // input.input.input.input.input.input.input
+                                  {"*"}, // need
+                                  {"Placeholder|Tile"}, // need
+                                  {"Const"} // need
+                                }
+                              },
+                              {"Const"}, // need
+                              {"Const"}, // need
+                              {"Const"}, // need
+                            }
+                          },
+                          {"Placeholder|Cast"}, // need
+                          {"Const"} // need
+                        }
+                      },
+                      {"Reshape", // need
+                        { // input.input.input.input.input
+                          {"StridedSlice"}, // ad stridedslice, need
+                          {"Const"},        // shape const, [batch, 5, 4] -> [batch, 1, 5, 4]
+                        }
+                      },
+                    }
+                  },
+                }
+              },
+              {"Const"},  // sum input const, not need
+            }
+          },
+          {"Sum",
+            {
+              {"Tanh",
+                {
+                  {"BatchMatMul|BatchMatMulV2",
+                    {
+                      {"GatherV2",
+                        {
+                          {"Mul|Square",
+                            {
+                              {"StridedSlice"}, // same 2
+                              {"StridedSlice"}, // same 3
+                            }
+                          },
+                          {"Placeholder|Cast"}, // need
+                          {"Const"} // need
                         }
                       },
                       {"Reshape"}, // need
