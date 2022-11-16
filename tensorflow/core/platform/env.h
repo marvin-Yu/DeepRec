@@ -21,6 +21,7 @@ limitations under the License.
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <iostream>
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/core/stringpiece.h"
@@ -479,8 +480,22 @@ template <typename Factory>
 struct Register {
   Register(Env* env, const string& scheme) {
     // TODO(b/32704451): Don't just ignore the ::tensorflow::Status object!
+    std::cerr << "tf try Register file system " << scheme << " as " << typeid(Factory).name() << std::endl;
     env->RegisterFileSystem(scheme, []() -> FileSystem* { return new Factory; })
         .IgnoreError();
+  }
+};
+
+template <typename Factory>
+struct RegisterByEnv {
+  RegisterByEnv(Env* env, const string& scheme, const string& var) {
+    // TODO(b/32704451): Don't just ignore the ::tensorflow::Status object!
+    const char *v = std::getenv(var.c_str());
+    if (!v || std::string(v) == "true") {
+      std::cerr << "tf try Register file system " << scheme << " as " << typeid(Factory).name() << std::endl;
+      env->RegisterFileSystem(scheme, []() -> FileSystem* { return new Factory; })
+          .IgnoreError();
+    }
   }
 };
 
@@ -503,5 +518,19 @@ struct Register {
 
 #define REGISTER_FILE_SYSTEM(scheme, factory) \
   REGISTER_FILE_SYSTEM_ENV(::tensorflow::Env::Default(), scheme, factory);
+
+
+#define REGISTER_FILE_SYSTEM_ENV_BY_ENV_FLAG(env, scheme, factory, var) \
+  REGISTER_FILE_SYSTEM_UNIQ_BY_ENV_FLAG_HELPER(__COUNTER__, env, scheme, factory, var)
+#define REGISTER_FILE_SYSTEM_UNIQ_BY_ENV_FLAG_HELPER(ctr, env, scheme, factory, var) \
+  REGISTER_FILE_SYSTEM_UNIQ_BY_ENV_FLAG(ctr, env, scheme, factory, var)
+#define REGISTER_FILE_SYSTEM_UNIQ_BY_ENV_FLAG(ctr, env, scheme, factory, var)   \
+  static ::tensorflow::register_file_system::RegisterByEnv<factory> \
+      register_ff##ctr TF_ATTRIBUTE_UNUSED =                   \
+          ::tensorflow::register_file_system::RegisterByEnv<factory>(env, scheme, var)
+
+#define REGISTER_FILE_SYSTEM_BY_ENV_FLAG(scheme, factory, var) \
+  REGISTER_FILE_SYSTEM_ENV_BY_ENV_FLAG(::tensorflow::Env::Default(), scheme, factory, var);
+
 
 #endif  // TENSORFLOW_CORE_PLATFORM_ENV_H_

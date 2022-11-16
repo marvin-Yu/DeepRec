@@ -516,7 +516,8 @@ Status HadoopFileSystem::Stat(const string& fname, FileStatistics* stats) {
   return Status::OK();
 }
 
-REGISTER_FILE_SYSTEM("hdfs", HadoopFileSystem);
+REGISTER_FILE_SYSTEM_BY_ENV_FLAG("hdfs", HadoopFileSystem, "REGISTER_TF_HADOOP_FS");
+
 REGISTER_FILE_SYSTEM("viewfs", HadoopFileSystem);
 
 }  // namespace tensorflow
