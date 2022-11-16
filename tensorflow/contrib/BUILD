@@ -134,6 +134,7 @@ py_library(
         "//conditions:default": [
             "//tensorflow/contrib/fused_conv:fused_conv_py",
             "//tensorflow/contrib/tensorrt:init_py",
+            "//tensorflow/contrib/tensorrt8:init_py",
             "//tensorflow/contrib/ffmpeg:ffmpeg_ops_py",
         ],
     }) + select({

@@ -36,6 +36,17 @@ _TF_TENSORRT_HEADERS_V6 = [
     "NvUffParser.h",
     "NvUtils.h",
 ]
+_TF_TENSORRT_HEADERS_V8 = [
+    "NvInfer.h",
+    "NvInferLegacyDims.h",
+    "NvInferImpl.h",
+    "NvUtils.h",
+    "NvInferPlugin.h",
+    "NvInferVersion.h",
+    "NvInferRuntime.h",
+    "NvInferRuntimeCommon.h",
+    "NvInferPluginUtils.h",
+]
 
 _DEFINE_TENSORRT_SONAME_MAJOR = "#define NV_TENSORRT_SONAME_MAJOR"
 _DEFINE_TENSORRT_SONAME_MINOR = "#define NV_TENSORRT_SONAME_MINOR"
@@ -47,6 +58,8 @@ def _at_least_version(actual_version, required_version):
     return actual >= required
 
 def _get_tensorrt_headers(tensorrt_version):
+    if _at_least_version(tensorrt_version, "8"):
+        return _TF_TENSORRT_HEADERS_V8
     if _at_least_version(tensorrt_version, "6"):
         return _TF_TENSORRT_HEADERS_V6
     return _TF_TENSORRT_HEADERS
@@ -60,7 +73,11 @@ def _tpl(repository_ctx, tpl, substitutions):
 
 def _create_dummy_repository(repository_ctx):
     """Create a dummy TensorRT repository."""
-    _tpl(repository_ctx, "build_defs.bzl", {"%{if_tensorrt}": "if_false"})
+    _tpl(repository_ctx, "build_defs.bzl", {
+          "%{if_tensorrt}": "if_false",
+          "%{if_tensorrt_v6}": "if_false",
+          "%{if_tensorrt_v8}": "if_false"
+      }) 
     _tpl(repository_ctx, "BUILD", {
         "%{copy_rules}": "",
         "\":tensorrt_include\"": "",
@@ -133,7 +150,18 @@ def _tensorrt_configure_impl(repository_ctx):
     ]
 
     # Set up config file.
-    _tpl(repository_ctx, "build_defs.bzl", {"%{if_tensorrt}": "if_true"})
+    if _at_least_version(trt_version, "8"):
+      _tpl(repository_ctx, "build_defs.bzl", {
+          "%{if_tensorrt}": "if_true",
+          "%{if_tensorrt_v6}": "if_false",
+          "%{if_tensorrt_v8}": "if_true"
+      })
+    elif _at_least_version(trt_version, "6"):
+      _tpl(repository_ctx, "build_defs.bzl", {
+          "%{if_tensorrt}": "if_true",
+          "%{if_tensorrt_v6}": "if_true",
+          "%{if_tensorrt_v8}": "if_false"
+      })
 
     # Set up BUILD file.
     _tpl(repository_ctx, "BUILD", {
