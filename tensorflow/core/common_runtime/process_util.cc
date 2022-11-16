@@ -97,6 +97,12 @@ int32 NumIntraOpThreadsFromEnvironment() {
   return (val && strings::safe_strto32(val, &num)) ? num : 0;
 }
 
+int32 NumIntraOpThreadsFromEnvironmentHighPripority() {
+  int32 num;
+  const char* val = std::getenv("TF_GLOBAL_NUM_INTRAOP_THREADS");
+  return (val && strings::safe_strto32(val, &num)) ? num : 0;
+}
+
 int32 NumInterOpThreadsFromSessionOptions(const SessionOptions& options) {
   const int32 inter_op = options.config.inter_op_parallelism_threads();
   if (inter_op > 0) return inter_op;

@@ -36,6 +36,9 @@ int32 NumInterOpThreadsFromEnvironment();
 // Returns the TF_NUM_INTRAOP_THREADS environment value, or 0 if not specified.
 int32 NumIntraOpThreadsFromEnvironment();
 
+// Returns the TF_NUM_INTRAOP_THREADS environment value, or 0 if not specified.
+int32 NumIntraOpThreadsFromEnvironmentHighPripority();
+
 // Returns the number of inter op threads specified in `options` or a default.
 // If no value or a negative value is specified in the provided options, then
 // the function returns the value defined in the TF_NUM_INTEROP_THREADS
