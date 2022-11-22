@@ -98,9 +98,9 @@ Node* ConstuctMatMulOp(Graph* graph, const Edge* input,
                   .Finalize(&def);
   };
   NodeDef def;
-  Status status = NodeDefConstructor(def, matmul->def(), matmul_builder);
+  Status status = NodeDefConstructor(def, matmul->def().device(), matmul_builder);
   TF_RETURN_NULL_IF_ERROR(status, "construct matmul def");
-  Node* new_matmul = NodeConstructor(graph, name, matmul, def);
+  Node* new_matmul = NodeConstructor(graph, name, matmul->assigned_device_name(), def);
   TF_RETURN_NULL_IF_NULL(new_matmul, "construct matmul")
   VLOG(1) << "matmul " << new_matmul->DebugString();
   return new_matmul;
@@ -135,9 +135,9 @@ Node* ConstuctCoActionOp(Graph* graph, const Edge* input,
                   .Finalize(&def);
   };
   NodeDef def;
-  Status status = NodeDefConstructor(def, co_action->def(), co_action_builder);
+  Status status = NodeDefConstructor(def, co_action->def().device(), co_action_builder);
   TF_RETURN_NULL_IF_ERROR(status, "construct CoAction def");
-  Node* new_co_action = NodeConstructor(graph, name, co_action, def);
+  Node* new_co_action = NodeConstructor(graph, name, co_action->assigned_device_name(), def);
   TF_RETURN_NULL_IF_NULL(new_co_action, "construct CoAction")
   VLOG(1) << "co_action " << new_co_action->DebugString();
   return new_co_action;
@@ -178,7 +178,7 @@ TensorShape GetGemmInputConstTensorShape(const Node* matmul) {
     weight->input_node(1, &in2);
     const Node* const2 = SearchConst(in2);
     TensorShape shape2 = GetFloatConstTensorShape(const1);
-    return shape1.num_elements() > shape2.num_elements ? shape1 : shape2;
+    return shape1.num_elements() > shape2.num_elements() ? shape1 : shape2;
   }
   return GetFloatConstTensorShape(SearchConst(weight));
 }

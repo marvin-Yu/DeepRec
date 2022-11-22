@@ -340,7 +340,8 @@ struct MultiHeadPattern {
         data(change_dim) = data(change_dim) * arr_add.size();
       }
       string new_shape_name = old_shape->name() + "/merge_shape";
-      Node* new_shape = CreateConstNode(graph, new_shape_name, new_shape_t, add);
+      Node* new_shape = CreateConstNode(graph, new_shape_name, new_shape_t,
+                        old_shape->def().device(), old_shape->assigned_device_name());
       TF_RETURN_FALSE_IF_NULL(new_shape, "merge shape")
       VLOG(1) << new_shape->DebugString();
       Node* reshape = arr_reshape2[0];
@@ -602,7 +603,8 @@ bool MergeAttention(Graph* graph) {
                               last_dim_size, first_dim_size, parallel);
       }
       string new_shape_name = reshape->name() + "/extend_shape";
-      Node* new_shape = CreateConstNode(graph, new_shape_name, new_shape_t, old_shape);
+      Node* new_shape = CreateConstNode(graph, new_shape_name, new_shape_t,
+                        old_shape->def().device(), old_shape->assigned_device_name());
       graph->UpdateEdge(new_shape, 0, reshape, 1);
 
       // 2.construct new transpose
