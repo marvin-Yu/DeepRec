@@ -1454,7 +1454,6 @@ cc_library(
         ":tpu_replication_ops_op_lib",
         ":training_ops_op_lib",
         ":user_ops_op_lib",
-        ":dice_ops_op_lib",
         ":word2vec_ops",
         "//tensorflow/c/kernels:bitcast_op_lib",
     ] + if_mkl([
