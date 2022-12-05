@@ -145,11 +145,11 @@ bool AutoMixedPrecisionEnabled(RewriterConfig::Toggle opt_level) {
 }
 
 // A helper function to decide whether to enable the dice fusion optimizer.
-bool DiceFusionEnabled() {
-  bool is_enabled = true;
-  TF_CHECK_OK(ReadBoolFromEnvVar("TF_DICE_FUSION",
-                                 /*default_val=*/true, &is_enabled));
-  return is_enabled;
+bool DiceFusionEnabled(RewriterConfig::Toggle opt_level) {
+  if (opt_level == RewriterConfig::ON ||
+      opt_level == RewriterConfig::AGGRESSIVE) {
+    return true;
+  }
 }
 
 }  // namespace
@@ -205,7 +205,7 @@ MetaOptimizer::MetaOptimizer(DeviceBase* cpu_device, const ConfigProto& cfg)
 
 Status MetaOptimizer::InitializeOptimizers(
     std::vector<std::unique_ptr<GraphOptimizer>>* optimizers) const {
-  if (DiceFusionEnabled()) {
+  if (DiceFusionEnabled(cfg_.dice_fusion())) {
     optimizers->push_back(MakeUnique<DiceFusion>());
   }
   if (cfg_.disable_meta_optimizer()) {
