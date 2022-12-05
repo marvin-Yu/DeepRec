@@ -35,6 +35,7 @@ limitations under the License.
 #include "tensorflow/core/grappler/optimizers/function_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/gemm_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/multi_dnn_switch_optimizer.h"
+#include "tensorflow/core/grappler/optimizers/dice_fusion.h"
 #include "tensorflow/core/grappler/optimizers/batch_mat_mul_compatible.h"
 #include "tensorflow/core/grappler/optimizers/gemm_compression.h"
 #include "tensorflow/core/grappler/optimizers/memory_access_optimizer.h"
@@ -143,6 +144,14 @@ bool AutoMixedPrecisionEnabled(RewriterConfig::Toggle opt_level) {
   return false;
 }
 
+// A helper function to decide whether to enable the dice fusion optimizer.
+bool DiceFusionEnabled() {
+  bool is_enabled = true;
+  TF_CHECK_OK(ReadBoolFromEnvVar("TF_DICE_FUSION",
+                                 /*default_val=*/true, &is_enabled));
+  return is_enabled;
+}
+
 }  // namespace
 
 #define MK_OPT(NAME, VALUE) \
@@ -163,6 +172,7 @@ std::unique_ptr<GraphOptimizer> MetaOptimizer::MakeNewOptimizer(
   MK_OPT("multi_dnn_switch", new MultiDNNSwitchOptimizer());
   MK_OPT("fuse_cross_feature", new FuseCrossFeatureOptimizer());
   MK_OPT("partial_mixed_precision", new PartialMixedPrecision());
+  MK_OPT("dice_fusion", new DiceFusion());
   MK_OPT("partial_mixed_precision_second_stage", new PartialMixedPrecisionSecondStage());
   MK_OPT("merge_gemm", new MergeGemmOptimizer());
   MK_OPT("merge_gemm_second_stage", new MergeGemmOptimizerSecondStage());
@@ -195,6 +205,9 @@ MetaOptimizer::MetaOptimizer(DeviceBase* cpu_device, const ConfigProto& cfg)
 
 Status MetaOptimizer::InitializeOptimizers(
     std::vector<std::unique_ptr<GraphOptimizer>>* optimizers) const {
+  if (DiceFusionEnabled()) {
+    optimizers->push_back(MakeUnique<DiceFusion>());
+  }
   if (cfg_.disable_meta_optimizer()) {
     return Status::OK();
   }
