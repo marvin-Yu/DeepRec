@@ -7672,6 +7672,7 @@ tf_kernel_library(
     ],
     hdrs = ["dice/compile_util.h"],
     deps = ["//third_party/eigen3"] + DYNAMIC_DEPS + mkl_deps(),
+    copts = ["-mavx -mavx2 -mavx512f -mfma -mf16c "],
 )
 
 tf_cc_test(

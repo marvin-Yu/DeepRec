@@ -755,6 +755,7 @@ tf_cc_shared_object(
         "//tensorflow/core/debug:debug_gateway_internal",
         "@com_google_protobuf//:protobuf"
     ] + if_ngraph(["@ngraph_tf//:ngraph_tf"]),
+    copts = ["-mavx -mavx2 -mavx512f -mfma -mf16c"],
 )
 
 # ** Targets for Windows build (start) **
