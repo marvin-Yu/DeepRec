@@ -411,6 +411,11 @@ DirectSession::DirectSession(const SessionOptions& options,
     }
     ++devices_added;
   }
+  Status status_online_tuning =
+      ReadBoolFromEnvVar("PAI_ENABLE_ONLINE_TUNING", false, &pai_enable_online_tuning_);
+  if (!status_online_tuning.ok()) {
+    LOG(ERROR) << status_online_tuning.error_message();
+  }
 }
 
 DirectSession::~DirectSession() {
@@ -2697,6 +2702,193 @@ Status DirectSession::CreateExecutors(
   }
   *out_executors_and_keys = std::move(ek);
   *out_func_info = std::move(func_info);
+  return Status::OK();
+}
+
+Status DirectSession::PreCreateExecutors(
+    const std::vector<std::string>& inputs,
+    const std::vector<std::string>& outputs,
+    const std::vector<std::string>& target_nodes,
+    const ::tensorflow::RunOptions& run_options) {
+  RunStateArgs run_state_args(run_options.debug_options());
+    run_state_args.collective_graph_key =
+        run_options.experimental().collective_graph_key();
+
+  int64 handle_name_counter_value = -1;
+  if (LogMemory::IsEnabled() || run_state_args.is_partial_run) {
+    handle_name_counter_value = handle_name_counter_.fetch_add(1);
+  }
+
+  string debug_tensor_watches_summary;
+  if (!run_state_args.debug_options.debug_tensor_watch_opts().empty()) {
+    debug_tensor_watches_summary = SummarizeDebugTensorWatches(
+        run_state_args.debug_options.debug_tensor_watch_opts());
+  }
+
+  string options_string = "";
+  if (pai_enable_online_tuning_) {
+    bool enable_auto_mixed_precision = false;
+    auto status = ReadBoolFromEnvVar(
+            "TF_AUTO_MIXED_PRECISION", false, &enable_auto_mixed_precision);
+    if (options_.config.graph_options().optimizer_options().do_mixed_precision()
+        || enable_auto_mixed_precision) {
+      options_string += "_amp";
+    }
+
+    auto jit_level =
+        options_.config.graph_options().optimizer_options().global_jit_level();
+    bool enable_tao = false;
+    status = ReadBoolFromEnvVar("TF_ENABLE_TAO", false, &enable_tao);
+    if (jit_level == OptimizerOptions::ON_1 || enable_tao) {
+      options_string += "_tao";
+    }
+
+    bool enable_hlo_dumper = false;
+    status = ReadBoolFromEnvVar("PAI_ENABLE_HLO_DUMPER", false, &enable_hlo_dumper);
+    if (enable_hlo_dumper) {
+      options_string += "_hlo_dumper";
+    }
+
+    auto rewrite_opt =
+      options_.config.graph_options().rewrite_options().layout_optimizer();
+    if (rewrite_opt != RewriterConfig::OFF) {
+      options_string += "_layout_opt";
+    }
+    rewrite_opt =
+      options_.config.graph_options().rewrite_options().dependency_optimization();
+    if (rewrite_opt != RewriterConfig::OFF) {
+      options_string += "_dep_opt";
+    }
+    rewrite_opt =
+      options_.config.graph_options().rewrite_options().loop_optimization();
+    if (rewrite_opt != RewriterConfig::OFF) {
+      options_string += "_loop_opt";
+    }
+    rewrite_opt =
+      options_.config.graph_options().rewrite_options().arithmetic_optimization();
+    if (rewrite_opt != RewriterConfig::OFF) {
+      options_string += "_arith_opt";
+    }
+    rewrite_opt =
+      options_.config.graph_options().rewrite_options().constant_folding();
+    if (rewrite_opt != RewriterConfig::OFF) {
+      options_string += "_constfold_opt";
+    }
+    rewrite_opt =
+      options_.config.graph_options().rewrite_options().function_optimization();
+    if (rewrite_opt != RewriterConfig::OFF) {
+      options_string += "_func_opt";
+    }
+  }
+  // Fast lookup path, no sorting.
+  const string key = strings::StrCat(
+      str_util::Join(inputs, ","), "->", str_util::Join(outputs, ","), "/",
+      str_util::Join(target_nodes, ","), "/", run_state_args.is_partial_run,
+      "/", debug_tensor_watches_summary,
+      "/", options_string);
+  // Set the handle, if it's needed to log memory or for partial run.
+  if (handle_name_counter_value >= 0) {
+    run_state_args.handle =
+        strings::StrCat(key, ";", handle_name_counter_value);
+  }
+
+  // See if we already have the executors for this run.
+  {
+    mutex_lock l(executor_lock_);  // could use reader lock
+    auto it = executors_.find(key);
+    if (it != executors_.end()) {
+      std::shared_ptr<ExecutorsAndKeys> found_executors_and_keys = it->second;
+      if (!found_executors_and_keys->status.ok()) {
+        return found_executors_and_keys->status;
+      }
+      return Status::OK();
+    }
+  }
+
+  // Slow lookup path, the unsorted key missed the cache.
+  // Sort the inputs and outputs, and look up with the sorted key in case an
+  // earlier call used a different order of inputs and outputs.
+  //
+  // We could consider some other signature instead of sorting that
+  // preserves the same property to avoid the sort in the future.
+  std::vector<string> inputs_sorted(inputs.begin(), inputs.end());
+  std::sort(inputs_sorted.begin(), inputs_sorted.end());
+  std::vector<string> outputs_sorted(outputs.begin(), outputs.end());
+  std::sort(outputs_sorted.begin(), outputs_sorted.end());
+  std::vector<string> tn_sorted(target_nodes.begin(), target_nodes.end());
+  std::sort(tn_sorted.begin(), tn_sorted.end());
+
+  const string sorted_key = strings::StrCat(
+      str_util::Join(inputs_sorted, ","), "->",
+      str_util::Join(outputs_sorted, ","), "/", str_util::Join(tn_sorted, ","),
+      "/", run_state_args.is_partial_run, "/", debug_tensor_watches_summary,
+      "/", options_string);
+  // Set the handle, if its needed to log memory or for partial run.
+  if (handle_name_counter_value >= 0) {
+    run_state_args.handle =
+        strings::StrCat(sorted_key, ";", handle_name_counter_value);
+  }
+
+  // See if we already have the executors for this run.
+  {
+    mutex_lock l(executor_lock_);
+    auto it = executors_.find(sorted_key);
+    if (it != executors_.end()) {
+      std::shared_ptr<ExecutorsAndKeys> found_executors_and_keys = it->second;
+      if(!found_executors_and_keys->status.ok()) {
+        return found_executors_and_keys->status;
+      }
+      // Insert this under the original key.
+      executors_.emplace(key, found_executors_and_keys);
+      return Status::OK();
+    }
+  }
+
+  // Nothing found, so create the executors and store in the cache.
+  // The executor_lock_ is intentionally released while executors are
+  // being created.
+  CallableOptions callable_options;
+  for (const string& input : inputs_sorted) {
+    callable_options.add_feed(input);
+  }
+  for (const string& output : outputs_sorted) {
+    callable_options.add_fetch(output);
+  }
+  for (const string& target : tn_sorted) {
+    callable_options.add_target(target);
+  }
+  *callable_options.mutable_run_options()->mutable_debug_options() =
+      run_state_args.debug_options;
+  callable_options.mutable_run_options()
+      ->mutable_experimental()
+      ->set_collective_graph_key(run_state_args.collective_graph_key);
+  std::unique_ptr<ExecutorsAndKeys> ek;
+  std::unique_ptr<FunctionInfo> func_info;
+  Status status = CreateExecutors(callable_options, &ek, &func_info, &run_state_args);
+
+  // When create executors failed, still cache empty executor to 
+  // optimize performance for the same query
+  if (!status.ok()) {
+    mutex_lock l(executor_lock_);
+    std::unique_ptr<ExecutorsAndKeys> ek(new ExecutorsAndKeys(status));
+    auto insert_result = executors_.emplace(
+      sorted_key, std::shared_ptr<ExecutorsAndKeys>(std::move(ek)));
+    executors_.emplace(key, insert_result.first->second);
+    return status;
+  }
+
+  // Reacquire the lock, try to insert into the map.
+  mutex_lock l(executor_lock_);
+  functions_.push_back(std::move(func_info));
+
+  // Another thread may have created the entry before us, in which case we will
+  // reuse the already created one.
+  auto insert_result = executors_.emplace(
+      sorted_key, std::shared_ptr<ExecutorsAndKeys>(std::move(ek)));
+  // Insert the value under the original key, so the fast path lookup will work
+  // if the user uses the same order of inputs, outputs, and targets again.
+  executors_.emplace(key, insert_result.first->second);
+
   return Status::OK();
 }
 

@@ -289,6 +289,7 @@ message OptimizerOptions {
   repeated string output_names_with_cg = 10;
   
   bool cuda_graph_capture = 11;
+  bool do_mixed_precision = 12;
 }
 
 message GraphOptions {
@@ -607,6 +608,7 @@ message ConfigProto {
   string auto_padding_shape = 116;
   bool enable_xla_fusion_shape = 117;
   // Next: 17
+  int32 global_io_parallelism_threads = 202;
 }
 
 // config for cuda graph session
