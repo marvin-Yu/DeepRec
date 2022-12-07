@@ -148,8 +148,11 @@ bool AutoMixedPrecisionEnabled(RewriterConfig::Toggle opt_level) {
 bool DiceFusionEnabled(RewriterConfig::Toggle opt_level) {
   if (opt_level == RewriterConfig::ON ||
       opt_level == RewriterConfig::AGGRESSIVE) {
+    VLOG(1) << "enable dice fusion";
     return true;
   }
+    VLOG(1) << "disable dice fusion";
+  return false;
 }
 
 }  // namespace
