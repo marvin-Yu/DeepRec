@@ -654,6 +654,7 @@ cc_library(
     srcs = ["meta_optimizer.cc"],
     hdrs = [
         "meta_optimizer.h",
+        "//tensorflow/core/platform:cpu_info.h",
     ],
     visibility = ["//visibility:public"],
     deps = [

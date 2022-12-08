@@ -61,6 +61,7 @@ limitations under the License.
 #include "tensorflow/core/grappler/verifiers/structure_verifier.h"
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/gtl/map_util.h"
+#include "tensorflow/core/platform/cpu_info.h"
 #include "tensorflow/core/util/dump_graph.h"
 #include "tensorflow/core/util/ptr_util.h"
 
@@ -146,6 +147,7 @@ bool AutoMixedPrecisionEnabled(RewriterConfig::Toggle opt_level) {
 
 // A helper function to decide whether to enable the dice fusion optimizer.
 bool DiceFusionEnabled(RewriterConfig::Toggle opt_level) {
+  if (!port::TestCPUFeature(port::CPUFeature::AVX512F)) {return false;}
   if (opt_level == RewriterConfig::ON ||
       opt_level == RewriterConfig::AGGRESSIVE) {
     VLOG(1) << "enable dice fusion";
