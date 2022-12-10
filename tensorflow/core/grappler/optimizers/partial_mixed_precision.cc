@@ -28,6 +28,7 @@ limitations under the License.
 #include "tensorflow/core/grappler/utils.h"
 #include "tensorflow/core/util/dump_graph.h"
 #include "tensorflow/core/util/env_var.h"
+#include "tensorflow/core/lib/strings/str_util.h"
 
 
 namespace tensorflow {
@@ -397,11 +398,19 @@ Status Collapse(GraphDef* graph) {
 
 }  // end namespace
 
+void ParseBranchsString(const string& scope_str, std::set<string>& scopes) {
+  for (auto x : str_util::Split(scope_str, ",")) {
+    scopes.insert(x);
+  }
+  return;
+}
+
 Status PartialMixedPrecision::Optimize(Cluster* cluster, const GrapplerItem& item,
                                GraphDef* optimized_graph) {
-  bool opt = false;
+  std::set<string> scopes;
+  ParseBranchsString(cast_scope_, scopes);
   // maybe lead to nan, default off
-  ReadBoolFromEnvVar("TF_ENABLE_PARTIAL_MIXED_PRECISION_MAX", false, &opt);
+  bool opt = scopes.find("max") != scopes.end();
   if (!opt) {
     *optimized_graph = item.graph;
     return Status::OK();
@@ -431,8 +440,9 @@ Status PartialMixedPrecision::Optimize(Cluster* cluster, const GrapplerItem& ite
   }
   graph.ToGraphDef(optimized_graph);
   *optimized_graph->mutable_versions() = item.graph.versions();
+
   // maybe lead to nan, default off
-  ReadBoolFromEnvVar("TF_ENABLE_PARTIAL_MIXED_PRECISION_SECOND", false, &opt);
+  opt = scopes.find("submax") != scopes.end();
   if (opt) {
     VLOG(0) << "PartialMixedPrecision round 2";
     status = ConvertGemm(&graph);
@@ -460,8 +470,9 @@ void PartialMixedPrecision::Feedback(tensorflow::grappler::Cluster *cluster,
 
 Status PartialMixedPrecisionSecondStage::Optimize(Cluster* cluster, const GrapplerItem& item,
                                GraphDef* optimized_graph) {
-  bool opt = true;
-  ReadBoolFromEnvVar("TF_ENABLE_PARTIAL_MIXED_PRECISION", true, &opt);
+  std::set<string> scopes;
+  ParseBranchsString(cast_scope_, scopes);
+  bool opt = scopes.find("pre") != scopes.end();
   if (!opt) {
     *optimized_graph = item.graph;
     return Status::OK();
