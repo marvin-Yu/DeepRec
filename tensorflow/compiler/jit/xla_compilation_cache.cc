@@ -49,11 +49,20 @@ XlaCompilationCache::XlaCompilationCache(xla::LocalClient* client,
                                          DeviceType device_type,
                                          std::string name)
     : client_(client), device_type_(std::move(device_type)),
-      name_(name) {
-  xla_auto_padding_ = std::make_shared<XlaAutoPadding>(this, name_);
+      name_(name), exit_flag_(false) {
+  xla_auto_padding_ = std::make_shared<XlaAutoPadding>(name_);
+  compile_thread_pool_ = std::make_shared<thread::ThreadPool>(
+						        Env::Default(), ThreadOptions(), strings::StrCat("xla_compile"),
+						        1, /*low_latency_hint*/true,
+						        /*allocator=*/nullptr);
 }
 
 XlaCompilationCache::~XlaCompilationCache() {
+  exit_flag_ = true;
+  if (xla_auto_padding_->IsAutopadding()) {
+    LOG(INFO) << "Core Test: XlaCompilationCache release, XlaCompilationCache address:" << this
+              << ", autopadding address:" << xla_auto_padding_;
+  }
   // Ensure any use of our programs have completed by waiting for all stream
   // executors to complete.
   for (auto* executor : client_->backend().stream_executors()) {
@@ -231,10 +240,45 @@ Status XlaCompilationCache::Compile(
                        /*compile_threshold=*/compile_threshold,
                        out_compilation_result, out_executable, nullptr);
   } else {
-    VLOG(1) << name_ << " Compile auto padding";
-    return xla_auto_padding_->Compile(ctx, options, function, args, compile_options, compile_fn,
-                       /*compile_threshold=*/compile_threshold,
-                       out_compilation_result, out_executable, inputs_shape_info);
+    if (exit_flag_) {
+      LOG(INFO) << "Core Test exit_flag true, not compile, this is " << this;
+      return Status::OK();
+    }
+
+    bool sync_compile = false;
+    bool need_compile = true;
+
+    auto status = xla_auto_padding_->PreCheck(
+         out_compilation_result, out_executable, inputs_shape_info,
+         sync_compile, need_compile);
+		if (!status.ok()) {
+		  return status;
+		}
+
+    if (!need_compile) {
+      return Status::OK();
+    }
+
+    LOG(INFO) << "Compile auto padding " << name_;
+    std::vector<XlaCompiler::Argument> unconst_args;
+    unconst_args.reserve(args.size());
+    for (auto& arg: args) {
+      unconst_args.push_back(arg);
+    }
+
+    if (sync_compile) {
+      return CompileImpl(
+                   options, function, unconst_args, compile_options, compile_fn,
+                   compile_threshold,
+                   nullptr, nullptr, inputs_shape_info);
+    } else {
+      auto fn = std::bind(&XlaCompilationCache::CompileImpl, this,
+                   options, function, unconst_args, compile_options, compile_fn,
+                   compile_threshold,
+                   nullptr, nullptr, inputs_shape_info);
+      compile_thread_pool_->Schedule(fn);
+      return Status::OK();
+    }
   }
 }
 
@@ -309,6 +353,11 @@ Status XlaCompilationCache::CompileImpl(
     const XlaCompiler::CompilationResult** out_compilation_result,
     xla::LocalExecutable** out_executable,
     std::shared_ptr<InputsShapeInfo> inputs_shape_info) {
+  if (exit_flag_) {
+    LOG(INFO) << "Core Test exit_flag true, not compile, this is " << this;
+    return Status::OK();
+  }
+
   VLOG(2) << "XlaCompilationCache::Compile " << DebugString();
   nvtxRangePushA("CompileImpl");
 
@@ -321,6 +370,12 @@ Status XlaCompilationCache::CompileImpl(
 
   TF_ASSIGN_OR_RETURN(Signature signature, BuildSignature(function, args));
   VLOG(2) << "Signature: " << signature.HumanString();
+  if(inputs_shape_info != nullptr) {
+    LOG(INFO) << "Core Test CompileImpl " << name_
+              << " XlaCompilationCache address:" << this
+              << ", autopadding address:" << xla_auto_padding_
+              << ", cache map size:" << cache_.size();
+  }
   // The outer lock protects the existence of the cache entry. It does not
   // protect the contents of the cache entry.
   Entry* entry;

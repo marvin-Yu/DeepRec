@@ -36,6 +36,7 @@ limitations under the License.
 #include "tensorflow/core/lib/gtl/cleanup.h"
 #include "tensorflow/core/lib/gtl/flatset.h"
 #include "tensorflow/core/lib/strings/str_util.h"
+#include "tensorflow/core/util/env_var.h"
 
 namespace tensorflow {
 namespace grappler {
@@ -1130,7 +1131,7 @@ class SymbolicShapeRefiner {
       NodeContext* src_ctx = GetNodeContext(src, ctx_idx);
       SetConstNodeOutputShape(src, src_ctx);
     }
-    return InferShapes(*node, ctx, false);
+    return InferShapes(*node, ctx, false, false);
   }
 
   string DebugString(const gtl::ArraySlice<int> arrays) {
@@ -1149,7 +1150,7 @@ class SymbolicShapeRefiner {
   Status UpdateNodeFastMode(const NodeDef* node,
       const std::vector<Tensor>& feed_tensors,
       std::vector<TensorShapeProto>& output_shapes,
-      int ctx_idx) {
+      int ctx_idx, bool validate) {
     NodeContext* ctx = GetNodeContext(node, ctx_idx);
     CHECK(ctx != nullptr); 
     // Check if the shapes of the nodes in the fan-in of this node have changed,
@@ -1208,7 +1209,7 @@ class SymbolicShapeRefiner {
     //  Construct Tensors for constant inputs used by shape functions.
     std::vector<Tensor> notused(ic->num_inputs());
     FillCtxInputTensors(feed_tensors, ctx, src_names, src_is_const, notused);
-    auto ret = InferShapes(*node, ctx, true);
+    auto ret = InferShapes(*node, ctx, true, validate);
     if (PopulateOutputShapes(node, ctx, output_shapes)) return Status::OK();
     LOG(ERROR) << "Shape infer error, dump cluster inputs:"; 
     for (auto iter = feed_.begin(); iter != feed_.end(); iter++) {
@@ -2020,7 +2021,8 @@ class SymbolicShapeRefiner {
     return Status::OK();
   }
 
-  Status InferShapes(const NodeDef& node, NodeContext* c, bool is_fast_mode) {
+  Status InferShapes(const NodeDef& node, NodeContext* c,
+         bool is_fast_mode, bool validate) {
     // Infer the shapes of output tensors.
     // node is arg node and its output shape has known, do not need shape inference;
     auto ic = c->inference_context.get();
@@ -2043,11 +2045,13 @@ class SymbolicShapeRefiner {
     //for (int i = 0; i < ic->num_outputs(); i++) {
     //  VLOG(0) << node.name() << " output shape" << ic->DebugString(ic->output(i));
     //}
-    xla_padding_rule_->CheckNodeIsPaddingValid(node, 
-        c->inference_context.get(), 
-        is_fast_mode);
-    Status status = Status::OK();
+    if (validate) {
+      xla_padding_rule_->CheckNodeIsPaddingValid(node,
+          c->inference_context.get(),
+          is_fast_mode);
+    }
 
+    Status status = Status::OK();
     auto it = fed_ports_.find(node.name());
     const bool is_fed = it != fed_ports_.end();
 
@@ -2350,7 +2354,7 @@ Status GraphProperties::UpdateShapes(
     const NodeDef* n, bool* new_shapes, 
     const std::vector<Tensor>& feed_tensors,
     std::vector<TensorShapeProto>& output_shapes, 
-    bool is_fast_mode, int ctx_idx) const {
+    bool is_fast_mode, int ctx_idx, bool validate) const {
   if (IsEnter(*n)) {
     // The Enter shape function always forwards an UnknownShape, so do the right
     // thing here.
@@ -2370,7 +2374,7 @@ Status GraphProperties::UpdateShapes(
     // Rely on regular TF shape refinement for all the other nodes.
     // UpdateNode calls UpdateFunction if a function node is detected.
     if (is_fast_mode) {
-      TF_RETURN_IF_ERROR(shape_refiner->UpdateNodeFastMode(n, feed_tensors, output_shapes, ctx_idx));
+      TF_RETURN_IF_ERROR(shape_refiner->UpdateNodeFastMode(n, feed_tensors, output_shapes, ctx_idx, validate));
     } else {
       TF_RETURN_IF_ERROR(shape_refiner->UpdateNode(n, new_shapes, ctx_idx, feed_tensors));
     }
@@ -2442,12 +2446,12 @@ Status GraphProperties::PropagateShapes(
 Status GraphProperties::PropagateShapesFastMode(
     const std::vector<Tensor>& feed_tensors,
     std::vector<TensorShapeProto>& output_shapes,
-    int ctx_idx) const {
+    int ctx_idx, bool validate) const {
   for(const NodeDef* n: topo_order_nodes_) {
     bool updated = false;
     TF_RETURN_IF_ERROR(
           UpdateShapes(refiner_.get(), resource_handles_, n, &updated, 
-                       feed_tensors, output_shapes, true, ctx_idx));
+                       feed_tensors, output_shapes, true, ctx_idx, validate));
   }
   return Status::OK();
 }
@@ -2804,13 +2808,15 @@ Status GraphProperties::InferStatically(bool assume_valid_feeds,
 
 Status GraphProperties::InferStaticallyFastMode(
          const std::vector<Tensor>& feed_tensors,
-         std::vector<TensorShapeProto>& output_shapes) {
+         std::vector<TensorShapeProto>& output_shapes,
+         bool validate) {
   output_shapes.clear();
   output_shapes.resize(fetch_.size());
   auto index_wrapper = ContextIndexWrapper(context_index_pool_);
   int ctx_idx =  index_wrapper.acquire();
   TF_RETURN_IF_ERROR(
-      PropagateShapesFastMode(feed_tensors, output_shapes, ctx_idx));
+      PropagateShapesFastMode(feed_tensors,
+					output_shapes, ctx_idx, validate));
   return Status::OK();
 }
 

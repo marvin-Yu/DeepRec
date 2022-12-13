@@ -110,7 +110,9 @@ ThreadPool::ThreadPool(thread::ThreadPoolInterface* user_threadpool) {
       underlying_threadpool_, underlying_threadpool_->NumThreads(), nullptr));
 }
 
-ThreadPool::~ThreadPool() {}
+ThreadPool::~ThreadPool() {
+  VLOG(0) << "Core Test ThreadPool release.";
+}
 
 void ThreadPool::Schedule(std::function<void()> fn) {
   CHECK(fn != nullptr);
