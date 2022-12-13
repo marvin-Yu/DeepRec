@@ -127,7 +127,8 @@ class GraphProperties {
   void ForceRestPaddingState();
   Status InferStaticallyFastMode(
              const std::vector<Tensor>& feed_tensors,
-             std::vector<TensorShapeProto>& output_shapes);
+             std::vector<TensorShapeProto>& output_shapes,
+             bool validate=false);
   // Infer the shape by running the graph on the specified cluster and recording
   // the shapes of the processed tensors.
   Status InferDynamically(Cluster* cluster);
@@ -213,7 +214,7 @@ class GraphProperties {
                       const NodeDef* n, bool* new_shapes, 
                       const std::vector<Tensor>& feed_tensors,
                       std::vector<TensorShapeProto>& output_shapes,
-                      bool is_fast_mode, int ctx_idx) const;
+                      bool is_fast_mode, int ctx_idx, bool validate=false) const;
   // Propagate the shapes for the nodes enqueued in new_shapes and their
   // transitive fanout until a fixed point is reached.
   Status PropagateShapes(
@@ -223,7 +224,7 @@ class GraphProperties {
 
   Status PropagateShapesFastMode(
       const std::vector<Tensor>& feed_tensors,
-      std::vector<TensorShapeProto>& output_shapes, int ctx_idx) const;
+      std::vector<TensorShapeProto>& output_shapes, int ctx_idx, bool validate=false) const;
 
   int AcquireCtxIndex() {
     mutex_lock lock(infer_ctx_index_mu_);

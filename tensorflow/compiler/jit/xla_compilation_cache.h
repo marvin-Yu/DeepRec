@@ -139,8 +139,9 @@ class XlaCompilationCache : public ResourceBase {
       std::shared_ptr<InputsShapeInfo> inputs_shape_info=nullptr);
  
  private:
+	// Let compile thread exit
+  std::atomic<bool> exit_flag_;
   std::string name_;
-  std::shared_ptr<XlaAutoPadding> xla_auto_padding_ = nullptr;
 
   // Takes `result` which has been compiled from a Tensorflow subgraph to a
   // XLA computation already, and generates an XLA LocalExecutable `executable`.
@@ -203,6 +204,9 @@ class XlaCompilationCache : public ResourceBase {
   static constexpr int64 kDefaultCompilationThreshold = 1;
 
   TF_DISALLOW_COPY_AND_ASSIGN(XlaCompilationCache);
+
+  std::shared_ptr<XlaAutoPadding> xla_auto_padding_ = nullptr;
+  std::shared_ptr<thread::ThreadPool> compile_thread_pool_ = nullptr;
 };
 
 }  // namespace tensorflow
