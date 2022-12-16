@@ -149,9 +149,9 @@ bool AutoMixedPrecisionEnabled(RewriterConfig::Toggle opt_level) {
 // A helper function to decide whether to enable the dice fusion optimizer.
 bool DiceFusionEnabled(RewriterConfig::Toggle opt_level) {
   if (!port::TestCPUFeature(port::CPUFeature::AVX512F)) {return false;}
-  bool is_enabled = true;
+  bool is_enabled = false;
   TF_CHECK_OK(ReadBoolFromEnvVar("TF_DICE_FUSION",
-                                 /*default_val=*/true, &is_enabled));
+                                 /*default_val=*/false, &is_enabled));
   if (is_enabled) {return true;}
   if (opt_level == RewriterConfig::ON ||
       opt_level == RewriterConfig::AGGRESSIVE) {
