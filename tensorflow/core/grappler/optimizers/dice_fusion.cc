@@ -340,6 +340,7 @@ Status DiceFusion::Optimize(Cluster* cluster, const GrapplerItem& item,
       mutation->AddNode(std::move(dice_op), &status);
       TF_RETURN_IF_ERROR(status);
       TF_RETURN_IF_ERROR(mutation->Apply());
+      VLOG(0) << "dice op found and replace";
     }
   }
 
