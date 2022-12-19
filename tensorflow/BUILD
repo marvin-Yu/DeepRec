@@ -586,6 +586,18 @@ tf_cc_shared_object(
     soversion = VERSION,
     visibility = ["//visibility:public"],
     deps = [
+        "//tensorflow:tensorflow_framework_impl",
+        "//tensorflow:tf_framework_version_script.lds",
+    ],
+)
+
+cc_library(
+    name = "tensorflow_framework_impl",
+    srcs = [
+           ],
+    linkstatic = 1,
+    visibility = ["//visibility:public"],
+    deps = [
         "//tensorflow/cc/saved_model:loader_lite_impl",
         "//tensorflow/core:core_cpu_impl",
         "//tensorflow/core:framework_internal_impl",
@@ -593,7 +605,6 @@ tf_cc_shared_object(
         "//tensorflow/core/grappler/optimizers:custom_graph_optimizer_registry_impl",
         "//tensorflow/core:lib_internal_impl",
         "//tensorflow/stream_executor:stream_executor_impl",
-        "//tensorflow:tf_framework_version_script.lds",
         "@com_google_protobuf//:protobuf"
     ] + tf_additional_binary_deps(),
 )

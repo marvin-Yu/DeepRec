@@ -756,6 +756,7 @@ cc_library(
         ":custom_graph_optimizer",
         "//tensorflow/core:lib",
     ],
+    alwayslink = 1,
 )
 
 tf_cuda_cc_test(

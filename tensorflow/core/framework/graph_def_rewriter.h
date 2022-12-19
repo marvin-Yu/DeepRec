@@ -65,7 +65,7 @@ private:
   
 };
 
-GraphDefRewriter::GraphDefRewriter(const GraphDef& origin_graph_def) {
+inline GraphDefRewriter::GraphDefRewriter(const GraphDef& origin_graph_def) {
   global_op_registry_ = OpRegistry::Global();
   InitNodeMap(origin_graph_def);
 }
