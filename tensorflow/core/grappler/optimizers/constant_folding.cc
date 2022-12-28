@@ -125,13 +125,16 @@ bool MaybeRemoveControlInput(const string& old_input, NodeDef* node,
   return removed_input;
 }
 
+// reduce optimization latency
 bool HasTPUAttributes(const NodeDef& node) {
+#ifndef GOOGLE_CUDA
   AttrSlice attrs(node);
   for (auto attr : attrs) {
     if (attr.first.find("_tpu_") != attr.first.npos) {
       return true;
     }
   }
+#endif  // GOOGLE_CUDA
   return false;
 }
 
@@ -1494,7 +1497,7 @@ Status ConstantFolding::FoldNode(NodeDef* node, GraphDef* output_graph,
             const_node->name(), " already present in the graph"));
       }
       NodeDef* added_node = output_graph->add_node();
-      *added_node = *const_node;
+      *added_node = std::move(*const_node);
       added_node->set_device(node->device());
       node_map_->AddNode(added_node->name(), added_node);
       for (const auto& input : added_node->input()) {
@@ -1690,6 +1693,13 @@ bool ConstantFolding::IsOnes(const NodeDef& node) const {
   if (node.op() != "Const") return false;
   if (node.attr().count("dtype") == 0) return false;
   const auto dtype = node.attr().at("dtype").type();
+  // reduce optimization latency
+  if (dtype == DT_FLOAT || dtype == DT_HALF) {
+    auto& const_shape = node.attr().at("value").tensor().tensor_shape();
+    if (TensorShape(const_shape).num_elements() > 1024) {
+      return false;
+    }
+  }
   switch (dtype) {
     IS_ONES_CASE(DT_BOOL);
     IS_ONES_CASE(DT_HALF);
@@ -1729,6 +1739,13 @@ bool ConstantFolding::IsZeros(const NodeDef& node) const {
   if (!IsConstant(node)) return false;
   if (node.attr().count("dtype") == 0) return false;
   const auto dtype = node.attr().at("dtype").type();
+  // reduce optimization latency
+  if (dtype == DT_FLOAT || dtype == DT_HALF) {
+    auto& const_shape = node.attr().at("value").tensor().tensor_shape();
+    if (TensorShape(const_shape).num_elements() > 1024) {
+      return false;
+    }
+  }
   switch (dtype) {
     IS_ZEROS_CASE(DT_BOOL);
     IS_ZEROS_CASE(DT_HALF);

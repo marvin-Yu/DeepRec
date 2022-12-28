@@ -150,7 +150,7 @@ bool OptimizeGatherPattern(GraphDef &input_graph_def, GraphDef* output_graph_def
     LOG(ERROR) << "optimize gather failed " << status;
     return false;
   }
-  input_graph_def = *output_graph_def;
+  std::swap(input_graph_def, *output_graph_def);
   VLOG(1) << "start to optimize gather pattern, " << gather_pattern2.DebugString();
   status = ReplaceMatchingOpTypes(
       input_graph_def,
@@ -176,7 +176,7 @@ bool OptimizeGatherPattern(GraphDef &input_graph_def, GraphDef* output_graph_def
     return false;
   }
   if (!radical) return true;
-  input_graph_def = *output_graph_def;
+  std::swap(input_graph_def, *output_graph_def);
   // gather->MatMul pattern没有利用broadcast语义，直接去掉gather会导致输出形状变化
   // 可以通过环境变量关闭优化来避免问题，默认开启
   VLOG(1) << "start to optimize gather pattern, " << gather_pattern3.DebugString();

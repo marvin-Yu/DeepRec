@@ -23,7 +23,7 @@ namespace grappler {
 
 class PartialMixedPrecision : public GraphOptimizer {
  public:
-  PartialMixedPrecision() {}
+  PartialMixedPrecision(const string& scope = "") : cast_scope_(scope) {}
   ~PartialMixedPrecision() override {}
 
   string name() const override { return "partial_mixed_precision"; };
@@ -35,11 +35,13 @@ class PartialMixedPrecision : public GraphOptimizer {
 
   void Feedback(Cluster* cluster, const GrapplerItem& item,
                 const GraphDef& optimized_graph, double result) override;
+ private:
+  string cast_scope_;
 };
 
 class PartialMixedPrecisionSecondStage : public GraphOptimizer {
  public:
-  PartialMixedPrecisionSecondStage() {}
+  PartialMixedPrecisionSecondStage(const string& scope = "") : cast_scope_(scope) {}
   ~PartialMixedPrecisionSecondStage() override {}
 
   string name() const override { return "partial_mixed_precision_second_stage"; };
@@ -51,6 +53,8 @@ class PartialMixedPrecisionSecondStage : public GraphOptimizer {
 
   void Feedback(Cluster* cluster, const GrapplerItem& item,
                 const GraphDef& optimized_graph, double result) override;
+ private:
+  string cast_scope_;
 };
 
 }  // end namespace grappler

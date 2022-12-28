@@ -73,7 +73,7 @@ bool OptimizeContinuousFCPattern(GraphDef &input_graph_def, GraphDef* output_gra
         auto dim_data = t_dim.tensor<int64, 1>();
         dim_data(0) = 0;
         TF_RETURN_IF_ERROR(CreateConstNodeDef(dim_const,
-                           b1.name() + "_expand_dim", t_dim, b1));
+                           b1.name() + "_expand_dim", t_dim, b1.device()));
         NodeDef expand_dims;
         NodeDefBuilder::NodeOut expand_input(b1.name(), 0, output_type);
         NodeDefBuilder::NodeOut expand_dim(dim_const.name(), 0, DT_INT64);
@@ -124,7 +124,7 @@ bool OptimizeContinuousFCPattern(GraphDef &input_graph_def, GraphDef* output_gra
         count++;
         return Status::OK();
       },
-      {}, output_graph_def);
+      {}, output_graph_def, true);
   if (!status.ok()) {
     LOG(ERROR) << "optimize continuous fc failed " << status;
     return false;

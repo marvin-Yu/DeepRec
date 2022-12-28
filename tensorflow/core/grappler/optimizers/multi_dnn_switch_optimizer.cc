@@ -615,11 +615,13 @@ class SubGraphCollection {
     std::unordered_set<string> converted;
     std::unordered_set<Node*> remove_set;
     Status status;
+    string device = switch_n_[0]->def().device();
+    string assigned_device = switch_n_[0]->assigned_device_name();
     string switch_name = switch_n_[0]->name() + "/merge_switch_subgraph/switch";
     NodeDefBuilder::NodeOut switch_input(index_->src()->name(),
                                          index_->src_output(),
                                          index_->src()->output_type(0));
-    Node* switch_n = NodeConstructor(graph_, switch_name, switch_n_[0],
+    Node* switch_n = NodeConstructor(graph_, switch_name, device, assigned_device,
               [&](NodeDef& def) {
                 return NodeDefBuilder(switch_name, "_SwitchN")
                       .Input(switch_input)
@@ -638,13 +640,14 @@ class SubGraphCollection {
                        + std::to_string(i);
       string identity_name = switch_n_[0]->name() + "/merge_switch_subgraph/pivot_"
                        + std::to_string(i);
-      Node* no = NodeConstructor(graph_, no_name, switch_n_[0], [&](NodeDef& def) {
+      Node* no = NodeConstructor(graph_, no_name, device, assigned_device,
+            [&](NodeDef& def) {
         return NodeDefBuilder(no_name, "NoOp")
                               .Finalize(&def);
       });
       TF_RETURN_FALSE_IF_NULL(no, "construct NoOp failed")
       no_ops[i] = no;
-      Node* identity = NodeConstructor(graph_, identity_name, switch_n_[0],
+      Node* identity = NodeConstructor(graph_, identity_name, device, assigned_device,
             [&](NodeDef& def) {
         return NodeDefBuilder(identity_name, "Identity")
                               .Input(switch_n->name(), i, switch_n->output_type(0))
@@ -708,7 +711,8 @@ class SubGraphCollection {
                                   .Attr("N", merge_attr_n)
                                   .Finalize(&def);
           };
-          Node* merge = NodeConstructor(graph_, merge_name, switch_n_[0], merge_builder);
+          Node* merge = NodeConstructor(graph_, merge_name, device,
+                                        assigned_device, merge_builder);
           TF_RETURN_FALSE_IF_NULL(merge, "construct Merge failed")
           int port = 0;
 
@@ -899,6 +903,8 @@ bool DynamicPartitionToSwitch(Graph* graph, std::vector<std::shared_ptr<
   for (MultiDNNInfo& info:multi_dnn_info) {
     VLOG(1) << "start to replace nodes";
     int switch_branch_num = -1;
+    string device = info.partition->def().device();
+    string assigned_device = info.partition->assigned_device_name();
     // 构建reduction indices const
     string squeeze_name = info.partition->name() + "/multi_dnn/squeeze";
     Node *squeeze = nullptr;
@@ -918,7 +924,7 @@ bool DynamicPartitionToSwitch(Graph* graph, std::vector<std::shared_ptr<
 
       // squeeze
       string squeeze_name = info.partition->name() + "/multi_dnn/squeeze";
-      squeeze = NodeConstructor(graph, squeeze_name, slice,
+      squeeze = NodeConstructor(graph, squeeze_name, device, assigned_device,
                       [&](NodeDef& def) {
                         return NodeDefBuilder(squeeze_name, "Squeeze")
                              .Input(slice->name(), 0, slice->output_type(0))
@@ -959,7 +965,7 @@ bool DynamicPartitionToSwitch(Graph* graph, std::vector<std::shared_ptr<
         return false;
       }
       switch_branch_num = num_partitions;
-      Node* switch_n = NodeConstructor(graph, switch_name, dynamic_partition_a,
+      Node* switch_n = NodeConstructor(graph, switch_name, device, assigned_device,
               [&](NodeDef& def) {
         return NodeDefBuilder(switch_name, "_SwitchN")
                              .Input(switch_inputs[0])
@@ -997,7 +1003,7 @@ bool DynamicPartitionToSwitch(Graph* graph, std::vector<std::shared_ptr<
                                 e->src()->output_type(0));
     }
     int input_size = stitch_inputs.size();
-    Node* merge = NodeConstructor(graph, merge_name, info.dynamic_stitch,
+    Node* merge = NodeConstructor(graph, merge_name, device, assigned_device,
               [&](NodeDef& def) {
       return NodeDefBuilder(merge_name, "Merge")
                             .Input(merge_inputs)
@@ -1096,8 +1102,8 @@ bool ReplaceControlflowToMergeNode(Graph* graph, Node* node) {
                           .Attr("N", in_size)
                           .Finalize(&def);
   };
-  Node* merge = NodeConstructor(graph, merge_name,
-                                identity_ops[0]->src(), merge_builder);
+  Node* merge = NodeConstructor(graph, merge_name, identity_ops[0]->src()->def().device(),
+                                identity_ops[0]->src()->assigned_device_name(), merge_builder);
   TF_RETURN_FALSE_IF_NULL(merge, "construct merge")
   int merge_in_port = 0;
   for (auto e:identity_ops) {
