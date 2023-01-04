@@ -385,6 +385,95 @@ Status PartiallyDeclusterGraph(Graph* graph) {
   return Status::OK();
 }
 }  // namespace decluster_root_shape_consumers
+
+namespace decluster_autopadding_invalid_shape {
+
+DataType GetNodeDataType(Node* n) {
+  DataType type = DataType::DT_INVALID;
+  Status status = GetNodeAttr(n->attrs(), "T", &type);
+  if (status.ok()) return type;
+
+  status = GetNodeAttr(n->attrs(), "dtype", &type);
+  if (status.ok()) return type;
+
+  status = GetNodeAttr(n->attrs(), "DstT", &type);
+  if (status.ok()) return type;
+
+  status = GetNodeAttr(n->attrs(), "VALUE_TYPE", &type);
+  if (status.ok()) return type;
+
+  status = GetNodeAttr(n->attrs(), "Tparams", &type);
+  if (status.ok()) return type;
+
+  std::vector<DataType> types;
+  status = GetNodeAttr(n->attrs(), "T", &types);
+  if (status.ok()) return DataType::DT_INVALID;
+
+  // TODO Should return false
+  LOG(ERROR) << "GetNodeDataType Error:" << n->DebugString();
+  return type;
+}
+
+void GetShapeConsumers(Node* n, std::vector<Node*>* order) {
+  order->push_back(n);
+  for (const Edge* e: n->out_edges()) {
+    if (e->IsControlEdge()) {
+      continue;
+    }
+    auto output_type = GetNodeDataType(e->dst());
+    if (output_type == DT_INT32 || output_type == DT_INT64) {
+      GetShapeConsumers(e->dst(), order);
+    } else {
+      order->push_back(e->dst());
+    }
+  }
+  return ;
+}
+
+// decluster all shape consumers if they belong to different clusters.
+Status PartiallyDeclusterGraph(Graph* graph) {
+  std::vector<Node*> reverse_post_order;
+  GetReversePostOrder(*graph, &reverse_post_order,
+                      /*stable_comparator=*/NodeComparatorName(),
+                      /*edge_filter=*/NotBackedge);
+
+  for (Node* n : reverse_post_order) {
+    if (!IsShapeConsumerOp(*n)) {
+      continue;
+    }
+
+    absl::optional<absl::string_view> cluster = GetXlaClusterForNode(*n);
+    if (!cluster.has_value()) {
+      continue;
+    }
+
+    std::vector<Node*> shape_consumers;
+    GetShapeConsumers(n, &shape_consumers);
+
+    bool belong_to_same_cluster = true;
+    for (Node* m : shape_consumers) {
+      if (cluster != GetXlaClusterForNode(*m)) {
+        belong_to_same_cluster = false;
+        break;
+      }
+    }
+    if (belong_to_same_cluster) {
+      continue;
+    }
+
+    for (Node* m : shape_consumers) {
+      VLOG(0) << "Declustering " << m->name()
+              << " because it is a invalid shape consumer in autopadding";
+      RemoveFromXlaCluster(m);
+      if (m != n && cluster == GetXlaClusterForNode(*m)) {
+        VLOG(2) << "Declustering " << m->name() << " of the same cluster"
+                << " may cause cycle in the graph";
+      }
+    }
+  }
+  return Status::OK();
+}
+}  // namespace decluster_autopadding_invalid_shape
 }  // namespace
 
 Status PartiallyDeclusterPass::Run(
@@ -414,6 +503,11 @@ Status PartiallyDeclusterPass::Run(
 
   TF_RETURN_IF_ERROR(
       decluster_root_shape_consumers::PartiallyDeclusterGraph(graph));
+
+  if (options.session_options->config.enable_xla_fusion_shape()) {
+    TF_RETURN_IF_ERROR(
+        decluster_autopadding_invalid_shape::PartiallyDeclusterGraph(graph));
+  }
 
   return Status::OK();
 }
