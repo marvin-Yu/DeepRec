@@ -453,8 +453,10 @@ void SearchNodesWithRanges(const Graph* graph, const std::vector<string> &ranges
       }
     }
   }
-  for (auto node_name: target_nodes) {
-    LOG(INFO) << "SearchNodesWithRanges: target node: " << node_name;
+  if (SAMPLING_LOG()) {
+    for (auto node_name: target_nodes) {
+      LOG(INFO) << "SearchNodesWithRanges: target node: " << node_name;
+    }
   }
 }
 

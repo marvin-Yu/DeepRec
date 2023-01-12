@@ -680,8 +680,10 @@ void SearchNodesWithRanges(const Graph* graph, const std::vector<string> &ranges
       }
     }
   }
-  for (auto node_name: target_nodes) {
-    LOG(INFO) << "SearchNodesWithRanges: target node: " << node_name;
+  if (SAMPLING_LOG()) {
+    for (auto node_name: target_nodes) {
+      LOG(INFO) << "SearchNodesWithRanges: target node: " << node_name;
+    }
   }
 }
 
@@ -787,6 +789,7 @@ Status SegmentGraph(const Graph* tf_graph,
 
   // Parsing each node of the graph
   std::vector<UnionFind<SimpleNode*>> node_segments;
+  bool sampling_log = SAMPLING_LOG();
   for (int i = 0; i < graph->num_node_ids(); ++i) {
     SimpleNode* node = graph->FindNodeId(i);
     if (!node) {
@@ -794,10 +797,12 @@ Status SegmentGraph(const Graph* tf_graph,
       continue;
     }
     auto exclude_node = [&](absl::string_view reason) {
-      LOG(INFO) << "Not a TF-TRT candidate, "
-              << "(Op type: " << node->tf_node()->type_string() << "), "
-              << "(Op name: " << node->name() << "), "
-              << "(Reason: " << reason << ")";
+      if (sampling_log) {
+        LOG(INFO) << "Not a TF-TRT candidate, "
+                  << "(Op type: " << node->tf_node()->type_string() << "), "
+                  << "(Op name: " << node->name() << "), "
+                  << "(Reason: " << reason << ")";
+      }
       unsupported_ops_map[node->tf_node()->type_string()]++;
       node = nullptr;
     };

@@ -875,6 +875,7 @@ Status ConvertAfterShapes(const ConversionParams& params) {
 
   std::vector<Node*> engine_nodes;
   engine_nodes.resize(engine_segments.size());
+  bool sampling_log = SAMPLING_LOG();
   for (int i = 0; i < engine_segments.size(); ++i) {
     auto& engine = engine_segments.at(i);
     // TODO(b/170762693): implement the heuristic to calculate
@@ -889,9 +890,11 @@ Status ConvertAfterShapes(const ConversionParams& params) {
                         converted_segments.at(i).nodes.size(), " nodes by ",
                         engine.engine_name);
     if (status.ok()) {
-      LOG(INFO) << "Replaced " << msg << ". They are:";
-      for (auto node : converted_segments.at(i).nodes) {
-        LOG(INFO) << "    " << node->name();
+      if (sampling_log) {
+        LOG(INFO) << "Replaced " << msg << ". They are:";
+        for (auto node : converted_segments.at(i).nodes) {
+          LOG(INFO) << "    " << node->name();
+        }
       }
     } else {
       // Graph is not modified.
