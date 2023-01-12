@@ -257,6 +257,15 @@ int64 MinVLogLevelFromEnv() {
 #endif
 }
 
+int SamplingLogStepFromEnv() {
+  const char* tf_env_var_val = getenv("TF_SAMPLING_LOG_STEP");
+  // default sampling log step is 10
+  if (tf_env_var_val == nullptr) {
+    return 10;
+  }
+  return ParseInteger(tf_env_var_val, strlen(tf_env_var_val));
+}
+
 LogMessage::LogMessage(const char* fname, int line, int severity)
     : fname_(fname), line_(line), severity_(severity) {}
 
@@ -289,6 +298,17 @@ bool LogMessage::VmoduleActivated(const char* fname, int level) {
   StringData module(module_start, module_limit - module_start);
   auto it = vmodules->find(module);
   return it != vmodules->end() && it->second >= level;
+}
+
+int LogMessage::SamplingLogStep() {
+  static int sampling_log_step = SamplingLogStepFromEnv();
+  return sampling_log_step;
+}
+
+bool LogMessage::SamplingLog() {
+  static EnvTime* env_time = tensorflow::EnvTime::Default();
+  uint64 now_micros = env_time->NowMicros();
+  return (now_micros % SamplingLogStep() == 0);
 }
 
 LogMessageFatal::LogMessageFatal(const char* file, int line)

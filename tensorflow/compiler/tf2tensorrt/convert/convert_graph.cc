@@ -703,6 +703,7 @@ Status ConvertAfterShapes(const ConversionParams& params) {
   VLOG(1) << "Current cuda device is " << old_cuda_device;
   std::vector<Node*> engine_nodes;
   engine_nodes.resize(engine_segments.size());
+  bool sampling_log = SAMPLING_LOG();
   for (int i = 0; i < engine_segments.size(); ++i) {
     auto& engine = engine_segments.at(i);
     // Partition the workspace size by the average of node ratio and segment
@@ -736,9 +737,11 @@ Status ConvertAfterShapes(const ConversionParams& params) {
         StrCat("TensorRT node ", engine.engine_name, " added for segment ", i,
                " consisting of ", converted_segments.at(i).size(), " nodes");
     if (status.ok()) {
-      LOG(INFO) << msg << " succeeded. They are:";
-      for (auto node : converted_segments.at(i)) {
-        LOG(INFO) << "    " << node->name();
+      if (sampling_log) {
+        LOG(INFO) << msg << " succeeded. They are:";
+        for (auto node : converted_segments.at(i)) {
+          LOG(INFO) << "    " << node->name();
+        }
       }
     } else {
       // Graph is not modified.

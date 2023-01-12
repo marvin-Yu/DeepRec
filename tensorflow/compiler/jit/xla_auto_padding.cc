@@ -318,11 +318,13 @@ Status XlaAutoPadding::CompileCallback(
     }
 
     // Print the cached shapes
-    LOG(INFO) << name_ << " print XLA cached shapes**********************";
-    for (int i = 0 ; i < cached_inputs_shapes_.size(); i++) {
-      LOG(INFO) << name_ << " cached " << i + 1 << "/" 
-                << cached_inputs_shapes_.size() 
-                << " " << cached_inputs_shapes_[i]->DebugString();
+    if (SAMPLING_LOG()) {
+      LOG(INFO) << name_ << " print XLA cached shapes**********************";
+      for (int i = 0 ; i < cached_inputs_shapes_.size(); i++) {
+        LOG(INFO) << name_ << " cached " << i + 1 << "/"
+                  << cached_inputs_shapes_.size()
+                  << " " << cached_inputs_shapes_[i]->DebugString();
+      }
     }
   }
   

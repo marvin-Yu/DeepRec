@@ -61,6 +61,10 @@ class LogMessage : public std::basic_ostringstream<char> {
   // access against the VLOG-ing specification provided by the env var.
   static bool VmoduleActivated(const char* fname, int level);
 
+  static int SamplingLogStep();
+
+  static bool SamplingLog();
+
   static void Printf(const char* fname, int line, int severity,
                      const char* format, ...);
 
@@ -137,6 +141,9 @@ class LogMessageFatal : public LogMessage {
   : ::tensorflow::internal::Voidifier() &                        \
           ::tensorflow::internal::LogMessage(__FILE__, __LINE__, \
                                              tensorflow::INFO)
+
+#define SAMPLING_LOG()                               \
+  ::tensorflow::internal::LogMessage::SamplingLog()
 
 // CHECK dies with a fatal error if condition is not true.  It is *not*
 // controlled by NDEBUG, so the check will be executed regardless of
@@ -357,6 +364,8 @@ T&& CheckNotNull(const char* file, int line, const char* exprtext, T&& t) {
 int64 MinLogLevelFromEnv();
 
 int64 MinVLogLevelFromEnv();
+
+int SamplingLogStepFromEnv();
 
 }  // namespace internal
 
