@@ -1024,6 +1024,95 @@ Status GraphPartitionerBase::CompleteMainGraph(
   return Status::OK();
 }
 
+Status GraphPartitionerBase::CompleteMainGraphV2(
+    const std::vector<SubGraph> &sub_graphs,
+    SubGraph *worker_graph)
+
+{
+  std::unordered_map<std::string, int> ps_graph_count;
+  for (auto sub_graph : sub_graphs) {
+    if (ps_graph_count.find(sub_graph.GetLoc()) == ps_graph_count.end()) {
+      ps_graph_count[sub_graph.GetLoc()] = 1;
+    } else {
+      ++ps_graph_count[sub_graph.GetLoc()];
+    }
+  }
+
+  GraphDef &graph_def = worker_graph->GetGraphDef();
+  std::string worker_device = worker_graph->GetDeviceName();
+  if (worker_device.empty()) {
+    // if worker's node count = 0
+    if ((worker_graph->GetNodes()).size() == 0) {
+      LOG(WARNING) << "Worker's graph is empty, add a RunStarGraphOp node.";
+      int64 task_index = -1;
+      Status s = ReadInt64FromEnvVar("TASK_INDEX", -1, &task_index);
+      if (!s.ok() || task_index == -1) {
+        LOG(FATAL) << "Read Env 'TASK_INDEX' failed. task_index=" << task_index;
+      }
+
+      // NOTE(rangeng.llb): Add a specific run (star) graph node for each
+      // ps subgraph.
+      for (auto sub_graph : sub_graphs) {
+        NodeDef *run_graph_node_def = graph_def.add_node();
+        MakeRunGraphNodeDefV2(sub_graph,
+                            strings::StrCat("/job:worker/replica:0/task:",
+                            task_index, "/device:CPU:0"),
+                            run_graph_node_def,
+                            zero_copy_,
+                            ps_graph_count[sub_graph.GetLoc()]);
+      }
+
+      return Status::OK();
+    }
+
+    return errors::Internal("empty worker device name!");
+  }
+
+  std::map<int, NodeDef*> added_nodes;
+  std::map<InputSrcKey, NodeDef*> bridge_nodes_map;
+  for (const SubGraph &sub_graph : sub_graphs) {
+    if (sub_graph.GetInputEdges().empty() &&
+        sub_graph.GetOutputEdges().empty() &&
+        !sub_graph.GetSendRecvFlag()) {
+      // NOTE(jiankeng.pt): We should add a run graph node for every sub graph.
+      // One sub graph should has some out/in edges, or has
+      // direct edge which connect to other ps.
+      // So if code run to here, it may be some wrong there.
+      // LOG(FATAL) << "No RunGraph node to trigger the ps graph to run. \
+      //              There must be some wrong with your graph partition.";
+      continue;
+    } else {
+        std::cerr << sub_graph.GetInputEdges().size() << std::endl;
+        std::cerr << sub_graph.GetOutputEdges().size() << std::endl;
+    }
+
+    NodeDef *run_graph_node_def = graph_def.add_node();
+    MakeRunGraphNodeDefV2(sub_graph, worker_device,
+                        run_graph_node_def, zero_copy_,
+                        ps_graph_count[sub_graph.GetLoc()]);
+    Status s = ProcessRunGraphInputs(sub_graph, worker_device,
+                                     &graph_def, run_graph_node_def, &bridge_nodes_map);
+    RETURN_IF_NOT_OK(s);
+
+    s = ProcessRunGraphOutputs(sub_graph, worker_device,
+                               &graph_def, run_graph_node_def, &bridge_nodes_map,
+                               &added_nodes);
+    RETURN_IF_NOT_OK(s);
+  }
+
+  for (const Node* node : worker_graph->GetNodes()) {
+    if (added_nodes.find(node->id()) == added_nodes.end()) {
+      NodeDef *node_def = graph_def.add_node();
+      Status s = ConstructNodeDef(node, node_def);
+      if (!s.ok()) {
+        return s;
+      }
+    }
+  }
+
+  return Status::OK();
+}
+
 bool IsReadyPsGraph(const PartitionOptions &opts,
                     const SubGraph &ps_graph,
                     const set<const Node*> &ready_nodes)

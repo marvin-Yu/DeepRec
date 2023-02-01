@@ -157,6 +157,9 @@ class GraphPartitionerBase {
   Status CompleteMainGraph(const std::vector<SubGraph> &sub_graphs,
                            SubGraph *main_graph);
 
+  Status CompleteMainGraphV2(const std::vector<SubGraph> &sub_graphs,
+                           SubGraph *main_graph);
+
  protected:
   bool ShouldUseSendRecvMode(Node* src, Node* dst);
 
@@ -339,7 +342,7 @@ class TrainGraphPartitioner : public GraphPartitionerBase {
                            bool zero_copy,
                            int ps_graph_count) override;
   
-  void MakeRunGraphNodeDef(const SubGraph &ps_graph,
+  void MakeRunGraphNodeDefV2(const SubGraph &ps_graph,
                            const std::string &worker_device,
                            NodeDef *run_graph_node_def,
                            bool zero_copy,
