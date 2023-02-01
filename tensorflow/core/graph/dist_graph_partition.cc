@@ -1651,7 +1651,8 @@ void InferGraphPartitioner::MakeRunGraphNodeDefV2(const SubGraph &ps_graph,
   *((*run_graph_node_def->mutable_attr())["T1"].mutable_list()) = {};
   *((*run_graph_node_def->mutable_attr())["feed_names"].mutable_list()) = {};
   *((*run_graph_node_def->mutable_attr())["fetch_names"].mutable_list()) = {};
-  *((*run_graph_node_def->mutable_attr())["part"].mutable_i()) = part;
+//   *((*run_graph_node_def->mutable_attr())["part"].mutable_i()) = part;
+  (*run_graph_node_def->mutable_attr())["part"].set_i(part);
 }
 
 
