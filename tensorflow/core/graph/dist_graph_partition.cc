@@ -1533,6 +1533,38 @@ void InferGraphPartitioner::MakeRunGraphNodeDef(const SubGraph &ps_graph,
   *((*run_graph_node_def->mutable_attr())["fetch_names"].mutable_list()) = {};
 }
 
+void InferGraphPartitioner::MakeRunGraphNodeDefV2(const SubGraph &ps_graph,
+        const std::string &worker_device,
+        NodeDef *run_graph_node_def,
+        bool zero_copy,
+        int ps_graph_count)
+{
+  static int idx = 0;
+  int part = 0;
+  std::string loc = ps_graph.GetLoc();
+  std::string ps_loc = ps_graph.GetLoc();
+  size_t first = ps_loc.find("_");
+  size_t last = ps_loc.find(".");
+  if(first !=std::string::npos && first < last) {
+    part = atoi(ps_loc.substr(first + 1, last).c_str());
+    loc = last != std::string::npos ? ps_loc.substr(0, first) + ps_loc.substr(last, ps_loc.length() - last) : ps_loc.substr(0, first);
+  }
+
+  std::replace(ps_loc.begin(), ps_loc.end(), '/', '_');
+  std::replace(ps_loc.begin(), ps_loc.end(), ':', '_');
+
+  run_graph_node_def->set_name(strings::StrCat("run_graph", ps_loc, "_", idx++));
+  run_graph_node_def->set_op("RunGraphOpV2");
+  run_graph_node_def->set_device(worker_device);
+  *((*run_graph_node_def->mutable_attr())["graph_handle"].mutable_s()) = ps_graph.GetGraphHandle();
+  *((*run_graph_node_def->mutable_attr())["loc"].mutable_s()) = loc;
+  *((*run_graph_node_def->mutable_attr())["T2"].mutable_list()) = {};
+  *((*run_graph_node_def->mutable_attr())["T1"].mutable_list()) = {};
+  *((*run_graph_node_def->mutable_attr())["feed_names"].mutable_list()) = {};
+  *((*run_graph_node_def->mutable_attr())["fetch_names"].mutable_list()) = {};
+  *((*run_graph_node_def->mutable_attr())["part"].mutable_i()) = part;
+}
+
 
 NodeDef* TrainGraphPartitioner::DealWithSubNodeOutputEdge(
     const Edge* out_edge,
