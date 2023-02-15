@@ -13,7 +13,7 @@
    limitations under the License.
    ==============================================================================*/
 
-#if defined(INTEL_MKL) && !defined(ENABLE_ONEDNN_V3)
+#ifdef INTEL_MKL
 #define EIGEN_USE_THREADS
 
 #include "dnnl.hpp"
@@ -84,7 +84,12 @@ class MklAvgPoolingOp : public MklPoolingForwardOpBase<T> {
 
       memory::dims filter_dims, strides, padding_left, padding_right;
       // Get src/filter/stride/padding information.
+#ifndef ENABLE_ONEDNN_V3
       this->PoolParamsToDims(&pool_params, &filter_dims, &strides,
+#else
+      memory::dims dilations;
+      this->PoolParamsToDims(&pool_params, &filter_dims, &strides, &dilations,
+#endif  // !ENABLE_ONEDNN_V3
                              &padding_left, &padding_right, is_pool2d);
 
       // Get the input memory descriptor.
@@ -111,8 +116,12 @@ class MklAvgPoolingOp : public MklPoolingForwardOpBase<T> {
         pooling_prop_kind = prop_kind::forward_training;
       // TODO(DNNL): Find out what should we use input_md.data.format.
       MklPoolingParams fwdParams(
-          src_dims, output_dims_mkl_order, filter_dims, strides, padding_left,
-          padding_right, ALGORITHM::pooling_avg_exclude_padding,
+#ifndef ENABLE_ONEDNN_V3
+          src_dims, output_dims_mkl_order, filter_dims, strides,
+#else
+          src_dims, output_dims_mkl_order, filter_dims, strides, dilations,
+#endif  // !ENABLE_ONEDNN_V3
+          padding_left, padding_right, ALGORITHM::pooling_avg_exclude_padding,
           pooling_prop_kind,
           static_cast<MEMORY_FORMAT>(this->data_format_dnnl_), input_md,
           this->native_format_);
@@ -203,7 +212,12 @@ class MklAvgPoolingGradOp : public MklPoolingBackwardOpBase<T> {
                                   orig_input_shape);
 
       memory::dims filter_dims, strides, padding_left, padding_right;
+#ifndef ENABLE_ONEDNN_V3
       this->PoolParamsToDims(&pool_params, &filter_dims, &strides,
+#else
+      memory::dims dilations;
+      this->PoolParamsToDims(&pool_params, &filter_dims, &strides, &dilations,
+#endif  // !ENABLE_ONEDNN_V3
                              &padding_left, &padding_right, is_pool2d);
 
       memory::dims orig_input_dims_mkl_order =
@@ -221,6 +235,13 @@ class MklAvgPoolingGradOp : public MklPoolingBackwardOpBase<T> {
                                                       this->data_format_tf_)
                           : TFShapeToMklDnnDimsInNCDHW(grad_tensor.shape(),
                                                        this->data_format_tf_);
+
+      OP_REQUIRES(
+          context, orig_input_dims_mkl_order[0] == diff_dst_dims[0],
+          errors::InvalidArgument("Expected first dimension of orig_input "
+            "and diff_dst to match, got ", orig_input_dims_mkl_order[0],
+            " and ", diff_dst_dims[0]));
+
       memory::dims output_dims_mkl_order;
       this->GetOutputDims(pool_params, &output_dims_mkl_order);
 
@@ -243,7 +264,11 @@ class MklAvgPoolingGradOp : public MklPoolingBackwardOpBase<T> {
       // TODO(DNNL): Find out what should we use src_md.data.format.
       MklPoolingParams bwdParams(
           orig_input_dims_mkl_order, output_dims_mkl_order, filter_dims,
+#ifndef ENABLE_ONEDNN_V3
           strides, padding_left, padding_right,
+#else
+          strides, dilations, padding_left, padding_right,
+#endif  // !ENABLE_ONEDNN_V3
           ALGORITHM::pooling_avg_exclude_padding, prop_kind::forward_training,
           static_cast<MEMORY_FORMAT>(this->data_format_dnnl_), src_md,
           this->native_format_);
@@ -353,6 +378,7 @@ TF_CALL_bfloat16(REGISTER_MKL_AVGPOOL3D_KERNELS);
 TF_CALL_float(REGISTER_MKL_AVGPOOL_KERNELS);
 TF_CALL_bfloat16(REGISTER_MKL_AVGPOOL_KERNELS);
 
+#ifndef ENABLE_ONEDNN_V3
 REGISTER_KERNEL_BUILDER(Name("_MklQuantizedAvgPool")
                             .Device(DEVICE_CPU)
                             .TypeConstraint<quint8>("T")
@@ -364,6 +390,7 @@ REGISTER_KERNEL_BUILDER(Name("_MklQuantizedAvgPool")
                             .TypeConstraint<qint8>("T")
                             .Label(mkl_op_registry::kMklQuantizedOpLabel),
                         MklAvgPoolingOp<CPUDevice, qint8>);
+#endif  // !ENABLE_ONEDNN_V3
 
 }  // namespace tensorflow
 
