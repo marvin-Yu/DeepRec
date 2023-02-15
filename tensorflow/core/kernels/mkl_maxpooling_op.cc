@@ -14,7 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 // See docs in ../ops/nn_ops.cc.
-#if defined(INTEL_MKL) && !defined(ENABLE_ONEDNN_V3)
+#ifdef INTEL_MKL
 #define EIGEN_USE_THREADS
 
 #include <algorithm>
@@ -125,7 +125,12 @@ class MklMaxPoolingOp : public MklPoolingForwardOpBase<T> {
                           : TFShapeToMklDnnDimsInNCDHW(input_tensor.shape(),
                                                        this->data_format_tf_);
       memory::dims filter_dims, strides, padding_left, padding_right;
+#ifndef ENABLE_ONEDNN_V3
       this->PoolParamsToDims(&pool_params, &filter_dims, &strides,
+#else
+      memory::dims dilations;
+      this->PoolParamsToDims(&pool_params, &filter_dims, &strides, &dilations,
+#endif  // ENABLE_ONEDNN_V3
                              &padding_left, &padding_right, is_pool2d);
 
       // Get a pooling op from the cached pool
@@ -139,8 +144,13 @@ class MklMaxPoolingOp : public MklPoolingForwardOpBase<T> {
         pooling_prop_kind = prop_kind::forward_training;
       // TODO(DNNL): Figure out what should be used for input_md.data.format
       MklPoolingParams fwdParams(
-          src_dims, output_dims_mkl_order, filter_dims, strides, padding_left,
-          padding_right, ALGORITHM::pooling_max, pooling_prop_kind,
+#ifndef ENABLE_ONEDNN_V3
+          src_dims, output_dims_mkl_order, filter_dims, strides,
+#else
+          src_dims, output_dims_mkl_order, filter_dims, strides, dilations,
+#endif  // !ENABLE_ONEDNN_V3
+          padding_left, padding_right, ALGORITHM::pooling_max,
+          pooling_prop_kind,
           static_cast<MEMORY_FORMAT>(this->data_format_dnnl_), input_md,
           this->native_format_);
       pooling_fwd = MklPoolingFwdPrimitiveFactory<T>::Get(fwdParams);
@@ -262,7 +272,12 @@ class MklMaxPoolingGradOp : public MklPoolingBackwardOpBase<T> {
                                   orig_input_shape);
 
       memory::dims filter_dims, strides, padding_left, padding_right;
+#ifndef ENABLE_ONEDNN_V3
       this->PoolParamsToDims(&pool_params, &filter_dims, &strides,
+#else
+      memory::dims dilations;
+      this->PoolParamsToDims(&pool_params, &filter_dims, &strides, &dilations,
+#endif  // !ENABLE_ONEDNN_V3
                              &padding_left, &padding_right, is_pool2d);
 
       memory::dims orig_input_dims_mkl_order =
@@ -301,7 +316,12 @@ class MklMaxPoolingGradOp : public MklPoolingBackwardOpBase<T> {
       // TODO(DNNL): Find out what should be used for src_md.data.format.
       MklPoolingParams bwdParams(
           orig_input_dims_mkl_order, output_dims_mkl_order, filter_dims,
+#ifndef ENABLE_ONEDNN_V3
           strides, padding_left, padding_right, ALGORITHM::pooling_max,
+#else
+          strides, dilations, padding_left, padding_right,
+          ALGORITHM::pooling_max,
+#endif  // !ENABLE_ONEDNN_V3
           prop_kind::forward_training,
           static_cast<MEMORY_FORMAT>(this->data_format_dnnl_), src_md,
           this->native_format_);
@@ -419,6 +439,7 @@ TF_CALL_bfloat16(REGISTER_MKL_MAXPOOL3D_KERNELS);
 TF_CALL_float(REGISTER_MKL_MAXPOOL_KERNELS);
 TF_CALL_bfloat16(REGISTER_MKL_MAXPOOL_KERNELS);
 
+#ifndef ENABLE_ONEDNN_V3
 REGISTER_KERNEL_BUILDER(Name("_MklQuantizedMaxPool")
                             .Device(DEVICE_CPU)
                             .TypeConstraint<quint8>("T")
@@ -431,6 +452,7 @@ REGISTER_KERNEL_BUILDER(Name("_MklQuantizedMaxPool")
                             .Label(mkl_op_registry::kMklQuantizedOpLabel),
                         MklMaxPoolingOp<CPUDevice, qint8>);
 
+#endif  // !ENABLE_ONEDNN_V3
 }  // namespace tensorflow
 
 #endif  // INTEL_MKL
