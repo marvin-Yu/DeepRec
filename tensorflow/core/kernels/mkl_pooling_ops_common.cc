@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#if defined(INTEL_MKL) && !defined(ENABLE_ONEDNN_V3)
+#ifdef INTEL_MKL
 
 #include "tensorflow/core/kernels/mkl_pooling_ops_common.h"
 
@@ -24,12 +24,20 @@ limitations under the License.
 #include "tensorflow/core/framework/bounds_check.h"
 #include "tensorflow/core/framework/common_shape_fns.h"
 namespace tensorflow {
+#ifndef ENABLE_ONEDNN_V3
+#define AVG_POOLING_DCHECK(params) \
+  params.alg_kind == dnnl::algorithm::pooling_avg ||
+#define GET_MEMORY_DESC(md) md.data
+#else
+#define AVG_POOLING_DCHECK(params)
+#define GET_MEMORY_DESC(md) md
+#endif  // !ENABLE_ONEDNN_V3
 using dnnl::prop_kind;
 
 template <typename T>
 void MklPoolingFwdPrimitive<T>::Setup(const MklPoolingParams& fwdParams) {
   DCHECK(fwdParams.alg_kind == ALGORITHM::pooling_max ||
-         fwdParams.alg_kind == ALGORITHM::pooling_avg ||
+         AVG_POOLING_DCHECK(fwdParams)
          fwdParams.alg_kind == ALGORITHM::pooling_avg_include_padding ||
          fwdParams.alg_kind == ALGORITHM::pooling_avg_exclude_padding)
       << "Pooling algorithm kind is not supported";
@@ -37,30 +45,39 @@ void MklPoolingFwdPrimitive<T>::Setup(const MklPoolingParams& fwdParams) {
   context_.alg_kind = fwdParams.alg_kind;
   context_.prop_kind = fwdParams.prop_kind;
 
-// Create memory descriptor
-// FIXME: Pooling doesn't expose to get the src_primitive_desc,
-//        so src format is currently hard-coded.
-//        A utility function is used to do this,
-//        which may be broken with future CPU architectures
-  context_.src_md.reset(new memory::desc(fwdParams.src_md.data));
+  // Create memory descriptor
+  // TODO(intel-tf): Pooling doesn't expose to get the src_primitive_desc,
+  //                 so src format is currently hard-coded.
+  //                 A utility function is used to do this,
+  //                 which may be broken with future CPU architectures
+  context_.src_md.reset(new memory::desc(fwdParams.GET_MEMORY_DESC(src_md)));
 
   context_.dst_md.reset(new memory::desc(
-      {fwdParams.dst_dims}, MklDnnType<T>(),
-      fwdParams.native_format ? fwdParams.src_format : MEMORY_FORMAT::any));
+        {fwdParams.dst_dims}, MklDnnType<T>(),
+        fwdParams.native_format ? fwdParams.src_format : MEMORY_FORMAT::any));
 
+  // Create a pooling descriptor.
+#ifndef ENABLE_ONEDNN_V3
   context_.fwd_desc.reset(new pooling_forward::desc(
       fwdParams.prop_kind, fwdParams.alg_kind, *context_.src_md,
       *context_.dst_md, fwdParams.strides, fwdParams.filter_dims,
       fwdParams.padding_left, fwdParams.padding_right));
   context_.fwd_pd.reset(
       new pooling_forward::primitive_desc(*context_.fwd_desc, cpu_engine_));
+#else
+  context_.fwd_pd.reset(new pooling_forward::primitive_desc(
+      cpu_engine_, fwdParams.prop_kind, fwdParams.alg_kind, *context_.src_md,
+      *context_.dst_md, fwdParams.strides, fwdParams.filter_dims,
+      fwdParams.dilations, fwdParams.padding_left, fwdParams.padding_right));
+#endif  // !ENABLE_ONEDNN_V3
   context_.dst_fmt = static_cast<MEMORY_FORMAT>(MEMORY_FORMAT::any);
 
-  // Create OneDNN internal memory object with dummy data.
-  context_.src_mem.reset(new MEMORY_CONSTRUCTOR(
-      context_.fwd_pd.get()->PRIMITIVE_DESC_SRC, cpu_engine_, DummyData));
-  context_.dst_mem.reset(new MEMORY_CONSTRUCTOR(
-      context_.fwd_pd.get()->PRIMITIVE_DESC_DST, cpu_engine_, DummyData));
+  // Create oneDNN internal memory object with dummy data.
+  context_.src_mem.reset(
+      new memory(context_.fwd_pd.get()->src_desc(), cpu_engine_, DummyData));
+  context_.dst_mem.reset(
+      new memory(context_.fwd_pd.get()->dst_desc(), cpu_engine_, DummyData));
+
   // For max pooling, need to return workspace (ws) for backward computing.
   if (fwdParams.alg_kind == ALGORITHM::pooling_max &&
       fwdParams.prop_kind == prop_kind::forward_training) {
@@ -87,7 +104,7 @@ void MklPoolingFwdPrimitive<T>::Execute(const T* src_data, T* dst_data,
 #ifdef DNNL_AARCH64_USE_ACL
   mutex_lock lock(primitive_execution_mu_);
 #endif
-#ifdef ENABLE_DNNL_THREADPOOL
+#if defined(ENABLE_DNNL_THREADPOOL) && !defined(ENABLE_ONEDNN_V3)
   context_.src_mem->set_data_handle(
       static_cast<void*>(const_cast<T*>(src_data)), *fwd_stream);
   context_.dst_mem->set_data_handle(static_cast<void*>(dst_data), *fwd_stream);
@@ -107,7 +124,7 @@ void MklPoolingFwdPrimitive<T>::Execute(const T* src_data, T* dst_data,
     DCHECK(ws_data != nullptr);
     context_.ws_mem->set_data_handle(ws_data);
   }
-#endif  // ENABLE_DNNL_THREADPOOL
+#endif  // !ENABLE_DNNL_THREADPOOL && !ENABLE_ONEDNN_V3
   execute_primitives(context_.fwd_primitives, fwd_stream, context_.net_args);
 
   // Set back data handle.
@@ -122,14 +139,17 @@ void MklPoolingFwdPrimitive<T>::Execute(const T* src_data, T* dst_data,
 }
 
 template class MklPoolingFwdPrimitive<float>;
+template class MklPoolingFwdPrimitive<bfloat16>;
+
+#ifndef ENABLE_ONEDNN_V3
 template class MklPoolingFwdPrimitive<quint8>;
 template class MklPoolingFwdPrimitive<qint8>;
-template class MklPoolingFwdPrimitive<bfloat16>;
+#endif  // !ENABLE_ONEDNN_V3
 
 template <typename T>
 void MklPoolingBwdPrimitive<T>::Setup(const MklPoolingParams& bwdParams) {
   DCHECK(bwdParams.alg_kind == ALGORITHM::pooling_max ||
-         bwdParams.alg_kind == ALGORITHM::pooling_avg ||
+         AVG_POOLING_DCHECK(bwdParams)
          bwdParams.alg_kind == ALGORITHM::pooling_avg_include_padding ||
          bwdParams.alg_kind == ALGORITHM::pooling_avg_exclude_padding)
       << "Pooling algorithm kind is not supported";
@@ -138,12 +158,13 @@ void MklPoolingBwdPrimitive<T>::Setup(const MklPoolingParams& bwdParams) {
   // Create memory descriptor.
   context_.src_md.reset(new memory::desc({bwdParams.src_dims}, MklDnnType<T>(),
                                          MEMORY_FORMAT::any));
-  context_.src_md.reset(new memory::desc(bwdParams.src_md.data));
+  context_.src_md.reset(new memory::desc(bwdParams.GET_MEMORY_DESC(src_md)));
 
   context_.dst_md.reset(new memory::desc(
-      {bwdParams.dst_dims}, MklDnnType<T>(),
-      bwdParams.native_format ? bwdParams.src_format : MEMORY_FORMAT::any));
+        {bwdParams.dst_dims}, MklDnnType<T>(),
+        bwdParams.native_format ? bwdParams.src_format : MEMORY_FORMAT::any));
 
+#ifndef ENABLE_ONEDNN_V3
   // Create a backward primitive. The implementation for backward must comply to
   // the workspace format it gets from forward pass, so we directly use src_md
   // and dst_md here.
@@ -160,6 +181,16 @@ void MklPoolingBwdPrimitive<T>::Setup(const MklPoolingParams& bwdParams) {
       new pooling_forward::primitive_desc(*context_.fwd_desc, cpu_engine_));
   context_.bwd_pd.reset(new pooling_backward::primitive_desc(
       *context_.bwd_desc, cpu_engine_, *context_.fwd_pd));
+#else
+  context_.fwd_pd.reset(new pooling_forward::primitive_desc(
+      cpu_engine_, bwdParams.prop_kind, bwdParams.alg_kind, *context_.src_md,
+      *context_.dst_md, bwdParams.strides, bwdParams.filter_dims,
+      bwdParams.dilations, bwdParams.padding_left, bwdParams.padding_right));
+  context_.bwd_pd.reset(new pooling_backward::primitive_desc(
+      cpu_engine_, bwdParams.alg_kind, *context_.src_md, *context_.dst_md,
+      bwdParams.strides, bwdParams.filter_dims, bwdParams.dilations,
+      bwdParams.padding_left, bwdParams.padding_right, *context_.fwd_pd));
+#endif  // !ENABLE_ONEDNN_V3
 
   // Create OneDNN internal memory object with dummy data.
   context_.diff_src_mem.reset(new memory(context_.bwd_pd.get()->diff_src_desc(),
@@ -169,7 +200,6 @@ void MklPoolingBwdPrimitive<T>::Setup(const MklPoolingParams& bwdParams) {
 
   // For max pooling, need to return workspace for backward computing.
   if (bwdParams.alg_kind == ALGORITHM::pooling_max) {
-    auto ws_pd = context_.fwd_pd.get()->PRIMITIVE_DESC_WORKSPACE.data;
     context_.ws_mem.reset(
         new memory(context_.fwd_pd.get()->workspace_desc(), cpu_engine_));
     context_.net_args.push_back(
@@ -193,7 +223,7 @@ void MklPoolingBwdPrimitive<T>::Execute(const T* diff_dst_data,
 #ifdef DNNL_AARCH64_USE_ACL
   mutex_lock lock(primitive_execution_mu_);
 #endif
-#ifdef ENABLE_DNNL_THREADPOOL
+#if defined(ENABLE_DNNL_THREADPOOL) && !defined(ENABLE_ONEDNN_V3)
   context_.diff_dst_mem->set_data_handle(
       static_cast<void*>(const_cast<T*>(diff_dst_data)), *bwd_stream);
   context_.diff_src_mem->set_data_handle(static_cast<void*>(diff_src_data),
@@ -210,7 +240,8 @@ void MklPoolingBwdPrimitive<T>::Execute(const T* diff_dst_data,
     DCHECK(ws_data != nullptr);
     context_.ws_mem->set_data_handle(const_cast<void*>(ws_data));
   }
-#endif  // ENABLE_DNNL_THREADPOOL
+#endif  // ENABLE_DNNL_THREADPOOL && !ENABLE_ONEDNN_V3
+
   execute_primitives(context_.bwd_primitives, bwd_stream, context_.net_args);
 
   // Set back data handle.
@@ -298,6 +329,14 @@ void MklPoolParameters::Init(OpKernelContext* context,
     col_stride = GetTensorDim(stride, data_format, 'W');
     depth_stride = GetTensorDim(stride, data_format, 'C');
 
+#ifdef ENABLE_ONEDNN_V3
+    // TODO(intel-tf): we are setting dilations to 0 to mimic the behavior of
+    // oneDNN v2.x integration code. We can extend this in the future to support
+    // dilations != 0
+    row_dilation = 0;
+    col_dilation = 0;
+#endif  // ENABLE_ONEDNN_V3
+
     // We only support 2D pooling across width/height and depthwise
     // pooling, not a combination.
     OP_REQUIRES(context,
@@ -318,6 +357,13 @@ void MklPoolParameters::Init(OpKernelContext* context,
     row_stride = GetTensorDim(stride, data_format, '1');
     col_stride = GetTensorDim(stride, data_format, '2');
     depth_stride = GetTensorDim(stride, data_format, 'C');
+
+#ifdef ENABLE_ONEDNN_V3
+    // TODO(intel-tf): TensorFlow's 3D-pooling API does not support dilations
+    planes_dilation = 0;
+    row_dilation = 0;
+    col_dilation = 0;
+#endif  // ENABLE_ONEDNN_V3
 
     // We only support 3D pooling across depth/width/height and depthwise
     // pooling, not a combination.
@@ -387,6 +433,9 @@ void MklPoolParameters::Init(OpKernelContext* context,
     out_depth = depth / depth_window;
   }
 }
+
+#undef AVG_POOLING_DCHECK
+#undef GET_MEMORY_DESC
 
 }  // namespace tensorflow
 
