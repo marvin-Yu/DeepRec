@@ -160,6 +160,9 @@ class GraphPartitionerBase {
   Status CompleteMainGraphV2(const std::vector<SubGraph> &sub_graphs,
                            SubGraph *main_graph);
 
+  Status CompleteMainGraphV3(const std::vector<SubGraph> &sub_graphs,
+                           SubGraph *main_graph);
+
  protected:
   bool ShouldUseSendRecvMode(Node* src, Node* dst);
 
@@ -294,6 +297,12 @@ class GraphPartitionerBase {
                                    bool zero_copy,
                                    int ps_graph_count) = 0;
 
+  virtual void MakeRunGraphNodeDefV3(const SubGraph &ps_graph,
+                                   const std::string &worker_device,
+                                   NodeDef *run_graph_node_def,
+                                   bool zero_copy,
+                                   int ps_graph_count) = 0;
+
   virtual void dealWithNodeOfNullptr(std::string *fetch_key,
                                      const Edge* out_edge) = 0;
 protected:
@@ -350,6 +359,14 @@ class TrainGraphPartitioner : public GraphPartitionerBase {
         assert(false);
   };
 
+  void MakeRunGraphNodeDefV3(const SubGraph &ps_graph,
+                           const std::string &worker_device,
+                           NodeDef *run_graph_node_def,
+                           bool zero_copy,
+                           int ps_graph_count) override{
+        assert(false);
+  };
+
   void dealWithNodeOfNullptr(std::string *fetch_key,
                              const Edge* out_edge) override;
 
@@ -394,6 +411,12 @@ class InferGraphPartitioner : public GraphPartitionerBase {
                            int ps_graph_count) override;
   
   virtual void MakeRunGraphNodeDefV2(const SubGraph &ps_graph,
+                                   const std::string &worker_device,
+                                   NodeDef *run_graph_node_def,
+                                   bool zero_copy,
+                                   int ps_graph_count) override;
+
+  virtual void MakeRunGraphNodeDefV3(const SubGraph &ps_graph,
                                    const std::string &worker_device,
                                    NodeDef *run_graph_node_def,
                                    bool zero_copy,
