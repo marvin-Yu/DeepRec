@@ -927,7 +927,7 @@ static Status MergeOneBundle(Env* env, StringPiece prefix,
   }
   return Status::OK();
 }
-
+/*
 Status RenameBundlesInParallel(Env* env, thread::ThreadPool* pool,
                                const MergeState* merge,
                                StringPiece merged_prefix)
@@ -963,7 +963,7 @@ Status RenameBundlesInParallel(Env* env, thread::ThreadPool* pool,
 
   return overall_status;
 }
-
+*/
 Status FixMergeHashTableBundles(MergeState* state) {
   std::unordered_map<string, string> bundle_mapping;
   for (auto&& item : state->entries) {
