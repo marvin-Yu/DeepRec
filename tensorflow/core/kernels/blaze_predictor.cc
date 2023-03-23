@@ -251,6 +251,7 @@ Status BlazePredictor::InitSession() {
 }
 
 Status BlazePredictor::Compute(OpKernelContext* ctx) {
+  if (need_split_) { return ComputeSplited(ctx); }
   if (log_level_ > 0) RawInputsDebugLogging(ctx);
 
   int num_inputs = ctx->num_inputs();
