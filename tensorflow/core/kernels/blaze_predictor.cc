@@ -348,8 +348,8 @@ Status BlazePredictor::ComputeSplited(OpKernelContext* ctx) {
       st = this->PrepareOutputs(outputs, &real_outputs, ctx);
       RETURN_AND_SUB();
       sp_outputs[i] = std::move(outputs);
-      cv.notify_all();
       --(*barrier_shared);
+      cv.notify_all();
     };
     split_thread_pool_->Schedule(std::move(func));
   }
@@ -601,6 +601,9 @@ Status BlazePredictor::InitSplitConf(OpKernelConstruction* ctx) {
       return errors::Internal("splist size <=0 ", split_size_);
     }
 
+    if (ctx->device_type().type_string() != DEVICE_CPU) {
+      return errors::Internal("blaze split does not support device ", ctx->device_type().type_string());
+    }
     for (const auto& input : input_names_) {
       need_split_column_.push_back(kNComm == input ? false : true);
     }
@@ -613,6 +616,7 @@ Status BlazePredictor::InitSplitConf(OpKernelConstruction* ctx) {
 
     split_thread_pool_ = absl::make_unique<thread::ThreadPool>(
         Env::Default(), "blaze_split_kernel", dense_threads_num);
+    need_split_ = true;
   }
   return Status::OK();
 }
