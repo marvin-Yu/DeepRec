@@ -298,6 +298,17 @@ static port::StatusOr<RedzoneCheckStatus> CheckRedzonesForBuffer(
 }
 
 port::StatusOr<RedzoneCheckStatus> RedzoneAllocator::CheckRedzones() const {
+  // add for PPU
+  static bool handle_ppu = [] {
+    const char* env = std::getenv("FIND_PPU_DEVICE");
+    if (env && std::string(env) == "yes") {
+      return true;
+    }
+    return false;
+  }();
+  if (handle_ppu) {
+    return RedzoneCheckStatus::OK();
+  }
   StreamExecutor* executor = stream_->parent();
 
   absl::Span<const uint8> compiled_ptx = {};

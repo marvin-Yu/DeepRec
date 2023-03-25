@@ -348,6 +348,20 @@ static StatusOr<bool> DeviceCompare(se::Stream* stream,
                                     const Shape& buffer_shape,
                                     const HloModuleConfig& config,
                                     absl::string_view kernel_name) {
+  // add for PPU
+  static bool handle_ppu = [] {
+    const char* env = std::getenv("FIND_PPU_DEVICE");
+    if (env && std::string(env) == "yes") {
+      return true;
+    }
+    return false;
+  }();
+  if (handle_ppu) {
+    VLOG(1) << "For ppu platform, always return true to work around "
+            << "not supporting compiling ptx code";
+    return true;
+  }
+
   se::StreamExecutor* executor = stream->parent();
 
   se::ScopedDeviceMemory<uint64> out_param =
