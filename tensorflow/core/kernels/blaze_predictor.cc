@@ -319,21 +319,24 @@ Status BlazePredictor::ComputeSplited(OpKernelContext* ctx) {
   std::condition_variable cv;
   std::shared_ptr<std::atomic<int>> barrier_shared = std::make_shared<std::atomic<int>>(0);
   bool run_ok = true;
+  int total = splited_inputs.size();
   for (int i = 0; i < splited_inputs.size(); ++i) {
     auto& inputs = splited_inputs[i];
-    ++(*barrier_shared);
 
-    auto func = [this, ctx, &inputs, &cv, barrier_shared, &run_ok, i, &sp_outputs]() {
+    auto func = [this, ctx, &inputs, &cv, barrier_shared, &run_ok, i, &sp_outputs, total, &m]() {
       std::vector<Tensor> outputs;
       std::vector<Tensor> real_inputs(inputs.size());
       Status st;
       st = PrepareInputs(inputs, &real_inputs, ctx);
 #define RETURN_AND_SUB() \
       if (!st.ok()) { \
+        VLOG(0) << st.ToString(); \
         run_ok = false; \
-        --(*barrier_shared); \
-        cv.notify_all(); \
-        return; \
+        std::unique_lock<std::mutex> lock(m); \
+        if(barrier_shared->fetch_add(1) == total -1) { \
+          cv.notify_all(); \
+          return; \
+        } \
       }
       RETURN_AND_SUB();
       if (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
@@ -348,13 +351,15 @@ Status BlazePredictor::ComputeSplited(OpKernelContext* ctx) {
       st = this->PrepareOutputs(outputs, &real_outputs, ctx);
       RETURN_AND_SUB();
       sp_outputs[i] = std::move(outputs);
-      --(*barrier_shared);
-      cv.notify_all();
+      if(barrier_shared->fetch_add(1) == total -1) {
+        cv.notify_all();
+        return;
+      }
     };
     split_thread_pool_->Schedule(std::move(func));
   }
   auto lock = std::unique_lock<std::mutex>(m);
-  cv.wait(lock, [&]() { return *barrier_shared == 0; });
+  cv.wait(lock, [&]() { return barrier_shared->load() == total; });
   if (!run_ok) {
     return errors::Internal("split run fail");
   }
@@ -593,7 +598,7 @@ Status BlazePredictor::CopyTensorGPUToCPU(const std::vector<Tensor>& gpu_tensors
 }
 
 Status BlazePredictor::InitSplitConf(OpKernelConstruction* ctx) {
-  const char* kNComm = "ncomm";
+  const char* kNComm = "comm";
   need_split_ = false;
   if (blaze_run_options_.need_split()) {
     split_size_ = blaze_run_options_.split_size();
@@ -637,7 +642,6 @@ Status BlazePredictor::SplitInputs(std::vector<Tensor>& inputs,
       }
     }
   }
-
   // split by split_dim
   int split_count = batch_size / split_size_;
   int index = 0;
@@ -646,7 +650,15 @@ Status BlazePredictor::SplitInputs(std::vector<Tensor>& inputs,
     tensors.reserve(inputs.size()); \
     for (int j = 0; j < inputs.size(); ++j) { \
       if (need_split_column_[j]) { \
-        tensors.push_back(inputs[j].Slice(START, END)); \
+		TensorShape shape(inputs[j].shape()); \
+		shape.set_dim(0, END-START); \
+		Tensor tensor(inputs[j].dtype(), shape); \
+		int data_len = tensor.TotalBytes() / tensor.NumElements(); \
+		int delta = inputs[j].NumElements() / inputs[j].dim_size(0); \
+		auto* addr = tensor.data(); \
+		auto* src = inputs[j].data() + START*delta * data_len; \
+		std::memcpy(addr, src, tensor.TotalBytes()); \
+        tensors.push_back(std::move(tensor)); \
       } else { \
         tensors.push_back(inputs[j]); \
       } \
@@ -663,6 +675,10 @@ Status BlazePredictor::SplitInputs(std::vector<Tensor>& inputs,
   if (index < batch_size) {
     SPLIT_TENSOR(index, batch_size);
   }
+for (int i = 0; i < splited_inputs.size(); ++i) {
+	for (auto& tensor : splited_inputs[i]) {
+}
+}
   return Status::OK();
 }
 
@@ -683,7 +699,7 @@ Status BlazePredictor::MergeOutputs(OpKernelContext* ctx,
     }
     int merge_dims = base_shape.dim_size(0);
     for (int j = 1; j < sp_outputs.size(); ++j) {
-      merge_dims += (sp_outputs[j][i].dims() > 0 ? sp_outputs[j][j].dim_size(0) : 0);
+      merge_dims += (sp_outputs[j][i].dims() > 0 ? sp_outputs[j][i].dim_size(0) : 0);
     }
     TensorShape concat_shape(base_shape);
     concat_shape.set_dim(0, merge_dims);
