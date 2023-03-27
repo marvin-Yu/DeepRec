@@ -330,9 +330,9 @@ Status BlazePredictor::ComputeSplited(OpKernelContext* ctx) {
       st = PrepareInputs(inputs, &real_inputs, ctx);
 #define RETURN_AND_SUB() \
       if (!st.ok()) { \
+        std::unique_lock<std::mutex> lock(m); \
         VLOG(0) << st.ToString(); \
         run_ok = false; \
-        std::unique_lock<std::mutex> lock(m); \
         if(barrier_shared->fetch_add(1) == total -1) { \
           cv.notify_all(); \
           return; \
