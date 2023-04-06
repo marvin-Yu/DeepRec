@@ -91,6 +91,8 @@ message RewriterConfig {
   // Gemm optimizations (default is ON).
   Toggle gemm_optimization = 24;
 
+  Toggle dice_fusion = 25;
+
   // Disable the entire meta optimizer (off by default).
   bool disable_meta_optimizer = 19;
 
@@ -203,7 +205,7 @@ message RewriterConfig {
   Toggle batch_gemm_compatible_optimization = 503;
   Toggle memory_access_optimization = 504;
   Toggle gemm_compression_optimization = 505;
-  Toggle partial_mixed_precision = 506;
+  string partial_mixed_precision = 506;
   Toggle merge_gemm_optimization = 507;
   // skip branch
   string multi_dnn_skip_branchs = 508;

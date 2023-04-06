@@ -23,6 +23,7 @@
 #include "tensorflow/core/graph/algorithm.h"
 #include "tensorflow/core/graph/graph_constructor.h"
 #include "tensorflow/core/lib/core/refcount.h"
+#include "tensorflow/core/lib/core/threadpool.h"
 #include "tensorflow/core/lib/strings/str_util.h"
 #include "tensorflow/core/lib/strings/strcat.h"
 #include "tensorflow/core/platform/logging.h"
@@ -57,6 +58,7 @@ class BlazePredictor {
   virtual ~BlazePredictor();
 
   virtual Status Compute(OpKernelContext* ctx);
+  virtual Status ComputeSplited(OpKernelContext* ctx);
   virtual void ComputeNull(OpKernelContext* ctx) {}
   //session must created in constructor function, otherwise in compute function
   //it will cost lots of time the first time
@@ -79,6 +81,11 @@ class BlazePredictor {
   std::string graph_def_str_;
   std::string device_;
   OpKernelConstruction* ctx_;
+  bool need_split_;
+  std::unique_ptr<thread::ThreadPool> split_thread_pool_;
+  uint32_t split_size_;
+  std::vector<bool> need_split_column_;
+  
   //runtime options
   std::shared_ptr<Session> session_;
   Session::CallableHandle handle_;
@@ -110,6 +117,7 @@ class BlazePredictor {
   virtual Status Warmup();
   void SetDeviceInGraphDef(const std::string device_name, GraphDef* graph_def);
   void SetCPUDeviceInGraphDef(const std::string device_name, GraphDef* graph_def);
+  Status InitSplitConf(OpKernelConstruction* ctx);
 
   Status SetDeviceInfo(OpKernelConstruction* ctx);
   Status PrepareCallableOptions(CallableOptions &callable_options);
@@ -128,6 +136,11 @@ class BlazePredictor {
   stream_executor::Stream* GetStream() const;
   Status PrepareInputs(const std::vector<Tensor>& inputs,
       std::vector<Tensor>* real_inputs, OpKernelContext* ctx);
+
+  Status SplitInputs(std::vector<Tensor>& inputs,
+       std::vector<std::vector<Tensor>>& splited_inputs) const;
+  Status MergeOutputs(OpKernelContext* ctx,
+      std::vector<std::vector<Tensor>>& sp_outputs, std::vector<Tensor>& outputs) const;
 
   Status PrepareOutputs(const std::vector<Tensor>& outputs,
       std::vector<Tensor>* real_outputs, OpKernelContext* ctx);

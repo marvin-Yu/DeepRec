@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include "tensorflow/core/grappler/optimizers/fuse_cross_feature_optimizer.h"
+#include "tensorflow/core/grappler/optimizers/original_delivery_common.h"
 #include "tensorflow/core/grappler/costs/graph_properties.h"
 
 #include <fstream>
@@ -34,7 +35,6 @@ namespace grappler {
 
 namespace {
 
-const std::string kCpuDeviceName = "/job:localhost/replica:0/task:0/device:CPU:0";
 
 #define CHECK_NULL(target)   \
   if (target == nullptr) {   \
@@ -425,60 +425,6 @@ bool GetCoActionPattern(Node* co_action, CoActionPattern& pattern) {
   return true;
 }
 
-Node* ConstructPackOp(Graph* graph, Node* co_action,
-                     std::vector<const Edge*>& input_edges, string sufix) {
-  const string device_name = kCpuDeviceName;
-  string pack_name =  co_action->name() + sufix;
-  NodeDef pack_node;
-  int input_size = input_edges.size();
-  VLOG(1) << pack_name << ", size:" << input_size;
-  std::vector<NodeDefBuilder::NodeOut> pack_inputs;
-  for (auto e:input_edges) {
-    pack_inputs.emplace_back(e->src()->name(), e->src_output(), co_action->output_type(0));
-  }
-  Status status = NodeDefBuilder(pack_name, "Pack")
-                                .Input(pack_inputs)
-                                .Attr("T", co_action->output_type(0))
-                                .Attr("N", input_size)
-                                .Attr("axis", 1)
-                                .Finalize(&pack_node);
-  if (!status.ok()) {
-    LOG(ERROR) << "Adding pack nodedef build failed " << status;
-    return nullptr;
-  }
-  pack_node.set_device(device_name);
-  VLOG(1) << pack_node.DebugString();
-  Node* pack = graph->AddNode(pack_node, &status);
-  if (!status.ok()) {
-    LOG(ERROR) << "Adding pack node failed " << status;
-    return nullptr;
-  }
-  pack->set_assigned_device_name(device_name);
-  int port = 0;
-  for (auto e:input_edges) {
-    graph->AddEdge(e->src(), e->src_output(), pack, port);
-    port++;
-    graph->RemoveEdge(e);
-  }
-  // 减少embedding H2D拷贝次数，将pack之前的输入设备全部设为CPU
-  std::unordered_set<string> visited;
-  std::queue<Node*> unvisited_queue;
-  unvisited_queue.push(pack);
-  while(!unvisited_queue.empty()) {
-    Node* top = unvisited_queue.front();
-    unvisited_queue.pop();
-    if (visited.count(top->name()) != 0) continue;
-    visited.insert(top->name());
-    VLOG(1) << "set device cpu " << top->name();
-    top->set_assigned_device_name(device_name);
-    for (auto e : top->in_edges()) {
-      if (visited.count(e->src()->name()) != 0) continue;
-      unvisited_queue.push(e->src());
-    }
-  }
-  return pack;
-}
-
 Node* ConstructUnpackOp(Graph* graph, Node* co_action,
                        std::vector<const Edge*>& out_edges, string sufix) {
   string unpack_name =  co_action->name() + sufix;
@@ -510,6 +456,27 @@ Node* ConstructUnpackOp(Graph* graph, Node* co_action,
     port++;
   }
   return unpack;
+}
+
+bool IsHostInputPlaceholder(Node* node) {
+  std::unordered_set<string> visited;
+  std::queue<Node*> unvisited_queue;
+  unvisited_queue.push(node);
+  while(!unvisited_queue.empty()) {
+    Node* top = unvisited_queue.front();
+    unvisited_queue.pop();
+    if (visited.count(top->name()) != 0) continue;
+    visited.insert(top->name());
+    if (top->type_string() == "Placeholder" &&
+        top->def().device().find("/device:CPU:0") != std::string::npos) {
+      return true;
+    }
+    for (auto e : top->in_edges()) {
+      if (visited.count(e->src()->name()) != 0) continue;
+      unvisited_queue.push(e->src());
+    }
+  }
+  return false;
 }
 
 Status MergeCoAction(Graph* graph, std::set<string>& skip_merge_nodes) {
@@ -552,11 +519,28 @@ Status MergeCoAction(Graph* graph, std::set<string>& skip_merge_nodes) {
   for (auto iter:collection) {
     // 1.pack CoAction input
     Node* co_action = (iter.second.co_action)[0];
-    Node* pack_a = ConstructPackOp(graph, co_action, iter.second.input_a, "/pack_input_a");
+    Node* pack_a = ConstructPackOp(graph, co_action, co_action->name() + "/pack_input_a",
+                                   iter.second.input_a, 1);
     CHECK_NULL(pack_a)
-    Node* pack_b = ConstructPackOp(graph, co_action, iter.second.input_b, "/pack_input_b");
+    if (IsHostInputPlaceholder(pack_a)) {
+      VLOG(0) << "Placeholder was placed to CPU, set nodes before pack to CPU";
+      SetFrontNodesToCPU(pack_a);
+    }
+    Node* pack_b = ConstructPackOp(graph, co_action, co_action->name() + "/pack_input_b",
+                                   iter.second.input_b, 1);
     CHECK_NULL(pack_b)
+    if (IsHostInputPlaceholder(pack_b)) {
+      VLOG(0) << "Placeholder was placed to CPU, set nodes before pack to CPU";
+      SetFrontNodesToCPU(pack_a);
+    }
+    //SetFrontNodesToCPU(pack_b);
     // 2.连接Pack到其中一个CoAction op，其他的可以不用了
+    for (auto e:iter.second.input_a) {
+      graph->RemoveEdge(e);
+    }
+    for (auto e:iter.second.input_b) {
+      graph->RemoveEdge(e);
+    }
     graph->AddEdge(pack_a, 0, co_action, 0);
     graph->AddEdge(pack_b, 0, co_action, 1);
     // 3.Unpack为多个输出

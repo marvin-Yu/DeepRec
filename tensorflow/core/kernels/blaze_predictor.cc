@@ -14,6 +14,10 @@
 #include "tensorflow/core/kernels/gpu_utils.h"
 using tensorflow::se::Event;
 #endif
+
+#include <mutex>
+#include <condition_variable>
+
 namespace tensorflow {
 const int kBlazeStartStepId = 1024;
 const std::string kCpuDeviceName = "/job:localhost/replica:0/task:0/device:CPU:0";
@@ -30,6 +34,7 @@ BlazePredictor::BlazePredictor(OpKernelConstruction* ctx) : device_type_(ctx->de
   OP_REQUIRES_OK(ctx, ctx->GetAttr("blaze_option_path", &blaze_option_path_));
   OP_REQUIRES_OK(ctx, ctx->GetAttr("InT", &input_types_));
   OP_REQUIRES_OK(ctx, ParseAttr(ctx->def().device()));
+  OP_REQUIRES_OK(ctx, InitSplitConf(ctx));
   ctx_ = ctx;
 }
 
@@ -63,7 +68,9 @@ BlazePredictor::BlazePredictor(const std::vector<std::string>& input_names,
         }
       }
     }
-  } { LOG(INFO) << "not get _extra_conf_root_path" << root_path; }
+  } else { LOG(INFO) << "not get _extra_conf_root_path" << root_path; }
+  
+  OP_REQUIRES_OK(ctx, InitSplitConf(ctx));
 }
 
 BlazePredictor::~BlazePredictor() {
@@ -244,6 +251,7 @@ Status BlazePredictor::InitSession() {
 }
 
 Status BlazePredictor::Compute(OpKernelContext* ctx) {
+  if (need_split_) { return ComputeSplited(ctx); }
   if (log_level_ > 0) RawInputsDebugLogging(ctx);
 
   int num_inputs = ctx->num_inputs();
@@ -279,6 +287,86 @@ Status BlazePredictor::Compute(OpKernelContext* ctx) {
   TF_RETURN_IF_ERROR(PrepareOutputs(outputs, &real_outputs, ctx));
   for (int i = 0; i < real_outputs.size(); ++i) {
     ctx->set_output(i, real_outputs[i]);
+  }
+  return Status::OK();
+}
+
+Status BlazePredictor::ComputeSplited(OpKernelContext* ctx) {
+  if (log_level_ > 0) RawInputsDebugLogging(ctx);
+
+  int num_inputs = ctx->num_inputs();
+  if (num_inputs != input_names_.size()) {
+    return errors::Internal("ctx input size ", num_inputs,
+        " != ", input_names_.size());
+  }
+  if (ctx->num_outputs() != output_names_.size()) {
+    return errors::Internal("ctx output size ", ctx->num_outputs(),
+        " != ", output_names_.size());
+  }
+
+  std::vector<Tensor> inputs;
+  inputs.reserve(num_inputs);
+  for (int i = 0; i < num_inputs; ++i) {
+    inputs.push_back(ctx->input(i));
+  }
+
+  std::vector<std::vector<Tensor>> splited_inputs;
+  TF_RETURN_IF_ERROR(SplitInputs(inputs, splited_inputs));
+  std::vector<std::vector<Tensor>> sp_outputs;
+  sp_outputs.resize(splited_inputs.size());
+
+  std::mutex m;
+  std::condition_variable cv;
+  std::shared_ptr<std::atomic<int>> barrier_shared = std::make_shared<std::atomic<int>>(0);
+  bool run_ok = true;
+  int total = splited_inputs.size();
+  for (int i = 0; i < splited_inputs.size(); ++i) {
+    auto& inputs = splited_inputs[i];
+
+    auto func = [this, ctx, &inputs, &cv, barrier_shared, &run_ok, i, &sp_outputs, total, &m]() {
+      std::vector<Tensor> outputs;
+      std::vector<Tensor> real_inputs(inputs.size());
+      Status st;
+      st = PrepareInputs(inputs, &real_inputs, ctx);
+#define RETURN_AND_SUB() \
+      if (!st.ok()) { \
+        std::unique_lock<std::mutex> lock(m); \
+        VLOG(0) << st.ToString(); \
+        run_ok = false; \
+        if(barrier_shared->fetch_add(1) == total -1) { \
+          cv.notify_all(); \
+          return; \
+        } \
+      }
+      RETURN_AND_SUB();
+      if (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
+        RunMetadata metadata;
+        st = session_->RunCallable(this->handle_, real_inputs, &outputs, &metadata);
+        ctx->traced_infos()->UpdateProfStats(&metadata);
+      } else {
+        st = session_->RunCallable(this->handle_, real_inputs, &outputs, nullptr);
+      }
+      RETURN_AND_SUB();
+      std::vector<Tensor> real_outputs(outputs.size());
+      st = this->PrepareOutputs(outputs, &real_outputs, ctx);
+      RETURN_AND_SUB();
+      sp_outputs[i] = std::move(outputs);
+      if(barrier_shared->fetch_add(1) == total -1) {
+        cv.notify_all();
+        return;
+      }
+    };
+    split_thread_pool_->Schedule(std::move(func));
+  }
+  auto lock = std::unique_lock<std::mutex>(m);
+  cv.wait(lock, [&]() { return barrier_shared->load() == total; });
+  if (!run_ok) {
+    return errors::Internal("split run fail");
+  }
+  std::vector<Tensor> mg_tensors;
+  TF_RETURN_IF_ERROR(MergeOutputs(ctx, sp_outputs, mg_tensors));
+  for (int i = 0; i < mg_tensors.size(); ++i) {
+    ctx->set_output(i, mg_tensors[i]);
   }
   return Status::OK();
 }
@@ -505,6 +593,132 @@ Status BlazePredictor::CopyTensorGPUToCPU(const std::vector<Tensor>& gpu_tensors
 #else
     return errors::Internal("cuda not supported");
 #endif
+  }
+  return Status::OK();
+}
+
+Status BlazePredictor::InitSplitConf(OpKernelConstruction* ctx) {
+  const char* kNComm = "comm";
+  need_split_ = false;
+  if (blaze_run_options_.need_split()) {
+    split_size_ = blaze_run_options_.split_size();
+    if (split_size_ <= 0) {
+      return errors::Internal("splist size <=0 ", split_size_);
+    }
+
+    if (ctx->device_type().type_string() != DEVICE_CPU) {
+      return errors::Internal("blaze split does not support device ", ctx->device_type().type_string());
+    }
+    for (const auto& input : input_names_) {
+      need_split_column_.push_back(kNComm == input ? false : true);
+    }
+
+    const int kDefaultDenseThreadsNum = 2;
+    int64 dense_threads_num;
+    ReadInt64FromEnvVar("BLAZE_SPLIT_THREADS_NUM", 
+        kDefaultDenseThreadsNum, &dense_threads_num);
+    VLOG(0) << "blaze split set thread pool size " << dense_threads_num;
+
+    split_thread_pool_ = absl::make_unique<thread::ThreadPool>(
+        Env::Default(), "blaze_split_kernel", dense_threads_num);
+    need_split_ = true;
+  }
+  return Status::OK();
+}
+
+Status BlazePredictor::SplitInputs(std::vector<Tensor>& inputs,
+   std::vector<std::vector<Tensor>>& splited_inputs) const {
+  int batch_size = -1;
+  // infer batchsize
+  for (int i = 0; i < inputs.size(); ++i) {
+    if (need_split_column_[i]) {
+      int dim_0 = inputs[i].shape().dims() == 0 ? 0 : inputs[i].dim_size(0);
+      if (batch_size == -1) {
+        batch_size = dim_0;
+      } else {
+        if (batch_size != dim_0) {
+          return errors::Internal("invalid input size ", batch_size, dim_0);
+        }
+      }
+    }
+  }
+  // split by split_dim
+  int split_count = batch_size / split_size_;
+  int index = 0;
+#define SPLIT_TENSOR(START, END) { \
+    std::vector<Tensor> tensors; \
+    tensors.reserve(inputs.size()); \
+    for (int j = 0; j < inputs.size(); ++j) { \
+      if (need_split_column_[j]) { \
+		TensorShape shape(inputs[j].shape()); \
+		shape.set_dim(0, END-START); \
+		Tensor tensor(inputs[j].dtype(), shape); \
+		int data_len = tensor.TotalBytes() / tensor.NumElements(); \
+		int delta = inputs[j].NumElements() / inputs[j].dim_size(0); \
+		auto* addr = tensor.data(); \
+		auto* src = inputs[j].data() + START*delta * data_len; \
+		std::memcpy(addr, src, tensor.TotalBytes()); \
+        tensors.push_back(std::move(tensor)); \
+      } else { \
+        tensors.push_back(inputs[j]); \
+      } \
+    } \
+    splited_inputs.push_back(std::move(tensors)); \
+}
+
+  for (int i = 0; i < split_count; ++i) {
+    auto end = index+split_size_;
+    SPLIT_TENSOR(index, end);
+    index += split_size_;
+  }
+
+  if (index < batch_size) {
+    SPLIT_TENSOR(index, batch_size);
+  }
+for (int i = 0; i < splited_inputs.size(); ++i) {
+	for (auto& tensor : splited_inputs[i]) {
+}
+}
+  return Status::OK();
+}
+
+Status BlazePredictor::MergeOutputs(OpKernelContext* ctx, 
+    std::vector<std::vector<Tensor>>& sp_outputs, std::vector<Tensor>& outputs) const {
+  outputs.reserve(output_names_.size());
+  if (sp_outputs.size() == 0) {
+    return errors::Internal("nothing calculated");
+  }
+  std::vector<TensorShape> all_shapes;
+  all_shapes.reserve(output_names_.size());
+
+  //generate merged shapes
+  for (int i = 0; i < output_names_.size(); ++i) {
+    const auto& base_shape = sp_outputs[0][i].shape();
+    if (base_shape.dims() == 0) {
+      return errors::Internal("0 batchsize generated");
+    }
+    int merge_dims = base_shape.dim_size(0);
+    for (int j = 1; j < sp_outputs.size(); ++j) {
+      merge_dims += (sp_outputs[j][i].dims() > 0 ? sp_outputs[j][i].dim_size(0) : 0);
+    }
+    TensorShape concat_shape(base_shape);
+    concat_shape.set_dim(0, merge_dims);
+    all_shapes.push_back(std::move(concat_shape));
+  }
+
+  //merge tensor
+  for (int i = 0; i < output_names_.size(); ++i) {
+    Tensor tensor;
+    TF_RETURN_IF_ERROR(ctx->allocate_temp(sp_outputs[0][i].dtype(), all_shapes[i], &tensor));
+    auto* base_addr = tensor.data();
+    for (int j = 0; j < sp_outputs.size(); ++j) {
+      auto size = sp_outputs[j][i].TotalBytes();
+      if (size > 0) {
+        std::memcpy(base_addr, sp_outputs[j][i].data(), size);
+      }
+      base_addr += size;
+    }
+    outputs.push_back(tensor);
   }
   return Status::OK();
 }

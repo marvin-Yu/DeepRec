@@ -23,7 +23,9 @@ class XlaCompilationCache;
 
 class XlaAutoPadding {
 public:
-  XlaAutoPadding(XlaCompilationCache* cache, std::string name);
+  XlaAutoPadding(std::string name);
+
+  ~XlaAutoPadding();
 
   Status FillAndFindCacheShape(
     const std::map<int, Tensor>& constant_args,
@@ -31,21 +33,12 @@ public:
     std::vector<XlaCompiler::Argument>* args,
     std::shared_ptr<InputsShapeInfo> inputs_shape_info);
 
-  Status Compile(
-    OpKernelContext* ctx,
-    const XlaCompiler::Options& options, const NameAttrList& function,
-    absl::Span<const XlaCompiler::Argument> args,
-    const XlaCompiler::CompileOptions& compile_options,
-    const std::function<Status(XlaCompiler* compiler,
-            XlaCompiler::CompilationResult*,
-            const XlaCompiler::CompileOptions& compile_options,
-            const NameAttrList& function,
-            absl::Span<const XlaCompiler::Argument> args,
-            std::shared_ptr<InputsShapeInfo> inputs_shape_info)>& compile_fn,
-    absl::optional<int64> compile_threshold,
+  Status PreCheck(
     const XlaCompiler::CompilationResult** out_compilation_result,
     xla::LocalExecutable** out_executable,
-    std::shared_ptr<InputsShapeInfo> inputs_shape_info);
+    std::shared_ptr<InputsShapeInfo> inputs_shape_info,
+		bool& sync_compile,
+		bool& need_compile);
 
   Status CompileCallback(
     const XlaCompiler::Options& options,
@@ -53,6 +46,10 @@ public:
     XlaCompiler::CompilationResult* out_compilation_result,
     xla::LocalExecutable* out_executable,
     std::shared_ptr<InputsShapeInfo> inputs_shape_info);
+
+  bool IsAutopadding() {
+    return cached_inputs_shapes_.size() > 0;
+  }
 
 private:
   int GetCachedSize() {
@@ -72,34 +69,34 @@ private:
     std::vector<XlaCompiler::Argument>* args,
     std::shared_ptr<InputsShapeInfo> inputs_shape_info);
 
-  Status CompileImpl(
-                const XlaCompiler::Options& options,
-                const NameAttrList& function,
-                std::vector<XlaCompiler::Argument> args,
-                const std::function<Status(
-                        XlaCompiler* compiler,
-                        XlaCompiler::CompilationResult*,
-                        const XlaCompiler::CompileOptions& compile_options,
-                        const NameAttrList& function,
-                        absl::Span<const XlaCompiler::Argument> args,
-                        std::shared_ptr<InputsShapeInfo> inputs_shape_info)>& compile_fn,
-                const XlaCompiler::CompileOptions& compile_options,
-                absl::optional<int64> compile_threshold,
-                std::shared_ptr<InputsShapeInfo> inputs_shape_info);
+  //Status CompileImpl(
+  //              const XlaCompiler::Options& options,
+  //              const NameAttrList& function,
+  //              std::vector<XlaCompiler::Argument> args,
+  //              const std::function<Status(
+  //                      XlaCompiler* compiler,
+  //                      XlaCompiler::CompilationResult*,
+  //                      const XlaCompiler::CompileOptions& compile_options,
+  //                      const NameAttrList& function,
+  //                      absl::Span<const XlaCompiler::Argument> args,
+  //                      std::shared_ptr<InputsShapeInfo> inputs_shape_info)>& compile_fn,
+  //              const XlaCompiler::CompileOptions& compile_options,
+  //              absl::optional<int64> compile_threshold,
+  //              std::shared_ptr<InputsShapeInfo> inputs_shape_info);
 
- Status Warmup(
-    OpKernelContext* ctx,
-    const XlaCompiler::Options& options, const NameAttrList& function,
-    absl::Span<const XlaCompiler::Argument> args,
-    const XlaCompiler::CompileOptions& compile_options,
-    const std::function<Status(XlaCompiler* compiler,
-            XlaCompiler::CompilationResult*,
-            const XlaCompiler::CompileOptions& compile_options,
-            const NameAttrList& function,
-            absl::Span<const XlaCompiler::Argument> args,
-            std::shared_ptr<InputsShapeInfo> inputs_shape_info)>& compile_fn,
-    absl::optional<int64> compile_threshold,
-    std::shared_ptr<InputsShapeInfo> inputs_shape_info);
+ //Status Warmup(
+ //   OpKernelContext* ctx,
+ //   const XlaCompiler::Options& options, const NameAttrList& function,
+ //   absl::Span<const XlaCompiler::Argument> args,
+ //   const XlaCompiler::CompileOptions& compile_options,
+ //   const std::function<Status(XlaCompiler* compiler,
+ //           XlaCompiler::CompilationResult*,
+ //           const XlaCompiler::CompileOptions& compile_options,
+ //           const NameAttrList& function,
+ //           absl::Span<const XlaCompiler::Argument> args,
+ //           std::shared_ptr<InputsShapeInfo> inputs_shape_info)>& compile_fn,
+ //   absl::optional<int64> compile_threshold,
+ //   std::shared_ptr<InputsShapeInfo> inputs_shape_info);
 
  Status InitExecutable(xla::LocalExecutable* executable, OpKernelContext* ctx);
  void FillShapeInferCtx(std::shared_ptr<InputsShapeInfo> inputs_shape_info,
@@ -118,10 +115,9 @@ private:
 
 private:
   const int MIN_PAD_VAL = 8;
-  std::shared_ptr<XlaArgumentDumper> arg_dumper_;
+  //std::shared_ptr<XlaArgumentDumper> arg_dumper_;
   std::string name_;
   uint64 graph_key_ = 0;
-  XlaCompilationCache* cache_;
   mutex graph_properties_mu_;
   // Record xla compiled shapes
   mutex cached_input_shapes_mu_;
@@ -131,7 +127,6 @@ private:
   mutex compiling_shapes_mu_;
   std::set<uint64> compiling_shapes_;
   std::shared_ptr<grappler::GraphProperties> graph_properties_;
-  std::shared_ptr<thread::ThreadPool> compile_thread_pool_ = nullptr;
   void InitShapeInferEntity(
       std::shared_ptr<InputsShapeInfo> inputs_shape_info);
   Status ParseArgIndex(std::shared_ptr<InputsShapeInfo> inputs_shape_info);

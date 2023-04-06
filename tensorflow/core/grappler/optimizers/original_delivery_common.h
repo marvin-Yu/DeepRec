@@ -23,6 +23,7 @@ limitations under the License.
 namespace tensorflow {
 namespace grappler {
 
+const std::string kCpuDeviceName = "/job:localhost/replica:0/task:0/device:CPU:0";
 
 #define TF_RETURN_NULL_IF_ERROR(status, msg) \
   if (!status.ok()) {                        \
@@ -50,17 +51,20 @@ namespace grappler {
     return false;                              \
   }
 
-Status NodeDefConstructor(NodeDef& def, const NodeDef& base,
+Status NodeDefConstructor(NodeDef& def, const std::string device,
                           const std::function<Status(NodeDef&)>& node_builder);
 
-Node* NodeConstructor(Graph* graph, string name, const Node* base, const NodeDef& def);
+Node* NodeConstructor(Graph* graph, string name, const std::string assigned_device,
+                      const NodeDef& def);
 
-Node* NodeConstructor(Graph* graph, string name, Node* base,
-                     const std::function<Status(NodeDef&)>& node_builder);
+Node* NodeConstructor(Graph* graph, string name, const std::string device,
+                      const std::string assigned_device,
+                      const std::function<Status(NodeDef&)>& node_builder);
 
 Status CreateConstNodeDef(NodeDef& def, string const_name, Tensor &t_const,
-                          const NodeDef& base);
-Node* CreateConstNode(Graph* graph, string const_name, Tensor &t_const, Node* base);
+                          const std::string device);
+Node* CreateConstNode(Graph* graph, string const_name, Tensor &t_const,
+                      const std::string device, const std::string assigned_device);
 
 Status ConstructSliceNodeDef(NodeDef& slice, const NodeDef& input, const NodeDef& begin,
                             const NodeDef& size, string name, DataType output_type);
@@ -74,6 +78,8 @@ Status ConstuctConcatNodeDef(NodeDef& concat, const NodeDef& base, string name,
                              DataType t_input, DataType t_idx);
 Node* ConstructConcatOp(Graph* graph, Node* base, int64 axis,
                      std::vector<Node*>& input_nodes, string concat_name);
+Node* ConstructConcatOp(Graph* graph, Node* base, int64 axis,
+                     std::vector<const Edge*>& input_nodes, string concat_name);
 
 Status ConstuctAddNodeDef(NodeDef& def, const NodeDef& base, string name,
                           std::vector<NodeDefBuilder::NodeOut>& inputs,
@@ -89,9 +95,9 @@ Node* ConstructSplitOp(Graph* graph, Node* base, int split_num, int axis,
 
 Status ConstructPackNodeDef(NodeDef& def, const NodeDef& base, string pack_name,
                              std::vector<NodeDefBuilder::NodeOut>& inputs,
-                             int input_size, DataType t_input);
+                             int input_size, DataType t_input, int axis);
 Node* ConstructPackOp(Graph* graph, Node* base, string pack_name,
-                       std::vector<const Edge*>& input_edges);
+                       std::vector<const Edge*>& input_edges, int axis);
 
 Status ConstructTransposeNodeDef(NodeDef& def, const NodeDef& base, string name,
                                  NodeDefBuilder::NodeOut& input,
@@ -121,6 +127,8 @@ Status ConstructExpandDimsNodeDef(NodeDef& def, const NodeDef& base, string name
 Status ConstructSqueezeNodeDef(NodeDef& def, const NodeDef& base, string name,
                                  NodeDefBuilder::NodeOut& input,
                                  DataType t_type);
+
+void SetFrontNodesToCPU(Node* node);
 
 Status UpdateAllEdge(Graph* graph, Node* new_src_node, Node* old_dst_node);
 

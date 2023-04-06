@@ -1194,6 +1194,7 @@ tf_gen_op_libs(
         "nccl_ops",
         "nn_ops",
         "no_op",
+        "dice_ops",
         "parsing_ops",
         "random_grad",
         "random_ops",
@@ -1409,6 +1410,7 @@ cc_library(
         ":experimental_dataset_ops_op_lib",
         ":function_ops_op_lib",
         ":functional_ops_op_lib",
+        ":dice_ops_op_lib",
         ":image_ops_op_lib",
         ":io_ops_op_lib",
         ":linalg_ops_op_lib",
@@ -1593,6 +1595,7 @@ cc_library(
         "//tensorflow/core/kernels:fake_quant_ops",
         "//tensorflow/core/kernels:function_ops",
         "//tensorflow/core/kernels:functional_ops",
+        "//tensorflow/core/kernels:dice_ops",
         "//tensorflow/core/kernels:grappler",
         "//tensorflow/core/kernels:histogram_op",
         "//tensorflow/core/kernels:image",
@@ -1752,6 +1755,8 @@ cc_library(
         ":tensor_testutil",
         ":test",
         ":testlib_ops",
+        ":gpu_runtime_impl",
+        "//tensorflow/core/grappler/optimizers:custom_graph_optimizer_registry_impl",
         "//tensorflow/cc:scope",
         "//tensorflow/core/kernels:ops_testutil",
         "//tensorflow/core/kernels:ops_util",
@@ -1768,6 +1773,7 @@ cc_library(
             "//tensorflow/core/kernels:reshape_op",
         ],
     ),
+    linkopts = ["-L/usr/local/cuda-11.2/targets/x86_64-linux/lib/ -lnvToolsExt"],
 )
 
 cc_library(
@@ -3695,7 +3701,7 @@ tf_cuda_library(
     hdrs = GPU_RUNTIME_HEADERS,
     linkstatic = 1,
     deps = [
-        ":core_cpu_lib",
+        #":core_cpu_lib",
         ":framework",
         ":framework_internal",
         ":lib",
@@ -3703,7 +3709,8 @@ tf_cuda_library(
         ":protos_all_cc",
         ":stream_executor",
         "//third_party/eigen3",
-    ] + if_static([":gpu_runtime_impl"]),
+    ],
+    #] + if_static([":gpu_runtime_impl"]),
 )
 
 # This is redundant with the "gpu_runtime_*" targets above. It's useful for

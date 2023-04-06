@@ -36,6 +36,7 @@ limitations under the License.
 #include "tensorflow/core/lib/gtl/cleanup.h"
 #include "tensorflow/core/lib/gtl/flatset.h"
 #include "tensorflow/core/lib/strings/str_util.h"
+#include "tensorflow/core/util/env_var.h"
 
 namespace tensorflow {
 namespace grappler {
@@ -541,6 +542,9 @@ bool IsWhiteListedOpTypeForEvaluateNode(const string& op_type) {
   return kOpTpeWhitelist->find(op_type) != kOpTpeWhitelist->end();
 }
 
+// reduce optimization latency
+static std::map<std::string, Tensor> big_const_tensors_map_;
+
 // Processes symbolic shapes.
 // Each symbolic shape or dimension is represented by a handle. Unlike the TF
 // shape refiner which creates new handles every time it processes an unknown
@@ -833,15 +837,27 @@ class SymbolicShapeRefiner {
     if (!IsConstant(*node)) return false;
 
     InferenceContext* ic = c->inference_context.get();
-    auto iter = const_tensors_map_.find(node->name());
-    if (iter != const_tensors_map_.end()) {
-      const TensorShape& shape = iter->second.shape();
+    auto set_output = [ic](const TensorShape& shape) {
       std::vector<DimensionHandle> dims;
       for (int i = 0; i < shape.dims(); i++) {
         int64 size = shape.dim_size(i);
         dims.push_back(size < 0 ? ic->UnknownDim() : ic->MakeDim(size));
       }
       ic->set_output(0, ic->MakeShape(dims));
+    };
+    auto iter = const_tensors_map_.find(node->name());
+    if (iter != const_tensors_map_.end()) {
+      const TensorShape& shape = iter->second.shape();
+      set_output(shape);
+    } else {
+      const auto dtype = node->attr().at("dtype").type();
+      auto shape = TensorShape(node->attr().at("value").tensor().tensor_shape());
+      std::string key = shape.DebugString() + std::to_string(dtype);
+      auto iter_big_const = big_const_tensors_map_.find(key);
+      if (iter_big_const != big_const_tensors_map_.end()) {
+        const TensorShape& shape = iter_big_const->second.shape();
+        set_output(shape);
+      }
     }
 
     MaybeUpdateNodeContextOutput(*node, false, c);
@@ -922,6 +938,16 @@ class SymbolicShapeRefiner {
       //
       const TensorProto* tensor_proto = ctx->input_tensor_protos[dst_input];
       if (tensor_proto == nullptr) continue;
+      if (src_is_const[dst_input]) {
+        const auto dtype = tensor_proto->dtype();
+        auto shape = TensorShape(tensor_proto->tensor_shape());
+        std::string key = shape.DebugString() + std::to_string(dtype);
+        auto iter = big_const_tensors_map_.find(key);
+        if (iter != big_const_tensors_map_.end()) {
+          input_tensors[dst_input] = &(iter->second);
+          continue;
+        }
+      }
       
       if (!src_is_const[dst_input] && 
           tensor_proto->dtype() != DT_INT32 && 
@@ -934,7 +960,19 @@ class SymbolicShapeRefiner {
 
       // Cache node value if const inputs, since const input does not change
       if (src_is_const[dst_input]) {
-        const_tensors_map_[src_name] = tensor_values[dst_input];
+        DataType dtype = tensor_values[dst_input].dtype();
+        if (dtype == DT_FLOAT || dtype == DT_HALF) {
+          TensorShape shape = tensor_values[dst_input].shape();
+          if (shape.num_elements() > 1024) {
+            std::string key = shape.DebugString() + std::to_string(dtype);
+            big_const_tensors_map_[key] = tensor_values[dst_input];
+            VLOG(1) << "cache big const:" << key << ", with " << src_name;
+          } else {
+            const_tensors_map_[src_name] = tensor_values[dst_input];
+          }
+        } else {
+          const_tensors_map_[src_name] = tensor_values[dst_input];
+        }
       }
     }
     ic->set_input_tensors(input_tensors);
@@ -1130,7 +1168,7 @@ class SymbolicShapeRefiner {
       NodeContext* src_ctx = GetNodeContext(src, ctx_idx);
       SetConstNodeOutputShape(src, src_ctx);
     }
-    return InferShapes(*node, ctx, false);
+    return InferShapes(*node, ctx, false, false);
   }
 
   string DebugString(const gtl::ArraySlice<int> arrays) {
@@ -1149,7 +1187,7 @@ class SymbolicShapeRefiner {
   Status UpdateNodeFastMode(const NodeDef* node,
       const std::vector<Tensor>& feed_tensors,
       std::vector<TensorShapeProto>& output_shapes,
-      int ctx_idx) {
+      int ctx_idx, bool validate) {
     NodeContext* ctx = GetNodeContext(node, ctx_idx);
     CHECK(ctx != nullptr); 
     // Check if the shapes of the nodes in the fan-in of this node have changed,
@@ -1208,7 +1246,7 @@ class SymbolicShapeRefiner {
     //  Construct Tensors for constant inputs used by shape functions.
     std::vector<Tensor> notused(ic->num_inputs());
     FillCtxInputTensors(feed_tensors, ctx, src_names, src_is_const, notused);
-    auto ret = InferShapes(*node, ctx, true);
+    auto ret = InferShapes(*node, ctx, true, validate);
     if (PopulateOutputShapes(node, ctx, output_shapes)) return Status::OK();
     LOG(ERROR) << "Shape infer error, dump cluster inputs:"; 
     for (auto iter = feed_.begin(); iter != feed_.end(); iter++) {
@@ -2020,7 +2058,8 @@ class SymbolicShapeRefiner {
     return Status::OK();
   }
 
-  Status InferShapes(const NodeDef& node, NodeContext* c, bool is_fast_mode) {
+  Status InferShapes(const NodeDef& node, NodeContext* c,
+         bool is_fast_mode, bool validate) {
     // Infer the shapes of output tensors.
     // node is arg node and its output shape has known, do not need shape inference;
     auto ic = c->inference_context.get();
@@ -2043,11 +2082,13 @@ class SymbolicShapeRefiner {
     //for (int i = 0; i < ic->num_outputs(); i++) {
     //  VLOG(0) << node.name() << " output shape" << ic->DebugString(ic->output(i));
     //}
-    xla_padding_rule_->CheckNodeIsPaddingValid(node, 
-        c->inference_context.get(), 
-        is_fast_mode);
-    Status status = Status::OK();
+    if (validate) {
+      xla_padding_rule_->CheckNodeIsPaddingValid(node,
+          c->inference_context.get(),
+          is_fast_mode);
+    }
 
+    Status status = Status::OK();
     auto it = fed_ports_.find(node.name());
     const bool is_fed = it != fed_ports_.end();
 
@@ -2350,7 +2391,7 @@ Status GraphProperties::UpdateShapes(
     const NodeDef* n, bool* new_shapes, 
     const std::vector<Tensor>& feed_tensors,
     std::vector<TensorShapeProto>& output_shapes, 
-    bool is_fast_mode, int ctx_idx) const {
+    bool is_fast_mode, int ctx_idx, bool validate) const {
   if (IsEnter(*n)) {
     // The Enter shape function always forwards an UnknownShape, so do the right
     // thing here.
@@ -2370,7 +2411,7 @@ Status GraphProperties::UpdateShapes(
     // Rely on regular TF shape refinement for all the other nodes.
     // UpdateNode calls UpdateFunction if a function node is detected.
     if (is_fast_mode) {
-      TF_RETURN_IF_ERROR(shape_refiner->UpdateNodeFastMode(n, feed_tensors, output_shapes, ctx_idx));
+      TF_RETURN_IF_ERROR(shape_refiner->UpdateNodeFastMode(n, feed_tensors, output_shapes, ctx_idx, validate));
     } else {
       TF_RETURN_IF_ERROR(shape_refiner->UpdateNode(n, new_shapes, ctx_idx, feed_tensors));
     }
@@ -2442,12 +2483,12 @@ Status GraphProperties::PropagateShapes(
 Status GraphProperties::PropagateShapesFastMode(
     const std::vector<Tensor>& feed_tensors,
     std::vector<TensorShapeProto>& output_shapes,
-    int ctx_idx) const {
+    int ctx_idx, bool validate) const {
   for(const NodeDef* n: topo_order_nodes_) {
     bool updated = false;
     TF_RETURN_IF_ERROR(
           UpdateShapes(refiner_.get(), resource_handles_, n, &updated, 
-                       feed_tensors, output_shapes, true, ctx_idx));
+                       feed_tensors, output_shapes, true, ctx_idx, validate));
   }
   return Status::OK();
 }
@@ -2804,13 +2845,15 @@ Status GraphProperties::InferStatically(bool assume_valid_feeds,
 
 Status GraphProperties::InferStaticallyFastMode(
          const std::vector<Tensor>& feed_tensors,
-         std::vector<TensorShapeProto>& output_shapes) {
+         std::vector<TensorShapeProto>& output_shapes,
+         bool validate) {
   output_shapes.clear();
   output_shapes.resize(fetch_.size());
   auto index_wrapper = ContextIndexWrapper(context_index_pool_);
   int ctx_idx =  index_wrapper.acquire();
   TF_RETURN_IF_ERROR(
-      PropagateShapesFastMode(feed_tensors, output_shapes, ctx_idx));
+      PropagateShapesFastMode(feed_tensors,
+					output_shapes, ctx_idx, validate));
   return Status::OK();
 }
 

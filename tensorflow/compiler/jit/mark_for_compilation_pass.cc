@@ -1727,7 +1727,7 @@ DataType GetNodeDataType(Node* n) {
 
 bool PostOrderTrace(Node* n) { 
   string node_name = n->name() + "(" + n->type_string() + ")";
-  LOG(INFO) << "Trace " << node_name << " xla compile false";
+  VLOG(1) << "Trace " << node_name << " xla compile false";
 
   n->AddAttr(kXlaDisableByPadding, false);
   for (const Edge* e: n->out_edges()) {
@@ -1740,7 +1740,7 @@ bool PostOrderTrace(Node* n) {
        PostOrderTrace(&dst);
     } else {
       dst.AddAttr(kXlaDisableByPadding, false);
-      LOG(INFO) << "Trace " << dst.name() << + "(" << n->type_string() 
+      VLOG(1) << "Trace " << dst.name() << + "(" << n->type_string()
               << ") xla compile false, output type " << output_type;
     }
   }

@@ -445,11 +445,13 @@ tf_cuda_library(
     srcs = [
         "convert/convert_graph.cc",
         "convert/convert_nodes.cc",
+        "convert/timing_cache.cc",
         "convert/trt_optimization_pass.cc",
     ],
     hdrs = [
         "convert/convert_graph.h",
         "convert/convert_nodes.h",
+        "convert/timing_cache.h",
         "convert/trt_optimization_pass.h",
     ],
     deps = [

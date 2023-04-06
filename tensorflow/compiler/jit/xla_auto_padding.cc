@@ -29,43 +29,42 @@ namespace tensorflow {
 
 using namespace xla_padding_rule;
 
-XlaAutoPadding::XlaAutoPadding(XlaCompilationCache* cache, std::string name) :
-    cache_(cache),
+XlaAutoPadding::XlaAutoPadding(std::string name) :
     name_(name) {
-  compile_thread_pool_ = std::make_shared<thread::ThreadPool>(
-        Env::Default(), ThreadOptions(), strings::StrCat("xla_compile"),
-        1, /*low_latency_hint*/true,
-        /*allocator=*/nullptr);
-  arg_dumper_ = std::make_shared<XlaArgumentDumper>();
+  //arg_dumper_ = std::make_shared<XlaArgumentDumper>();
 }
 
-Status XlaAutoPadding::CompileImpl(
-        const XlaCompiler::Options& options,
-        const NameAttrList& function,
-        std::vector<XlaCompiler::Argument> args,
-        const std::function<Status(
-                 XlaCompiler* compiler,
-                 XlaCompiler::CompilationResult*,
-                 const XlaCompiler::CompileOptions& compile_options,
-                 const NameAttrList& function,
-                 absl::Span<const XlaCompiler::Argument> args,
-                 std::shared_ptr<InputsShapeInfo> inputs_shape_info)>& compile_fn,
-        const XlaCompiler::CompileOptions& compile_options,
-        absl::optional<int64> compile_threshold,
-        std::shared_ptr<InputsShapeInfo> inputs_shape_info){
-  auto ret = cache_->CompileImpl(options, function, args,
-                     compile_options, compile_fn,
-                     compile_threshold,
-                     nullptr,
-                     nullptr,
-                     inputs_shape_info);
-  // dump xla arguments for warm up
-  if (inputs_shape_info){
-    mutex_lock lock(args_indexs_mu_);
-    arg_dumper_->DumpXlaArguments(args, args_indexs_, name_, inputs_shape_info->padded_shape_uuid());
-  }
-  return ret;
+XlaAutoPadding::~XlaAutoPadding() {
+  LOG(INFO) << "Core Test XlaAutoPadding release " << this;
 }
+
+//Status XlaAutoPadding::CompileImpl(
+//        const XlaCompiler::Options& options,
+//        const NameAttrList& function,
+//        std::vector<XlaCompiler::Argument> args,
+//        const std::function<Status(
+//                 XlaCompiler* compiler,
+//                 XlaCompiler::CompilationResult*,
+//                 const XlaCompiler::CompileOptions& compile_options,
+//                 const NameAttrList& function,
+//                 absl::Span<const XlaCompiler::Argument> args,
+//                 std::shared_ptr<InputsShapeInfo> inputs_shape_info)>& compile_fn,
+//        const XlaCompiler::CompileOptions& compile_options,
+//        absl::optional<int64> compile_threshold,
+//        std::shared_ptr<InputsShapeInfo> inputs_shape_info){
+//  auto ret = cache_->CompileImpl(options, function, args,
+//                     compile_options, compile_fn,
+//                     compile_threshold,
+//                     nullptr,
+//                     nullptr,
+//                     inputs_shape_info);
+//  // dump xla arguments for warm up
+//  if (inputs_shape_info){
+//    mutex_lock lock(args_indexs_mu_);
+//    arg_dumper_->DumpXlaArguments(args, args_indexs_, name_, inputs_shape_info->padded_shape_uuid());
+//  }
+//  return ret;
+//}
 
 Status XlaAutoPadding::FillAndFindCacheShape(
   const std::map<int, Tensor>& constant_args,
@@ -109,68 +108,59 @@ Status XlaAutoPadding::InitExecutable(xla::LocalExecutable* executable, OpKernel
   return Status::OK();
 }
 
-Status XlaAutoPadding::Warmup(
-    OpKernelContext* ctx,
-    const XlaCompiler::Options& options, const NameAttrList& function,
-    absl::Span<const XlaCompiler::Argument> args,
-    const XlaCompiler::CompileOptions& compile_options,
-    const std::function<Status(XlaCompiler* compiler,
-            XlaCompiler::CompilationResult*,
-            const XlaCompiler::CompileOptions& compile_options,
-            const NameAttrList& function,
-            absl::Span<const XlaCompiler::Argument> args,
-            std::shared_ptr<InputsShapeInfo> inputs_shape_info)>& compile_fn,
-    absl::optional<int64> compile_threshold,
-    std::shared_ptr<InputsShapeInfo> inputs_shape_info) {
-  has_warmup_ = true;
+//Status XlaAutoPadding::Warmup(
+//    OpKernelContext* ctx,
+//    const XlaCompiler::Options& options, const NameAttrList& function,
+//    absl::Span<const XlaCompiler::Argument> args,
+//    const XlaCompiler::CompileOptions& compile_options,
+//    const std::function<Status(XlaCompiler* compiler,
+//            XlaCompiler::CompilationResult*,
+//            const XlaCompiler::CompileOptions& compile_options,
+//            const NameAttrList& function,
+//            absl::Span<const XlaCompiler::Argument> args,
+//            std::shared_ptr<InputsShapeInfo> inputs_shape_info)>& compile_fn,
+//    absl::optional<int64> compile_threshold,
+//    std::shared_ptr<InputsShapeInfo> inputs_shape_info) {
+//  has_warmup_ = true;
+//
+//  if(!ParseArgIndex(inputs_shape_info).ok()) {
+//    return Status::OK();
+//  }
+//
+//  // Build signature for cluster
+//  TF_ASSIGN_OR_RETURN(XlaCompilationCache::Signature signature,
+//      XlaCompilationCache::BuildSignatureNoShape(function, args));
+//
+//  // Read warmup files
+//  std::vector<std::vector<XlaCompiler::Argument>> args_array;
+//  std::vector<std::shared_ptr<InputsShapeInfo>> inputs_shape_info_array;
+//  {
+//    mutex_lock lock(args_indexs_mu_);
+//    arg_dumper_->ParseFromFile(inputs_shape_info, name_, indexs_args_,
+//                                args_array, inputs_shape_info_array);
+//  }
+//
+//  LOG(INFO) << name_ << " warmup " << name_ + "_" + signature.HumanString()
+//            << " cache file size " << args_array.size();
+//
+//  // Warmup by files
+//  for(int i = 0; i < args_array.size(); i++) {
+//    LOG(INFO) << name_ << " warmup from file " << inputs_shape_info_array[i]->uuid();
+//    CompileImpl(options, function, args_array[i], compile_fn,
+//                compile_options, compile_threshold, inputs_shape_info_array[i]);
+//
+//    InitExecutable(inputs_shape_info_array[i]->out_executable, ctx);
+//  }
+//  LOG(INFO) << name_ << " warmup from file finish! total cache size=" << args_array.size();
+//  return Status::OK();
+//}
 
-  if(!ParseArgIndex(inputs_shape_info).ok()) {
-    return Status::OK();
-  }
-
-  // Build signature for cluster
-  TF_ASSIGN_OR_RETURN(XlaCompilationCache::Signature signature, 
-      XlaCompilationCache::BuildSignatureNoShape(function, args));
-
-  // Read warmup files
-  std::vector<std::vector<XlaCompiler::Argument>> args_array;
-  std::vector<std::shared_ptr<InputsShapeInfo>> inputs_shape_info_array;
-  {
-    mutex_lock lock(args_indexs_mu_);
-    arg_dumper_->ParseFromFile(inputs_shape_info, name_, indexs_args_, 
-                                args_array, inputs_shape_info_array);
-  }
-
-  LOG(INFO) << name_ << " warmup " << name_ + "_" + signature.HumanString()
-            << " cache file size " << args_array.size();
-
-  // Warmup by files
-  for(int i = 0; i < args_array.size(); i++) {
-    LOG(INFO) << name_ << " warmup from file " << inputs_shape_info_array[i]->uuid();
-    CompileImpl(options, function, args_array[i], compile_fn,
-                compile_options, compile_threshold, inputs_shape_info_array[i]);
-
-    InitExecutable(inputs_shape_info_array[i]->out_executable, ctx); 
-  }
-  LOG(INFO) << name_ << " warmup from file finish! total cache size=" << args_array.size(); 
-  return Status::OK();
-}
-
-Status XlaAutoPadding::Compile(
-    OpKernelContext* ctx,
-    const XlaCompiler::Options& options, const NameAttrList& function,
-    absl::Span<const XlaCompiler::Argument> args,
-    const XlaCompiler::CompileOptions& compile_options,
-    const std::function<Status(XlaCompiler* compiler,
-            XlaCompiler::CompilationResult*,
-            const XlaCompiler::CompileOptions& compile_options,
-            const NameAttrList& function,
-            absl::Span<const XlaCompiler::Argument> args,
-            std::shared_ptr<InputsShapeInfo> inputs_shape_info)>& compile_fn,
-    absl::optional<int64> compile_threshold,
+Status XlaAutoPadding::PreCheck(
     const XlaCompiler::CompilationResult** out_compilation_result,
     xla::LocalExecutable** out_executable,
-    std::shared_ptr<InputsShapeInfo> inputs_shape_info) {
+    std::shared_ptr<InputsShapeInfo> inputs_shape_info,
+		bool& sync_compile,
+		bool& need_compile) {
   *out_executable = nullptr;
   *out_compilation_result = nullptr;
   // If the backend compile is running, we dont schedule new task to it.
@@ -186,18 +176,6 @@ Status XlaAutoPadding::Compile(
 
   // If this is first compile and has warmup file, then dont compile this
   // beacuse first compile is warmup data, the inputs shape has no use
-
-  std::vector<XlaCompiler::Argument> unconst_args;
-  unconst_args.reserve(args.size());
-  for (auto& arg: args) {
-    unconst_args.push_back(arg);
-  }
-
-  auto fn = std::bind(&XlaAutoPadding::CompileImpl, this, 
-                     options, function, unconst_args, compile_fn,
-                     compile_options, compile_threshold, 
-                     inputs_shape_info);
-
   {
     std::string padded_shape = inputs_shape_info->padded_shape_uuid();
     uint64 h = std::hash<string>()(padded_shape);
@@ -208,28 +186,20 @@ Status XlaAutoPadding::Compile(
       LOG(INFO) << name_ << " sync xla compile " 
                 << " " << inputs_shape_info->DebugString();
       compiling_shapes_.insert(h);
-      auto ret = XlaAutoPadding::CompileImpl(
-                         options, function, unconst_args, compile_fn,
-                         compile_options, compile_threshold, 
-                         inputs_shape_info);
-      {
-        mutex_lock lock(warmup_mu_);
-        if (! has_warmup_) {
-          Warmup(ctx, options, function, args, compile_options, compile_fn,
-              compile_threshold, inputs_shape_info);
-          VLOG(0) << name_ << " Warmup Finish";
-          return Status::OK();
-        }
-      }
-      return ret;
+			sync_compile = true;
+			need_compile = true;
+      return Status::OK();
     }
 
     if (compiling_shapes_.find(h) == compiling_shapes_.end()) {
       compiling_shapes_.insert(h);
-      compile_thread_pool_->Schedule(fn); 
-      LOG(INFO) << name_ << " schedule xla compile to backend thread " 
+			sync_compile = false;
+			need_compile = true;
+      LOG(INFO) << name_ << " schedule xla compile to backend thread,"
+                << " autopadding address: " << this
                 << " " << inputs_shape_info->DebugString();
     } else {
+			need_compile = false;
       VLOG(1) << "Has push shape " << padded_shape << " with hash " << h << " to Compile queue";
     }
   }
@@ -348,11 +318,13 @@ Status XlaAutoPadding::CompileCallback(
     }
 
     // Print the cached shapes
-    LOG(INFO) << name_ << " print XLA cached shapes**********************";
-    for (int i = 0 ; i < cached_inputs_shapes_.size(); i++) {
-      LOG(INFO) << name_ << " cached " << i + 1 << "/" 
-                << cached_inputs_shapes_.size() 
-                << " " << cached_inputs_shapes_[i]->DebugString();
+    if (SAMPLING_LOG()) {
+      LOG(INFO) << name_ << " print XLA cached shapes**********************";
+      for (int i = 0 ; i < cached_inputs_shapes_.size(); i++) {
+        LOG(INFO) << name_ << " cached " << i + 1 << "/"
+                  << cached_inputs_shapes_.size()
+                  << " " << cached_inputs_shapes_[i]->DebugString();
+      }
     }
   }
   
@@ -419,7 +391,7 @@ inline Status XlaAutoPadding::ValidateCluster(
     TF_RETURN_IF_ERROR(
         inputs_shape_info->graph_properties->InferStaticallyFastMode(
             inputs_shape_info->input_tensors,
-            inputs_shape_info->inferred_shape_protos));
+            inputs_shape_info->inferred_shape_protos, true));
     // Get pad state again
     state = properties->GetXlaPaddingState(signature);
   }

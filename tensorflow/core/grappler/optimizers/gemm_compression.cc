@@ -141,9 +141,9 @@ bool OptimizeGatherConcatPattern(GraphDef &input_graph_def, GraphDef* output_gra
         NodeDef slice_part1;
         // 构建Slice
         TF_RETURN_IF_ERROR(CreateConstNodeDef(begin_const_part1,
-                             slice_name_part1 + "/slice_begin", t_begin, weight_node));
+                             slice_name_part1 + "/slice_begin", t_begin, weight_node.device()));
         TF_RETURN_IF_ERROR(CreateConstNodeDef(size_const_part1,
-                             slice_name_part1 + "/slice_size", t_size, weight_node));
+                             slice_name_part1 + "/slice_size", t_size, weight_node.device()));
         TF_RETURN_IF_ERROR(ConstructSliceNodeDef(slice_part1, weight_node,
                              begin_const_part1, size_const_part1,
                              slice_name_part1 + "/slice", output_type));
@@ -155,9 +155,9 @@ bool OptimizeGatherConcatPattern(GraphDef &input_graph_def, GraphDef* output_gra
         NodeDef slice_part2;
         // 构建Slice
         TF_RETURN_IF_ERROR(CreateConstNodeDef(begin_const_part2,
-                             slice_name_part2 + "/slice_begin", t_begin, weight_node));
+                             slice_name_part2 + "/slice_begin", t_begin, weight_node.device()));
         TF_RETURN_IF_ERROR(CreateConstNodeDef(size_const_part2,
-                             slice_name_part2 + "/slice_size", t_size, weight_node));
+                             slice_name_part2 + "/slice_size", t_size, weight_node.device()));
         TF_RETURN_IF_ERROR(ConstructSliceNodeDef(slice_part2, weight_node,
                              begin_const_part2, size_const_part2,
                              slice_name_part2 + "/slice", output_type));

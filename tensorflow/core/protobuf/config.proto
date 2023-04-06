@@ -916,4 +916,6 @@ message BlazeKernelOptions {
 
   RunMode run_mode = 104;
   int32 wait_ms = 105;
+  bool need_split = 106;
+  int32 split_size = 107;
 }

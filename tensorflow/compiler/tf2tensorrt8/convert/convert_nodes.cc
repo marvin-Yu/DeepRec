@@ -33,6 +33,7 @@ limitations under the License.
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "tensorflow/compiler/tf2tensorrt8/common/utils.h"
+#include "tensorflow/compiler/tf2tensorrt8/convert/timing_cache.h"
 #include "tensorflow/compiler/tf2tensorrt8/convert/utils.h"
 #include "tensorflow/compiler/tf2tensorrt8/utils/trt_logger.h"
 #include "tensorflow/compiler/tf2tensorrt8/utils/trt_shape_optimization_profiles.h"
@@ -1537,6 +1538,22 @@ Status Converter::BuildCudaEngine(
         trt_builder_.get(), builder_config.get(), network()));
   }
 
+  std::unique_ptr<TimingCacheRegistry::TimingCache> timing_cache = nullptr;
+  // We only use a timing cache if the algorithm selector is not used. If we
+  // are using TRT version >= 8.0, then we can try to deserialize an existing
+  // cache.
+  if (trt_algorithm_id < 0) {
+    TimingCacheRegistry* registry = GetTimingCacheRegistry();
+    timing_cache = registry->GetCache("default_cache", builder_config.get());
+    if (timing_cache) {
+      builder_config->setTimingCache(*timing_cache, /*ignoreMismatch*/ false);
+    }
+  } else {
+    // Disabling the timing cache is recommended when using the algorithm
+    // selector.
+    builder_config->setFlag(nvinfer1::BuilderFlag::kDISABLE_TIMING_CACHE);
+  }
+
   string precision_mode_str;
   TF_RETURN_IF_ERROR(
       TrtPrecisionModeToName(precision_mode_, &precision_mode_str));
@@ -1575,6 +1592,12 @@ Status Converter::BuildCudaEngine(
       VLOG(2) << "Binding " << i << " name: " << (*engine)->getBindingName(i);
     }
   }
+
+  // Write back the new timing cache results to the registry.
+  if (timing_cache) {
+    GetTimingCacheRegistry()->Update("default_cache", timing_cache.get());
+  }
+
   return Status::OK();
 }
 
