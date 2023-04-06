@@ -1925,9 +1925,9 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
         auto flops = ctx.get_flops();
         UpdateFlops(flops);
         // Record tensor_size;
-        //if (params.traced_infos) {
-        //  params.traced_infos->RecordTensorSize(&inputs, &ctx, device->device_type());
-        //}
+        if (params.traced_infos) {
+          params.traced_infos->RecordTensorSize(&inputs, &ctx, device->device_type());
+        }
 
         nodestats::SetOpEnd(stats);
         s = ProcessOutputs(item, &ctx, &outputs, stats);
