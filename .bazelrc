@@ -160,7 +160,7 @@ test:rbe --test_env=USER=anon
 # Default options should come above this line
 
 # Options from ./configure
-try-import %workspace%/.tf_configure_tf115.bazelrc
+try-import %workspace%/.tf_configure.bazelrc
 
 # Put user-specific options in .bazelrc.user
 try-import %workspace%/.bazelrc.user
