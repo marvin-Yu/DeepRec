@@ -104,6 +104,7 @@ class BlazePredictor {
   static mutex session_mu_;
   int64 log_level_;
   static mutex log_mu_;
+  bool need_trace_;
   
  private:
   Status ParseAttr(const std::string& device);
@@ -144,6 +145,14 @@ class BlazePredictor {
 
   Status PrepareOutputs(const std::vector<Tensor>& outputs,
       std::vector<Tensor>* real_outputs, OpKernelContext* ctx);
+
+  void DumpFile(RunMetadata& meta, int index=0) const {
+    auto name = ctx_->def().name() + "_blaze_" +
+      std::to_string(Env::Default()->NowMicros()) + std::to_string(index);
+    if(!WriteTextProto(Env::Default(), name, meta).ok()) {
+      VLOG(0) << "dump failed " << name;
+    }
+  }
 
 #define TYPECASE_0(dt, X, Y)                                    \
   case dt: {                                                  \
