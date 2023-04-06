@@ -421,6 +421,9 @@ Status BlazeXlaPredictor::ComputeNoPadding(OpKernelContext* ctx,
     TF_RETURN_IF_ERROR(session_->RunCallable(
             handle_, real_inputs, &outputs, &metadata));
     ctx->traced_infos()->UpdateProfStats(&metadata);
+    if (need_trace_) {
+      DumpFile(metadata);
+    }
   } else {
     TF_RETURN_IF_ERROR(session_->RunCallable(
             handle_, real_inputs, &outputs, nullptr));

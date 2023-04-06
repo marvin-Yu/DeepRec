@@ -910,6 +910,7 @@ message BlazeKernelOptions {
     DEFAULT = 0;
     BENCHMARK = 1;
     SKIP = 2; // skip for dense test, but i do not know shape
+    TRACE = 3;
   }
 
   RunMode run_mode = 104;
