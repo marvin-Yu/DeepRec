@@ -48,6 +48,7 @@ BlazePredictor::BlazePredictor(const std::vector<std::string>& input_names,
     graph_def_(graph_def), request_device_(device),
     blaze_run_options_(options), device_type_(device_string),
     input_types_(input_types), ctx_(ctx) {
+  need_trace_ = false;
   ReadInt64FromEnvVar("BLAZE_LOG_LEVEL", 0, &log_level_);
   // rewrite HugeConst
   std::string root_path;
@@ -183,6 +184,10 @@ Status BlazePredictor::PrepareCallableOptions(CallableOptions &callable_options)
     callable_options.mutable_fetch_devices()->insert({output, device_});
   }
   callable_options.set_fetch_skip_sync(true);
+  if (blaze_run_options_.run_mode() == BlazeKernelOptions::TRACE) {
+    need_trace_ = true;
+    callable_options.mutable_run_options()->set_trace_tensor_infos(true);
+  }
   return Status::OK();
 }
 
@@ -279,6 +284,9 @@ Status BlazePredictor::Compute(OpKernelContext* ctx) {
     RunMetadata metadata;
     TF_RETURN_IF_ERROR(session_->RunCallable(handle_, real_inputs, &outputs, &metadata));
     ctx->traced_infos()->UpdateProfStats(&metadata);
+    if (need_trace_) {
+      DumpFile(metadata);
+    }
   } else {
     TF_RETURN_IF_ERROR(session_->RunCallable(handle_, real_inputs, &outputs, nullptr));
   }
@@ -343,6 +351,9 @@ Status BlazePredictor::ComputeSplited(OpKernelContext* ctx) {
         RunMetadata metadata;
         st = session_->RunCallable(this->handle_, real_inputs, &outputs, &metadata);
         ctx->traced_infos()->UpdateProfStats(&metadata);
+        if (need_trace_) {
+          DumpFile(metadata, i);
+        }
       } else {
         st = session_->RunCallable(this->handle_, real_inputs, &outputs, nullptr);
       }
@@ -675,6 +686,7 @@ Status BlazePredictor::SplitInputs(std::vector<Tensor>& inputs,
   if (index < batch_size) {
     SPLIT_TENSOR(index, batch_size);
   }
+//can delete?
 for (int i = 0; i < splited_inputs.size(); ++i) {
 	for (auto& tensor : splited_inputs[i]) {
 }
