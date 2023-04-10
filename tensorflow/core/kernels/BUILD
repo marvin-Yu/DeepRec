@@ -3175,6 +3175,7 @@ cc_library(
         ":text_line_reader_op",
         ":tf_record_reader_op",
         ":whole_file_read_ops",
+        ":incr_save_restore_ops",
     ],
 )
 
@@ -3245,6 +3246,12 @@ tf_kernel_library(
 tf_kernel_library(
     name = "save_restore_v2_ops",
     prefix = "save_restore_v2_ops",
+    deps = SAVE_RESTORE_DEPS,
+)
+
+tf_kernel_library(
+    name = "incr_save_restore_ops",
+    prefix = "incr_save_restore_ops",
     deps = SAVE_RESTORE_DEPS,
 )
 

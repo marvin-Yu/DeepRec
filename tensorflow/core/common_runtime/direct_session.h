@@ -136,6 +136,12 @@ class DirectSession : public Session {
   ::tensorflow::Status ReleaseCallable(CallableHandle handle) override;
 
   const SessionOptions& options() const { return options_; }
+  
+  ::tensorflow::Status PreCreateExecutors(const std::vector<std::string>& inputs,
+                                          const std::vector<std::string>& outputs,
+                                          const std::vector<std::string>& target_nodes,
+                                          const ::tensorflow::RunOptions& run_options);
+
 
 #ifdef GOOGLE_CUDA
   ::tensorflow::Status CreateForCapture(const GraphDef& graph) override;
@@ -181,6 +187,9 @@ class DirectSession : public Session {
   void SetStepInitId(int step_id) {
     step_id_counter_ = step_id;
   }
+
+  // TODO: const cast check for aios auto scale
+  SessionOptions* get_options() const override {return const_cast<SessionOptions*>(&options_);}
  private:
 
 #ifdef GOOGLE_CUDA
@@ -231,7 +240,8 @@ class DirectSession : public Session {
   // 'input_keys' are the rendezvous keys for the feeds and 'output_keys'
   // are rendezvous keys for the fetches.
   struct ExecutorsAndKeys {
-    ExecutorsAndKeys() : step_count(0) {}
+    ExecutorsAndKeys() : step_count(0), status(Status::OK()) {}
+    ExecutorsAndKeys(Status status): step_count(0), status(status) {}
 
     std::atomic_int_fast64_t step_count;
     std::unique_ptr<Graph> graph;
@@ -248,6 +258,7 @@ class DirectSession : public Session {
     CallableOptions callable_options;
 
     int64 collective_graph_key = BuildGraphOptions::kNoCollectiveGraphKey;
+    Status status;
   };
 
   // A FunctionInfo object is created for every unique set of feeds/fetches.
@@ -536,6 +547,7 @@ class DirectSession : public Session {
   // pool according to other specifications of RunOptions and ConfigProto.
   bool run_in_caller_thread_ = false;
   bool force_run_in_caller_thread_ = false;
+  bool pai_enable_online_tuning_;
 
   TF_DISALLOW_COPY_AND_ASSIGN(DirectSession);
 

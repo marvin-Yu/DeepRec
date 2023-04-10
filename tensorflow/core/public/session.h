@@ -99,6 +99,10 @@ class Session {
   Session();
   virtual ~Session();
 
+  virtual SessionOptions* get_options() const {
+    return nullptr;
+  }
+
   /// \brief Create the graph to be used for the session.
   ///
   /// Returns an error if this session has already been created with a
@@ -313,6 +317,15 @@ class Session {
   virtual Status ReleaseCallable(CallableHandle handle) {
     return errors::Unimplemented(
         "ReleaseCallable is not supported for this session.");
+  }
+
+  ///\brief for empty inputs warmup 
+  virtual Status PreCreateExecutors(const std::vector<std::string>& inputs,
+                                    const std::vector<std::string>& outputs,
+                                    const std::vector<std::string>& target_nodes,
+                                    const ::tensorflow::RunOptions& run_options) {
+    return errors::Unimplemented(
+        "PreCreateExecutors is not supported for this session.");
   }
 };
 

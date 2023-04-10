@@ -56,7 +56,7 @@ class LocalDevice : public Device {
   // NUMA node will share a single fixed sized threadpool for numerical
   // computations.
   static mutex global_tp_mu_;
-  static gtl::InlinedVector<EigenThreadPoolInfo*, 4> global_tp_info_
+  static gtl::InlinedVector<std::shared_ptr<EigenThreadPoolInfo>, 4> global_tp_info_
       GUARDED_BY(global_tp_mu_);
 
   friend class test::Benchmark;

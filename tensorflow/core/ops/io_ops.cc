@@ -256,6 +256,46 @@ REGISTER_OP("ShardedFilespec")
     .Output("filename: string")
     .SetShapeFn(ScalarInputsAndOutputs);
 
+REGISTER_OP("RecordSparseIndices")
+    .Input("keys: TIndex")
+    .Attr("var_name: string = ''")
+    .Attr("TIndex: {int32, int64}")
+    .SetShapeFn([](InferenceContext* c) {
+    return Status::OK();
+  });
+    
+REGISTER_OP("IncrSave")
+    .Input("prefix: string")
+    .Input("tensor_names: string")
+    .Input("shape_and_slices: string")
+    .Input("is_sparse: bool")
+    .Input("tensors: dtypes")
+    .Attr("dtypes: list(type)")
+    .SetIsStateful()
+    .SetShapeFn([](InferenceContext* c) {
+        return Status::OK();
+    });
+ 
+ 
+REGISTER_OP("IncrRestore")
+    .Input("prefix: string")
+    .Input("tensor_names: string")
+    .Input("shape_and_slices: string")
+    .Input("is_sparse: bool")
+    .Input("in_tensors: dtypes")
+    .Output("out_tensors: dtypes")
+    .Attr("dtypes: list(type)")
+    .SetIsStateful()
+    .SetShapeFn([](InferenceContext* c) {
+      return Status::OK();
+    });
+ 
+REGISTER_OP("ActivateSparseRecorder")
+    .Input("tensor_names: string")
+    .SetShapeFn([](InferenceContext* c) {
+      return Status::OK();
+    });
+
 // Reader source ops ----------------------------------------------------------
 
 REGISTER_OP("WholeFileReader")
@@ -421,6 +461,47 @@ REGISTER_OP("ReaderNumWorkUnitsCompletedV2")
     .Input("reader_handle: resource")
     .Output("units_completed: int64")
     .SetShapeFn(ScalarInputsAndOutputs);
+
+REGISTER_OP("ReaderCurrentWorkFinished")
+.Input("reader_handle: Ref(string)")
+.Output("currentwork_finished: int64")
+.SetShapeFn(TwoElementVectorAndScalarOutputs)
+.Doc(R"doc(
+Returns if currentwork has finished.
+ 
+reader_handle: Handle to a Reader.
+)doc");
+ 
+REGISTER_OP("ReaderCurrentWorkFinishedV2")
+.Input("reader_handle: resource")
+.Output("currentwork_finished: int64")
+.SetShapeFn(ScalarInputsAndOutputs)
+.Doc(R"doc(
+Returns if the work has finished the current work.
+ 
+reader_handle: Handle to a Reader.
+)doc");
+ 
+ 
+REGISTER_OP("ReaderNewWorkStarted")
+.Input("reader_handle: Ref(string)")
+.Output("newwork_started: int64")
+.SetShapeFn(TwoElementVectorAndScalarOutputs)
+.Doc(R"doc(
+Returns if newwork has started.
+ 
+reader_handle: Handle to a Reader.
+)doc");
+ 
+REGISTER_OP("ReaderNewWorkStartedV2")
+.Input("reader_handle: resource")
+.Output("newwork_started: int64")
+.SetShapeFn(ScalarInputsAndOutputs)
+.Doc(R"doc(
+Returns if newwork has started.
+ 
+reader_handle: Handle to a Reader.
+)doc");
 
 REGISTER_OP("ReaderSerializeState")
     .Input("reader_handle: Ref(string)")

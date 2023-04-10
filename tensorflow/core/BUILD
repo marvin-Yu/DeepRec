@@ -3157,6 +3157,7 @@ CORE_CPU_BASE_HDRS = GRAPH_HDRS + [
     "common_runtime/function.h",
     "common_runtime/scoped_allocator.h",
     "common_runtime/scoped_allocator_mgr.h",
+    "common_runtime/eigen_thread_pool.h",
 ]
 
 tf_cuda_library(

@@ -16,9 +16,11 @@ limitations under the License.
 #include "tensorflow/core/util/tensor_bundle/tensor_bundle.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <thread>
 #include <utility>
 
 #include "tensorflow/core/framework/register_types.h"
@@ -42,6 +44,7 @@ limitations under the License.
 #include "tensorflow/core/lib/io/table_builder.h"
 #include "tensorflow/core/lib/random/random.h"
 #include "tensorflow/core/lib/strings/stringprintf.h"
+#include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/util/saved_tensor_slice_util.h"
 #include "tensorflow/core/util/tensor_bundle/byte_swap.h"
 #include "tensorflow/core/util/tensor_slice_util.h"
@@ -61,6 +64,52 @@ static const int kBufferSize = 1024 * 1024;
 // bundle.
 const char* const kHeaderEntryKey = "";
 
+// if datatype x is compatiable with y, DataTypeCompatiableTable[x][y] = true, else false
+// DataTypeCompatiableTable[DT_FLOAT][DT_DOUBLE] = true;
+// DataTypeCompatiableTable[DT_INT8][DT_INT16] = true;
+// DataTypeCompatiableTable[DT_INT8][DT_INT32] = true;
+// DataTypeCompatiableTable[DT_INT8][DT_INT64] = true;
+// DataTypeCompatiableTable[DT_INT16][DT_INT32] = true;
+// DataTypeCompatiableTable[DT_INT16][DT_INT64] = true;
+// DataTypeCompatiableTable[DT_INT32][DT_INT64] = true;
+// DataTypeCompatiableTable[DT_UINT8][DT_UINT16] = true;
+// DataTypeCompatiableTable[DT_UINT8][DT_UINT32] = true;
+// DataTypeCompatiableTable[DT_UINT8][DT_UINT64] = true;
+// DataTypeCompatiableTable[DT_UINT16][DT_UINT32] = true;
+// DataTypeCompatiableTable[DT_UINT16][DT_UINT64] = true;
+// DataTypeCompatiableTable[DT_UINT32][DT_UINT64] = true;
+const bool DataTypeCompatiableTable[DataType_ARRAYSIZE][DataType_ARRAYSIZE] = {
+  /*DT_INVALID = 0,    */ {false},
+  /*DT_FLOAT = 1,      */ {false, false,  true},
+  /*DT_DOUBLE = 2,     */ {false},
+  /*DT_INT32 = 3,      */ {false, false, false, false, false, false, false, false, false,  true},
+  /*DT_UINT8 = 4,      */ {false, false, false, false, false, false, false, false, false, false,
+                           false, false, false, false, false, false, false,  true, false, false,
+                           false, false,  true,  true},
+  /*DT_INT16 = 5,      */ {false, false, false,  true, false, false, false, false, false,  true},
+  /*DT_INT8 = 6,       */ {false, false, false,  true, false,  true, false, false, false,  true},
+  /*DT_STRING = 7,     */ {false},
+  /*DT_COMPLEX64 = 8,  */ {false},
+  /*DT_INT64 = 9,      */ {false},
+  /*DT_BOOL = 10,      */ {false},
+  /*DT_QINT8 = 11,     */ {false},
+  /*DT_QUINT8 = 12,    */ {false},
+  /*DT_QINT32 = 13,    */ {false},
+  /*DT_BFLOAT16 = 14,  */ {false},
+  /*DT_QINT16 = 15,    */ {false},
+  /*DT_QUINT16 = 16,   */ {false},
+  /*DT_UINT16 = 17,    */ {false, false, false, false, false, false, false, false, false, false,
+                           false, false, false, false, false, false, false, false, false, false,
+                           false, false,  true,  true},
+  /*DT_COMPLEX128 = 18,*/ {false},
+  /*DT_HALF = 19,      */ {false},
+  /*DT_RESOURCE = 20,  */ {false},
+  /*DT_VARIANT = 21,   */ {false},
+  /*DT_UINT32 = 22,    */ {false, false, false, false, false, false, false, false, false, false,
+                           false, false, false, false, false, false, false, false, false, false,
+                           false, false, false,  true},
+  /*DT_UINT64 = 23,    */ {false},
+  };
 namespace {
 
 // Reads "num_elements" string elements from file[offset, offset+size) into the
@@ -396,6 +445,118 @@ Status PadAlignment(FileOutputBuffer* out, int alignment, int64* size) {
   return status;
 }
 
+#define DO_CAST(FROM_TYPE, TO_TYPE, buffer, ret)                \
+  auto x = ret->flat<TO_TYPE>();                                \
+  for (auto index = 0; index < ret->NumElements(); ++index) {   \
+    x(index) = *(reinterpret_cast<FROM_TYPE*>(buffer) + index); \
+  }
+
+Status DoCast(const DataType& from, char* buffer, Tensor* ret) {
+  const DataType to = ret->dtype();
+  switch (from) {
+    case DT_FLOAT: {
+      switch (to) {
+        case DT_DOUBLE: {
+          DO_CAST(float, double, buffer, ret)
+          break;
+        } default: {
+          //for sanity, never reach here
+          break;
+        }
+      }
+      break;
+    } case DT_INT8: {
+      switch (to) {
+        case DT_INT16: {
+          DO_CAST(int8, int16, buffer, ret)
+          break;
+        } case DT_INT32: {
+          DO_CAST(int8, int32, buffer, ret)
+          break;
+        } case DT_INT64: {
+          DO_CAST(int8, int64, buffer, ret)
+          break;
+        } default: {
+          //for sanity, never reach here
+          break;
+        }
+      }
+      break;
+    } case DT_INT16: {
+      switch (to) {
+        case DT_INT32: {
+          DO_CAST(int16, int32, buffer, ret)
+          break;
+        } case DT_INT64: {
+          DO_CAST(int16, int64, buffer, ret)
+          break;
+        } default: {
+          //for sanity, never reach here
+          break;
+        }
+      }
+      break;
+    } case DT_INT32: {
+      switch (to) {
+        case DT_INT64: {
+          DO_CAST(int32, int64, buffer, ret)
+          break;
+        } default: {
+          //for sanity, never reach here
+          break;
+        }
+      }
+      break;
+    } case DT_UINT8: {
+      switch (to) {
+        case DT_UINT16: {
+          DO_CAST(uint8, uint16, buffer, ret)
+          break;
+        } case DT_UINT32: {
+          DO_CAST(uint8, uint32, buffer, ret)
+          break;
+        } case DT_UINT64: {
+          DO_CAST(uint8, uint64, buffer, ret)
+          break;
+        } default: {
+          //for sanity, never reach here
+          break;
+        }
+      }
+      break;
+    } case DT_UINT16: {
+      switch (to) {
+        case DT_UINT32: {
+          DO_CAST(uint16, uint32, buffer, ret)
+          break;
+        } case DT_UINT64: {
+          DO_CAST(uint16, uint64, buffer, ret)
+          break;
+        } default: {
+          //for sanity, never reach here
+          break;
+        }
+      }
+      break;
+    } case DT_UINT32: {
+      switch (to) {
+        case DT_UINT64: {
+          DO_CAST(uint32, uint64, buffer, ret)
+          break;
+        } default: {
+          //for sanity, never reach here
+          break;
+        }
+      }
+      break;
+    } default: {
+      return errors::DataLoss("Invalid cast from checkpoint to graph, ",
+                              "checkpoint stored type ", DataTypeString(from),
+                              "; graph expected type ", DataTypeString(to));
+    }
+  }
+  return Status::OK();
+}
 }  // namespace
 
 BundleWriter::BundleWriter(Env* env, StringPiece prefix, const Options& options)
@@ -500,6 +661,98 @@ Status BundleWriter::AddSlice(StringPiece full_tensor_key,
   return status_;
 }
 
+Status BundleWriter::AddSliceHeader(
+    string tensor_name, const TensorShape& shape, DataType type, bool is_hash,
+    TensorSliceProto** proto) {
+  if (!status_.ok()) return status_;
+  BundleEntryProto* full_entry = &entries_[tensor_name];
+  if (full_entry->dtype() != DT_INVALID) {
+    CHECK_EQ(full_entry->dtype(), type);
+  }
+  if (full_entry->has_shape()) {
+    CHECK(TensorShape(full_entry->shape()) == shape);
+  }
+
+  full_entry->set_is_hash_table(is_hash);
+  full_entry->set_dtype(type);
+  shape.AsProto(full_entry->mutable_shape());
+  *proto = full_entry->add_slices();
+  return Status::OK();
+}
+
+Status BundleWriter::AddTensorHeader(StringPiece key, DataType dtype) {
+  if (!status_.ok()) return status_;
+  CHECK_NE(key, kHeaderEntryKey);
+  const string key_string(key);
+  if (entries_.find(key_string) != entries_.end()) {
+    status_ = errors::InvalidArgument("Adding duplicate key: ", key_string.c_str());
+    return status_;
+  }
+
+  entry_seg_ = &entries_[key_string];
+  entry_seg_->set_dtype(dtype);
+  entry_seg_->set_shard_id(0);
+  entry_seg_->set_offset(size_);
+
+  out_->clear_crc32c();
+  return status_;
+}
+
+
+Status BundleWriter::AddTensorHeader(StringPiece key, DataType dtype, TensorShape shape) {
+  if (!status_.ok()) return status_;
+  CHECK_NE(key, kHeaderEntryKey);
+  const string key_string(key);
+  if (entries_.find(key_string) != entries_.end()) {
+    status_ = errors::InvalidArgument("Adding duplicate key: ", key_string.c_str());
+    return status_;
+  }
+
+  entry_seg_ = &entries_[key_string];
+  entry_seg_->set_dtype(dtype);
+  shape.AsProto(entry_seg_->mutable_shape());
+  entry_seg_->set_shard_id(0);
+  entry_seg_->set_offset(size_);
+
+  out_->clear_crc32c();
+  return status_;
+}
+
+// use if tensor is less or equal than buffer_size, just dump once
+Status BundleWriter::AddCompeleteData(char* content, int64 data_bytes_written) {
+   uint32 crc32c = 0;
+    
+   status_ = out_->Append(StringPiece(content, data_bytes_written));
+   if (!status_.ok())
+     return status_;
+
+   crc32c = out_->crc32c();
+
+   if (status_.ok()) {
+     entry_seg_->set_size(data_bytes_written);
+     entry_seg_->set_crc32c(crc32c::Mask(crc32c));
+     size_ += data_bytes_written;
+   }
+   return status_;
+}
+
+void BundleWriter::FillTensorShape(TensorShape shape) {
+  shape.AsProto(entry_seg_->mutable_shape());
+}
+// dump mutiple times;
+Status BundleWriter::AppendSegmentData(char* content, int64 data_bytes_written) {
+  return out_->AppendSegment(StringPiece(content, data_bytes_written));
+}
+
+void BundleWriter::EndSegmentData(int64 total_bytes_written, int64 end_bytes_written) {
+
+  //out_->EndSegment(end_bytes_written);
+  uint32 crc32c = out_->crc32c();
+
+  entry_seg_->set_size(total_bytes_written);
+  entry_seg_->set_crc32c(crc32c::Mask(crc32c));
+  size_ += total_bytes_written;
+}
 // TODO(zongheng): on metadata write failure or !status_.ok(), consider removing
 // the orphaned data file.
 Status BundleWriter::Finish() {
@@ -674,7 +927,110 @@ static Status MergeOneBundle(Env* env, StringPiece prefix,
   }
   return Status::OK();
 }
+/*
+Status RenameBundlesInParallel(Env* env, thread::ThreadPool* pool,
+                               const MergeState* merge,
+                               StringPiece merged_prefix)
+{
+  const uint32 shard_size = merge->shard_ids.size();
 
+  // running/finished count of scheduled works
+  std::atomic<uint32> finished_works(0);
+
+  // overall status scheduled works
+  mutex status_mutex;
+  Status overall_status GUARDED_BY(status_mutex);
+
+  // Renames data files to contain the merged bundle prefix.
+  for (const auto& p : merge->shard_ids) {
+    pool->Schedule([=, &status_mutex, &overall_status, &finished_works]() {
+      VLOG(1) << "Renaming " << p.first << " to "
+              << DataFilename(merged_prefix, p.second, shard_size);
+      Status status = env->TransactionRenameFile(
+          p.first, DataFilename(merged_prefix, p.second, shard_size));
+      {
+        mutex_lock l(status_mutex);
+        overall_status.Update(status);
+      }
+      finished_works++;
+    });
+  }
+
+  // Waits until all scheduled work has finished.
+  while (finished_works < shard_size) {
+    std::this_thread::yield();
+  }
+
+  return overall_status;
+}
+*/
+Status FixMergeHashTableBundles(MergeState* state) {
+  std::unordered_map<string, string> bundle_mapping;
+  for (auto&& item : state->entries) {
+    if (!item.second.is_hash_table()) {
+      continue;
+    }
+    std::multimap<int64, TensorSliceProto*> sorter;
+    for (int slice = 0; slice < item.second.slices_size(); slice++) {
+      sorter.emplace(item.second.slices(slice).hash_slice_begin(),
+          item.second.mutable_slices(slice));
+    }
+    int64 idx = 0;
+    std::vector<TensorSliceProto> slices;
+    for (auto&& itemx : sorter) {
+      if (itemx.second->extent(0).length() > 0) {
+        slices.emplace_back();
+        TensorSliceProto& slice = slices.back();
+        slice.CopyFrom(*itemx.second);
+        slice.mutable_extent(0)->set_start(idx);
+        idx += slice.extent(0).length();
+        TensorSlice from_slice(1);
+        from_slice.set_start(0, slice.hash_slice_begin());
+        from_slice.set_length(0, slice.hash_slice_length());
+        string from = checkpoint::EncodeTensorNameSlice(
+            item.first, from_slice);
+        string to = checkpoint::EncodeTensorNameSlice(
+            item.first, TensorSlice(slice));
+        if (!bundle_mapping.emplace(from, to).second) {
+          return errors::FailedPrecondition(
+              "FixMergeHashTableBundles has some error when create bundle mapping.");
+        }
+      } else {
+        TensorSlice from_slice(1);
+        from_slice.set_start(0, itemx.second->hash_slice_begin());
+        from_slice.set_length(0, itemx.second->hash_slice_length());
+        string from = checkpoint::EncodeTensorNameSlice(
+            item.first, from_slice);
+        if (!bundle_mapping.emplace(from, "").second) {
+          return errors::FailedPrecondition(
+              "FixMergeHashTableBundles has some error when create bundle mapping. 2");
+        }
+      }
+    }
+    item.second.clear_slices();
+    for (auto&& itemx : slices) {
+      item.second.add_slices()->CopyFrom(itemx);
+    }
+    item.second.mutable_shape()->mutable_dim(0)->set_size(idx);
+  }
+  std::map<string, BundleEntryProto> entries_tmp;
+  entries_tmp.swap(state->entries);
+  for (auto&& item : entries_tmp) {
+    auto iter = bundle_mapping.find(item.first);
+    string real_name;
+    if (iter == bundle_mapping.end()) {
+      real_name = item.first;
+    } else {
+      real_name = iter->second;
+    }
+    if (real_name == "") {
+      // LOG(INFO) << "Ignore Hash Table: " << str_util::CEscape(item.first);
+      continue;
+    }
+    state->entries.emplace(real_name, item.second);
+  }
+  return Status::OK();
+};
 Status MergeBundles(Env* env, gtl::ArraySlice<tstring> prefixes,
                     StringPiece merged_prefix) {
   // Merges all metadata tables.
@@ -849,9 +1205,19 @@ Status BundleReader::GetValue(const BundleEntryProto& entry, Tensor* val) {
   TF_RETURN_IF_ERROR(buffered_file->Seek(entry.offset()));
   uint32 actual_crc32c = 0;
 
-  if (DataTypeCanUseMemcpy(entry.dtype())) {
-    char* backing_buffer = const_cast<char*>((ret->tensor_data().data()));
+  if (DataTypeCompatiableTable[entry.dtype()][ret->dtype()]) {
+    LOG(WARNING) << "Reading ckpt, key " << key() << ", dtype cast from " << DataTypeString(entry.dtype())
+                 << " to " << DataTypeString(ret->dtype());
+    char* buffer = new char[entry.size()];
     size_t unused_bytes_read;
+    TF_RETURN_IF_ERROR(buffered_file->ReadNBytes(entry.size(), buffer,
+                                                 &unused_bytes_read));
+    TF_RETURN_IF_ERROR(DoCast(entry.dtype(), buffer, ret));
+    actual_crc32c = crc32c::Unmask(entry.crc32c());
+    delete []buffer;
+  } else if (DataTypeCanUseMemcpy(entry.dtype())) {
+      char* backing_buffer = const_cast<char*>((ret->tensor_data().data()));
+      size_t unused_bytes_read;
     if (entry.size() > kBufferSize) {
       StringPiece sp;
       TF_RETURN_IF_ERROR(buffered_file->file()->Read(
@@ -914,6 +1280,105 @@ Status BundleReader::Lookup(StringPiece key, Tensor* val) {
   }
 }
 
+
+
+Status BundleReader::LookupHeader(StringPiece tensor_key, int64 total_bytes) {
+  BundleEntryProto entry;
+  TF_RETURN_IF_ERROR(GetBundleEntryProto(tensor_key, &entry));
+  if (entry.size() != total_bytes) {
+    return errors::DataLoss("Invalid size in bundle entry: key ", key(),
+        "; stored size ", entry.size(),
+        "; expected size ", total_bytes);
+  }
+  io::InputBuffer* buffered_file = data_[entry.shard_id()];
+  if (buffered_file == nullptr) {
+    std::unique_ptr<RandomAccessFile> file = nullptr;
+    TF_RETURN_IF_ERROR(env_->NewRandomAccessFile(
+          DataFilename(prefix_, entry.shard_id(), num_shards_), &file));
+    buffered_file =
+      new io::InputBuffer(file.release(), 256 << 10 /* 256KB buffer */);
+    // The InputBuffer and RandomAccessFile objects are both released in dtor.
+    data_[entry.shard_id()] = buffered_file;
+  }
+  CHECK(buffered_file != nullptr);
+
+  TF_RETURN_IF_ERROR(buffered_file->Seek(entry.offset()));
+  if (!DataTypeCanUseMemcpy(entry.dtype())) {
+    return errors::DataLoss("segment lookup not support string");
+  } 
+  LookupSegItem seg_item;
+  seg_item.entry = entry;
+  seg_item.total_size = entry.size();
+  seg_item.bytes_read = 0;
+
+  tmp_lookupseg_items_[string(tensor_key)] = seg_item;
+  return Status::OK();
+
+}
+
+Status BundleReader::LookupSegment(StringPiece key, size_t buffer_size, char* destination, size_t& real_bytes_read) {
+  LookupSegItem& seg_item = tmp_lookupseg_items_[string(key)];
+  const size_t desired_bytes = std::min(buffer_size, seg_item.total_size);
+  if (desired_bytes == 0) {
+    real_bytes_read = 0;
+    return Status::OK();
+  }
+
+  io::InputBuffer* buffered_file = data_[seg_item.entry.shard_id()];
+  StringPiece result;
+  Status status = buffered_file->file()->Read(seg_item.entry.offset() + seg_item.bytes_read, desired_bytes, &result, destination);
+
+  if (!status.ok()) {
+    return errors::InvalidArgument("Read Error! ", buffer_size, " ", seg_item.total_size, " ", seg_item.entry.offset() + seg_item.bytes_read, " ", desired_bytes, " ", status.ToString());
+  } 
+  if (result.size() != desired_bytes) {
+    return errors::DataLoss("Requested ", desired_bytes, " bytes but read ",
+        result.size(), " bytes.");
+  } 
+  // Data is already in the correct location.
+  seg_item.bytes_read += result.size();
+  seg_item.total_size -= result.size();
+  real_bytes_read = result.size();
+  return Status::OK();
+}
+
+Status BundleReader::LookupSegmentOffset(StringPiece key, uint64_t offset, size_t buffer_size, char* destination, size_t& real_bytes_read) {
+  LookupSegItem& seg_item = tmp_lookupseg_items_[string(key)];
+  const size_t desired_bytes = std::min(buffer_size, seg_item.total_size);
+  if (desired_bytes == 0) {
+    real_bytes_read = 0;
+    return Status::OK();
+  }
+
+  io::InputBuffer* buffered_file = data_[seg_item.entry.shard_id()];
+  StringPiece result;
+  Status status = buffered_file->file()->Read(seg_item.entry.offset() + offset, desired_bytes, &result, destination);
+
+  if (!status.ok()) {
+    return errors::InvalidArgument("Read Error! ", buffer_size, " ", seg_item.total_size, " ", seg_item.entry.offset() + seg_item.bytes_read, " ", desired_bytes, " ", status.ToString());
+  } 
+  if (result.size() != desired_bytes) {
+    return errors::DataLoss("Requested ", desired_bytes, " bytes but read ",
+        result.size(), " bytes.");
+  } 
+  // Data is already in the correct location.
+  seg_item.bytes_read += result.size();
+  seg_item.total_size -= result.size();
+  real_bytes_read = result.size();
+  return Status::OK();
+}
+
+Status BundleReader::GetTensorInfo(
+    StringPiece key, int64* size,
+    std::unique_ptr<RandomAccessFile>* file, int64* offset) {
+  BundleEntryProto entry;
+  TF_RETURN_IF_ERROR(GetBundleEntryProto(key, &entry));
+  TF_RETURN_IF_ERROR(env_->NewRandomAccessFile(
+        DataFilename(prefix_, entry.shard_id(), num_shards_), file));
+  *size = entry.size();
+  *offset = entry.offset();
+  return Status::OK();
+}
 Status BundleReader::ReadCurrent(Tensor* val) {
   CHECK(val != nullptr);
   BundleEntryProto entry;
@@ -934,6 +1399,17 @@ Status BundleReader::ReadCurrent(Tensor* val) {
 
 Status BundleReader::LookupTensorSlices(StringPiece key,
                                         std::vector<TensorSlice>* slices) {
+  slices->clear();
+  BundleEntryProto entry;
+  TF_RETURN_IF_ERROR(GetBundleEntryProto(key, &entry));
+  slices->reserve(entry.slices_size());
+  for (const auto& slice : entry.slices()) {
+    slices->emplace_back(slice);
+  }
+  return Status::OK();
+}
+Status BundleReader::LookupTensorSliceProtos(
+      StringPiece key, std::vector<TensorSliceProto>* slices) {
   slices->clear();
   BundleEntryProto entry;
   TF_RETURN_IF_ERROR(GetBundleEntryProto(key, &entry));
@@ -1139,6 +1615,14 @@ Status FileOutputBuffer::Append(StringPiece data) {
   return Status::OK();
 }
 
+Status FileOutputBuffer::AppendSegment(StringPiece data) {
+  TF_RETURN_IF_ERROR(FlushBuffer());
+  memcpy(&buffer_[0], data.data(), data.size());
+  crc32c_ = crc32c::Extend(crc32c_, &buffer_[0], data.size());
+  position_ = data.size();
+  TF_RETURN_IF_ERROR(FlushBuffer());
+  return Status::OK();
+}
 Status FileOutputBuffer::Close() {
   TF_RETURN_IF_ERROR(FlushBuffer());
   return file_->Close();
@@ -1152,4 +1636,110 @@ Status FileOutputBuffer::FlushBuffer() {
   return Status::OK();
 }
 
+SegmentBundleWriter::SegmentBundleWriter(
+    BundleWriter* writer, const string& name,
+    const TensorShape& shape, DataType type, int64 buffer_size)
+  : writer_(writer), name_(name), shape_(shape), type_(type),
+    buffer_size_(buffer_size), buffer_(new char[buffer_size]),
+    buffer_ptr_(0), write_counter_(0) {}
+
+Status SegmentBundleWriter::Begin() {
+  return writer_->AddTensorHeader(name_, type_, shape_);
+}
+
+Status SegmentBundleWriter::WriteData(const void* data, int64 size) {
+  while (size > 0) {
+    if (buffer_ptr_ + size <= buffer_size_) {
+      memcpy(buffer_.get() + buffer_ptr_, data, size);
+      buffer_ptr_ += size;
+      size = 0;
+    } else {
+      int64 w = buffer_size_ - buffer_ptr_;
+      memcpy(buffer_.get() + buffer_ptr_, data, w);
+      TF_RETURN_IF_ERROR(writer_->AppendSegmentData(buffer_.get(), buffer_size_));
+      size -= w;
+      data = (const char*)data + w;
+      buffer_ptr_ = 0;
+      write_counter_++;
+    }
+  }
+  return Status::OK();
+}
+
+Status SegmentBundleWriter::End() {
+  if (write_counter_ * buffer_size_ + buffer_ptr_ !=
+      shape_.num_elements() * DataTypeSize(type_)) {
+    return errors::Internal("SegmentBundleWriter write size error");
+  }
+  if (write_counter_ == 0) {
+    return writer_->AddCompeleteData(buffer_.get(), buffer_ptr_);
+  } else if (buffer_ptr_ > 0) {
+    TF_RETURN_IF_ERROR(writer_->AppendSegmentData(buffer_.get(), buffer_ptr_));
+    writer_->EndSegmentData(
+        write_counter_ * buffer_size_ + buffer_ptr_,  buffer_ptr_);
+    return Status::OK();
+  } else {
+    writer_->EndSegmentData(
+        write_counter_ * buffer_size_ + buffer_ptr_,  buffer_size_);
+    return Status::OK();
+  }
+}
+
+SegmentBundleReader::SegmentBundleReader(
+    BundleReader* reader, const string& name,
+    int64 offset, int64 size, int64 buffer_size)
+  : reader_(reader), name_(name), buffer_size_(buffer_size),
+    offset_(offset), size_(size) { }
+
+Status SegmentBundleReader::Begin() {
+  TF_RETURN_WITH_CONTEXT_IF_ERROR(reader_->LookupDtypeAndShape(name_, &type_, &shape_), "xx1");
+  if (size_ == -1) {
+    size_ = shape_.dim_size(0);
+  }
+  if (offset_ + size_ > shape_.dim_size(0)) {
+    return errors::InvalidArgument("SegmentBundleReader offset error");
+  }
+  int64 xsize = DataTypeSize(type_);
+  for (int i = 1; i < shape_.dims(); i++) {
+    xsize *= shape_.dim_size(i);
+  }
+  int64 real_size_ = xsize * size_;
+  if (real_size_ < buffer_size_) {
+    buffer_size_ = real_size_;
+  }
+  remain_size_ = real_size_;
+  int64 var_offset;
+  int64 var_size;
+  TF_RETURN_IF_ERROR(reader_->GetTensorInfo(name_, &var_size, &file_, &var_offset));
+  input_.reset(new io::InputBuffer(file_.get(), buffer_size_));
+  TF_RETURN_IF_ERROR(input_->Seek(var_offset + xsize * offset_));
+  return Status::OK();
+}
+
+const TensorShape& SegmentBundleReader::shape() {
+  return shape_;
+}
+
+DataType SegmentBundleReader::type() {
+  return type_;
+}
+
+Status SegmentBundleReader::Read(void* data, int64 size) {
+  if (size > remain_size_) {
+    return errors::InvalidArgument("SegmentBundleReader Read Exhuasted");
+  }
+  size_t read_size;
+  TF_RETURN_IF_ERROR(input_->ReadNBytes(size, (char*)data, &read_size));
+  remain_size_ -= size;
+  return Status::OK();
+}
+
+Status SegmentBundleReader::Skip(int64 size) {
+  if (size > remain_size_) {
+    return errors::InvalidArgument("SegmentBundleReader Read Exhuasted");
+  }
+  TF_RETURN_IF_ERROR(input_->SkipNBytes(size));
+  remain_size_ -= size;
+  return Status::OK();
+}
 }  // namespace tensorflow

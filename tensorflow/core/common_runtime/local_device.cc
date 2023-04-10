@@ -52,7 +52,7 @@ bool OverrideGlobalThreadPoolFromEnvironment() {
 /* static */
 bool LocalDevice::use_global_threadpool_ = true;
 mutex LocalDevice::global_tp_mu_;
-gtl::InlinedVector<LocalDevice::EigenThreadPoolInfo*, 4>
+gtl::InlinedVector<std::shared_ptr<LocalDevice::EigenThreadPoolInfo>, 4>
     LocalDevice::global_tp_info_;
 
 struct LocalDevice::EigenThreadPoolInfo {
@@ -139,19 +139,19 @@ LocalDevice::LocalDevice(const SessionOptions& options,
       Allocator* numa_allocator =
           ProcessState::singleton()->GetCPUAllocator(numa_node);
       while (numa_node >= global_tp_info_.size()) {
-        global_tp_info_.push_back(nullptr);
+        global_tp_info_.push_back(std::shared_ptr<LocalDevice::EigenThreadPoolInfo>(nullptr));
       }
       if (!global_tp_info_[numa_node]) {
-        global_tp_info_[numa_node] = new LocalDevice::EigenThreadPoolInfo(
-            options, numa_node, numa_allocator);
+        global_tp_info_[numa_node] = std::shared_ptr<LocalDevice::EigenThreadPoolInfo>(new LocalDevice::EigenThreadPoolInfo(
+            options, numa_node, numa_allocator));
       }
-      tp_info = global_tp_info_[numa_node];
+      tp_info = global_tp_info_[numa_node].get();
     } else {
       if (global_tp_info_.empty()) {
-        global_tp_info_.push_back(new LocalDevice::EigenThreadPoolInfo(
-            options, port::kNUMANoAffinity, nullptr));
+        global_tp_info_.push_back(std::shared_ptr<LocalDevice::EigenThreadPoolInfo>(new LocalDevice::EigenThreadPoolInfo(
+            options, port::kNUMANoAffinity, nullptr)));
       }
-      tp_info = global_tp_info_[0];
+      tp_info = global_tp_info_[0].get();
     }
   } else {
     // Each LocalDevice owns a separate ThreadPoolDevice for numerical
