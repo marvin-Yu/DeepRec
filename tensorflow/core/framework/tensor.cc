@@ -1053,40 +1053,6 @@ void Tensor::HostScalarTensorBufferBase::FillAllocationDescription(
   proto->set_ptr(reinterpret_cast<uintptr_t>(data()));
 }
 
-template <typename T>
-class SubBuffer : public TensorBuffer {
- public:
-  // This buffer is an alias to buf[delta, delta + n).
-  SubBuffer(TensorBuffer* buf, int64 delta, int64 n)
-      : TensorBuffer(buf->base<T>() + delta),
-        root_(buf->root_buffer()),
-        elem_(n) {
-    // Sanity check. The caller should ensure the sub buffer is valid.
-    CHECK_LE(root_->base<T>(), this->base<T>());
-    T* root_limit = root_->base<T>() + root_->size() / sizeof(T);
-    CHECK_LE(this->base<T>(), root_limit);
-    CHECK_LE(this->base<T>() + n, root_limit);
-    // Hold a ref of the underlying root buffer.
-    // NOTE: 'buf' is a sub-buffer inside the 'root_' buffer.
-    root_->Ref();
-  }
-
-  size_t size() const override { return sizeof(T) * elem_; }
-  TensorBuffer* root_buffer() override { return root_; }
-  void FillAllocationDescription(AllocationDescription* proto) const override {
-    root_->FillAllocationDescription(proto);
-  }
-
- private:
-  TensorBuffer* root_;
-  T* data_;
-  int64 elem_;
-
-  ~SubBuffer() override { root_->Unref(); }
-
-  TF_DISALLOW_COPY_AND_ASSIGN(SubBuffer);
-};
-
 Tensor Tensor::Slice(int64 start, int64 limit) const {
   CHECK_GE(dims(), 1);
   CHECK_LE(0, start);
