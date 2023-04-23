@@ -189,6 +189,12 @@ class Tensor {
   /// Acquires a ref on buf that belongs to this Tensor.
   Tensor(DataType type, const TensorShape& shape, TensorBuffer* buf);
 
+  /// \brief Creates a tensor with the input datatype, shape and buf.
+  ///
+  /// Acquires a ref on buf that not belongs to this Tensor.
+  Tensor(DataType type, const TensorShape& shape, TensorBuffer* buf,
+      bool hold_buf);
+
   /// \brief Creates an empty Tensor of the given data type.
   ///
   /// Like Tensor(), returns a 1-dimensional, 0-element Tensor with

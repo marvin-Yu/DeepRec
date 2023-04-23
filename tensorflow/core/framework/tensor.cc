@@ -655,6 +655,15 @@ Tensor::Tensor(DataType type, const TensorShape& shape, TensorBuffer* buf)
   RefIfNonNull(buf);
 }
 
+Tensor::Tensor(DataType type, const TensorShape& shape, TensorBuffer* buf,
+    bool hold_buf)
+    : shape_(shape), buf_(buf) {
+  set_dtype(type);
+  if (hold_buf) {
+    RefIfNonNull(buf);
+  }
+}
+
 bool Tensor::IsInitialized() const {
   return (buf_ != nullptr && buf_->data() != nullptr) ||
          shape_.num_elements() == 0;
