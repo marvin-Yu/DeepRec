@@ -96,6 +96,40 @@ class TensorBuffer : public core::RefCounted {
   void* const data_;
 };
 
+template <typename T>
+class SubBuffer : public TensorBuffer {
+ public:
+  // This buffer is an alias to buf[delta, delta + n).
+  SubBuffer(TensorBuffer* buf, int64 delta, int64 n)
+      : TensorBuffer(buf->base<T>() + delta),
+        root_(buf->root_buffer()),
+        elem_(n) {
+    // Sanity check. The caller should ensure the sub buffer is valid.
+    CHECK_LE(root_->base<T>(), this->base<T>());
+    T* root_limit = root_->base<T>() + root_->size() / sizeof(T);
+    CHECK_LE(this->base<T>(), root_limit);
+    CHECK_LE(this->base<T>() + n, root_limit);
+    // Hold a ref of the underlying root buffer.
+    // NOTE: 'buf' is a sub-buffer inside the 'root_' buffer.
+    root_->Ref();
+  }
+
+  size_t size() const override { return sizeof(T) * elem_; }
+  TensorBuffer* root_buffer() override { return root_; }
+  void FillAllocationDescription(AllocationDescription* proto) const override {
+    root_->FillAllocationDescription(proto);
+  }
+
+ private:
+  TensorBuffer* root_;
+  T* data_;
+  int64 elem_;
+
+  ~SubBuffer() override { root_->Unref(); }
+
+  TF_DISALLOW_COPY_AND_ASSIGN(SubBuffer);
+};
+
 /// Represents an n-dimensional array of values.
 class Tensor {
  public:
@@ -154,6 +188,12 @@ class Tensor {
   ///
   /// Acquires a ref on buf that belongs to this Tensor.
   Tensor(DataType type, const TensorShape& shape, TensorBuffer* buf);
+
+  /// \brief Creates a tensor with the input datatype, shape and buf.
+  ///
+  /// Acquires a ref on buf that not belongs to this Tensor.
+  Tensor(DataType type, const TensorShape& shape, TensorBuffer* buf,
+      bool hold_buf);
 
   /// \brief Creates an empty Tensor of the given data type.
   ///
@@ -646,6 +686,9 @@ class Tensor {
 
   bool SameAs(const Tensor& other) const;
 
+  TensorBuffer* buf() const {
+    return buf_;
+  }
  private:
   // Returns true if the refcount on buf_ and any possible underlying root
   // buffer is one.
