@@ -36,6 +36,7 @@ limitations under the License.
 #include "tensorflow/core/grappler/optimizers/gemm_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/multi_dnn_switch_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/dice_fusion.h"
+#include "tensorflow/core/grappler/optimizers/custom_matmul_bn_fusion.h"
 #include "tensorflow/core/grappler/optimizers/batch_mat_mul_compatible.h"
 #include "tensorflow/core/grappler/optimizers/gemm_compression.h"
 #include "tensorflow/core/grappler/optimizers/memory_access_optimizer.h"
@@ -163,6 +164,12 @@ bool DiceFusionEnabled(RewriterConfig::Toggle opt_level) {
   return false;
 }
 
+// Helper function to decide whether to enable custom matmul bn fusion optimizer.
+bool CustomMatMulBNFusionEnabled() {
+  bool is_enabled = true;
+  TF_CHECK_OK(ReadBoolFromEnvVar("TF_CUSTOM_BN_FUSION", true, &is_enabled));
+  return is_enabled;
+}
 }  // namespace
 
 #define MK_OPT(NAME, VALUE) \
@@ -202,6 +209,7 @@ std::unique_ptr<GraphOptimizer> MetaOptimizer::MakeNewOptimizer(
                                       cfg_.scoped_allocator_opts()));
   MK_OPT("pin_to_host",
          new PinToHostOptimizer(cfg_.pin_to_host_optimization()));
+  MK_OPT("custom_matmul_bn_fusion", new CustomMatMulBNFusion());
 
   return std::unique_ptr<GraphOptimizer>();
 }
@@ -356,6 +364,9 @@ Status MetaOptimizer::InitializeOptimizers(
   if (cfg_.scoped_allocator_optimization()) {
     optimizers->push_back(MakeUnique<ScopedAllocatorOptimizer>(
         cfg_.scoped_allocator_optimization(), cfg_.scoped_allocator_opts()));
+  }
+  if (CustomMatMulBNFusionEnabled()) {
+    optimizers->push_back(MakeUnique<CustomMatMulBNFusion>());
   }
   return InitializeCustomGraphOptimizers(std::set<string>(), optimizers);
 }
