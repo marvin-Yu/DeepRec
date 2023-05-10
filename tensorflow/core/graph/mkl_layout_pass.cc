@@ -1482,6 +1482,7 @@ class MklLayoutRewritePass : public GraphOptimizationPass {
   // @return RewriteInfo* for the applicable rewrite rule
   const RewriteInfo* CheckForNodeRewrite(const Node* n) const;
   const RewriteInfo* CheckForQuantizedNodeRewrite(const Node* n) const;
+  bool CheckForRecoOpsListNodeRewrite(const Node* n) const;
 
   // Default rewrite rule to be used in scenario 1 for rewrite.
   // @return - true (since we want to always rewrite)
