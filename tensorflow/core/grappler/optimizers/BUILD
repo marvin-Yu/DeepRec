@@ -1,5 +1,5 @@
 load("//tensorflow:tensorflow.bzl", "tf_cc_test", "tf_cc_test_mkl", "tf_kernel_library")
-load("//tensorflow:tensorflow.bzl", "tf_cuda_cc_test")
+load("//tensorflow:tensorflow.bzl", "tf_copts", "tf_cuda_cc_test")
 
 # Platform specific build config
 load(
@@ -445,12 +445,11 @@ cc_library(
     deps = [
         ":graph_optimizer",
         "//tensorflow/core:framework",
-        "//tensorflow/core:lib",
         "//tensorflow/core:protos_all_cc",
         "//tensorflow/core/grappler:grappler_item",
+        "//tensorflow/core/grappler:mutable_graph_view",
         "//tensorflow/core/grappler:op_types",
         "//tensorflow/core/grappler:utils",
-        "//tensorflow/core/grappler/utils:graph_view",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
     ],
@@ -611,6 +610,7 @@ cc_library(
         "auto_mixed_precision_lists.h",
     ],
     visibility = ["//visibility:public"],
+    copts = tf_copts(),
     deps = [
         ":custom_graph_optimizer_registry",
         ":graph_optimizer",
@@ -627,6 +627,7 @@ cc_library(
         "//tensorflow/core/grappler/costs:virtual_placer",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/memory",
     ],
 )
 
@@ -907,6 +908,7 @@ tf_kernel_library(
         "//tensorflow/core/grappler/utils:graph_view",
         "//tensorflow/core/grappler/utils:symbolic_shapes",
         "//tensorflow/core/grappler/utils:topological_sort",
+        "//tensorflow/core/grappler/utils:pattern_utils",
         "@com_google_absl//absl/container:flat_hash_set",
     ],
 )
@@ -917,6 +919,7 @@ tf_cuda_cc_test(
     deps = [
         ":remapper",
         "//tensorflow/cc:cc_ops",
+        "//tensorflow/cc:cc_ops_internal",
         "//tensorflow/core:framework",
         "//tensorflow/core:protos_all_cc",
         "//tensorflow/core:test",
@@ -935,11 +938,16 @@ tf_cc_test_mkl(
     srcs = ["mkl_remapper_test.cc"],
     tags = [
         "no_mac",
-        "no_oss",
     ],
     deps = [
+        ":model_pruner",
         ":remapper",
         "//tensorflow/cc:cc_ops",
+        "//tensorflow/cc:cc_ops_internal",
+        "//tensorflow/cc:client_session",
+        "//tensorflow/cc:gradients",
+        "//tensorflow/cc:grad_ops",
+        "//tensorflow/cc:grad_op_registry",
         "//tensorflow/core:framework",
         "//tensorflow/core:protos_all_cc",
         "//tensorflow/core:test",

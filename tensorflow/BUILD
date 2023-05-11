@@ -281,12 +281,6 @@ config_setting(
 )
 
 config_setting(
-    name = "no_kafka_support",
-    define_values = {"no_kafka_support": "true"},
-    visibility = ["//visibility:public"],
-)
-
-config_setting(
     name = "no_nccl_support",
     define_values = {"no_nccl_support": "true"},
     visibility = ["//visibility:public"],
@@ -497,8 +491,8 @@ cc_library(
     name = "grpc",
     visibility = ["//visibility:public"],
     deps = select({
-        ":linux_s390x": ["@grpc//:grpc_unsecure"],
-        "//conditions:default": ["@grpc"],
+        ":linux_s390x": ["@com_github_grpc_grpc//:grpc_unsecure"],
+        "//conditions:default": ["@com_github_grpc_grpc//:grpc"],
     }),
 )
 
@@ -506,8 +500,8 @@ cc_library(
     name = "grpc++",
     visibility = ["//visibility:public"],
     deps = select({
-        ":linux_s390x": ["@grpc//:grpc++_unsecure"],
-        "//conditions:default": ["@grpc//:grpc++"],
+        ":linux_s390x": ["@com_github_grpc_grpc//:grpc++_unsecure"],
+        "//conditions:default": ["@com_github_grpc_grpc//:grpc++"],
     }),
 )
 

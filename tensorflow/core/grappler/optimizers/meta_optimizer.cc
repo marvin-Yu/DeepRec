@@ -104,7 +104,8 @@ bool IsRunOnceOptimizer(const string& name) {
          name == "memory_access" || name == "fold_continuous_fc" ||
          name == "fuse_cross_feature" || name == "gemm_compression" ||
          name == "batch_mat_mul_compatible" ||
-         name == "loop_optimizer" || name == "auto_mixed_precision";
+         name == "loop_optimizer" || name == "auto_mixed_precision" ||
+         name == "auto_mixed_precision_mkl";
 }
 
 // Creates a function library stub from a real function library: copy only
@@ -187,7 +188,9 @@ std::unique_ptr<GraphOptimizer> MetaOptimizer::MakeNewOptimizer(
   MK_OPT("merge_gemm", new MergeGemmOptimizer());
   MK_OPT("merge_gemm_second_stage", new MergeGemmOptimizerSecondStage());
   MK_OPT("auto_mixed_precision",
-         new AutoMixedPrecision(cfg_.auto_mixed_precision()));
+         new AutoMixedPrecision(AutoMixedPrecisionMode::CUDA));
+  MK_OPT("auto_mixed_precision_mkl",
+         new AutoMixedPrecision(AutoMixedPrecisionMode::MKL));
   MK_OPT("memory", new MemoryOptimizer(RewriterConfig::MANUAL));
   MK_OPT("arithmetic", new ArithmeticOptimizer(cfg_.arithmetic_optimization()));
   MK_OPT("autoparallel", new AutoParallel(cfg_.auto_parallel().num_replicas()));
@@ -265,6 +268,14 @@ Status MetaOptimizer::InitializeOptimizers(
   if (cfg_.shape_optimization() != RewriterConfig::OFF) {
     optimizers->push_back(MakeUnique<ShapeOptimizer>());
   }
+  if (AutoMixedPrecisionEnabled(cfg_.auto_mixed_precision())) {
+    optimizers->push_back(
+        MakeUnique<AutoMixedPrecision>(AutoMixedPrecisionMode::CUDA));
+  }
+  if (AutoMixedPrecisionEnabled(cfg_.auto_mixed_precision_mkl())) {
+    optimizers->push_back(
+        MakeUnique<AutoMixedPrecision>(AutoMixedPrecisionMode::MKL));
+  }
   if (cfg_.remapping() != RewriterConfig::OFF) {
     optimizers->push_back(MakeUnique<Remapper>(cfg_.remapping()));
   }
@@ -323,10 +334,6 @@ Status MetaOptimizer::InitializeOptimizers(
   }
   if (cfg_.tile_equal() == RewriterConfig::ON) {
     optimizers->push_back(MakeUnique<TileOptimizer>());
-  }
-  if (AutoMixedPrecisionEnabled(cfg_.auto_mixed_precision())) {
-    optimizers->push_back(
-        MakeUnique<AutoMixedPrecision>(cfg_.auto_mixed_precision()));
   }
   if (cfg_.layout_optimizer() != RewriterConfig::OFF) {
     optimizers->push_back(MakeUnique<GenericLayoutOptimizer>());
@@ -942,6 +949,7 @@ bool MetaOptimizerEnabled(const ConfigProto& cfg) {
          rewrite_cfg.pin_to_host_optimization() == RewriterConfig::ON ||
          rewrite_cfg.gemm_optimization() != RewriterConfig::OFF ||
          AutoMixedPrecisionEnabled(rewrite_cfg.auto_mixed_precision()) ||
+         AutoMixedPrecisionEnabled(rewrite_cfg.auto_mixed_precision_mkl()) ||
          !rewrite_cfg.optimizers().empty() ||
          !rewrite_cfg.custom_optimizers().empty();
 }

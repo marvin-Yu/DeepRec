@@ -38,7 +38,7 @@ pkg_tar(
 pkg_tar(
     name = "libtensorflow_jni",
     srcs = [
-        "include/tensorflow/jni/LICENSE",
+        ":THIRD_PARTY_TF_JNI_LICENSES",
         "//:LICENSE",
         "//tensorflow/java:libtensorflow_jni",
     ],
@@ -123,10 +123,9 @@ pkg_tar(
 pkg_tar(
     name = "clicenses",
     srcs = [
-        ":include/tensorflow/c/LICENSE",
+        ":THIRD_PARTY_TF_C_LICENSES",
         "//:LICENSE",
     ],
-    package_dir = "include/tensorflow/c",
     # Mark as "manual" till
     # https://github.com/bazelbuild/bazel/issues/2352
     # and https://github.com/bazelbuild/bazel/issues/1580
@@ -148,7 +147,7 @@ genrule(
         "@double_conversion//:LICENSE",
         "@eigen_archive//:COPYING.MPL2",
         "@farmhash_archive//:COPYING",
-        "@fft2d//:fft2d/readme2d.txt",
+        "@fft2d//:readme2d.txt",
         "@gemmlowp//:LICENSE",
         "@gif_archive//:COPYING",
         "@highwayhash//:LICENSE",
@@ -163,17 +162,8 @@ genrule(
         "@png_archive//:LICENSE",
         "@com_google_protobuf//:LICENSE",
         "@snappy//:COPYING",
-        "@zlib_archive//:zlib.h",
+        "@zlib//:zlib.h",
     ] + select({
-        "//tensorflow:android": [],
-        "//tensorflow:ios": [],
-        "//tensorflow:linux_s390x": [],
-        "//tensorflow:windows": [],
-        "//tensorflow:no_aws_support": [],
-        "//conditions:default": [
-            "@aws//:LICENSE",
-        ],
-    }) + select({
         "//tensorflow:android": [],
         "//tensorflow:ios": [],
         "//tensorflow:linux_s390x": [],
@@ -196,15 +186,15 @@ genrule(
     ]) + if_mkl_gemm_only([
         "//third_party/mkl:LICENSE",
     ]) + if_not_system_lib(
-        "grpc",
+        "com_github_grpc_grpc",
         [
-            "@grpc//:LICENSE",
-            "@grpc//third_party/address_sorting:LICENSE",
+            "@com_github_grpc_grpc//:LICENSE",
+            "@com_github_grpc_grpc//third_party/address_sorting:LICENSE",
         ],
     ) + if_rocm([
         "@rocprim_archive//:LICENSE.txt",
     ]) + tf_additional_license_deps(),
-    outs = ["include/tensorflow/c/LICENSE"],
+    outs = ["THIRD_PARTY_TF_C_LICENSES"],
     cmd = "$(location :concat_licenses.sh) $(SRCS) >$@",
     tools = [":concat_licenses.sh"],
 )
@@ -222,7 +212,7 @@ genrule(
         "@double_conversion//:LICENSE",
         "@eigen_archive//:COPYING.MPL2",
         "@farmhash_archive//:COPYING",
-        "@fft2d//:fft2d/readme2d.txt",
+        "@fft2d//:readme2d.txt",
         "@gemmlowp//:LICENSE",
         "@gif_archive//:COPYING",
         "@highwayhash//:LICENSE",
@@ -237,19 +227,10 @@ genrule(
         "@png_archive//:LICENSE",
         "@com_google_protobuf//:LICENSE",
         "@snappy//:COPYING",
-        "@zlib_archive//:zlib.h",
-        "@grpc//:LICENSE",
-        "@grpc//third_party/address_sorting:LICENSE",
+        "@zlib//:zlib.h",
+        "@com_github_grpc_grpc//:LICENSE",
+        "@com_github_grpc_grpc//third_party/address_sorting:LICENSE",
     ] + select({
-        "//tensorflow:android": [],
-        "//tensorflow:ios": [],
-        "//tensorflow:linux_s390x": [],
-        "//tensorflow:windows": [],
-        "//tensorflow:no_aws_support": [],
-        "//conditions:default": [
-            "@aws//:LICENSE",
-        ],
-    }) + select({
         "//tensorflow:android": [],
         "//tensorflow:ios": [],
         "//tensorflow:linux_s390x": [],
@@ -274,7 +255,7 @@ genrule(
     ]) + if_rocm([
         "@rocprim_archive//:LICENSE.txt",
     ]) + tf_additional_license_deps(),
-    outs = ["include/tensorflow/jni/LICENSE"],
+    outs = ["THIRD_PARTY_TF_JNI_LICENSES"],
     cmd = "$(location :concat_licenses.sh) $(SRCS) >$@",
     tools = [":concat_licenses.sh"],
 )

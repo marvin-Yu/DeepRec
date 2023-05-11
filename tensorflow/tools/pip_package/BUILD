@@ -154,6 +154,7 @@ py_binary(
 filegroup(
     name = "licenses",
     data = [
+        "//:LICENSE",
         "//third_party/icu/data:LICENSE",
         "//third_party/eigen3:LICENSE",
         "//third_party/fft2d:LICENSE",
@@ -168,7 +169,7 @@ filegroup(
         "@eigen_archive//:COPYING.MPL2",
         "@enum34_archive//:LICENSE",
         "@farmhash_archive//:COPYING",
-        "@fft2d//:fft2d/readme2d.txt",
+        "@fft2d//:readme2d.txt",
         "@flatbuffers//:LICENSE.txt",
         "@functools32_archive//:LICENSE",
         "@gast_archive//:PKG-INFO",
@@ -195,18 +196,9 @@ filegroup(
         "@snappy//:COPYING",
         "@swig//:LICENSE",
         "@termcolor_archive//:COPYING.txt",
-        "@zlib_archive//:zlib.h",
+        "@zlib//:zlib.h",
         "@org_python_pypi_backports_weakref//:LICENSE",
     ] + select({
-        "//tensorflow:android": [],
-        "//tensorflow:ios": [],
-        "//tensorflow:linux_s390x": [],
-        "//tensorflow:windows": [],
-        "//tensorflow:no_aws_support": [],
-        "//conditions:default": [
-            "@aws//:LICENSE",
-        ],
-    }) + select({
         "//tensorflow:android": [],
         "//tensorflow:ios": [],
         "//tensorflow:linux_s390x": [],
@@ -215,15 +207,6 @@ filegroup(
         "//conditions:default": [
             "@com_github_googleapis_googleapis//:LICENSE",
             "@com_github_googlecloudplatform_google_cloud_cpp//:LICENSE",
-        ],
-    }) + select({
-        "//tensorflow:android": [],
-        "//tensorflow:ios": [],
-        "//tensorflow:linux_s390x": [],
-        "//tensorflow:windows": [],
-        "//tensorflow:no_kafka_support": [],
-        "//conditions:default": [
-            "@kafka//:LICENSE",
         ],
     }) + select({
         "//tensorflow/core/kernels:xsmm": [
@@ -246,10 +229,10 @@ filegroup(
             "@absl_py//absl/third_party/unittest3_backport:LICENSE",
         ],
     ) + if_not_system_lib(
-        "grpc",
+        "com_github_grpc_grpc",
         [
-            "@grpc//:LICENSE",
-            "@grpc//third_party/address_sorting:LICENSE",
+            "@com_github_grpc_grpc//:LICENSE",
+            "@com_github_grpc_grpc//third_party/address_sorting:LICENSE",
         ],
     ) + if_ngraph([
         "@ngraph//:LICENSE",

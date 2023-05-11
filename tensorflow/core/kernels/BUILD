@@ -104,14 +104,14 @@ config_setting(
 )
 
 config_setting(
-    # Add "--define tensorflow_mkldnn_contraction_kernel=0" to your build command to disable mkldnn
-    # sgemm in Eigen tensor contractions (matrix multiplications and convolutions). The mkldnn
-    # kernels are generated at runtime and use avx/avx2/fma/avx512 based on cpu status registers
+    # Add "--define tensorflow_dnnl_contraction_kernel=0" to your build command to disable dnnl
+    # sgemm in Eigen tensor contractions (matrix multiplications and convolutions). The dnnl
+    # kernels are generated at runtime and use amx/avx/avx2/fma/avx512 based on cpu status registers
     # (https://en.wikipedia.org/wiki/CPUID). Default Eigen contraction kernel is
     # Eigen::internal::gebp_kernel (general block-panel kernel).
-    name = "no_mkldnn_contraction_kernel",
+    name = "no_dnnl_contraction_kernel",
     values = {
-        "define": "tensorflow_mkldnn_contraction_kernel=0",
+        "define": "tensorflow_dnnl_contraction_kernel=0",
     },
 )
 
@@ -731,10 +731,10 @@ cc_library(
 # blocks of the original tensors).
 #
 # 1) Default:
-#    Use Mkldnn single threaded sgemm. The mkldnn kernels are generated at runtime and
-#    use avx/avx2/fma/avx512 based on cpu status registers (https://en.wikipedia.org/wiki/CPUID).
+#    Use OneDNN single threaded sgemm. The dnnl kernels are generated at runtime and
+#    use amx/avx/avx2/fma/avx512 based on cpu status registers (https://en.wikipedia.org/wiki/CPUID).
 #
-# 2) Eigen: --define tensorflow_mkldnn_contraction_kernel=0 (disable mkldnn)
+# 2) Eigen: --define tensorflow_dnnl_contraction_kernel=0 (disable dnnl)
 #    Use Eigen contraction kernel: Eigen::internal::gebp_kernel.
 #
 # If you use `tensor.contract(other_tensor)` in your code, you must include additional header
@@ -745,9 +745,9 @@ cc_library(
 #   #endif
 #
 # We define a two-level target because if we just add
-#   ":no_mkldnn_contraction_kernel": []
+#   ":no_dnnl_contraction_kernel": []
 # in the same select list with //third_party/tensorflow:{android,arm,ios,ppc},
-# there can be more than one match, e.g., when building for android and MKL-DNN
+# there can be more than one match, e.g., when building for android and OneDNN
 # contraction kernel is disabled. Bazel doesn't allow multiple matches.
 # See more details in
 #   https://github.com/tensorflow/tensorflow/issues/24414
@@ -755,7 +755,7 @@ cc_library(
     name = "eigen_contraction_kernel",
     hdrs = ["eigen_contraction_kernel.h"],
     deps = select({
-        ":no_mkldnn_contraction_kernel": [":eigen_contraction_kernel_no_mkl"],
+        ":no_dnnl_contraction_kernel": [":eigen_contraction_kernel_no_mkl"],
         "//conditions:default": [":eigen_contraction_kernel_with_mkl"],
     }),
 )
@@ -772,7 +772,7 @@ cc_library(
         "//tensorflow:linux_ppc64le": [],
         "//conditions:default": [
             "TENSORFLOW_USE_CUSTOM_CONTRACTION_KERNEL",
-            "TENSORFLOW_USE_MKLDNN_CONTRACTION_KERNEL",
+            "TENSORFLOW_USE_DNNL_CONTRACTION_KERNEL",
         ],
     }),
     deps = [
@@ -783,7 +783,7 @@ cc_library(
         "//tensorflow:ios": [],
         "//tensorflow:linux_aarch64": [],
         "//tensorflow:linux_ppc64le": [],
-        "//conditions:default": ["@mkl_dnn//:mkldnn_single_threaded"],
+        "//conditions:default": ["@mkl_dnn_v1//:mkl_dnn"],
     }),
 )
 
@@ -1293,7 +1293,9 @@ tf_kernel_library(
 tf_kernel_library(
     name = "unique_op",
     prefix = "unique_op",
-    deps = ARRAY_DEPS,
+    deps = ARRAY_DEPS + [
+        "@com_google_absl//absl/container:flat_hash_map",
+    ],
 )
 
 tf_kernel_library(
@@ -1653,6 +1655,7 @@ tf_cuda_cc_test(
         ":ops_testutil",
         ":ops_util",
         "//tensorflow/cc:cc_ops",
+        "//tensorflow/cc:cc_ops_internal",
         "//tensorflow/core:core_cpu",
         "//tensorflow/core:framework",
         "//tensorflow/core:framework_internal",
@@ -2981,17 +2984,17 @@ tf_cc_tests(
 # Conditional test target generation is not supported by the "tf_cc_tests" macro
 # (can't add 'select' to the srcs field, type 'select' is not iterable).
 tf_cc_test(
-    name = "eigen_mkldnn_contraction_kernel_test",
+    name = "eigen_dnnl_contraction_kernel_test",
     size = "small",
     srcs = select({
         "//tensorflow:android": [],
         "//tensorflow:arm": [],
         "//tensorflow:ios": [],
         "//tensorflow:linux_ppc64le": [],
-        ":no_mkldnn_contraction_kernel": [],
-        "//conditions:default": ["eigen_mkldnn_contraction_kernel_test.cc"],
+        ":no_dnnl_contraction_kernel": [],
+        "//conditions:default": ["eigen_dnnl_contraction_kernel_test.cc"],
     }),
-    tags = ["mkldnn_contraction_kernel"],
+    tags = ["dnnl_contraction_kernel"],
     deps = [
         ":eigen_contraction_kernel",
         "//tensorflow/core:test",
@@ -3049,6 +3052,7 @@ tf_cc_tests(
         "adjust_contrast_op_test.cc",
         "colorspace_op_test.cc",
         "crop_and_resize_op_test.cc",
+        "mirror_pad_op_test.cc",
         "non_max_suppression_op_test.cc",
         "resize_area_op_test.cc",
         "resize_bicubic_op_test.cc",
@@ -3061,6 +3065,7 @@ tf_cc_tests(
     }),
     deps = [
         ":image",
+        ":mirror_pad_op",
         ":ops_testutil",
         ":ops_util",
         ":sampling_kernels",
@@ -3068,6 +3073,39 @@ tf_cc_tests(
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core:testlib",
+    ],
+)
+
+
+tf_cuda_cc_test(
+    name = "mirror_pad_op_benchmark_test",
+    srcs = ["mirror_pad_op_benchmark_test.cc"],
+    deps = [
+        ":mirror_pad_op",
+        ":ops_testutil",
+        ":ops_util",
+        "//tensorflow/core:core_cpu",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core:testlib",
+    ],
+)
+
+tf_cc_test(
+    name = "non_max_suppression_op_benchmark_test",
+    srcs = ["non_max_suppression_op_benchmark_test.cc"],
+    deps = [
+        ":image",
+        ":ops_testutil",
+        ":ops_util",
+        "//tensorflow/core:core_cpu",
+        "//tensorflow/core:framework",
         "//tensorflow/core:protos_all_cc",
         "//tensorflow/core:test",
         "//tensorflow/core:test_main",
@@ -3789,7 +3827,11 @@ tf_kernel_library(
 tf_mkl_kernel_library(
     name = "mkl_batch_matmul_op",
     srcs = ["mkl_batch_matmul_op.cc"],
-    hdrs = ["batch_matmul_op_impl.h"],
+    hdrs = [
+        "batch_matmul_op_impl.h",
+        "mkl_matmul_ops_common.h",
+        "no_op.h"
+    ],
     deps = MATH_DEPS + mkl_deps(),
 )
 
@@ -3876,8 +3918,14 @@ tf_kernel_library(
 
 tf_mkl_kernel_library(
     name = "mkl_matmul_op",
-    srcs = ["mkl_matmul_op.cc"],
-    deps = MATH_DEPS + mkl_deps(),
+    srcs = [
+        "mkl_matmul_op.cc",
+        "mkl_matmul_op_fused.cc",
+    ],
+    hdrs = ["mkl_matmul_ops_common.h"],
+    deps = [
+        "//tensorflow/core/kernels:no_op"
+    ] + MATH_DEPS + mkl_deps(),
 )
 
 tf_kernel_library(
@@ -4381,6 +4429,7 @@ cc_library(
         ":depthwise_conv_op",
         ":dilation_ops",
         ":fused_batch_norm_op",
+        ":gelu_op",
         ":in_topk_op",
         ":l2loss_op",
         ":lrn_op",
@@ -4448,6 +4497,7 @@ tf_kernel_library(
     deps = NN_DEPS + [
         ":fill_functor",
         ":redux_functor",
+        ":transpose_functor",
     ] + if_cuda([
         "//tensorflow/core:stream_executor",
     ]),
@@ -4463,6 +4513,12 @@ tf_kernel_library(
     name = "lrn_op",
     prefix = "lrn_op",
     deps = NN_DEPS + if_rocm([":conv_ops_gpu_hdrs"]),
+)
+
+tf_kernel_library(
+    name = "gelu_op",
+    prefix = "gelu_op",
+    deps = NN_DEPS,
 )
 
 tf_kernel_library(
@@ -7707,6 +7763,7 @@ tf_mkl_kernel_library(
     name = "mkl_qmatmul_op",
     srcs = ["mkl_qmatmul_op.cc"],
     hdrs = [
+        "mkl_matmul_ops_common.h",
         "mkl_quantized_conv_ops.h",
         "no_op.h",
     ],
@@ -7778,6 +7835,51 @@ tf_cc_test_mkl(
         "//tensorflow/core:test",
         "//tensorflow/core:test_main",
         "//tensorflow/core:testlib",
+    ],
+)
+
+tf_cc_test_mkl(
+    name = "mkl_relu_op_test",
+    size = "small",
+    srcs = ["mkl_relu_op_test.cc"],
+    linkstatic = 1,  # Fixes dyld error on MacOS.
+    deps = [
+        ":ops_testutil",
+        ":ops_util",
+        "//tensorflow/cc:cc_ops",
+        "//tensorflow/core:core_cpu",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:framework_internal",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core:tensorflow",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core:testlib",
+    ],
+)
+
+tf_cc_test_mkl(
+    name = "mkl_eltwise_swish_op_test",
+    size = "small",
+    srcs = ["mkl_eltwise_swish_op_test.cc"],
+    linkstatic = 1,  # Fixes dyld error on MacOS.
+    deps = [
+        ":ops_testutil",
+        ":ops_util",
+        ":cwise_op",
+        "//tensorflow/cc:cc_ops",
+        "//tensorflow/cc:math_ops",
+        "//tensorflow/core:core_cpu",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:framework_internal",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core:tensorflow",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core:testlib",
+        "//tensorflow/core:direct_session",
     ],
 )
 
@@ -7856,32 +7958,13 @@ tf_mkl_kernel_library(
     ] + mkl_deps(),
 )
 
-tf_cc_test_mkl(
-    name = "mkl_dequantize_op_test",
-    size = "small",
-    srcs = ["mkl_dequantize_op_test.cc"],
-    deps = [
-        ":mkl_dequantize_op",
-        ":ops_testutil",
-        ":ops_util",
-        "//tensorflow/core:array_ops_op_lib",
-        "//tensorflow/core:framework",
-        "//tensorflow/core:math_ops_op_lib",
-        "//tensorflow/core:mkl_array_ops_op_lib",
-        "//tensorflow/core:nn_ops_op_lib",
-        "//tensorflow/core:protos_all_cc",
-        "//tensorflow/core:test",
-        "//tensorflow/core:test_main",
-        "//tensorflow/core:testlib",
-    ],
-)
-
 tf_mkl_kernel_library(
     name = "mkl_relu_op",
     prefix = "mkl_relu",
     deps = [
         ":bounds_check",
         ":ops_util",
+        ":no_op",
         "//tensorflow/core:core_cpu",
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
@@ -7905,9 +7988,42 @@ tf_mkl_kernel_library(
 )
 
 tf_mkl_kernel_library(
+    name = "mkl_tmp_bf16_ops",
+    prefix = "mkl_tmp_bf16_ops",
+    deps = [
+        ":no_op",
+    ] + mkl_deps(),
+)
+
+tf_mkl_kernel_library(
     name = "mkl_fused_batch_norm_op",
     srcs = ["mkl_fused_batch_norm_op.cc"],
-    deps = NN_DEPS + mkl_deps(),
+    deps = NN_DEPS + [
+        ":fused_batch_norm_op",
+        ":no_op",
+    ] + mkl_deps(),
+)
+
+tf_cc_test_mkl(
+    name = "mkl_fused_batch_norm_op_test",
+    size = "small",
+    srcs = ["mkl_fused_batch_norm_op_test.cc"],
+    linkstatic = 1,
+    deps = [
+        ":mkl_fused_batch_norm_op",
+        ":ops_testutil",
+        ":ops_util",
+        "//tensorflow/cc:cc_ops",
+        "//tensorflow/core:core_cpu",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:framework_internal",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core:tensorflow",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core:testlib",
+    ],
 )
 
 tf_mkl_kernel_library(
@@ -8021,15 +8137,33 @@ tf_cc_test_mkl(
         ":conv_ops",
         ":image",
         ":mkl_conv_op",
+        ":mkl_matmul_op",
         ":mkl_tfconv_op",
         ":ops_testutil",
         ":ops_util",
+        "//tensorflow/cc:cc_ops_internal",
         "//tensorflow/cc:cc_ops",
         "//tensorflow/core:core_cpu",
         "//tensorflow/core:framework",
         "//tensorflow/core:framework_internal",
         "//tensorflow/core:lib",
         "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core:tensorflow",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core:testlib",
+    ],
+)
+
+tf_cc_test_mkl(
+    name = "mkl_cwise_ops_test",
+    size = "small",
+    srcs = ["mkl_cwise_ops_test.cc"],
+    linkstatic = 1,
+    deps = [
+        ":mkl_cwise_ops_common",
+        "//tensorflow/cc:cc_ops",
+        "//tensorflow/cc:cc_ops_internal",
         "//tensorflow/core:tensorflow",
         "//tensorflow/core:test",
         "//tensorflow/core:test_main",

@@ -17,26 +17,26 @@ limitations under the License.
 #define TENSORFLOW_CORE_KERNELS_MKL_POOLING_OPS_COMMON_H_
 
 #ifdef INTEL_MKL
+
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "mkldnn.hpp"
+#include "dnnl.hpp"
+#include "tensorflow/core/util/mkl_types.h"
 #include "tensorflow/core/util/mkl_util.h"
 #include "tensorflow/core/util/padding.h"
 
-using mkldnn::memory;
-using mkldnn::pooling_backward;
-using mkldnn::pooling_forward;
-using mkldnn::stream;
-
 namespace tensorflow {
-using mkldnn::memory;
-using mkldnn::pooling_avg;
-using mkldnn::pooling_avg_exclude_padding;
-using mkldnn::pooling_avg_include_padding;
-using mkldnn::pooling_max;
-using mkldnn::prop_kind;
+
+using dnnl::memory;
+using dnnl::pooling_backward;
+using dnnl::pooling_forward;
+using dnnl::prop_kind;
+using dnnl::stream;
+
+using PoolingFwdPd = dnnl::pooling_forward::primitive_desc;
+using PoolingBwdPd = dnnl::pooling_backward::primitive_desc;
 
 struct MklPoolingParams {
   memory::dims src_dims;
@@ -45,13 +45,16 @@ struct MklPoolingParams {
   memory::dims strides;
   memory::dims padding_left;
   memory::dims padding_right;
-  mkldnn::algorithm alg_kind;
-  mkldnn::prop_kind prop_kind;
+  dnnl::algorithm alg_kind;
+  dnnl::prop_kind prop_kind;
+  MEMORY_FORMAT src_format;
+  memory::desc src_md;
 
   MklPoolingParams(memory::dims src_dims, memory::dims dst_dims,
                    memory::dims filter_dims, memory::dims strides,
                    memory::dims padding_left, memory::dims padding_right,
-                   mkldnn::algorithm alg_kind, mkldnn::prop_kind prop_kind)
+                   dnnl::algorithm alg_kind, dnnl::prop_kind prop_kind,
+                   MEMORY_FORMAT src_format, memory::desc src_md)
       : src_dims(src_dims),
         dst_dims(dst_dims),
         filter_dims(filter_dims),
@@ -59,15 +62,16 @@ struct MklPoolingParams {
         padding_left(padding_left),
         padding_right(padding_right),
         alg_kind(alg_kind),
-        prop_kind(prop_kind) {}
+        prop_kind(prop_kind),
+        src_format(src_format),
+        src_md(src_md) {}
 };
 
 template <typename T>
 class MklPoolingFwdPrimitive : public MklPrimitive {
  public:
   explicit MklPoolingFwdPrimitive(const MklPoolingParams& fwdParams)
-      : cpu_engine_(engine::cpu, 0) {
-    context_.fwd_stream.reset(new stream(stream::kind::eager));
+      : MklPrimitive(engine(ENGINE_CPU, 0)) {
     if (context_.fwd == nullptr) Setup(fwdParams);
   }
 
@@ -77,59 +81,59 @@ class MklPoolingFwdPrimitive : public MklPrimitive {
   //   src_data:  input data buffer of src
   //   ws_data:   output data buffer of workspace
   //   dst_data:  output data buffer of dst
-  void Execute(const T* src_data, T* dst_data, void* ws_data = nullptr);
+  void Execute(const T* src_data, T* dst_data, void* ws_data,
+               std::shared_ptr<stream> fwd_stream);
 
-  std::shared_ptr<mkldnn::pooling_forward::primitive_desc> GetPoolingFwdPd()
-      const {
+  std::shared_ptr<PoolingFwdPd> GetPoolingFwdPd() const {
     return context_.fwd_pd;
   }
 
-  memory::format GetSrcMemoryFormat() const { return context_.src_fmt; }
-
-  memory::format GetDstMemoryFormat() const { return context_.dst_fmt; }
+  MEMORY_FORMAT GetSrcMemoryFormat() const { return context_.src_fmt; }
+  MEMORY_FORMAT GetDstMemoryFormat() const { return context_.dst_fmt; }
 
  private:
   void Setup(const MklPoolingParams& fwdParams);
 
   struct PoolingFwdContext {
-    // algorithm
-    mkldnn::algorithm alg_kind;
+    // Algorithm.
+    dnnl::algorithm alg_kind;
 
-    // Kind of propagation, forward or backward
-    mkldnn::prop_kind prop_kind;
+    // Kind of propagation, forward or backward.
+    dnnl::prop_kind prop_kind;
 
-    // expected memory format
-    memory::format src_fmt;
-    memory::format dst_fmt;
-    memory::format ws_fmt;
+    // Expected memory format.
+    MEMORY_FORMAT src_fmt;
+    MEMORY_FORMAT dst_fmt;
+    MEMORY_FORMAT ws_fmt;
 
-    // workspace shape
+    // Workspace shape.
     memory::dims ws_dims;
     memory::data_type ws_dt;
     size_t ws_size;
 
-    // MKL-DNN memory, just dummy data
-    std::shared_ptr<mkldnn::memory> ws_mem;
-    std::shared_ptr<mkldnn::memory> src_mem;
-    std::shared_ptr<mkldnn::memory> dst_mem;
+    // OneDNN memory, just dummy data.
+    std::shared_ptr<dnnl::memory> ws_mem;
+    std::shared_ptr<dnnl::memory> src_mem;
+    std::shared_ptr<dnnl::memory> dst_mem;
 
-    // desc & primitive desc
-    std::shared_ptr<mkldnn::pooling_forward::desc> fwd_desc;
-    std::shared_ptr<mkldnn::pooling_forward::primitive_desc> fwd_pd;
+    // Pooling forward descriptor and primitive descriptor.
+    std::shared_ptr<dnnl::pooling_forward::desc> fwd_desc;
+    std::shared_ptr<PoolingFwdPd> fwd_pd;
 
-    // memory desc
-    std::shared_ptr<mkldnn::memory::desc> src_md;
-    std::shared_ptr<mkldnn::memory::desc> dst_md;
+    // Memory descriptor.
+    std::shared_ptr<dnnl::memory::desc> src_md;
+    std::shared_ptr<dnnl::memory::desc> dst_md;
 
     // Pooling primitive
-    std::shared_ptr<mkldnn::pooling_forward> fwd;
-    std::shared_ptr<mkldnn::stream> fwd_stream;
-    std::vector<mkldnn::primitive> fwd_primitives;
+    std::shared_ptr<dnnl::pooling_forward> fwd;
+    std::shared_ptr<dnnl::stream> fwd_stream;
+    std::vector<dnnl::primitive> fwd_primitives;
+    std::vector<std::unordered_map<int, memory>> net_args;
 
     PoolingFwdContext()
-        : src_fmt(memory::format::any),
-          dst_fmt(memory::format::any),
-          ws_fmt(memory::format::any),
+        : src_fmt(MEMORY_FORMAT::any),
+          dst_fmt(MEMORY_FORMAT::any),
+          ws_fmt(MEMORY_FORMAT::any),
           ws_mem(nullptr),
           src_mem(nullptr),
           dst_mem(nullptr),
@@ -137,12 +141,10 @@ class MklPoolingFwdPrimitive : public MklPrimitive {
           fwd_pd(nullptr),
           src_md(nullptr),
           dst_md(nullptr),
-          fwd(nullptr),
-          fwd_stream(nullptr) {}
+          fwd(nullptr) {}
   };
 
   struct PoolingFwdContext context_;
-  engine cpu_engine_;
 };
 
 template <typename T>
@@ -207,8 +209,7 @@ template <typename T>
 class MklPoolingBwdPrimitive : public MklPrimitive {
  public:
   explicit MklPoolingBwdPrimitive(const MklPoolingParams& bwdParams)
-      : cpu_engine(engine::cpu, 0) {
-    context_.bwd_stream.reset(new stream(stream::kind::eager));
+      : MklPrimitive(engine(ENGINE_CPU, 0)) {
     if (context_.bwd == nullptr) Setup(bwdParams);
   }
 
@@ -218,83 +219,78 @@ class MklPoolingBwdPrimitive : public MklPrimitive {
   //   diff_dst_data:  input data buffer of diff_dst
   //   diff_src_data:  output data buffer of diff_src
   //   ws_data:        input data buffer of workspace
-  void Execute(const T* diff_dst_data, T* diff_src_data,
-               const void* ws_data = nullptr);
+  void Execute(const T* diff_dst_data, T* diff_src_data, const void* ws_data,
+               std::shared_ptr<stream> bwd_stream);
 
  public:
-  std::shared_ptr<mkldnn::pooling_forward::primitive_desc> GetPoolingFwdPd()
-      const {
+  std::shared_ptr<PoolingFwdPd> GetPoolingFwdPd() const {
     return context_.fwd_pd;
   }
-  std::shared_ptr<mkldnn::pooling_backward::primitive_desc> GetPoolingBwdPd()
-      const {
+  std::shared_ptr<PoolingBwdPd> GetPoolingBwdPd() const {
     return context_.bwd_pd;
   }
 
-  memory::format GetDiffDstFormat() const { return context_.diff_dst_fmt; }
-
-  mkldnn::memory::data_type GetWorkspaceDataType() const {
+  dnnl::memory::data_type GetWorkspaceDataType() const {
     return context_.ws_dt;
   }
-  memory::format GetWorkspaceFormat() const { return context_.ws_fmt; }
 
  private:
   void Setup(const MklPoolingParams& bwdParams);
 
   // Primitive reuse context for pooling bwd ops
   struct PoolingBwdContext {
-    // algorithm
-    mkldnn::algorithm alg_kind;
+    // Algorithm.
+    dnnl::algorithm alg_kind;
 
-    // expected memory format
-    mkldnn::memory::format diff_src_fmt;
-    mkldnn::memory::format diff_dst_fmt;
-    mkldnn::memory::format ws_fmt;
+    // Expected memory format.
+    MEMORY_FORMAT diff_src_fmt;
+    MEMORY_FORMAT diff_dst_fmt;
+    MEMORY_FORMAT ws_fmt;
 
-    // workspace attribute
-    mkldnn::memory::dims ws_dims;
-    mkldnn::memory::data_type ws_dt;
+    // Workspace attribute.
+    dnnl::memory::dims ws_dims;
+    dnnl::memory::data_type ws_dt;
 
-    // MKL-DNN memory
-    std::shared_ptr<mkldnn::memory> ws_mem;
-    std::shared_ptr<mkldnn::memory> diff_src_mem;
-    std::shared_ptr<mkldnn::memory> diff_dst_mem;
+    // OneDNN memory.
+    std::shared_ptr<dnnl::memory> ws_mem;
+    std::shared_ptr<dnnl::memory> diff_src_mem;
+    std::shared_ptr<dnnl::memory> diff_dst_mem;
 
-    // memory desc
-    std::shared_ptr<mkldnn::memory::desc> diff_src_md;
-    std::shared_ptr<mkldnn::memory::desc> diff_dst_md;
+    // Memory descriptors.
+    std::shared_ptr<dnnl::memory::desc> src_md;
+    std::shared_ptr<dnnl::memory::desc> dst_md;
 
-    // desc & primitive desc
-    std::shared_ptr<mkldnn::pooling_forward::desc> fwd_desc;
-    std::shared_ptr<mkldnn::pooling_backward::desc> bwd_desc;
-    std::shared_ptr<mkldnn::pooling_forward::primitive_desc> fwd_pd;
-    std::shared_ptr<mkldnn::pooling_backward::primitive_desc> bwd_pd;
+    // Forward and backward pooling descriptors and primitive descriptors.
+    std::shared_ptr<dnnl::pooling_forward::desc> fwd_desc;
+    std::shared_ptr<dnnl::pooling_backward::desc> bwd_desc;
+    std::shared_ptr<PoolingFwdPd> fwd_pd;
+    std::shared_ptr<PoolingBwdPd> bwd_pd;
 
-    // pooling primitive
-    std::shared_ptr<mkldnn::pooling_backward> bwd;
-    std::shared_ptr<mkldnn::stream> bwd_stream;
+    // Backward pooling primitive.
+    std::shared_ptr<dnnl::pooling_backward> bwd;
+    std::shared_ptr<dnnl::stream> bwd_stream;
 
-    std::vector<mkldnn::primitive> bwd_primitives;
+    std::vector<dnnl::primitive> bwd_primitives;
+    std::vector<std::unordered_map<int, memory>> net_args;
 
     PoolingBwdContext()
-        : diff_src_fmt(memory::format::any),
-          diff_dst_fmt(memory::format::any),
-          ws_fmt(memory::format::any),
+        : diff_src_fmt(MEMORY_FORMAT::any),
+          diff_dst_fmt(MEMORY_FORMAT::any),
+          ws_fmt(MEMORY_FORMAT::any),
           ws_mem(nullptr),
           diff_src_mem(nullptr),
           diff_dst_mem(nullptr),
-          diff_src_md(nullptr),
-          diff_dst_md(nullptr),
+          src_md(nullptr),
+          dst_md(nullptr),
           fwd_desc(nullptr),
           bwd_desc(nullptr),
           fwd_pd(nullptr),
           bwd_pd(nullptr),
-          bwd(nullptr),
-          bwd_stream(nullptr) {}
+          bwd(nullptr) {
+    }
   };
 
   struct PoolingBwdContext context_;
-  engine cpu_engine;
 };
 
 template <typename T>
@@ -303,8 +299,8 @@ class MklPoolingBwdPrimitiveFactory : public MklPrimitiveFactory<T> {
   static MklPoolingBwdPrimitive<T>* Get(const MklPoolingParams& bwdParams) {
     MklPoolingBwdPrimitive<T>* pooling_backward = nullptr;
 
-    // Find a pooling backward primitive from the pool
-    // If it does not exist, create a new one
+    // Find a pooling backward primitive from the pool.
+    // If it does not exist, create a new one.
     pooling_backward = static_cast<MklPoolingBwdPrimitive<T>*>(
         MklPoolingBwdPrimitiveFactory<T>::GetInstance().GetPoolingBwd(
             bwdParams));
@@ -437,7 +433,7 @@ class MklPoolingOpBase : public OpKernel {
       : OpKernel(context), workspace_enabled_(false) {
     string data_format;
     if (std::is_same<T, qint8>::value || std::is_same<T, quint8>::value) {
-      // current quantized convolution doesn't have data_format attribute.
+      // Current quantized convolution doesn't have data_format attribute.
       data_format = "NHWC";
     } else {
       OP_REQUIRES_OK(context, context->GetAttr("data_format", &data_format));
@@ -457,9 +453,12 @@ class MklPoolingOpBase : public OpKernel {
                 errors::Unimplemented("Pooling is not yet supported on the "
                                       "batch dimension."));
     bool is_pool2d = (this->ksize_.size() == 4);
-    this->data_format_mkldnn_ =
+    this->tensor_format_dnnl_ =
         is_pool2d ? TFDataFormatToMklDnnDataFormat(this->data_format_tf_)
                   : TFDataFormatToMklDnn3DDataFormat(this->data_format_tf_);
+
+    this->data_format_dnnl_ =
+        MklTensorFormatToMklDnnDataFormat(this->tensor_format_dnnl_);
 
     // We may not get this attribute for this node if it does not go through
     // graph rewrite pass. So we do not check for error while retrieving this
@@ -469,21 +468,21 @@ class MklPoolingOpBase : public OpKernel {
   void Compute(OpKernelContext* context) override = 0;
 
  protected:
-  // Calculate output shape of pooling op in MKL-DNN and TensorFlow order.
-  // MKL-DNN uses NCHW(Pool2D) or NCDHW(Pool3D) for output order.
+  // Calculate output shape of pooling op in OneDNN and TensorFlow order.
+  // OneDNN uses NCHW(Pool2D) or NCDHW(Pool3D) for output order.
   // But TensorFlow output will be in NHWC/NCHW(Pool2D) or
   // NDHWC/NCDHW(Pool3D) format depending on data format. Function expects
   // output height and width to have already been int32 bounds-checked.
   void GetOutputDims(const MklPoolParameters& mkl_pool_params,
                      memory::dims* output_dims_mkl_order) {
     if (this->ksize_.size() == 4) {
-      // Pooling2D: MKL-DNN always needs output in NCHW format.
+      // Pooling2D: OneDNN always needs output in NCHW format.
       *output_dims_mkl_order = {mkl_pool_params.tensor_in_batch,
                                 mkl_pool_params.out_depth,
                                 static_cast<int>(mkl_pool_params.out_height),
                                 static_cast<int>(mkl_pool_params.out_width)};
     } else {
-      // Pooling3D: MKL-DNN always needs output in NCDHW format.
+      // Pooling3D: OneDNN always needs output in NCDHW format.
       *output_dims_mkl_order = {mkl_pool_params.tensor_in_batch,
                                 mkl_pool_params.out_depth,
                                 static_cast<int>(mkl_pool_params.out_planes),
@@ -566,13 +565,13 @@ class MklPoolingOpBase : public OpKernel {
     }
     AllocateOutputSetMklShape(context, kOutputIndex, output_tensor,
                               output_tf_shape, output_mkl_shape);
-    CHECK_NOTNULL(output_tensor);
+    DCHECK(output_tensor);
   }
 
   // Checks to make sure that the memory we need to allocate
   // is a multiple of sizeof(T)
   // returns the number of elements
-  size_t GetNumTElements(const memory::primitive_desc& pd) {
+  size_t GetNumTElements(const MEMORY_PRIMITIVE_DESC& pd) {
     size_t num_bytes = pd.get_size();
     size_t ret_val = num_bytes / sizeof(T);
     if (num_bytes % sizeof(T) != 0) {
@@ -585,7 +584,10 @@ class MklPoolingOpBase : public OpKernel {
   std::vector<int32> stride_;
   Padding padding_;
   TensorFormat data_format_tf_;
-  memory::format data_format_mkldnn_;
+  // Either memory::format (OneDNN v-0.x) or MklTensorFormat (OneDNN v-1.x)
+  MKL_TENSOR_FORMAT tensor_format_dnnl_;
+  // Either memory::format (OneDNN v-0.x) or memory::format_tag (OneDNN v-1.x)
+  MEMORY_FORMAT data_format_dnnl_;
   bool workspace_enabled_;
 };
 
@@ -602,8 +604,8 @@ class MklPoolingForwardOpBase : public MklPoolingOpBase<T> {
                       const Tensor& input_tensor,
                       MklPoolParameters* pool_params,
                       MklDnnData<T>* dnn_data_input) {
-    CHECK_NOTNULL(pool_params);
-    CHECK_NOTNULL(dnn_data_input);
+    DCHECK(pool_params);
+    DCHECK(dnn_data_input);
     TensorShape input_tensor_shape = input_tensor.shape();
     if (input_tensor.NumElements() != 0) {
       memory::desc input_md =
@@ -615,31 +617,32 @@ class MklPoolingForwardOpBase : public MklPoolingOpBase<T> {
                                                     this->data_format_tf_)
                         : TFShapeToMklDnnDimsInNCDHW(input_tensor_shape,
                                                      this->data_format_tf_),
-                    MklDnnType<T>(), this->data_format_mkldnn_);
+                    MklDnnType<T>(), this->data_format_dnnl_);
       dnn_data_input->SetUsrMem(input_md, &input_tensor);
 
       if (this->ksize_.size() == 5) {
         // Pool3D
-        std::vector<int> mkldnn_sizes(5, -1);
-        mkldnn_sizes[MklDnnDims3D::Dim3d_N] = input_md.data.dims[0];
-        mkldnn_sizes[MklDnnDims3D::Dim3d_C] = input_md.data.dims[1];
-        mkldnn_sizes[MklDnnDims3D::Dim3d_D] = input_md.data.dims[2];
-        mkldnn_sizes[MklDnnDims3D::Dim3d_H] = input_md.data.dims[3];
-        mkldnn_sizes[MklDnnDims3D::Dim3d_W] = input_md.data.dims[4];
-        dnn_data_input->SetOpMemDesc(mkldnn_sizes, this->data_format_mkldnn_);
+        std::vector<int> dnnl_sizes(5, -1);
+        dnnl_sizes[MklDnnDims3D::Dim3d_N] = input_md.data.dims[0];
+        dnnl_sizes[MklDnnDims3D::Dim3d_C] = input_md.data.dims[1];
+        dnnl_sizes[MklDnnDims3D::Dim3d_D] = input_md.data.dims[2];
+        dnnl_sizes[MklDnnDims3D::Dim3d_H] = input_md.data.dims[3];
+        dnnl_sizes[MklDnnDims3D::Dim3d_W] = input_md.data.dims[4];
+        dnn_data_input->SetOpMemDesc(dnnl_sizes, this->data_format_dnnl_);
       }
     }
     this->InitMklPoolParameters(context, pool_params, input_mkl_shape,
                                 input_tensor_shape);
   }
 
-  void AllocateOutputTensor(
-      OpKernelContext* context,
-      const pooling_forward::primitive_desc& pool_fwd_prim_desc,
-      const memory::dims output_dims_mkl_order,
-      const memory::format& output_tf_format, Tensor** output_tensor) {
-    CHECK_NOTNULL(output_tensor);
-    memory::primitive_desc dst_pd = pool_fwd_prim_desc.dst_primitive_desc();
+  void AllocateOutputTensor(OpKernelContext* context,
+                            const PoolingFwdPd& pool_fwd_prim_desc,
+                            const memory::dims output_dims_mkl_order,
+                            const MKL_TENSOR_FORMAT& output_tf_format,
+                            Tensor** output_tensor) {
+    TensorShape output_tf_shape;
+    DCHECK(output_tensor);
+    MEMORY_PRIMITIVE_DESC dst_pd = pool_fwd_prim_desc.PRIMITIVE_DESC_DST;
 
     MklDnnShape output_mkl_shape;
     output_mkl_shape.SetMklTensor(true);
@@ -647,13 +650,11 @@ class MklPoolingForwardOpBase : public MklPoolingOpBase<T> {
     output_mkl_shape.SetElemType(MklDnnType<T>());
     output_mkl_shape.SetTfLayout(output_dims_mkl_order.size(),
                                  output_dims_mkl_order, output_tf_format);
-    TensorShape output_tf_shape;
-
-    // only allocate enough space for the elements we need.
+    // Only allocate enough space for the elements we need.
     output_tf_shape.AddDim(this->GetNumTElements(dst_pd));
     AllocateOutputSetMklShape(context, kOutputTensorIndexOutput, output_tensor,
                               output_tf_shape, output_mkl_shape);
-    CHECK_NOTNULL(*output_tensor);
+    DCHECK(*output_tensor);
   }
 
   void SanityCheckInput(OpKernelContext* context, const Tensor& input_tensor,
@@ -669,8 +670,6 @@ class MklPoolingForwardOpBase : public MklPoolingOpBase<T> {
           errors::InvalidArgument("Input shape must be 4 or 5-dimensional"));
     }
   }
-  // .Input("value: T")
-  // .Output("output: T")
   const int kInputTensorIndexInput = 0;
   const int kOutputTensorIndexOutput = 0;
 };  // MklPoolingForwardBaseOp
@@ -685,14 +684,13 @@ class MklPoolingBackwardOpBase : public MklPoolingOpBase<T> {
  protected:
   const int kOutputTensorIndexOutput = 0;
 
-  void AllocateOutputTensor(
-      OpKernelContext* context,
-      const pooling_backward::primitive_desc& pool_bkwd_prim_desc,
-      const memory::dims output_dims_mkl_order,
-      const memory::format& output_tf_format, Tensor** output_tensor) {
-    CHECK_NOTNULL(output_tensor);
-    memory::primitive_desc dst_pd =
-        pool_bkwd_prim_desc.diff_src_primitive_desc();
+  void AllocateOutputTensor(OpKernelContext* context,
+                            const PoolingBwdPd& pool_bkwd_prim_desc,
+                            const memory::dims output_dims_mkl_order,
+                            const MKL_TENSOR_FORMAT& output_tf_format,
+                            Tensor** output_tensor) {
+    DCHECK(output_tensor);
+    MEMORY_PRIMITIVE_DESC dst_pd = pool_bkwd_prim_desc.PRIMITIVE_DESC_DIFF_SRC;
     MklDnnShape output_mkl_shape;
     output_mkl_shape.SetMklTensor(true);
     output_mkl_shape.SetMklLayout(&dst_pd);
@@ -704,68 +702,10 @@ class MklPoolingBackwardOpBase : public MklPoolingOpBase<T> {
     output_tf_shape.AddDim(this->GetNumTElements(dst_pd));
     AllocateOutputSetMklShape(context, kOutputTensorIndexOutput, output_tensor,
                               output_tf_shape, output_mkl_shape);
-    CHECK_NOTNULL(*output_tensor);
-  }
-
-  memory::desc ConfigureInputGradient(
-      const MklDnnShape& input_gradient_mkl_shape,
-      const Tensor& input_gradient_tensor,
-      MklDnnData<T>* input_gradient_dnn_data,
-      const memory::desc& original_output_md) {
-    // Configure the gradient as is
-    memory::desc original_input_grad_md =
-        input_gradient_mkl_shape.IsMklTensor()
-            ? input_gradient_mkl_shape.GetMklLayout()
-            : memory::desc(
-                  (this->ksize_.size() == 4)
-                      ? TFShapeToMklDnnDimsInNCHW(input_gradient_tensor.shape(),
-                                                  this->data_format_tf_)
-                      : TFShapeToMklDnnDimsInNCDHW(
-                            input_gradient_tensor.shape(),
-                            this->data_format_tf_),
-                  MklDnnType<T>(), this->data_format_mkldnn_);
-
-    input_gradient_dnn_data->SetUsrMem(original_input_grad_md,
-                                       &input_gradient_tensor);
-
-    // Check to see if input grad diff dst is in the right format
-    // Create a new memory descriptor with the same shape as the
-    // original, but the format of the other tensors.
-    memory::format original_output_format =
-        static_cast<memory::format>(original_output_md.data.format);
-    bool grad_reorder_needed =
-        input_gradient_dnn_data->IsReorderNeeded(original_output_format);
-    memory::dims diff_dst_dims =
-        input_gradient_mkl_shape.IsMklTensor()
-            ? input_gradient_mkl_shape.GetSizesAsMklDnnDims()
-            : TFShapeToMklDnnDimsInNCHW(input_gradient_tensor.shape(),
-                                        this->data_format_tf_);
-    memory::desc target_diff_dst_md =
-        memory::desc(diff_dst_dims, MklDnnType<T>(), original_output_format);
-
-    return grad_reorder_needed ? target_diff_dst_md : original_input_grad_md;
+    DCHECK(*output_tensor);
   }
 };
 
-//-------------------------------------------------------------------
-// Utility functions
-
-typedef struct {
-  size_t in_dim;
-  size_t in_sizes[4];
-  size_t in_strides[4];
-  size_t out_sizes[4];
-  size_t out_strides[4];
-  int in_offset[4];
-  size_t kernel_stride[2];
-  size_t kernel_size[2];
-} MklPoolingOpParams;
-
-// Transfers the right parameters for pooling to the op parameters
-// Updates context->status if there is an invalid input.
-void ExtractMklOpParams(OpKernelContext* context, TensorFormat data_format,
-                        const MklPoolParameters& params,
-                        MklPoolingOpParams* mkl_params);
 }  // namespace tensorflow
 
 #endif  // INTEL_MKL

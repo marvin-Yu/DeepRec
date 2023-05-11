@@ -22,6 +22,8 @@ limitations under the License.
 #include "tensorflow/core/util/padding.h"
 #include "tensorflow/core/util/tensor_format.h"
 
+#define COMPAT_WITH_V2
+
 namespace tensorflow {
 
 using shape_inference::DimensionHandle;
@@ -179,6 +181,7 @@ REGISTER_OP("FusedBatchNorm")
     .Output("reserve_space_2: T")
     .Attr("T: {float}")
     .Attr("epsilon: float = 0.0001")
+    .Attr("exponential_avg_factor: float = 1.0")
     .Attr(GetConvnetDataFormatAttrString())
     .Attr("is_training: bool = true")
     .SetShapeFn(shape_inference::FusedBatchNormShape);
@@ -197,6 +200,7 @@ REGISTER_OP("FusedBatchNormV2")
     .Attr("T: {half, bfloat16, float}")
     .Attr("U: {float}")
     .Attr("epsilon: float = 0.0001")
+    .Attr("exponential_avg_factor: float = 1.0")
     .Attr(GetConvnetDataFormatAttrString())
     .Attr("is_training: bool = true")
     .SetShapeFn(shape_inference::FusedBatchNormShape);
@@ -216,6 +220,7 @@ REGISTER_OP("FusedBatchNormV3")
     .Attr("T: {half, bfloat16, float}")
     .Attr("U: {float}")
     .Attr("epsilon: float = 0.0001")
+    .Attr("exponential_avg_factor: float = 1.0")
     .Attr(GetConvnetDataFormatAttrString())
     .Attr("is_training: bool = true")
     .SetShapeFn(shape_inference::FusedBatchNormV3Shape);
@@ -233,9 +238,14 @@ REGISTER_OP("_FusedBatchNormEx")
     .Output("reserve_space_1: U")
     .Output("reserve_space_2: U")
     .Output("reserve_space_3: U")
+#ifdef INTEL_MKL
+    .Attr("T: {half, float, bfloat16}")
+#else
     .Attr("T: {half, float}")
+#endif
     .Attr("U: {float}")
     .Attr("epsilon: float = 0.0001")
+    .Attr("exponential_avg_factor: float = 1.0")
     .Attr("num_side_inputs: int >= 0 = 0")
     .Attr("activation_mode: string = \"Identity\"")
     .Attr(GetConvnetDataFormatAttrString())
@@ -398,6 +408,8 @@ REGISTER_OP("_FusedConv2D")
     .Attr("fused_ops: list(string) = []")
     // Attributes for the FusedBatchNorm ------------------------------------ //
     .Attr("epsilon: float = 0.0001")
+    // Attributes for the LeakyRelu ----------------------------------------- //
+    .Attr("leakyrelu_alpha: float = 0.2")
     // ---------------------------------------------------------------------- //
     .SetShapeFn(shape_inference::Conv2DShapeWithExplicitPadding)
     .Doc(R"doc(
@@ -592,6 +604,28 @@ REGISTER_OP("DepthwiseConv2dNativeBackpropFilter")
       c->set_output(0, s);
       return Status::OK();
     });
+
+#ifdef COMPAT_WITH_V2
+REGISTER_OP("_FusedDepthwiseConv2dNative")
+    .Input("input: T")
+    .Input("filter: T")
+    .Input("args: num_args * T")
+    .Output("output: T")
+    .Attr("T: {half, bfloat16, float, double}")
+    .Attr("num_args: int >= 0")
+    .Attr("strides: list(int)")
+    .Attr(GetPaddingAttrString())
+    .Attr(GetConvnetDataFormatAttrString())
+    .Attr("dilations: list(int) = [1, 1, 1, 1]")
+    .Attr("fused_ops: list(string) = []")
+    // Attributes for the FusedBatchNorm ------------------------------------ //
+    .Attr("epsilon: float = 0.0001")
+    // Attributes for the LeakyRelu ----------------------------------------- //
+    .Attr("leakyrelu_alpha: float = 0.2")
+    // ---------------------------------------------------------------------- //
+    .SetShapeFn(shape_inference::DepthwiseConv2DNativeShape);
+#endif
+
 
 // --------------------------------------------------------------------------
 REGISTER_OP("Conv3D")
@@ -1050,6 +1084,21 @@ REGISTER_OP("Dilation2DBackpropFilter")
 
 // --------------------------------------------------------------------------
 
+REGISTER_OP("Gelu")
+    .Input("features: T")
+    .Output("activations: T")
+    .Attr("T: {half, float, double, bfloat16}")
+    .Attr("approximate: bool = false")
+    .SetShapeFn(shape_inference::UnchangedShape);
+
+REGISTER_OP("GeluGrad")
+    .Input("gradients: T")
+    .Input("features: T")
+    .Output("backprops: T")
+    .Attr("T: {half, float, double, bfloat16}")
+    .Attr("approximate: bool = false")
+    .SetShapeFn(shape_inference::MergeBothInputsShapeFn);
+
 REGISTER_OP("Relu")
     .Input("features: T")
     .Output("activations: T")
@@ -1142,6 +1191,27 @@ REGISTER_OP("SoftsignGrad")
     .Output("backprops: T")
     .Attr("T: {half, bfloat16, float, double}")
     .SetShapeFn(shape_inference::MergeBothInputsShapeFn);
+
+// Add Swish op to fuse sigmoid + mul.
+REGISTER_OP("_FusedSwish")
+    .Input("x: T")
+    .Output("y: T")
+    .Attr("T: {float, bfloat16}")
+    .SetShapeFn(shape_inference::UnchangedShape);
+
+
+REGISTER_OP("_MklSwish")
+    .Input("features: T")
+    .Input("mkl_features: uint8")
+    .Output("activations: T")
+    .Output("mkl_activations: uint8")
+    .Attr("T: {float, bfloat16} = DT_FLOAT")
+    .SetShapeFn(shape_inference::UnchangedShape)
+    .Doc(R"doc(
+MKL version of Swish operator. Uses MKL DNN APIs to implement Swish operator.
+NOTE Do not invoke this operator directly in Python. Graph rewrite pass is
+expected to invoke these operators.
+)doc");
 
 // --------------------------------------------------------------------------
 
@@ -1473,10 +1543,10 @@ REGISTER_OP("QuantizedConv2D")
     .Attr("Tfilter: quantizedtype")
     .Attr("out_type: quantizedtype = DT_QINT32")
     .Attr("strides: list(int)")
-    .Attr(GetPaddingAttrString())
+    .Attr(GetPaddingAttrStringWithExplicit())
     .Attr("dilations: list(int) = [1, 1, 1, 1]")
     .SetShapeFn([](InferenceContext* c) {
-      TF_RETURN_IF_ERROR(shape_inference::Conv2DShape(c));
+      TF_RETURN_IF_ERROR(shape_inference::QuantizedConv2DShape(c));
       ShapeHandle unused;
       TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 0, &unused));
       TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 0, &unused));
@@ -2166,6 +2236,40 @@ NOTE Do not invoke this operator directly in Python. Graph rewrite pass is
 expected to invoke these operators.
 )doc");
 
+REGISTER_OP("_MklGelu")
+    .Input("features: T")
+    .Input("mkl_features: uint8")
+    .Output("activations: T")
+    .Output("mkl_activations: uint8")
+    .Attr("T: {float, bfloat16} = DT_FLOAT")
+    .Attr("approximate: bool = false")
+    .SetShapeFn(shape_inference::UnchangedShape)
+    .Doc(R"doc(
+MKL version of Gelu operator. Uses MKL DNN APIs to implement
+Gelu operator.
+
+NOTE Do not invoke this operator directly in Python. Graph rewrite pass is
+expected to invoke these operators.
+)doc");
+
+REGISTER_OP("_MklGeluGrad")
+    .Input("gradients: T")
+    .Input("features: T")
+    .Input("mkl_gradients: uint8")
+    .Input("mkl_features: uint8")
+    .Output("backprops: T")
+    .Output("mkl_backprops: uint8")
+    .Attr("T: {float, bfloat16} = DT_FLOAT")
+    .Attr("approximate: bool = false")
+    .SetShapeFn(shape_inference::MergeBothInputsShapeFn)
+    .Doc(R"doc(
+MKL version of GeluGrad operator. Uses MKL DNN APIs to compute the
+gradients for GeluGrad operation.
+
+NOTE Do not invoke this operator directly in Python. Graph rewrite pass is
+expected to invoke these operators.
+)doc");
+
 REGISTER_OP("_MklElu")
     .Input("features: T")
     .Input("mkl_features: uint8")
@@ -2200,7 +2304,7 @@ REGISTER_OP("_MklSoftmax")
     .Input("mkl_logits: uint8")
     .Output("softmax: T")
     .Output("mkl_softmax: uint8")
-    .Attr("T: {half, float, double}")
+    .Attr("T: {bfloat16, half, float, double}")
     .SetShapeFn([](InferenceContext* c) {
       return shape_inference::UnchangedShapeWithRankAtLeast(c, 1);
     })
@@ -2521,6 +2625,7 @@ REGISTER_OP("_MklFusedBatchNorm")
     .Attr("epsilon: float = 0.0001")
     .Attr("data_format: string = 'NHWC'")
     .Attr("is_training: bool = true")
+    .Attr("exponential_avg_factor: float = 1.0")
     .SetShapeFn([](InferenceContext* c) {
       ShapeHandle x;
       TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 4, &x));
@@ -2668,6 +2773,7 @@ REGISTER_OP("_MklFusedBatchNormV2")
     .Attr("T: {bfloat16, float}")
     .Attr("U: {float}")
     .Attr("epsilon: float = 0.0001")
+    .Attr("exponential_avg_factor: float = 1.0")
     .Attr(GetConvnetDataFormatAttrString())
     .Attr("is_training: bool = true")
     .SetShapeFn(shape_inference::FusedBatchNormShape);
@@ -2755,11 +2861,11 @@ REGISTER_OP("QuantizedConv2DAndRequantize")
     .Attr("Tfilter: quantizedtype")
     .Attr("out_type: quantizedtype = DT_QINT8")
     .Attr("strides: list(int)")
-    .Attr(GetPaddingAttrString())
+    .Attr(GetPaddingAttrStringWithExplicit())
     .Attr("dilations: list(int) = [1, 1, 1, 1]")
     .Attr("padding_list: list(int) = []")
     .SetShapeFn([](InferenceContext* c) {
-      TF_RETURN_IF_ERROR(shape_inference::Conv2DShape(c));
+      TF_RETURN_IF_ERROR(shape_inference::QuantizedConv2DShape(c));
       ShapeHandle unused;
       TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 0, &unused));
       TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 0, &unused));
@@ -2788,11 +2894,11 @@ REGISTER_OP("QuantizedConv2DWithBias")
     .Attr("Tfilter: quantizedtype")
     .Attr("out_type: quantizedtype = DT_QINT32")
     .Attr("strides: list(int)")
-    .Attr(GetPaddingAttrString())
+    .Attr(GetPaddingAttrStringWithExplicit())
     .Attr("dilations: list(int) = [1, 1, 1, 1]")
     .Attr("padding_list: list(int) = []")
     .SetShapeFn([](InferenceContext* c) {
-      TF_RETURN_IF_ERROR(shape_inference::Conv2DShape(c));
+      TF_RETURN_IF_ERROR(shape_inference::QuantizedConv2DShape(c));
       ShapeHandle unused, channel;
       TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &unused));
       TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 0, &unused));
@@ -2822,11 +2928,11 @@ REGISTER_OP("QuantizedConv2DWithBiasAndRequantize")
     .Attr("Tbias: {float, qint32}")
     .Attr("out_type: quantizedtype = DT_QINT8")
     .Attr("strides: list(int)")
-    .Attr(GetPaddingAttrString())
+    .Attr(GetPaddingAttrStringWithExplicit())
     .Attr("dilations: list(int) = [1, 1, 1, 1]")
     .Attr("padding_list: list(int) = []")
     .SetShapeFn([](InferenceContext* c) {
-      TF_RETURN_IF_ERROR(shape_inference::Conv2DShape(c));
+      TF_RETURN_IF_ERROR(shape_inference::QuantizedConv2DShape(c));
       ShapeHandle unused, channel;
       TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &unused));
       TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 0, &unused));
@@ -2855,11 +2961,11 @@ REGISTER_OP("QuantizedConv2DAndRelu")
     .Attr("Tfilter: quantizedtype")
     .Attr("out_type: quantizedtype = DT_QINT32")
     .Attr("strides: list(int)")
-    .Attr(GetPaddingAttrString())
+    .Attr(GetPaddingAttrStringWithExplicit())
     .Attr("dilations: list(int) = [1, 1, 1, 1]")
     .Attr("padding_list: list(int) = []")
     .SetShapeFn([](InferenceContext* c) {
-      TF_RETURN_IF_ERROR(shape_inference::Conv2DShape(c));
+      TF_RETURN_IF_ERROR(shape_inference::QuantizedConv2DShape(c));
       ShapeHandle unused, channel;
       TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 0, &unused));
       TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 0, &unused));
@@ -2886,11 +2992,11 @@ REGISTER_OP("QuantizedConv2DAndReluAndRequantize")
     .Attr("Tfilter: quantizedtype")
     .Attr("out_type: quantizedtype = DT_QUINT8")
     .Attr("strides: list(int)")
-    .Attr(GetPaddingAttrString())
+    .Attr(GetPaddingAttrStringWithExplicit())
     .Attr("dilations: list(int) = [1, 1, 1, 1]")
     .Attr("padding_list: list(int) = []")
     .SetShapeFn([](InferenceContext* c) {
-      TF_RETURN_IF_ERROR(shape_inference::Conv2DShape(c));
+      TF_RETURN_IF_ERROR(shape_inference::QuantizedConv2DShape(c));
       ShapeHandle unused, channel;
       TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 0, &unused));
       TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 0, &unused));
@@ -2903,7 +3009,7 @@ REGISTER_OP("QuantizedConv2DAndReluAndRequantize")
       return Status::OK();
     });
 
-// Fusion of Quantized Conv2D, BiasAdd and Relu.
+// Fusion of Quantized Conv2D, BiasAdd and Relu/LeakyRelu.
 REGISTER_OP("QuantizedConv2DWithBiasAndRelu")
     .Input("input: Tinput")
     .Input("filter: Tfilter")
@@ -2919,11 +3025,12 @@ REGISTER_OP("QuantizedConv2DWithBiasAndRelu")
     .Attr("Tfilter: quantizedtype")
     .Attr("out_type: quantizedtype = DT_QINT32")
     .Attr("strides: list(int)")
-    .Attr(GetPaddingAttrString())
+    .Attr(GetPaddingAttrStringWithExplicit())
     .Attr("dilations: list(int) = [1, 1, 1, 1]")
     .Attr("padding_list: list(int) = []")
+    .Attr("alpha: float = 0.0")
     .SetShapeFn([](InferenceContext* c) {
-      TF_RETURN_IF_ERROR(shape_inference::Conv2DShape(c));
+      TF_RETURN_IF_ERROR(shape_inference::QuantizedConv2DShape(c));
       ShapeHandle unused, channel;
       TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &unused));
       TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 0, &unused));
@@ -2935,7 +3042,7 @@ REGISTER_OP("QuantizedConv2DWithBiasAndRelu")
       return Status::OK();
     });
 
-// Fusion of Quantized Conv2D, BiasAdd, Relu, and Requantize.
+// Fusion of Quantized Conv2D, BiasAdd, Relu/LeakyRelu, and Requantize.
 REGISTER_OP("QuantizedConv2DWithBiasAndReluAndRequantize")
     .Input("input: Tinput")
     .Input("filter: Tfilter")
@@ -2954,11 +3061,12 @@ REGISTER_OP("QuantizedConv2DWithBiasAndReluAndRequantize")
     .Attr("Tbias: {float, qint32}")
     .Attr("out_type: quantizedtype = DT_QUINT8")
     .Attr("strides: list(int)")
-    .Attr(GetPaddingAttrString())
+    .Attr(GetPaddingAttrStringWithExplicit())
     .Attr("dilations: list(int) = [1, 1, 1, 1]")
     .Attr("padding_list: list(int) = []")
+    .Attr("alpha: float = 0.0")
     .SetShapeFn([](InferenceContext* c) {
-      TF_RETURN_IF_ERROR(shape_inference::Conv2DShape(c));
+      TF_RETURN_IF_ERROR(shape_inference::QuantizedConv2DShape(c));
       ShapeHandle unused, channel;
       TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &unused));
       TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 0, &unused));
@@ -2989,11 +3097,11 @@ REGISTER_OP("QuantizedConv2DWithBiasSumAndRelu")
     .Attr("Tfilter: quantizedtype")
     .Attr("out_type: quantizedtype = DT_QINT32")
     .Attr("strides: list(int)")
-    .Attr(GetPaddingAttrString())
+    .Attr(GetPaddingAttrStringWithExplicit())
     .Attr("dilations: list(int) = [1, 1, 1, 1]")
     .Attr("padding_list: list(int) = []")
     .SetShapeFn([](InferenceContext* c) {
-      TF_RETURN_IF_ERROR(shape_inference::Conv2DShape(c));
+      TF_RETURN_IF_ERROR(shape_inference::QuantizedConv2DShape(c));
       ShapeHandle unused, channel;
       TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &unused));
       TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 0, &unused));
@@ -3027,11 +3135,11 @@ REGISTER_OP("QuantizedConv2DWithBiasSumAndReluAndRequantize")
     .Attr("Tsummand: quantizedtype")
     .Attr("out_type: quantizedtype = DT_QUINT8")
     .Attr("strides: list(int)")
-    .Attr(GetPaddingAttrString())
+    .Attr(GetPaddingAttrStringWithExplicit())
     .Attr("dilations: list(int) = [1, 1, 1, 1]")
     .Attr("padding_list: list(int) = []")
     .SetShapeFn([](InferenceContext* c) {
-      TF_RETURN_IF_ERROR(shape_inference::Conv2DShape(c));
+      TF_RETURN_IF_ERROR(shape_inference::QuantizedConv2DShape(c));
       ShapeHandle unused, channel;
       TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &unused));
       TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 0, &unused));
@@ -3067,11 +3175,11 @@ REGISTER_OP("QuantizedConv2DWithBiasSignedSumAndReluAndRequantize")
     .Attr("Tsummand: quantizedtype")
     .Attr("out_type: quantizedtype = DT_QUINT8")
     .Attr("strides: list(int)")
-    .Attr(GetPaddingAttrString())
+    .Attr(GetPaddingAttrStringWithExplicit())
     .Attr("dilations: list(int) = [1, 1, 1, 1]")
     .Attr("padding_list: list(int) = []")
     .SetShapeFn([](InferenceContext* c) {
-      TF_RETURN_IF_ERROR(shape_inference::Conv2DShape(c));
+      TF_RETURN_IF_ERROR(shape_inference::QuantizedConv2DShape(c));
       ShapeHandle unused, channel;
       TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &unused));
       TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 0, &unused));
@@ -3082,6 +3190,81 @@ REGISTER_OP("QuantizedConv2DWithBiasSignedSumAndReluAndRequantize")
       TF_RETURN_IF_ERROR(c->WithRank(c->input(8), 0, &unused));
       // Since activations are not requantized per channel, `min_output`
       // and `max_output` are scalars.
+      c->set_output(1, c->Scalar());
+      c->set_output(2, c->Scalar());
+      return Status::OK();
+    });
+
+// Fusion of Quantized Conv2D, BiasAdd, Relu, and Sum.
+REGISTER_OP("QuantizedConv2DWithBiasReluAndSum")
+    .Input("input: Tinput")
+    .Input("filter: Tfilter")
+    .Input("bias: float")
+    .Input("min_input: float")
+    .Input("max_input: float")
+    .Input("min_filter: float")
+    .Input("max_filter: float")
+    .Input("summand: float")
+    .Output("output: out_type")
+    .Output("min_output: float")
+    .Output("max_output: float")
+    .Attr("Tinput: quantizedtype")
+    .Attr("Tfilter: quantizedtype")
+    .Attr("out_type: quantizedtype = DT_QINT32")
+    .Attr("strides: list(int)")
+    .Attr(GetPaddingAttrString())
+    .Attr("dilations: list(int) = [1, 1, 1, 1]")
+    .Attr("padding_list: list(int) = []")
+    .Attr("alpha: float = 0.0")
+    .SetShapeFn([](InferenceContext* c) {
+      TF_RETURN_IF_ERROR(shape_inference::QuantizedConv2DShape(c));
+      ShapeHandle unused, channel;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &unused));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 0, &unused));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(4), 0, &unused));
+      TF_RETURN_IF_ERROR(c->WithRankAtMost(c->input(5), 1, &channel));
+      TF_RETURN_IF_ERROR(c->WithRankAtMost(c->input(6), 1, &channel));
+      c->set_output(1, channel);
+      c->set_output(2, channel);
+      return Status::OK();
+    });
+
+REGISTER_OP("QuantizedConv2DWithBiasReluAndSumAndRequantize")
+    .Input("input: Tinput")
+    .Input("filter: Tfilter")
+    .Input("bias: Tbias")
+    .Input("min_input: float")
+    .Input("max_input: float")
+    .Input("min_filter: float")
+    .Input("max_filter: float")
+    .Input("min_freezed_output: float")
+    .Input("max_freezed_output: float")
+    .Input("summand: Tsummand")
+    .Input("min_summand: float")
+    .Input("max_summand: float")
+    .Output("output: out_type")
+    .Output("min_output: float")
+    .Output("max_output: float")
+    .Attr("Tinput: quantizedtype")
+    .Attr("Tfilter: quantizedtype")
+    .Attr("Tbias: {float, qint32}")
+    .Attr("Tsummand: quantizedtype")
+    .Attr("out_type: quantizedtype = DT_QUINT8")
+    .Attr("strides: list(int)")
+    .Attr(GetPaddingAttrString())
+    .Attr("dilations: list(int) = [1, 1, 1, 1]")
+    .Attr("padding_list: list(int) = []")
+    .Attr("alpha: float = 0.0")
+    .SetShapeFn([](InferenceContext* c) {
+      TF_RETURN_IF_ERROR(shape_inference::QuantizedConv2DShape(c));
+      ShapeHandle unused, channel;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &unused));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 0, &unused));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(4), 0, &unused));
+      TF_RETURN_IF_ERROR(c->WithRankAtMost(c->input(5), 1, &channel));
+      TF_RETURN_IF_ERROR(c->WithRankAtMost(c->input(6), 1, &channel));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(7), 0, &unused));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(8), 0, &unused));
       c->set_output(1, c->Scalar());
       c->set_output(2, c->Scalar());
       return Status::OK();
@@ -3184,6 +3367,75 @@ REGISTER_OP("QuantizedMatMulWithBiasAndReluAndRequantize")
       return Status::OK();
     });
 
+#ifdef COMPAT_WITH_V2
+REGISTER_OP("QuantizedMatMulWithBiasAndDequantize")
+    .Input("a: T1")
+    .Input("b: T2")
+    .Input("bias: Tbias")
+    .Input("min_a: float")
+    .Input("max_a: float")
+    .Input("min_b: float")
+    .Input("max_b: float")
+    .Input("min_freezed_output: float")
+    .Input("max_freezed_output: float")
+    .Output("out: Toutput")
+    .Attr("T1: quantizedtype")
+    .Attr("T2: quantizedtype")
+    .Attr("Tbias: {float, qint32}")
+    .Attr("Toutput: {float}")
+    .Attr("transpose_a: bool = false")
+    .Attr("transpose_b: bool = false")
+    .Attr("input_quant_mode: {'MIN_FIRST', 'SCALED'} = 'MIN_FIRST'")
+    .SetShapeFn([](InferenceContext* c) {
+      TF_RETURN_IF_ERROR(shape_inference::MatMulShape(c));
+      ShapeHandle unused;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &unused));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 0, &unused));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(4), 0, &unused));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(5), 0, &unused));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(6), 0, &unused));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(7), 0, &unused));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(8), 0, &unused));
+
+      return Status::OK();
+    });
+
+REGISTER_OP("QuantizedMatMulWithBiasAndRequantize")
+    .Input("a: T1")
+    .Input("b: T2")
+    .Input("bias: Tbias")
+    .Input("min_a: float")
+    .Input("max_a: float")
+    .Input("min_b: float")
+    .Input("max_b: float")
+    .Input("min_freezed_output: float")
+    .Input("max_freezed_output: float")
+    .Output("out: Toutput")
+    .Output("min_out: float")
+    .Output("max_out: float")
+    .Attr("T1: quantizedtype")
+    .Attr("T2: quantizedtype")
+    .Attr("Tbias: {float, qint32}")
+    .Attr("Toutput: quantizedtype = DT_QUINT8")
+    .Attr("transpose_a: bool = false")
+    .Attr("transpose_b: bool = false")
+    .Attr("input_quant_mode: {'MIN_FIRST', 'SCALED'} = 'MIN_FIRST'")
+    .SetShapeFn([](InferenceContext* c) {
+      TF_RETURN_IF_ERROR(shape_inference::MatMulShape(c));
+      ShapeHandle unused;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &unused));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 0, &unused));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(4), 0, &unused));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(5), 0, &unused));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(6), 0, &unused));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(7), 0, &unused));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(8), 0, &unused));
+      c->set_output(1, c->Scalar());
+      c->set_output(2, c->Scalar());
+      return Status::OK();
+    });
+#endif
+
 REGISTER_OP("QuantizedConv2DPerChannel")
     .Input("input: Tinput")
     .Input("filter: Tfilter")
@@ -3198,10 +3450,10 @@ REGISTER_OP("QuantizedConv2DPerChannel")
     .Attr("Tfilter: quantizedtype")
     .Attr("out_type: quantizedtype = DT_QINT32")
     .Attr("strides: list(int)")
-    .Attr(GetPaddingAttrString())
+    .Attr(GetPaddingAttrStringWithExplicit())
     .Attr("dilations: list(int) = [1, 1, 1, 1]")
     .SetShapeFn([](InferenceContext* c) {
-      TF_RETURN_IF_ERROR(shape_inference::Conv2DShape(c));
+      TF_RETURN_IF_ERROR(shape_inference::QuantizedConv2DShape(c));
       ShapeHandle unused, channel;
       TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 0, &unused));
       TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 0, &unused));
@@ -3266,6 +3518,7 @@ REGISTER_OP("QuantizedDepthwiseConv2DWithBiasAndRelu")
     .Attr("strides: list(int)")
     .Attr(GetPaddingAttrString())
     .Attr("dilations: list(int) = [1, 1, 1, 1]")
+    .Attr("padding_list: list(int) = []")
     .SetShapeFn(shape_inference::DepthwiseConv2DNativeShape);
 
 REGISTER_OP("QuantizedDepthwiseConv2DWithBiasAndReluAndRequantize")
@@ -3288,6 +3541,7 @@ REGISTER_OP("QuantizedDepthwiseConv2DWithBiasAndReluAndRequantize")
     .Attr("strides: list(int)")
     .Attr(GetPaddingAttrString())
     .Attr("dilations: list(int) = [1, 1, 1, 1]")
+    .Attr("padding_list: list(int) = []")
     .SetShapeFn(shape_inference::DepthwiseConv2DNativeShape);
 
 }  // namespace tensorflow
