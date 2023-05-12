@@ -27,6 +27,7 @@ limitations under the License.
 #include "tensorflow/stream_executor/kernel_spec.h"
 #include "tensorflow/stream_executor/stream.h"
 #include "tensorflow/stream_executor/stream_executor_pimpl.h"
+#include "tensorflow/core/util/env_var.h"
 
 namespace stream_executor {
 namespace cuda {
@@ -298,6 +299,20 @@ static port::StatusOr<RedzoneCheckStatus> CheckRedzonesForBuffer(
 }
 
 port::StatusOr<RedzoneCheckStatus> RedzoneAllocator::CheckRedzones() const {
+  // add for PPU
+  static bool found_ppu_device = [] {
+    bool found_ppu = false;
+    if (!tensorflow::ReadBoolFromEnvVar("FOUND_PPU_DEVICE", false, &found_ppu).ok()) {
+      return false;
+    }
+    if (found_ppu) {
+      return true;
+    }
+    return false;
+  }();
+  if (found_ppu_device) {
+    return RedzoneCheckStatus::OK();
+  }
   StreamExecutor* executor = stream_->parent();
 
   absl::Span<const uint8> compiled_ptx = {};

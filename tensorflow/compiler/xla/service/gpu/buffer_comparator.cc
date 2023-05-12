@@ -28,6 +28,7 @@ limitations under the License.
 #include "tensorflow/stream_executor/device_memory.h"
 #include "tensorflow/stream_executor/kernel.h"
 #include "tensorflow/stream_executor/stream_executor_pimpl.h"
+#include "tensorflow/core/util/env_var.h"
 
 namespace xla {
 namespace gpu {
@@ -348,6 +349,23 @@ static StatusOr<bool> DeviceCompare(se::Stream* stream,
                                     const Shape& buffer_shape,
                                     const HloModuleConfig& config,
                                     absl::string_view kernel_name) {
+  // add for PPU
+  static bool found_ppu_device = [] {
+    bool found_ppu = false;
+    if (!tensorflow::ReadBoolFromEnvVar("FOUND_PPU_DEVICE", false, &found_ppu).ok()) {
+      return false;
+    }
+    if (found_ppu) {
+      return true;
+    }
+    return false;
+  }();
+  if (found_ppu_device) {
+    VLOG(1) << "For ppu platform, always return true to work around "
+            << "not supporting compiling ptx code";
+    return true;
+  }
+
   se::StreamExecutor* executor = stream->parent();
 
   se::ScopedDeviceMemory<uint64> out_param =
