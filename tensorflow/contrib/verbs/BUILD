@@ -71,7 +71,6 @@ cc_library(
     deps = [
         ":verbs_service_proto_cc",
         "//tensorflow:grpc++",
-        "//tensorflow/core/distributed_runtime/rpc:grpc_util",
     ],
 )
 

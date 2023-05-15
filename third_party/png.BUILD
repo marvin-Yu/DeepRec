@@ -54,7 +54,7 @@ cc_library(
         "//conditions:default": ["-lm"],
     }),
     visibility = ["//visibility:public"],
-    deps = ["@zlib"],
+    deps = ["@zlib_archive//:zlib"],
 )
 
 genrule(

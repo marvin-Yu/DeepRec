@@ -3404,7 +3404,7 @@ cc_library(
     deps = [
         ":config",
         ":demangle",
-        "@zlib",
+        "@zlib_archive//:zlib",
     ],
 )
 

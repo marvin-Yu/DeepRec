@@ -506,19 +506,26 @@ def tf_repositories(path_prefix = "", tf_repo_name = ""):
         ],
     )
 
+    # WARNING: make sure ncteisen@ and vpai@ are cc-ed on any CL to change the below rule
     tf_http_archive(
-        name = "com_github_grpc_grpc",
-        sha256 = "b956598d8cbe168b5ee717b5dafa56563eb5201a947856a6688bbeac9cac4e1f",
-        strip_prefix = "grpc-b54a5b338637f92bfcf4b0bc05e0f57a5fd8fadd",
+        name = "grpc",
+        sha256 = "67a6c26db56f345f7cee846e681db2c23f919eba46dd639b09462d1b6203d28c",
+        strip_prefix = "grpc-4566c2a29ebec0835643b972eb99f4306c4234a3",
         system_build_file = clean_dep("//third_party/systemlibs:grpc.BUILD"),
-        system_link_files = {
-            "//third_party/systemlibs:BUILD": "bazel/BUILD",
-            "//third_party/systemlibs:grpc.BUILD": "src/compiler/BUILD",
-            "//third_party/systemlibs:grpc.bazel.grpc_deps.bzl": "bazel/grpc_deps.bzl",
-        },
         urls = [
-            "https://storage.googleapis.com/mirror.tensorflow.org/github.com/grpc/grpc/archive/b54a5b338637f92bfcf4b0bc05e0f57a5fd8fadd.tar.gz",
-            "https://github.com/grpc/grpc/archive/b54a5b338637f92bfcf4b0bc05e0f57a5fd8fadd.tar.gz",
+            "https://storage.googleapis.com/mirror.tensorflow.org/github.com/grpc/grpc/archive/4566c2a29ebec0835643b972eb99f4306c4234a3.tar.gz",
+            "https://github.com/grpc/grpc/archive/4566c2a29ebec0835643b972eb99f4306c4234a3.tar.gz",
+        ],
+    )
+
+    tf_http_archive(
+        name = "com_github_nanopb_nanopb",
+        sha256 = "8bbbb1e78d4ddb0a1919276924ab10d11b631df48b657d960e0c795a25515735",
+        build_file = "@grpc//third_party:nanopb.BUILD",
+        strip_prefix = "nanopb-f8ac463766281625ad710900479130c7fcb4d63b",
+        urls = [
+            "https://storage.googleapis.com/mirror.tensorflow.org/github.com/nanopb/nanopb/archive/f8ac463766281625ad710900479130c7fcb4d63b.tar.gz",
+            "https://github.com/nanopb/nanopb/archive/f8ac463766281625ad710900479130c7fcb4d63b.tar.gz",
         ],
     )
 
@@ -582,7 +589,7 @@ def tf_repositories(path_prefix = "", tf_repo_name = ""):
     )
 
     tf_http_archive(
-        name = "zlib",
+        name = "zlib_archive",
         build_file = clean_dep("//third_party:zlib.BUILD"),
         sha256 = "c3e5e9fdd5004dcb542feda5ee4f0ff0744628baf8ed2dd5d66f8ca1197cb1a1",
         strip_prefix = "zlib-1.2.11",
@@ -934,24 +941,62 @@ def tf_bind():
     # If that ends up being the case, please leave a comment explaining
     # why we can't depend on the canonical build target.
 
+    # gRPC wants a cares dependency but its contents is not actually
+    # important since we have set GRPC_ARES=0 in .bazelrc
+    native.bind(
+        name = "cares",
+        actual = "@com_github_nanopb_nanopb//:nanopb",
+    )
+
     # Needed by Protobuf
     native.bind(
         name = "grpc_cpp_plugin",
-        actual = "@com_github_grpc_grpc//src/compiler:grpc_cpp_plugin",
+        actual = "@grpc//:grpc_cpp_plugin",
     )
     native.bind(
         name = "grpc_python_plugin",
-        actual = "@com_github_grpc_grpc//src/compiler:grpc_python_plugin",
+        actual = "@grpc//:grpc_python_plugin",
     )
 
     native.bind(
         name = "grpc_lib",
-        actual = "@com_github_grpc_grpc//:grpc++",
+        actual = "@grpc//:grpc++",
     )
 
     native.bind(
         name = "grpc_lib_unsecure",
-        actual = "@com_github_grpc_grpc//:grpc++_unsecure",
+        actual = "@grpc//:grpc++_unsecure",
+    )
+
+    # Needed by gRPC
+    native.bind(
+        name = "libssl",
+        actual = "@boringssl//:ssl",
+    )
+
+    # Needed by gRPC
+    native.bind(
+        name = "nanopb",
+        actual = "@com_github_nanopb_nanopb//:nanopb",
+    )
+
+    # Needed by gRPC
+    native.bind(
+        name = "protobuf",
+        actual = "@com_google_protobuf//:protobuf",
+    )
+
+    # gRPC expects //external:protobuf_clib and //external:protobuf_compiler
+    # to point to Protobuf's compiler library.
+    native.bind(
+        name = "protobuf_clib",
+        actual = "@com_google_protobuf//:protoc_lib",
+    )
+
+    # Needed by gRPC
+    native.bind(
+        name = "protobuf_headers",
+        actual = "@com_google_protobuf//:protobuf_headers",
     )
 
     # Needed by Protobuf
@@ -964,4 +1009,10 @@ def tf_bind():
     native.bind(
         name = "six",
         actual = "@six_archive//:six",
+    )
+
+    # Needed by gRPC
+    native.bind(
+        name = "zlib",
+        actual = "@zlib_archive//:zlib",
     )

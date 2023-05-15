@@ -196,7 +196,7 @@ filegroup(
         "@snappy//:COPYING",
         "@swig//:LICENSE",
         "@termcolor_archive//:COPYING.txt",
-        "@zlib//:zlib.h",
+        "@zlib_archive//:zlib.h",
         "@org_python_pypi_backports_weakref//:LICENSE",
     ] + select({
         "//tensorflow:android": [],
@@ -229,10 +229,10 @@ filegroup(
             "@absl_py//absl/third_party/unittest3_backport:LICENSE",
         ],
     ) + if_not_system_lib(
-        "com_github_grpc_grpc",
+        "grpc",
         [
-            "@com_github_grpc_grpc//:LICENSE",
-            "@com_github_grpc_grpc//third_party/address_sorting:LICENSE",
+            "@grpc//:LICENSE",
+            "@grpc//third_party/address_sorting:LICENSE",
         ],
     ) + if_ngraph([
         "@ngraph//:LICENSE",
