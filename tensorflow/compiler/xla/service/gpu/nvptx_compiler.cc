@@ -479,9 +479,12 @@ NVPTXCompiler::CompileTargetBinary(const HloModule* module,
   string cubin_filename = std::to_string(key) + ".cubin";
   std::vector<uint8> cubin =
       CompilePtxOrGetCachedResult(stream_exec, ptx, compute_capability.first,
-                                  compute_capability.second, module->config(), 
-								  cubin_cache_dir, cubin_filename);
-
+                                  compute_capability.second, module->config(),
+                                  cubin_cache_dir, cubin_filename);
+  if (cubin.size() == 0) {
+    string ptx_filename = std::to_string(key) + ".ptx";
+    VLOG(0) << "load empty cubin, ptx is " << ptx_filename;
+  }
   VLOG(5) << "maybe load cubin size:" << cubin.size();
 
   return std::pair<std::string, std::vector<uint8>>(std::move(ptx),
