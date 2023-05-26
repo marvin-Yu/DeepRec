@@ -228,6 +228,11 @@ void HttpRequest::handleRead()
 	headsize += line.size() + 1;
 	SplitString(line, v, " ");
 	//for(int i = 0; i < v.size(); i++) VLOG(1) << v[i] << std::endl;
+	if (v.size() < 2) {
+          LOG(ERROR) << "socket got message error, v.size=" << v.size();
+          m_code = -1;
+          return;
+        }
 	m_code = std::stoi(v[1]);
 	if(v[1] != "200")
 	{
