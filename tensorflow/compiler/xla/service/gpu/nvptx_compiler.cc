@@ -505,6 +505,7 @@ std::vector<uint8> NVPTXCompiler::CompilePtx(
     VLOG(2) << "Compiled PTX size:" << ptx.size()
             << " CUBIN size: " << cubin_data.size();
   } else {
+    LOG(ERROR) << "compile ptx failed: " << maybe_cubin.status().ToString();
     bool log_warning = true;
     if (maybe_cubin.status().code() ==
         tensorflow::error::Code::NOT_FOUND) {
@@ -585,6 +586,7 @@ std::vector<uint8> NVPTXCompiler::CompilePtxOrGetCachedResult(
                 DumpCubinToFileInDir(cubin_cache_dir, cubin_filename, cache_value->cubin_data);
             }
           } else {
+            LOG(ERROR) << "compile ptx failed: " << maybe_cubin.status().ToString();
             bool log_warning = true;
             if (maybe_cubin.status().code() ==
                 tensorflow::error::Code::NOT_FOUND) {
