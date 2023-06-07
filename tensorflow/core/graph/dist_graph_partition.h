@@ -161,7 +161,7 @@ class GraphPartitionerBase {
                            SubGraph *main_graph);
 
   Status CompleteMainGraphV3(const std::vector<SubGraph> &sub_graphs,
-                           SubGraph *main_graph);
+                           SubGraph *main_graph, bool is_sub_main = false);
 
  protected:
   bool ShouldUseSendRecvMode(Node* src, Node* dst);
@@ -203,7 +203,7 @@ class GraphPartitionerBase {
             NodeDef *node_def,
             GraphDef *graph_def,
             std::vector<std::pair<std::string, const Edge*>> *boundary_output_edges,
-            bool& has_direct_edge);
+            bool& has_direct_edge, std::unordered_set<std::string>* sub_locs = nullptr);
 
   Status ConstructSendNodeDef(
             const std::string &node_name,

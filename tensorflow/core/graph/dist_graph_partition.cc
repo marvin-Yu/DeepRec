@@ -559,7 +559,7 @@ Status GraphPartitionerBase::ProcessSubNodeOutputs(
     NodeDef *node_def,
     GraphDef *graph_def,
     std::vector<std::pair<std::string, const Edge*>> *boundary_output_edges,
-    bool& use_send_recv)
+    bool& use_send_recv, std::unordered_set<std::string>* sub_locs)
 {
   std::unordered_map<std::string, NodeDef*> send_nodes_map;
   std::unordered_map<std::string, int> send_nodes_index;
@@ -572,6 +572,10 @@ Status GraphPartitionerBase::ProcessSubNodeOutputs(
 
     if (loc == opts_.node_to_loc(dst)) {
       continue;
+    }
+
+    if (sub_locs && sub_locs->find(opts_.node_to_loc(dst)) != sub_locs->end()) {
+        continue;
     }
 
     // NOTE(jiankeng.pt) If use Send/Recv instead of RunGraph,
@@ -1115,7 +1119,7 @@ Status GraphPartitionerBase::CompleteMainGraphV2(
 
 Status GraphPartitionerBase::CompleteMainGraphV3(
     const std::vector<SubGraph> &sub_graphs,
-    SubGraph *worker_graph)
+    SubGraph *worker_graph, bool is_sub_main)
 
 {
   std::unordered_map<std::string, int> ps_graph_count;
@@ -1159,6 +1163,7 @@ Status GraphPartitionerBase::CompleteMainGraphV3(
 
   std::map<int, NodeDef*> added_nodes;
   std::map<InputSrcKey, NodeDef*> bridge_nodes_map;
+  std::unordered_set<std::string> sub_locs;
   for (const SubGraph &sub_graph : sub_graphs) {
     if (sub_graph.GetInputEdges().empty() &&
         sub_graph.GetOutputEdges().empty() &&
@@ -1186,15 +1191,47 @@ Status GraphPartitionerBase::CompleteMainGraphV3(
     s = ProcessRunGraphOutputs(sub_graph, worker_device,
                                &graph_def, run_graph_node_def, &bridge_nodes_map,
                                &added_nodes);
+    sub_locs.insert(sub_graph.GetLoc());
     RETURN_IF_NOT_OK(s);
   }
 
+  const std::string &loc = worker_graph->GetLoc();
+  bool use_send_recv = false;
+  std::map<InputSrcKey, NodeDef*> input_src_nodes_map;
   for (const Node* node : worker_graph->GetNodes()) {
     if (added_nodes.find(node->id()) == added_nodes.end()) {
       NodeDef *node_def = graph_def.add_node();
       Status s = ConstructNodeDef(node, node_def);
       if (!s.ok()) {
         return s;
+      }
+
+      if (is_sub_main) {
+        if (node->IsVariable() && !worker_graph->IsOnlyVariable()) {
+          continue;
+        }
+
+        if (node->IsIdentity() &&
+            GetVarOfIdentity(node) != NULL &&
+            !worker_graph->IsOnlyVariable()) {
+          continue;
+        }
+
+        std::vector<std::pair<std::string, const Edge*>> boundary_input_edges;
+        s = ProcessSubNodeInputs(node, loc, node_def,
+                                 &graph_def, &input_src_nodes_map,
+                                 &boundary_input_edges,
+                                 use_send_recv);
+        RETURN_IF_NOT_OK(s);
+        worker_graph->AddInputs(boundary_input_edges);
+
+        std::vector<std::pair<std::string, const Edge*>> boundary_output_edges;
+        s = ProcessSubNodeOutputs(node, loc, node_def, &graph_def,
+                                  &boundary_output_edges,
+                                  use_send_recv, &sub_locs);
+        RETURN_IF_NOT_OK(s);
+        worker_graph->SetSendRecvFlag(use_send_recv);
+        worker_graph->AddOutputs(boundary_output_edges);
       }
     }
   }
