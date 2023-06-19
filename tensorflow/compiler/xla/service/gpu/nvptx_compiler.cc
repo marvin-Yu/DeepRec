@@ -542,7 +542,9 @@ std::vector<uint8> NVPTXCompiler::CompilePtxOrGetCachedResult(
   tensorflow::profiler::TraceMe activity(
       "PTX->CUBIN", tensorflow::profiler::TraceMeLevel::kInfo);
 
-  if (ptx_cache_dir.empty()) {
+  bool disable_memory_cubin_cache;
+  tensorflow::ReadBoolFromEnvVar("TF_DISABLE_MEMORY_CUBIN_CACHE", false, &disable_memory_cubin_cache);
+  if (ptx_cache_dir.empty() || disable_memory_cubin_cache) {
     return CompilePtx(stream_exec, ptx, cc_major, cc_minor, hlo_module_config);
   }
 
