@@ -223,9 +223,7 @@ port::StatusOr<std::vector<uint8>> CompilePtx(int device_ordinal,
     } else {
       LOG(WARNING) << "Get response failed "
 	           << ImageReq.getResponseCode()
-	           << " "
-	           << ImageReq.getResponseContent() << "."
-                   << " ptx_path = " << ptx_path
+                   << ", ptx_path = " << ptx_path
                    << ", cubin_path = " << cubin_path;
     }
   } else {
