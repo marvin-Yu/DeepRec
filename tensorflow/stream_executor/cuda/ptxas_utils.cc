@@ -213,6 +213,7 @@ port::StatusOr<std::vector<uint8>> CompilePtx(int device_ordinal,
   ImageReq.setRequestProperty("Connection", "close\r\n");
 
   bool remote_succ = false;
+  auto start_us = env->NowMicros();
   int conn_ret = ImageReq.connect();
   if (conn_ret == 0) {
     ImageReq.send();
@@ -220,20 +221,43 @@ port::StatusOr<std::vector<uint8>> CompilePtx(int device_ordinal,
     if (ImageReq.getResponseCode() == 200) {
       remote_succ = true;
     } else {
-      VLOG(0) << "Get response failed " 
-	      << ImageReq.getResponseCode()
-	      << " " 
-	      << ImageReq.getResponseContent();
+      LOG(WARNING) << "Get response failed "
+	           << ImageReq.getResponseCode()
+                   << ", ptx_path = " << ptx_path
+                   << ", cubin_path = " << cubin_path;
     }
   } else {
-    VLOG(0) << "Connect failed " << conn_ret;
+    LOG(WARNING) << "Connect failed " << conn_ret << "."
+                 << " ptx_path = " << ptx_path
+                 << ", cubin_path = " << cubin_path;
   }
+  auto end_us = env->NowMicros();
+  VLOG(0) << "Compile ptx using remote server cost: " << (end_us - start_us)
+          << " microseconds."
+          << " ptx_path = " << ptx_path
+          << ", cubin_path = " << cubin_path;
   ImageReq.close();
   nvtxRangePop();
 
-  if (!remote_succ ) {
+  uint64 cubin_size = 0;
+  if (env->FileExists(cubin_path).ok()) {
+    env->GetFileSize(cubin_path, &cubin_size);
+    if (cubin_size == 0) {
+      LOG(WARNING) << "Remote compile result file is empty."
+                   << " ptx_path = " << ptx_path
+                   << ", cubin_path = " << cubin_path;
+    }
+  } else {
+    LOG(WARNING) << "Remote compile result file doesn't exist."
+                 << " ptx_path = " << ptx_path
+                 << ", cubin_path = " << cubin_path;
+  }
+
+  if (!remote_succ || cubin_size == 0) {
     nvtxRangePushA("ptxas local compile");
-    LOG(WARNING) << "Remote ptxas fail, use local";
+    LOG(WARNING) << "Remote ptxas fail, use local."
+                 << " ptx_path = " << ptx_path
+                 << ", cubin_path = " << cubin_path;
     std::vector<string> ptxas_args = {
         ptxas_path, ptx_path, "-o", cubin_path,
         absl::StrCat("-arch=sm_", cc_major, cc_minor)};
@@ -266,6 +290,9 @@ port::StatusOr<std::vector<uint8>> CompilePtx(int device_ordinal,
   TF_RETURN_IF_ERROR(tensorflow::ReadFileToString(tensorflow::Env::Default(),
                                                   cubin_path, &cubin));
   std::vector<uint8> cubin_vector(cubin.begin(), cubin.end());
+  VLOG(0) << "Compile ptx done, cubin size = " << cubin_vector.size() << "."
+          << " ptx_path = " << ptx_path
+          << ", cubin_path = " << cubin_path;
   return cubin_vector;
 }
 

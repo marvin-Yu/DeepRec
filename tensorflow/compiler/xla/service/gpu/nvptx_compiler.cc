@@ -479,9 +479,12 @@ NVPTXCompiler::CompileTargetBinary(const HloModule* module,
   string cubin_filename = std::to_string(key) + ".cubin";
   std::vector<uint8> cubin =
       CompilePtxOrGetCachedResult(stream_exec, ptx, compute_capability.first,
-                                  compute_capability.second, module->config(), 
-								  cubin_cache_dir, cubin_filename);
-
+                                  compute_capability.second, module->config(),
+                                  cubin_cache_dir, cubin_filename);
+  if (cubin.size() == 0) {
+    string ptx_filename = std::to_string(key) + ".ptx";
+    VLOG(0) << "load empty cubin, ptx is " << ptx_filename;
+  }
   VLOG(5) << "maybe load cubin size:" << cubin.size();
 
   return std::pair<std::string, std::vector<uint8>>(std::move(ptx),
@@ -502,6 +505,7 @@ std::vector<uint8> NVPTXCompiler::CompilePtx(
     VLOG(2) << "Compiled PTX size:" << ptx.size()
             << " CUBIN size: " << cubin_data.size();
   } else {
+    LOG(ERROR) << "compile ptx failed: " << maybe_cubin.status().ToString();
     bool log_warning = true;
     if (maybe_cubin.status().code() ==
         tensorflow::error::Code::NOT_FOUND) {
@@ -538,7 +542,9 @@ std::vector<uint8> NVPTXCompiler::CompilePtxOrGetCachedResult(
   tensorflow::profiler::TraceMe activity(
       "PTX->CUBIN", tensorflow::profiler::TraceMeLevel::kInfo);
 
-  if (ptx_cache_dir.empty()) {
+  bool disable_memory_cubin_cache;
+  tensorflow::ReadBoolFromEnvVar("TF_DISABLE_MEMORY_CUBIN_CACHE", false, &disable_memory_cubin_cache);
+  if (ptx_cache_dir.empty() || disable_memory_cubin_cache) {
     return CompilePtx(stream_exec, ptx, cc_major, cc_minor, hlo_module_config);
   }
 
@@ -582,6 +588,7 @@ std::vector<uint8> NVPTXCompiler::CompilePtxOrGetCachedResult(
                 DumpCubinToFileInDir(cubin_cache_dir, cubin_filename, cache_value->cubin_data);
             }
           } else {
+            LOG(ERROR) << "compile ptx failed: " << maybe_cubin.status().ToString();
             bool log_warning = true;
             if (maybe_cubin.status().code() ==
                 tensorflow::error::Code::NOT_FOUND) {

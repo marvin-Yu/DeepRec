@@ -698,6 +698,9 @@ void XlaRunOp::Compute(OpKernelContext* ctx) {
       shape_inference_done = std::make_shared<absl::Notification>();
       shape_infer_thread_pool_->Schedule([&]() {
         InferOutputShape(ctx, closure.compilation_result(), inputs_shape_info);
+        if (!shape_inference_done) {
+          LOG(ERROR) << "shape_inference_done has been released!";
+        }
         shape_inference_done->Notify();
       });
     }
@@ -723,12 +726,18 @@ void XlaRunOp::Compute(OpKernelContext* ctx) {
         },
         tensorflow::profiler::TraceMeLevel::kInfo);
 
-  OP_REQUIRES_OK(
-      ctx,
-      launch_context.PopulateInputs(
-          ctx, closure.compilation_result(), closure.resource_var_snapshots(),
-          /*missing_ctx_input_prefix=*/closure.num_constant_args(),
-          inputs_shape_info, tmp_inputs));
+    Status s = launch_context.PopulateInputs(
+        ctx, closure.compilation_result(), closure.resource_var_snapshots(),
+        /*missing_ctx_input_prefix=*/closure.num_constant_args(),
+        inputs_shape_info, tmp_inputs);
+    if (!TF_PREDICT_TRUE(s.ok())) {
+      ctx->CtxFailureWithWarning(__FILE__, __LINE__, s);
+      LOG(ERROR) << "XlaRunOp PopulateInputs failed, " << s.ToString();
+      if (inputs_shape_info && shape_inference_done) {
+        shape_inference_done->WaitForNotification();
+      }
+      return;
+    }
   }
   se::Stream* stream =
       ctx->op_device_context() ? ctx->op_device_context()->stream() : nullptr;
@@ -752,8 +761,14 @@ void XlaRunOp::Compute(OpKernelContext* ctx) {
     run_result =
         closure.executable()->RunAsync(launch_context.arguments(), run_options);
   }
-  OP_REQUIRES(ctx, run_result.ok(), run_result.status());
-
+  if (!TF_PREDICT_TRUE(run_result.ok())) {
+    ctx->CtxFailure(__FILE__, __LINE__, run_result.status());
+    LOG(ERROR) << "XlaRunOp executable->Run failed, " << run_result.status().ToString();
+    if (inputs_shape_info && shape_inference_done) {
+      shape_inference_done->WaitForNotification();
+    }
+    return;
+  }
   if (inputs_shape_info && shape_inference_done) {
     auto start = Env::Default()->NowMicros();
     shape_inference_done->WaitForNotification();
