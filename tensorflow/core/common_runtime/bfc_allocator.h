@@ -519,6 +519,9 @@ class BFCAllocator : public Allocator {
 
   friend class GPUBFCAllocatorPrivateMethodsTest;
   TF_DISALLOW_COPY_AND_ASSIGN(BFCAllocator);
+
+  // Whether increase the region size of the next required allocation.
+  bool increase_next_region_size_ = true;
 };
 
 }  // namespace tensorflow

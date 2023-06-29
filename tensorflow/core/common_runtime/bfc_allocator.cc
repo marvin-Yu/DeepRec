@@ -26,6 +26,7 @@ limitations under the License.
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/types.h"
+#include "tensorflow/core/util/env_var.h"
 
 namespace tensorflow {
 
@@ -37,15 +38,20 @@ BFCAllocator::BFCAllocator(SubAllocator* sub_allocator, size_t total_memory,
       name_(name),
       free_chunks_list_(kInvalidChunkHandle),
       next_allocation_id_(1) {
+  ReadBoolFromEnvVar("TF_BFC_ALLOCATOR_INCREASE_NEXT_REGION_SIZE",
+                     /*default_val=*/true, &increase_next_region_size_);
   if (allow_growth) {
-    // 1MiB smallest initial allocation, unless total memory available
-    // is less.
+    // 1MiB smallest initial allocation, unless total memory available is less.
+    int64 init_megabytes = 512;
+    ReadInt64FromEnvVar("TF_BFC_ALLOCATOR_INIT_MEGABYTES",
+                        /*default_val=*/512, &init_megabytes);
+    init_megabytes = init_megabytes < 1 ? 1 : init_megabytes;
     curr_region_allocation_bytes_ =
-        RoundedBytes(std::min(total_memory, size_t{1024 * 1024 * 512 /*1048576*/}));
+        RoundedBytes(std::min(total_memory, size_t{1024 * 1024 * init_megabytes /*1048576*/}));
   } else {
     curr_region_allocation_bytes_ = RoundedBytes(total_memory);
-    LOG(INFO) << "curr_region_allocation_bytes_ = " << curr_region_allocation_bytes_;
   }
+  LOG(INFO) << "Initial allocation bytes: " << curr_region_allocation_bytes_;
 
   // Allocate the requested amount of memory.
   memory_limit_ = total_memory;
@@ -150,20 +156,19 @@ bool BFCAllocator::Extend(size_t alignment, size_t rounded_bytes) {
     return false;
   }
 
-  if (!increased_allocation) {
+  if (!increased_allocation && increase_next_region_size_) {
     // Increase the region size of the next required allocation.
     curr_region_allocation_bytes_ *= 2;
   }
 
-  VLOG(1) << "Extending allocation by " << strings::HumanReadableNumBytes(bytes)
-          << " bytes.";
-
   total_region_allocated_bytes_ += bytes;
-  VLOG(1) << "Total allocated bytes: "
-          << strings::HumanReadableNumBytes(total_region_allocated_bytes_);
 
-  VLOG(1) << "Allocated memory at " << mem_addr << " to "
-          << static_cast<void*>(static_cast<char*>(mem_addr) + bytes);
+  LOG(INFO) << "Extending allocation by " << strings::HumanReadableNumBytes(bytes)
+            << " bytes. Total allocated bytes: "
+            << strings::HumanReadableNumBytes(total_region_allocated_bytes_)
+            << ". Allocated memory at " << mem_addr << " to "
+            << static_cast<void*>(static_cast<char*>(mem_addr) + bytes);
+
   region_manager_.AddAllocationRegion(mem_addr, bytes);
 
   // Create one large chunk for the whole memory space that will
