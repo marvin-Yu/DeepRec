@@ -187,6 +187,9 @@ Status BlazePredictor::PrepareCallableOptions(CallableOptions &callable_options)
   if (blaze_run_options_.run_mode() == BlazeKernelOptions::TRACE) {
     need_trace_ = true;
     callable_options.mutable_run_options()->set_trace_tensor_infos(true);
+  } else if (blaze_run_options_.run_mode() == BlazeKernelOptions::TIMELNE) {
+    need_trace_ = true;
+    callable_options.mutable_run_options()->set_trace_level(RunOptions::SOFTWARE_TRACE);
   }
   return Status::OK();
 }
