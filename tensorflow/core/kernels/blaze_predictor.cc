@@ -355,7 +355,7 @@ Status BlazePredictor::ComputeSplited(OpKernelContext* ctx) {
       if (need_trace_ || (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats)) {
         RunMetadata metadata;
         st = session_->RunCallable(this->handle_, real_inputs, &outputs, &metadata);
-        (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
+        if (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
           ctx->traced_infos()->UpdateProfStats(&metadata);
         }
         if (need_trace_) {
