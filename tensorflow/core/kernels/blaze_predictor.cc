@@ -187,7 +187,7 @@ Status BlazePredictor::PrepareCallableOptions(CallableOptions &callable_options)
   if (blaze_run_options_.run_mode() == BlazeKernelOptions::TRACE) {
     need_trace_ = true;
     callable_options.mutable_run_options()->set_trace_tensor_infos(true);
-  } else if (blaze_run_options_.run_mode() == BlazeKernelOptions::TIMELNE) {
+  } else if (blaze_run_options_.run_mode() == BlazeKernelOptions::TIMELINE) {
     need_trace_ = true;
     callable_options.mutable_run_options()->set_trace_level(RunOptions::SOFTWARE_TRACE);
   }
@@ -283,10 +283,12 @@ Status BlazePredictor::Compute(OpKernelContext* ctx) {
   std::vector<Tensor> real_inputs(inputs.size());
   TF_RETURN_IF_ERROR(PrepareInputs(inputs, &real_inputs, ctx));
 
-  if (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
+  if (need_trace_ || (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats)) {
     RunMetadata metadata;
     TF_RETURN_IF_ERROR(session_->RunCallable(handle_, real_inputs, &outputs, &metadata));
-    ctx->traced_infos()->UpdateProfStats(&metadata);
+    if (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
+      ctx->traced_infos()->UpdateProfStats(&metadata);
+    }
     if (need_trace_) {
       DumpFile(metadata);
     }
@@ -350,10 +352,12 @@ Status BlazePredictor::ComputeSplited(OpKernelContext* ctx) {
         } \
       }
       RETURN_AND_SUB();
-      if (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
+      if (need_trace_ || (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats)) {
         RunMetadata metadata;
         st = session_->RunCallable(this->handle_, real_inputs, &outputs, &metadata);
-        ctx->traced_infos()->UpdateProfStats(&metadata);
+        (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
+          ctx->traced_infos()->UpdateProfStats(&metadata);
+        }
         if (need_trace_) {
           DumpFile(metadata, i);
         }
