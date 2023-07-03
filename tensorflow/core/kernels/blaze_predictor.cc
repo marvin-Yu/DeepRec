@@ -283,10 +283,12 @@ Status BlazePredictor::Compute(OpKernelContext* ctx) {
   std::vector<Tensor> real_inputs(inputs.size());
   TF_RETURN_IF_ERROR(PrepareInputs(inputs, &real_inputs, ctx));
 
-  if (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
+  if (need_trace_ || (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats)) {
     RunMetadata metadata;
     TF_RETURN_IF_ERROR(session_->RunCallable(handle_, real_inputs, &outputs, &metadata));
-    ctx->traced_infos()->UpdateProfStats(&metadata);
+    if (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
+      ctx->traced_infos()->UpdateProfStats(&metadata);
+    }
     if (need_trace_) {
       DumpFile(metadata);
     }
@@ -350,10 +352,12 @@ Status BlazePredictor::ComputeSplited(OpKernelContext* ctx) {
         } \
       }
       RETURN_AND_SUB();
-      if (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
+      if (need_trace_ || (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats)) {
         RunMetadata metadata;
         st = session_->RunCallable(this->handle_, real_inputs, &outputs, &metadata);
-        ctx->traced_infos()->UpdateProfStats(&metadata);
+        if (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
+          ctx->traced_infos()->UpdateProfStats(&metadata);
+        }
         if (need_trace_) {
           DumpFile(metadata, i);
         }

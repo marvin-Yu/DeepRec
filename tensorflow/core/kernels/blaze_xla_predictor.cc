@@ -134,8 +134,15 @@ Status BlazeXlaPredictor::Warmup(OpKernelContext* ctx) {
     std::vector<Tensor> padded_outputs;
 
     VLOG(0) << "RunCallable handle_ " << handle_ << " session_ " << session_.get();
-    status = session_->RunCallable(
-         handle_, sliced_inputs, &padded_outputs, nullptr);
+    if (need_trace_) {
+      RunMetadata metadata;
+      status = session_->RunCallable(
+          handle_, sliced_inputs, &padded_outputs, &metadata);
+    } else {
+      status = session_->RunCallable(
+          handle_, sliced_inputs, &padded_outputs, nullptr);
+    }
+    
     VLOG(0) << "RunCallable handle_ " << handle_ << " session_ " << session_.get() << " finish";
     if (!status.ok()) {
       return status;
@@ -416,11 +423,14 @@ Status BlazeXlaPredictor::ComputeNoPadding(OpKernelContext* ctx,
   std::vector<Tensor> real_inputs(inputs.size());
 
   TF_RETURN_IF_ERROR(PrepareInputs(inputs, &real_inputs, ctx));
-  if (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
+  if ((ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats)
+      || need_trace_) {
     RunMetadata metadata;
     TF_RETURN_IF_ERROR(session_->RunCallable(
             handle_, real_inputs, &outputs, &metadata));
-    ctx->traced_infos()->UpdateProfStats(&metadata);
+    if (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
+      ctx->traced_infos()->UpdateProfStats(&metadata);
+    }
     if (need_trace_) {
       DumpFile(metadata);
     }
@@ -507,11 +517,16 @@ Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
 
     // Call SessionRun
     std::vector<Tensor> padded_outputs;
-    if (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
+    if ((ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) || need_trace_) {
       RunMetadata metadata;
       TF_RETURN_IF_ERROR(session_->RunCallable(
               handle_, padded_inputs, &padded_outputs, &metadata));
-      ctx->traced_infos()->UpdateProfStats(&metadata);
+      if (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
+        ctx->traced_infos()->UpdateProfStats(&metadata);
+      }
+      if (need_trace_) {
+        DumpFile(metadata);
+      }
     } else {
       TF_RETURN_IF_ERROR(session_->RunCallable(
               handle_, padded_inputs, &padded_outputs, nullptr));
@@ -538,11 +553,16 @@ Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
     std::vector<Tensor> real_inputs(inputs.size());
 
     TF_RETURN_IF_ERROR(PrepareInputs(inputs, &real_inputs, ctx));
-    if (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
+    if ((ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) || need_trace_) {
       RunMetadata metadata;
       TF_RETURN_IF_ERROR(session_->RunCallable(
               handle_, real_inputs, &outputs, &metadata));
-      ctx->traced_infos()->UpdateProfStats(&metadata);
+      if (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
+        ctx->traced_infos()->UpdateProfStats(&metadata);
+      }
+      if (need_trace_) {
+        DumpFile(metadata);
+      }
     } else {
       TF_RETURN_IF_ERROR(session_->RunCallable(
               handle_, real_inputs, &outputs, nullptr));
