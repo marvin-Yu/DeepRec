@@ -117,7 +117,7 @@ class MklFusedMatMulOp : public MklDnnMatMulOpBase<T, T> {
         MEMORY_FORMAT::nc);
 
     // Extend the basic parameters for data types and fusions.
-    auto st = ExecuteSingleThreadedGemm(batch, k, channel);
+    auto st = ExecuteSingleThreadedGemm(batch, channel, k);
     MklDnnThreadPool eigen_tp(ctx, st ? 1 : -1);
     ExtendMklDnnMatMulFwdParams(ctx, matmul_params);
     bool do_not_cache = MklPrimitiveFactory<T>::IsPrimitiveMemOptEnabled();
