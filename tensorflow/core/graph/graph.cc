@@ -103,6 +103,7 @@ const std::unordered_map<string, Node::NodeClass>& Node::kNodeClassTable =
         {"_Retval", NC_RETVAL},
         {"_DeviceRetval", NC_RETVAL},
         {"BlazeXlaOp", NC_BLAZE},
+        {"RapidEmbeddingReduceOp", NC_BLAZE},
     });
 
 #undef REF_CLASS
