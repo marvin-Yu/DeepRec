@@ -93,6 +93,9 @@ message RewriterConfig {
 
   Toggle dice_fusion = 25;
 
+  // check nan/inf value in model
+  Toggle check_nan_optimization = 26;
+
   // Disable the entire meta optimizer (off by default).
   bool disable_meta_optimizer = 19;
 

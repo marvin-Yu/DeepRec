@@ -43,6 +43,7 @@ limitations under the License.
 #include "tensorflow/core/grappler/optimizers/partial_mixed_precision.h"
 #include "tensorflow/core/grappler/optimizers/merge_gemm_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/fold_continuous_fc.h"
+#include "tensorflow/core/grappler/optimizers/check_nan_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/generic_layout_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/implementation_selector.h"
 #include "tensorflow/core/grappler/optimizers/loop_optimizer.h"
@@ -349,6 +350,10 @@ Status MetaOptimizer::InitializeOptimizers(
   if (cfg_.scoped_allocator_optimization()) {
     optimizers->push_back(MakeUnique<ScopedAllocatorOptimizer>(
         cfg_.scoped_allocator_optimization(), cfg_.scoped_allocator_opts()));
+  }
+  if (cfg_.check_nan_optimization() == RewriterConfig::ON) {
+	LOG(INFO) << "check nan optimization push back";
+    optimizers->push_back(MakeUnique<CheckNanOptimizer>());
   }
   return InitializeCustomGraphOptimizers(std::set<string>(), optimizers);
 }
@@ -941,6 +946,7 @@ bool MetaOptimizerEnabled(const ConfigProto& cfg) {
          rewrite_cfg.scoped_allocator_optimization() == RewriterConfig::ON ||
          rewrite_cfg.pin_to_host_optimization() == RewriterConfig::ON ||
          rewrite_cfg.gemm_optimization() != RewriterConfig::OFF ||
+         rewrite_cfg.check_nan_optimization() == RewriterConfig::ON ||
          AutoMixedPrecisionEnabled(rewrite_cfg.auto_mixed_precision()) ||
          !rewrite_cfg.optimizers().empty() ||
          !rewrite_cfg.custom_optimizers().empty();

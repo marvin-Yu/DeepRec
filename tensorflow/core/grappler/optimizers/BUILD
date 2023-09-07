@@ -679,6 +679,7 @@ cc_library(
         ":partial_mixed_precision",
         ":merge_gemm_optimizer",
         ":fold_continuous_fc",
+        ":check_nan_optimizer",
         ":loop_optimizer",
         ":memory_optimizer",
         ":model_pruner",
@@ -1419,5 +1420,17 @@ cc_library(
         ":graph_optimizer",
         "//tensorflow/core:framework",
         "//tensorflow/core:graph",
+    ],
+)
+cc_library(
+    name = "check_nan_optimizer",
+    srcs = ["check_nan_optimizer.cc"],
+    hdrs = ["check_nan_optimizer.h",],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":graph_optimizer",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:graph",
+        "//tensorflow/core/grappler:grappler_item",
     ],
 )

@@ -956,6 +956,13 @@ REGISTER_OP("IsFinite")
     .Attr("T: {bfloat16, half, float, double}")
     .SetShapeFn(shape_inference::UnchangedShape);
 
+REGISTER_OP("CheckInputFinite")
+    .Input("x: T")
+    .Output("y: T")
+    .Attr("T: {bfloat16, half, float, double}")
+	.Attr("dump_input: bool = false")
+    .SetShapeFn(shape_inference::UnchangedShape);
+
 REGISTER_OP("Sign")
     .Input("x: T")
     .Output("y: T")

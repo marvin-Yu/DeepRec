@@ -1333,6 +1333,12 @@ tf_kernel_library(
     ]) + ARRAY_DEPS,
 )
 
+tf_kernel_library(
+    name = "check_input_finite_op",
+    srcs = ["check_input_finite_op.cc"],
+    deps = ARRAY_DEPS,
+)
+
 cc_library(
     name = "ragged_ops",
     deps = [
@@ -3694,6 +3700,7 @@ cc_library(
         ":blaze_bias_dice_op",
         ":indicator_matmul_op",
         ":indicator_batched_small_matmul_op",
+        ":check_input_finite_op",
         ":matmul_op",
         ":nextafter_op",
         ":population_count_op",
