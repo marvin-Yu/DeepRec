@@ -120,6 +120,8 @@ class Executor {
     ProfStats real_prof_stats;
     bool enable_prof_stats;
 
+    int stream_id = -1;
+
     std::shared_ptr<UserTracedInfos> traced_infos;
     // for benchmarking in blaze, trace tensor shaope, if interger, tensor
     // values together

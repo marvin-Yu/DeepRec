@@ -137,10 +137,10 @@ Status BlazeXlaPredictor::Warmup(OpKernelContext* ctx) {
     if (need_trace_) {
       RunMetadata metadata;
       status = session_->RunCallable(
-          handle_, sliced_inputs, &padded_outputs, &metadata);
+          handle_, sliced_inputs, &padded_outputs, &metadata, ctx->stream_id());
     } else {
       status = session_->RunCallable(
-          handle_, sliced_inputs, &padded_outputs, nullptr);
+          handle_, sliced_inputs, &padded_outputs, nullptr, ctx->stream_id());
     }
     
     VLOG(0) << "RunCallable handle_ " << handle_ << " session_ " << session_.get() << " finish";
@@ -216,7 +216,7 @@ Status BlazeXlaPredictor::PadToStaticCPUToGPU(const std::vector<Tensor>& inputs,
         return allocate_status;
       }
     } else {
-      Tensor padded_tensor(blaze_allocator_, inputs[i].dtype(), pad_to_shape);
+      Tensor padded_tensor(GetAllocator(ctx->stream_id()), inputs[i].dtype(), pad_to_shape);
       (*padded_inputs)[i] = padded_tensor;
     }
     const uint8* input_ptr = (uint8*)GetTensorAddress(&inputs[i]);
@@ -257,13 +257,13 @@ Status BlazeXlaPredictor::PadToStaticCPUToGPU(const std::vector<Tensor>& inputs,
       auto padded_dev_ptr = AsDeviceMemory(padded_ptr, padded_size);
       if (DataTypeIsInteger(inputs[i].dtype())) {
         bool copy_status =
-            GetStream()->ThenMemZero(&padded_dev_ptr, padded_size).ok();
+            GetStream(ctx->stream_id())->ThenMemZero(&padded_dev_ptr, padded_size).ok();
         if (!copy_status) {
           return errors::Internal("MemZero failed.");
         }
       }
       bool copy_status =
-          GetStream()->ThenMemcpy(&padded_dev_ptr, input_ptr, input_size).ok();
+          GetStream(ctx->stream_id())->ThenMemcpy(&padded_dev_ptr, input_ptr, input_size).ok();
       if (!copy_status) {
         return errors::Internal("MemcpyH2D for padding inputs failed.");
       }
@@ -396,7 +396,7 @@ Status BlazeXlaPredictor::SliceToDynamicCPU(const std::vector<Tensor>& padded_ou
     TF_RETURN_IF_ERROR(ctx->allocate_temp(tmp_tensor.dtype(),
           tmp_tensor.shape(), &tensor, alloc_attrs));
     uint8* host_add = (uint8*)GetTensorAddress(&tensor);
-    auto stream = GetStream();
+    auto stream = GetStream(ctx->stream_id());
     stream->ThenMemcpy(host_add, tmp_dev_ptr, tmp_size);
     auto event = std::make_shared<Event>(stream->parent());
     if (!event->Init()) {
@@ -427,7 +427,7 @@ Status BlazeXlaPredictor::ComputeNoPadding(OpKernelContext* ctx,
       || need_trace_) {
     RunMetadata metadata;
     TF_RETURN_IF_ERROR(session_->RunCallable(
-            handle_, real_inputs, &outputs, &metadata));
+            handle_, real_inputs, &outputs, &metadata, ctx->stream_id()));
     if (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
       ctx->traced_infos()->UpdateProfStats(&metadata);
     }
@@ -436,7 +436,7 @@ Status BlazeXlaPredictor::ComputeNoPadding(OpKernelContext* ctx,
     }
   } else {
     TF_RETURN_IF_ERROR(session_->RunCallable(
-            handle_, real_inputs, &outputs, nullptr));
+            handle_, real_inputs, &outputs, nullptr, ctx->stream_id()));
   }
 
   std::vector<Tensor> real_outputs(outputs.size());
@@ -520,7 +520,7 @@ Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
     if ((ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) || need_trace_) {
       RunMetadata metadata;
       TF_RETURN_IF_ERROR(session_->RunCallable(
-              handle_, padded_inputs, &padded_outputs, &metadata));
+              handle_, padded_inputs, &padded_outputs, &metadata, ctx->stream_id()));
       if (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
         ctx->traced_infos()->UpdateProfStats(&metadata);
       }
@@ -529,7 +529,7 @@ Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
       }
     } else {
       TF_RETURN_IF_ERROR(session_->RunCallable(
-              handle_, padded_inputs, &padded_outputs, nullptr));
+              handle_, padded_inputs, &padded_outputs, nullptr, ctx->stream_id()));
     }
 
     // Unpad outputs
@@ -556,7 +556,7 @@ Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
     if ((ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) || need_trace_) {
       RunMetadata metadata;
       TF_RETURN_IF_ERROR(session_->RunCallable(
-              handle_, real_inputs, &outputs, &metadata));
+              handle_, real_inputs, &outputs, &metadata, ctx->stream_id()));
       if (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
         ctx->traced_infos()->UpdateProfStats(&metadata);
       }
@@ -565,7 +565,7 @@ Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
       }
     } else {
       TF_RETURN_IF_ERROR(session_->RunCallable(
-              handle_, real_inputs, &outputs, nullptr));
+              handle_, real_inputs, &outputs, nullptr, ctx->stream_id()));
     }
 
     std::vector<Tensor> real_outputs(outputs.size());

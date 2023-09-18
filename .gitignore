@@ -28,6 +28,11 @@ tensorflow/contrib/cmake/_build/
 _bazel_*
 *~
 rpm/.dep_create/*
+*.backup
+*.qdrep
+*.nsys-rep
+*.log
+tensor_*.txt
 
 # Android
 .gradle

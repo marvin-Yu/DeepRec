@@ -1276,6 +1276,8 @@ class ExecutorState {
   TracedInfosPtr traced_infos_ = nullptr;
   bool trace_tensor_infos_;
 
+  int stream_id_ = -1;
+
   const bool vlog_;  // true if VLOG_IS_ON(1). Used to check vlog cheaply.
 
   // true if LogMemory::IsEnabled(). Used to check memory enabled cheaply.
@@ -1432,7 +1434,7 @@ ExecutorState::ExecutorState(const Executor::Args& args, ExecutorImpl* impl)
       prof_stats_(args.prof_stats),
       traced_infos_(args.traced_infos),
       trace_tensor_infos_(args.trace_tensor_infos),
-
+      stream_id_(args.stream_id),
       log_memory_(LogMemory::IsEnabled()),
       step_id_(args.step_id),
       tensor_holder(args.tensor_holder),
@@ -1702,6 +1704,8 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
   //[PROF-STATS]
   params.prof_stats = prof_stats_;
   params.traced_infos = traced_infos_;
+
+  params.stream_id = stream_id_;
 
   params.step_id = step_id_;
   params.round_step_id = round_step_id_;

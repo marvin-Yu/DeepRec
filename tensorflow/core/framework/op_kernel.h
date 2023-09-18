@@ -636,6 +636,7 @@ class OpKernelContext {
     //[PROF-STATS] unused, replaced by traced_infos
     ProfStats* prof_stats = nullptr;
     TracedInfosPtr traced_infos = nullptr;
+    int stream_id = -1;
 
     // The step being executed.
     int64 step_id = 0;
@@ -773,6 +774,8 @@ class OpKernelContext {
   ProfStats* prof_stats() const { return params_->prof_stats; };
   TracedInfosPtr traced_infos() const { return params_->traced_infos; }
   ProfStatsPtr prof_stats_ptr() const;
+
+  int stream_id() const {return params_->stream_id; }
   
   int64 round_step_id() const { return params_->round_step_id; }
   int64 step_id() const { return params_->step_id; }

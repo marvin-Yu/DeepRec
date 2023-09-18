@@ -388,6 +388,14 @@ DirectSession::DirectSession(const SessionOptions& options,
     LOG(ERROR) << status.error_message();
   }
 
+  status = ReadInt64FromEnvVar("TF_GPU_STREAM_GROUP_COUNT", 0, &gpu_stream_group_count_);
+  if (!status.ok()) {
+    LOG(ERROR) << status.error_message();
+  }
+  if (gpu_stream_group_count_ > 1) {
+    stream_group_mgr_ = absl::make_unique<StreamGroupMgr>(gpu_stream_group_count_);
+  }
+
   session_handle_ = "direct";
   int devices_added = 0;
   if (options.config.log_device_placement()) {
@@ -743,7 +751,7 @@ Status DirectSession::RunInternal(
     int64 step_id, const RunOptions& run_options,
     CallFrameInterface* call_frame, ExecutorsAndKeys* executors_and_keys,
     RunMetadata* run_metadata,
-    const thread::ThreadPoolOptions& threadpool_options,
+    const thread::ThreadPoolOptions& threadpool_options, int blaze_stream_id,
     CudaGraphMeta* cuda_graph_meta) {
   const uint64 start_time_usecs = options_.env->NowMicros();
   const int64 executor_step_count = executors_and_keys->step_count.fetch_add(1);
@@ -805,6 +813,13 @@ Status DirectSession::RunInternal(
         run_state.executors_done.Notify();
       });
 
+  int stream_group_idx;
+
+  if (is_blaze_) {
+    stream_group_idx = blaze_stream_id;
+  } else {
+    stream_group_idx = RequireStreamGroup(); 
+  }
   Executor::Args args;
   args.AddSettings(run_options);
   args.step_id = step_id;
@@ -821,6 +836,7 @@ Status DirectSession::RunInternal(
   args.step_container = &run_state.step_container;
   args.sync_on_finish = sync_on_finish_;
   args.user_intra_op_threadpool = threadpool_options.intra_op_threadpool;
+  args.stream_id = stream_group_idx;
 
   //[DYNAMIC-SHAPE]
   if (gemm_dynamic_batchsize_) {
@@ -960,8 +976,12 @@ Status DirectSession::RunInternal(
   }
 #endif
 
-  for (const auto& item : executors_and_keys->items) {
-    
+  for (int i = 0; i < executors_and_keys->items.size(); ++i) {
+    const auto& item =
+        stream_group_idx == -1 ||
+        stream_group_idx >= executors_and_keys->stream_items[i].size()
+            ? executors_and_keys->items[i]
+            : executors_and_keys->stream_items[i][stream_group_idx];
     // TODO(azaks): support partial run.
     // TODO(azaks): if the device picks its own threadpool, we need to assign
     //     less threads to the main compute pool by default.
@@ -1003,7 +1023,7 @@ Status DirectSession::RunInternal(
       args.tensor_holder = tensor_holder;
     }
 #endif
-    
+
     item.executor->RunAsync(args, barrier->Get());
 
   }
@@ -1018,6 +1038,10 @@ Status DirectSession::RunInternal(
     // outputs as this would make it block forever.
     mutex_lock l(run_state.mu_);
     run_state.status.Update(errors::Cancelled("Run call was cancelled"));
+  }
+
+  if (!is_blaze_) {
+    ReleaseStreamGroup(stream_group_idx);
   }
 
   if (profiler_session) {
@@ -1433,15 +1457,18 @@ void DirectSession::RunInternalAsync(
   const size_t num_executors = executors_and_keys->items.size();
   auto args = std::make_shared<Executor::Args>();
 
+  int stream_group_idx = RequireStreamGroup();
+
   ExecutorBarrier* barrier = new ExecutorBarrier(
       num_executors, run_state->rendez, [this, run_state, done, run_options,
-      output_names, target_nodes, outputs, run_metadata,
-      frame, start_time_usecs, args] (const Status& ret) {
+      output_names, target_nodes, outputs, run_metadata, frame,
+      start_time_usecs, args, stream_group_idx] (const Status& ret) {
       {
         mutex_lock l(run_state->mu_);
         run_state->status.Update(ret);
       }
       run_state->executors_done.Notify();
+      this->ReleaseStreamGroup(stream_group_idx);
       auto s = this->AfterRunAsync(run_options, output_names, target_nodes,
                                    outputs, frame, run_metadata, start_time_usecs);
       if (args->traced_infos) {
@@ -1467,6 +1494,7 @@ void DirectSession::RunInternalAsync(
 
   args->enable_prof_stats = enable_prof_stats_;
   args->flops = flops;
+  args->stream_id = stream_group_idx;
 
   const bool do_trace = (run_options.trace_level() > RunOptions::NO_TRACE);
 
@@ -1583,8 +1611,13 @@ void DirectSession::RunInternalAsync(
       pool->Schedule(std::move(c));
     };
   }
-
-  for (const auto& item : executors_and_keys->items) {
+  
+  for (int i = 0; i < executors_and_keys->items.size(); ++i) {
+    const auto& item =
+        stream_group_idx == -1 ||
+        stream_group_idx >= executors_and_keys->stream_items[i].size()
+            ? executors_and_keys->items[i]
+            : executors_and_keys->stream_items[i][stream_group_idx];
     // TODO(azaks): support partial run.
     // TODO(azaks): if the device picks its own threadpool, we need to assign
     //     less threads to the main compute pool by default.
@@ -1900,7 +1933,7 @@ Status DirectSession::RunForCapture(const RunOptions& run_options,
 
   TF_RETURN_IF_ERROR(RunInternal(step_id, run_options, &call_frame,
                                  executors_and_keys, run_metadata,
-                                 thread::ThreadPoolOptions(),
+                                 thread::ThreadPoolOptions(), -1,
                                  cuda_graph_meta));
 
   // Receive outputs.
@@ -2559,6 +2592,7 @@ Status DirectSession::CreateExecutors(
     }
   }
   ek->items.reserve(graphs.size());
+  ek->stream_items.reserve(graphs.size());
   const auto& optimizer_opts =
       options_.config.graph_options().optimizer_options();
 
@@ -2575,94 +2609,209 @@ Status DirectSession::CreateExecutors(
     
     Device* device;
     TF_RETURN_IF_ERROR(device_mgr_->LookupDevice(partition_name, &device));
-
-    ek->items.resize(ek->items.size() + 1);
-    auto* item = &(ek->items.back());
-    auto lib = func_info->proc_flr->GetFLR(partition_name);
-    if (lib == nullptr) {
-      return errors::Internal("Could not find device: ", partition_name);
-    }
-    item->flib = lib;
-
-    LocalExecutorParams params;
-    params.device = device;
-    params.session_metadata =
-        options_.config.experimental().has_session_metadata()
-            ? &options_.config.experimental().session_metadata()
-            : nullptr;
-    params.function_library = lib;
     auto opseg = device->op_segment();
-    params.create_kernel = [this, lib, opseg](const NodeDef& ndef,
-                                              OpKernel** kernel) {
-      // NOTE(mrry): We must not share function kernels (implemented
-      // using `CallOp`) between subgraphs, because `CallOp::handle_`
-      // is tied to a particular subgraph. Even if the function itself
-      // is stateful, the `CallOp` that invokes it is not.
-      if (!OpSegment::ShouldOwnKernel(lib, ndef.op())) {
-        return lib->CreateKernel(ndef, kernel);
+  
+    auto stream_num = device->GetStreamNum();
+    ek->items.resize(ek->items.size() + 1);
+    if (stream_num <= 0) {
+      // turn off multi-stream, go back to the original code.
+      auto* item = &(ek->items.back());
+      auto lib = func_info->proc_flr->GetFLR(partition_name);
+      if (lib == nullptr) {
+        return errors::Internal("Could not find device: ", partition_name);
       }
-      auto create_fn = [lib, &ndef](OpKernel** kernel) {
-        return lib->CreateKernel(ndef, kernel);
+      item->flib = lib;
+
+      LocalExecutorParams params;
+      params.device = device;
+      params.session_metadata =
+          options_.config.experimental().has_session_metadata()
+              ? &options_.config.experimental().session_metadata()
+              : nullptr;
+      params.function_library = lib;
+      params.create_kernel = [this, lib, opseg](const NodeDef& ndef,
+                                                OpKernel** kernel) {
+        // NOTE(mrry): We must not share function kernels (implemented
+        // using `CallOp`) between subgraphs, because `CallOp::handle_`
+        // is tied to a particular subgraph. Even if the function itself
+        // is stateful, the `CallOp` that invokes it is not.
+        if (!OpSegment::ShouldOwnKernel(lib, ndef.op())) {
+          return lib->CreateKernel(ndef, kernel);
+        }
+        auto create_fn = [lib, &ndef](OpKernel** kernel) {
+          return lib->CreateKernel(ndef, kernel);
+        };
+        // Kernels created for subgraph nodes need to be cached.  On
+        // cache miss, create_fn() is invoked to create a kernel based
+        // on the function library here + global op registry.
+        return opseg->FindOrCreate(session_handle_, ndef.name(), kernel,
+                                  create_fn);
       };
-      // Kernels created for subgraph nodes need to be cached.  On
-      // cache miss, create_fn() is invoked to create a kernel based
-      // on the function library here + global op registry.
-      return opseg->FindOrCreate(session_handle_, ndef.name(), kernel,
-                                 create_fn);
-    };
-    params.delete_kernel = [lib](OpKernel* kernel) {
-      if (kernel && !OpSegment::ShouldOwnKernel(lib, kernel->type_string()))
-        delete kernel;
-    };
-    params.rendezvous_factory = [](const int64, const DeviceMgr* device_mgr,
-                                   Rendezvous** r) {
-      *r = new IntraProcessRendezvous(device_mgr);
-      return Status::OK();
-    };
+      params.delete_kernel = [lib](OpKernel* kernel) {
+        if (kernel && !OpSegment::ShouldOwnKernel(lib, kernel->type_string()))
+          delete kernel;
+      };
+      params.rendezvous_factory = [](const int64, const DeviceMgr* device_mgr,
+                                    Rendezvous** r) {
+        *r = new IntraProcessRendezvous(device_mgr);
+        return Status::OK();
+      };
 
-    params.node_outputs_cb = node_outputs_callback_;
-    optimizer.Optimize(lib, options_.env, device, &partition_graph,
-                       /*shape_map=*/nullptr);
+      params.node_outputs_cb = node_outputs_callback_;
+      optimizer.Optimize(lib, options_.env, device, &partition_graph,
+                        /*shape_map=*/nullptr);
 
-    // TensorFlow Debugger (tfdbg) inserts debug nodes in the graph.
-    const DebugOptions& debug_options =
-        options.callable_options.run_options().debug_options();
-    if (!debug_options.debug_tensor_watch_opts().empty()) {
-      TF_RETURN_IF_ERROR(DecorateAndPublishGraphForDebug(
-          debug_options, partition_graph.get(), params.device));
-    }
-
-    TF_RETURN_IF_ERROR(EnsureMemoryTypes(DeviceType(device->device_type()),
-                                         device->name(),
-                                         partition_graph.get()));
-    // NewLocalExecutor takes ownership of partition_graph.
-    item->graph = partition_graph.get();
-    item->executor = nullptr;
-    item->device = device;
-    auto executor_type = options_.config.experimental().executor_type();
-    if (executor_type == "SINGLE_THREADED_EXECUTOR") {
-      auto status = CheckSingleThreadExecutorAvailable(partition_graph.get());
-      if (status.ok()) {
-        TF_RETURN_IF_ERROR(NewExecutor(
-             executor_type, params, std::move(partition_graph), &item->executor));
-      } else {
-        LOG(WARNING) << "Try to create " << executor_type << " executor failed: "
-                     << status.error_message()
-                     << ", Fallback to create default executor.";
-        TF_RETURN_IF_ERROR(NewExecutor(
-            "DEFAULT", params, std::move(partition_graph), &item->executor));
+      // TensorFlow Debugger (tfdbg) inserts debug nodes in the graph.
+      const DebugOptions& debug_options =
+          options.callable_options.run_options().debug_options();
+      if (!debug_options.debug_tensor_watch_opts().empty()) {
+        TF_RETURN_IF_ERROR(DecorateAndPublishGraphForDebug(
+            debug_options, partition_graph.get(), params.device));
       }
-    } else {
-      auto status = NewExecutor(executor_type, params, std::move(partition_graph), &item->executor);
-      if (!status.ok()) {
-        // Fallback to create default executor
-        if (executor_type != "DEFAULT") {
-          LOG(WARNING) << "Try to create " << executor_type << " executor failed. Error: " << status.error_message() << "."
-                      << "Fallback to create default executor.";
+
+      TF_RETURN_IF_ERROR(EnsureMemoryTypes(DeviceType(device->device_type()),
+                                          device->name(),
+                                          partition_graph.get()));
+      // NewLocalExecutor takes ownership of partition_graph.
+      item->graph = partition_graph.get();
+      item->executor = nullptr;
+      item->device = device;
+      auto executor_type = options_.config.experimental().executor_type();
+      if (executor_type == "SINGLE_THREADED_EXECUTOR") {
+        auto status = CheckSingleThreadExecutorAvailable(partition_graph.get());
+        if (status.ok()) {
+          TF_RETURN_IF_ERROR(NewExecutor(
+              executor_type, params, std::move(partition_graph), &item->executor));
+        } else {
+          LOG(WARNING) << "Try to create " << executor_type << " executor failed: "
+                      << status.error_message()
+                      << ", Fallback to create default executor.";
           TF_RETURN_IF_ERROR(NewExecutor(
               "DEFAULT", params, std::move(partition_graph), &item->executor));
+        }
+      } else {
+        auto status = NewExecutor(executor_type, params, std::move(partition_graph), &item->executor);
+        if (!status.ok()) {
+          // Fallback to create default executor
+          if (executor_type != "DEFAULT") {
+            LOG(WARNING) << "Try to create " << executor_type << " executor failed. Error: " << status.error_message() << "."
+                        << "Fallback to create default executor.";
+            TF_RETURN_IF_ERROR(NewExecutor(
+                "DEFAULT", params, std::move(partition_graph), &item->executor));
+          } else {
+            return status;
+          }
+        }
+      }
+    }
+    ek->stream_items.resize(ek->stream_items.size() + 1);
+    if (stream_num > 0) {
+      // turn on multi-stream, create the multi-executors
+      auto* stream_items = &(ek->stream_items.back());
+      stream_items->reserve(stream_num);
+
+      // optimizer only once
+      auto lib = func_info->proc_flr->GetFLR(partition_name);
+      optimizer.Optimize(lib, options_.env, device, &partition_graph,
+                        /*shape_map=*/nullptr);
+      const DebugOptions& debug_options =
+          options.callable_options.run_options().debug_options();
+      if (!debug_options.debug_tensor_watch_opts().empty()) {
+        TF_RETURN_IF_ERROR(DecorateAndPublishGraphForDebug(
+            debug_options, partition_graph.get(), device));
+      }
+      TF_RETURN_IF_ERROR(EnsureMemoryTypes(DeviceType(device->device_type()),
+                                          device->name(),
+                                          partition_graph.get()));
+
+      std::vector<FunctionLibraryRuntime*> stream_libs;
+      for (int executor_index(0); executor_index < stream_num; ++executor_index) {
+        stream_libs.push_back(
+          func_info->proc_flr->GetFLR(device->GetStreamDevice(executor_index)->name()));
+      }
+      for (int executor_index(0); executor_index < stream_num; ++executor_index) {
+        stream_items->resize(stream_items->size() + 1);
+        auto* item = &(stream_items->back());
+
+        auto lib = stream_libs[executor_index];
+        if (lib == nullptr) {
+          return errors::Internal("Could not find device: ", partition_name);
+        }
+        item->flib = lib;
+
+        static size_t const_stream_idx = 0;
+        LocalExecutorParams params;
+        params.device = device->GetStreamDevice(executor_index); 
+        params.session_metadata =
+            options_.config.experimental().has_session_metadata()
+                ? &options_.config.experimental().session_metadata()
+                : nullptr;
+        params.function_library = lib;
+        params.create_kernel = [this, lib, opseg, stream_num, stream_libs](
+                                  const NodeDef& ndef, OpKernel** kernel) {
+          // NOTE(mrry): We must not share function kernels (implemented
+          // using `CallOp`) between subgraphs, because `CallOp::handle_`
+          // is tied to a particular subgraph. Even if the function itself
+          // is stateful, the `CallOp` that invokes it is not.
+          if (!OpSegment::ShouldOwnKernel(lib, ndef.op())) {
+            return lib->CreateKernel(ndef, kernel);
+          }
+          auto create_fn = [lib, &ndef, stream_num, stream_libs](OpKernel** kernel) {
+            if (ndef.op() == "Const") {
+              const_stream_idx = (const_stream_idx + 1) % stream_num;
+              return stream_libs[const_stream_idx]->CreateKernel(ndef, kernel);
+            } else {
+              return lib->CreateKernel(ndef, kernel);
+            }
+          };
+          // Kernels created for subgraph nodes need to be cached.  On
+          // cache miss, create_fn() is invoked to create a kernel based
+          // on the function library here + global op registry.
+          return opseg->FindOrCreate(session_handle_, ndef.name(), kernel,
+                                     create_fn);
+        };
+        params.delete_kernel = [lib](OpKernel* kernel) {
+          if (kernel && !OpSegment::ShouldOwnKernel(lib, kernel->type_string()))
+            delete kernel;
+        };
+        params.rendezvous_factory = [](const int64, const DeviceMgr* device_mgr,
+                                      Rendezvous** r) {
+          *r = new IntraProcessRendezvous(device_mgr);
+          return Status::OK();
+        };
+        params.node_outputs_cb = node_outputs_callback_;
+
+        std::unique_ptr<Graph> stream_graph(new Graph(func_info->flib_def.get()));
+        CopyGraph(*partition_graph, stream_graph.get());
+        item->graph = stream_graph.get();
+        item->executor = nullptr;
+        item->device = params.device;
+        auto executor_type = options_.config.experimental().executor_type();
+        if (executor_type == "SINGLE_THREADED_EXECUTOR") {
+          auto status = CheckSingleThreadExecutorAvailable(stream_graph.get());
+          if (status.ok()) {
+            TF_RETURN_IF_ERROR(NewExecutor(
+                executor_type, params, std::move(stream_graph), &item->executor));
+          } else {
+            LOG(WARNING) << "Try to create " << executor_type << " executor failed: "
+                        << status.error_message()
+                        << ", Fallback to create default executor.";
+            TF_RETURN_IF_ERROR(NewExecutor(
+                "DEFAULT", params, std::move(stream_graph), &item->executor));
+          }
         } else {
-          return status;
+          auto status = NewExecutor(executor_type, params, std::move(stream_graph), &item->executor);
+          if (!status.ok()) {
+            // Fallback to create default executor
+            if (executor_type != "DEFAULT") {
+              LOG(WARNING) << "Try to create " << executor_type << " executor failed. Error: " << status.error_message() << "."
+                          << "Fallback to create default executor.";
+              TF_RETURN_IF_ERROR(NewExecutor(
+                  "DEFAULT", params, std::move(stream_graph), &item->executor));
+            } else {
+              return status;
+            }
+          }
         }
       }
     }
@@ -3354,17 +3503,17 @@ class DirectSession::RunCallableCallFrame : public CallFrameInterface {
 ::tensorflow::Status DirectSession::RunCallable(
     CallableHandle handle, const std::vector<Tensor>& feed_tensors,
     std::vector<Tensor>* fetch_tensors, RunMetadata* run_metadata,
-    uint64_t before_padding, uint64_t after_padding) {
+    int blaze_stream_id, uint64_t before_padding, uint64_t after_padding) {
   return RunCallable(handle, feed_tensors, fetch_tensors, run_metadata,
-                     thread::ThreadPoolOptions(), before_padding,
-                     after_padding);
+                     thread::ThreadPoolOptions(), blaze_stream_id,
+                     before_padding, after_padding);
 }
 
 ::tensorflow::Status DirectSession::RunCallable(
     CallableHandle handle, const std::vector<Tensor>& feed_tensors,
     std::vector<Tensor>* fetch_tensors, RunMetadata* run_metadata,
     const thread::ThreadPoolOptions& threadpool_options,
-    uint64_t before_padding, uint64_t after_padding) {
+    int blaze_stream_id, uint64_t before_padding, uint64_t after_padding) {
   TF_RETURN_IF_ERROR(CheckNotClosed());
   TF_RETURN_IF_ERROR(CheckGraphCreated("RunCallable()"));
   direct_session_runs->GetCell()->IncrementBy(1);
@@ -3428,7 +3577,7 @@ class DirectSession::RunCallableCallFrame : public CallFrameInterface {
 
   TF_RETURN_IF_ERROR(RunInternal(
       step_id, executors_and_keys->callable_options.run_options(), &call_frame,
-      executors_and_keys.get(), run_metadata, threadpool_options));
+      executors_and_keys.get(), run_metadata, threadpool_options, blaze_stream_id));
 
   if (fetch_tensors != nullptr) {
     size_t output_size = 0;
@@ -3458,6 +3607,110 @@ DirectSession::Callable::~Callable() {
   // or not).
   executors_and_keys.reset();
   function_info.reset();
+}
+
+int DirectSession::RequireStreamGroup() {
+  // turn off multi-stream
+  if (gpu_stream_group_count_ == 0) {
+    return -1;
+  }
+  // only stream_0
+  if (gpu_stream_group_count_ == 1) {
+    return 0;
+  }
+  return stream_group_mgr_->Require();
+}
+
+void DirectSession::ReleaseStreamGroup(const int stream_id) {
+  // turn off multi-stream or only stream_0
+  if (gpu_stream_group_count_ <= 1 || stream_group_mgr_ == nullptr) {
+    return;
+  }
+  if (stream_id < 0 || stream_id >= gpu_stream_group_count_) {
+    LOG(ERROR) << "Invalid value for stream_id: " << stream_id << ", max stream id: " 
+                << gpu_stream_group_count_ << " when ReleaseStreamGroup()";
+  } else {
+    stream_group_mgr_->Release(stream_id);
+  }
+}
+
+StreamGroupMgr::StreamGroupMgr(const size_t total_num)
+    : total_num_(total_num), swap_left_(1) {
+  stream_group_heap_.resize(total_num);
+  for (int i = 0; i < total_num; ++i) {
+    stream_group_heap_[i] = absl::make_unique<StreamGroupNode>(i);
+    id2heap_map_.insert(std::make_pair(i, i));
+  }
+}
+
+void StreamGroupMgr::swap(const size_t idx1, const size_t idx2) {
+  id2heap_map_[stream_group_heap_[idx1]->id_] = idx2;
+  id2heap_map_[stream_group_heap_[idx2]->id_] = idx1;
+  std::swap(stream_group_heap_[idx1], stream_group_heap_[idx2]);
+}
+
+int StreamGroupMgr::Require() {
+  mutex_lock l(mu_);
+  int ret(stream_group_heap_[0]->id_);
+  ++stream_group_heap_[0]->workload_;
+  size_t ptr(0);
+  while (true) {
+    if (2 * ptr + 2 >= total_num_) {
+      if (2 * ptr + 2 == total_num_ &&
+          stream_group_heap_[ptr]->workload_ >
+              stream_group_heap_[2 * ptr + 1]->workload_) {
+        swap(ptr, 2 * ptr + 1);
+      }
+      break;
+    }
+    if (stream_group_heap_[2 * ptr + 1]->workload_ <
+        stream_group_heap_[2 * ptr + 2]->workload_) {
+      if (stream_group_heap_[ptr]->workload_ >
+          stream_group_heap_[2 * ptr + 1]->workload_) {
+        swap(ptr, 2 * ptr + 1);
+        ptr = 2 * ptr + 1;
+      } else
+        break;
+    } else if (stream_group_heap_[2 * ptr + 1]->workload_ >
+               stream_group_heap_[2 * ptr + 2]->workload_) {
+      if (stream_group_heap_[ptr]->workload_ >
+          stream_group_heap_[2 * ptr + 2]->workload_) {
+        swap(ptr, 2 * ptr + 2);
+        ptr = 2 * ptr + 2;
+      } else
+        break;
+    } else {
+      if (stream_group_heap_[ptr]->workload_ >
+          stream_group_heap_[2 * ptr + 1]->workload_) {
+        if (swap_left_) {
+          swap(ptr, 2 * ptr + 1);
+          ptr = 2 * ptr + 1;
+          swap_left_--;
+        } else {
+          swap(ptr, 2 * ptr + 2);
+          ptr = 2 * ptr + 2;
+          swap_left_++;
+        }
+      } else
+        break;
+    }
+  }
+  return ret;
+}
+
+void StreamGroupMgr::Release(const int stream_id) {
+  mutex_lock l(mu_);
+  size_t ptr(id2heap_map_[stream_id]);
+  --stream_group_heap_[ptr]->workload_;
+  while (ptr != 0) {
+    size_t parent = (ptr + 1) / 2 - 1;
+    if (stream_group_heap_[ptr]->workload_ <
+        stream_group_heap_[parent]->workload_) {
+      swap(ptr, parent);
+      ptr = parent;
+    } else
+      break;
+  }
 }
 mutex BlazeConfSingleton::mu_;
 }  // namespace tensorflow
