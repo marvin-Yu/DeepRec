@@ -29,13 +29,18 @@ namespace stream_executor {
 
 namespace {
 static absl::once_flag flag_init;
-static void SetNumCudaContexts(int ordinal, int64* num_cuda_contexts) {
+static void SetNumCudaContexts(int ordinal, int64* num_cuda_contexts, int64* num_streams) {
   *num_cuda_contexts = 1;
+  *num_streams = 1;
 #ifdef GOOGLE_CUDA
   int64 num_contexts_env;
   tensorflow::ReadInt64FromEnvVar("TF_NUM_CONTEXTS_PER_GPU", 4, &num_contexts_env);
   if (num_contexts_env > 0) *num_cuda_contexts = num_contexts_env;
   LOG(INFO) << "TF_NUM_CONTEXTS_PER_GPU = " << *num_cuda_contexts;
+
+  int64 num_streams_env;
+  tensorflow::ReadInt64FromEnvVar("TF_GPU_STREAM_GROUP_COUNT", 1, &num_streams_env);
+  if (num_streams_env > 0) *num_streams = num_streams_env;
 #endif  // GOOGLE_CUDA
 }
 }  // end namespace
@@ -47,17 +52,17 @@ port::StatusOr<StreamExecutor*> ExecutorCache::GetOrCreate(
   // return after Get() which only takes a shared lock and not a unique lock.
   // If we need to create, we take a unique lock on cache_.
   static int64 num_cuda_contexts = 1;
-  absl::call_once(flag_init, &SetNumCudaContexts, config.ordinal, &num_cuda_contexts);
+  static int64 num_streams = 1;
+  absl::call_once(flag_init, &SetNumCudaContexts, config.ordinal, &num_cuda_contexts, &num_streams);
 
-  auto fast_result = Get(config, num_cuda_contexts);
+  auto fast_result = Get(config, num_cuda_contexts, num_streams);
   if (fast_result.ok()) {
     return fast_result;
   }
 
-  LOG(INFO) << "TF_NUM_CONTEXTS_PER_GPU = " << num_cuda_contexts;
   std::string key = std::to_string(config.ordinal) + "," +
-                    std::to_string(config.virtual_ordinal % num_cuda_contexts) + "," +
-                    std::to_string(config.stream_id % num_cuda_contexts);
+                    std::to_string((config.virtual_ordinal * num_streams + config.stream_id) % num_cuda_contexts);
+  LOG(INFO) << "TF_NUM_CONTEXTS_PER_GPU = " << num_cuda_contexts << ", context key:" << key;
   Entry* entry = nullptr;
   {
     absl::MutexLock lock{&mutex_};
@@ -92,10 +97,9 @@ port::StatusOr<StreamExecutor*> ExecutorCache::GetOrCreate(
 
 port::StatusOr<StreamExecutor*> ExecutorCache::Get(
     const StreamExecutorConfig& config,
-    int num_cuda_contexts) {
+    int num_cuda_contexts, int num_streams) {
   std::string key = std::to_string(config.ordinal) + "," +
-                    std::to_string(config.virtual_ordinal % num_cuda_contexts) + "," +
-                    std::to_string(config.stream_id % num_cuda_contexts);
+                    std::to_string((config.virtual_ordinal * num_streams + config.stream_id) % num_cuda_contexts);
   Entry* entry = nullptr;
   {
     absl::ReaderMutexLock lock{&mutex_};
