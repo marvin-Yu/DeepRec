@@ -50,10 +50,15 @@ XlaCompilationCache::XlaCompilationCache(xla::LocalClient* client,
                                          std::string name)
     : client_(client), device_type_(std::move(device_type)),
       name_(name), exit_flag_(false) {
+  int64 stream_count = 1;
+  int64 threads_num = 1;
+  ReadInt64FromEnvVar("TF_GPU_STREAM_GROUP_COUNT", 1, &stream_count);
+  ReadInt64FromEnvVar("TF_XLA_COMPILE_THREADS_NUM", stream_count > 1 ? stream_count : 1, &threads_num);
+  LOG(INFO) << "TF_XLA_COMPILE_THREADS_NUM: " << TF_XLA_COMPILE_THREADS_NUM;
   xla_auto_padding_ = std::make_shared<XlaAutoPadding>(name_);
   compile_thread_pool_ = std::make_shared<thread::ThreadPool>(
 						        Env::Default(), ThreadOptions(), strings::StrCat("xla_compile"),
-						        1, /*low_latency_hint*/true,
+						        threads_num, /*low_latency_hint*/true,
 						        /*allocator=*/nullptr);
 }
 
