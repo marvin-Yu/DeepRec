@@ -58,6 +58,43 @@ class Device;
 class DirectSessionFactory;
 class CallbackFrame;
 
+// StreamGroupMgr manages the allocation and recycling of stream groups. It
+// maintains a min-heap, so it can give the stream group with the lowest load at
+// each request.
+class StreamGroupMgr {
+ public:
+  StreamGroupMgr(const size_t total_num);
+  virtual ~StreamGroupMgr(){};
+
+  // Apply for a stream group.
+  int Require();
+
+  // Release the stream group when finish using it.
+  void Release(const int stream_id);
+
+ private:
+  // One stream group is represented by a node in the min-heap. The node
+  // contains a workload counter to record how many workloads are running in the
+  // stream group, and an accumulator to record how many times has the node been
+  // used for. New task should be allocated to the node of the lowest load.
+  struct StreamGroupNode {
+    int id_;
+    int workload_;
+    StreamGroupNode(const int id, const int workload = 0)
+        : id_(id), workload_(workload) {}
+  };
+
+  // Swap two stream group nodes.
+  void swap(const size_t, const size_t);
+
+  size_t total_num_;
+  mutable mutex mu_;
+  int swap_left_ GUARDED_BY(mu_);
+  std::vector<std::unique_ptr<StreamGroupNode>> stream_group_heap_
+      GUARDED_BY(mu_);
+  std::unordered_map<int, size_t> id2heap_map_ GUARDED_BY(mu_);
+};
+
 class DirectSession : public Session {
  public:
   typedef std::function<void(Session*)> CloseCallback;
@@ -123,6 +160,7 @@ class DirectSession : public Session {
                                    const std::vector<Tensor>& feed_tensors,
                                    std::vector<Tensor>* fetch_tensors,
                                    RunMetadata* run_metadata,
+                                   int blaze_stream_id = -1,
                                    uint64_t before_padding = 0,
                                    uint64_t after_padding = 0) override;
 
@@ -130,6 +168,7 @@ class DirectSession : public Session {
       CallableHandle handle, const std::vector<Tensor>& feed_tensors,
       std::vector<Tensor>* fetch_tensors, RunMetadata* run_metadata,
       const thread::ThreadPoolOptions& threadpool_options,
+      int blaze_stream_id = -1,
       uint64_t before_padding = 0,
       uint64_t after_padding = 0) override;
 
@@ -142,6 +181,9 @@ class DirectSession : public Session {
                                           const std::vector<std::string>& target_nodes,
                                           const ::tensorflow::RunOptions& run_options);
 
+  int RequireStreamGroup() override;
+
+  void ReleaseStreamGroup(const int stream_id) override;
 
 #ifdef GOOGLE_CUDA
   ::tensorflow::Status CreateForCapture(const GraphDef& graph) override;
@@ -247,6 +289,7 @@ class DirectSession : public Session {
     std::unique_ptr<Graph> graph;
     NameNodeMap name_to_node;
     std::vector<PerPartitionExecutorsAndLib> items;
+    std::vector<std::vector<PerPartitionExecutorsAndLib>> stream_items;
     std::unordered_map<string, size_t> input_name_to_index;
     std::unordered_map<string, string> input_name_to_rendezvous_key;
     std::unordered_map<string, size_t> output_name_to_index;
@@ -344,7 +387,7 @@ class DirectSession : public Session {
       int64 step_id, const RunOptions& run_options,
       CallFrameInterface* call_frame, ExecutorsAndKeys* executors_and_keys,
       RunMetadata* run_metadata,
-      const thread::ThreadPoolOptions& threadpool_options,
+      const thread::ThreadPoolOptions& threadpool_options, int blaze_stream_id = -1,
       CudaGraphMeta* cuda_graph_meta = nullptr);
 
   void RunInternalAsync(
@@ -455,6 +498,8 @@ class DirectSession : public Session {
   bool enable_prof_stats_ = true;
   int64 sampling_prof_stats_steps_ = kProfStatsSampleRatio;
 
+  int64 gpu_stream_group_count_ = 0;
+
   // If true, blocks until device has finished all queued operations in a step.
   bool sync_on_finish_ = true;
 
@@ -548,6 +593,8 @@ class DirectSession : public Session {
   bool run_in_caller_thread_ = false;
   bool force_run_in_caller_thread_ = false;
   bool pai_enable_online_tuning_;
+
+  std::unique_ptr<StreamGroupMgr> stream_group_mgr_;
 
   TF_DISALLOW_COPY_AND_ASSIGN(DirectSession);
 

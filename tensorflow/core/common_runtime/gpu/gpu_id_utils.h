@@ -35,16 +35,28 @@ class GpuIdUtil {
     return gpu_manager->ExecutorForDevice(platform_gpu_id.value());
   }
   static se::port::StatusOr<se::StreamExecutor*> ExecutorForPlatformGpuId(
+      se::Platform* gpu_manager, PlatformGpuId platform_gpu_id,
+      int stream_id) {
+    return gpu_manager->ExecutorForDevice(platform_gpu_id.value(), 0, stream_id);
+  }
+  static se::port::StatusOr<se::StreamExecutor*> ExecutorForPlatformGpuId(
       PlatformGpuId platform_gpu_id) {
     return ExecutorForPlatformGpuId(GPUMachineManager(), platform_gpu_id);
   }
+  static se::port::StatusOr<se::StreamExecutor*> ExecutorForPlatformGpuId(
+      PlatformGpuId platform_gpu_id, int stream_id) {
+    return ExecutorForPlatformGpuId(GPUMachineManager(), platform_gpu_id,
+                                    stream_id);
+  }
   static se::port::StatusOr<se::StreamExecutor*> ExecutorForTfGpuId(
       se::Platform* gpu_manager, PlatformGpuId platform_gpu_id, TfGpuId tf_gpu_id) {
-    const int virtual_gpus = gpu_manager->VirtualDeviceCount();
-    const int visible_gpus = gpu_manager->VisibleDeviceCount();
-    int temp = tf_gpu_id.value();
-    if (virtual_gpus / visible_gpus > 0) temp = temp % (virtual_gpus / visible_gpus);
-    return gpu_manager->ExecutorForDevice(platform_gpu_id.value(), temp);
+    const int virtual_gpus = gpu_manager->VirtualDeviceCount(platform_gpu_id.value());
+    return gpu_manager->ExecutorForDevice(platform_gpu_id.value(), tf_gpu_id.value() % virtual_gpus);
+  }
+  static se::port::StatusOr<se::StreamExecutor*> ExecutorForTfGpuId(
+      se::Platform* gpu_manager, PlatformGpuId platform_gpu_id, TfGpuId tf_gpu_id, int stream_id) {
+    const int virtual_gpus = gpu_manager->VirtualDeviceCount(platform_gpu_id.value());
+    return gpu_manager->ExecutorForDevice(platform_gpu_id.value(), tf_gpu_id.value() % virtual_gpus, stream_id);
   }
   static se::port::StatusOr<se::StreamExecutor*> ExecutorForTfGpuId(
       TfGpuId tf_gpu_id) {
@@ -53,6 +65,13 @@ class GpuIdUtil {
         GpuIdManager::TfToPlatformGpuId(tf_gpu_id, &platform_gpu_id));
     // return ExecutorForPlatformGpuId(platform_gpu_id);
     return ExecutorForTfGpuId(GPUMachineManager(), platform_gpu_id, tf_gpu_id);
+  }
+  static se::port::StatusOr<se::StreamExecutor*> ExecutorForTfGpuId(
+      TfGpuId tf_gpu_id, int stream_id) {
+    PlatformGpuId platform_gpu_id;
+    TF_RETURN_IF_ERROR(
+        GpuIdManager::TfToPlatformGpuId(tf_gpu_id, &platform_gpu_id));
+    return ExecutorForTfGpuId(GPUMachineManager(), platform_gpu_id, tf_gpu_id, stream_id);
   }
 
   // Verify that the platform_gpu_id associated with a TfGpuId is legitimate.

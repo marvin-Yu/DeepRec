@@ -285,7 +285,7 @@ Status BlazePredictor::Compute(OpKernelContext* ctx) {
 
   if (need_trace_ || (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats)) {
     RunMetadata metadata;
-    TF_RETURN_IF_ERROR(session_->RunCallable(handle_, real_inputs, &outputs, &metadata));
+    TF_RETURN_IF_ERROR(session_->RunCallable(handle_, real_inputs, &outputs, &metadata, ctx->stream_id()));
     if (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
       ctx->traced_infos()->UpdateProfStats(&metadata);
     }
@@ -293,7 +293,7 @@ Status BlazePredictor::Compute(OpKernelContext* ctx) {
       DumpFile(metadata);
     }
   } else {
-    TF_RETURN_IF_ERROR(session_->RunCallable(handle_, real_inputs, &outputs, nullptr));
+    TF_RETURN_IF_ERROR(session_->RunCallable(handle_, real_inputs, &outputs, nullptr, ctx->stream_id()));
   }
 
   std::vector<Tensor> real_outputs(outputs.size());
@@ -354,7 +354,7 @@ Status BlazePredictor::ComputeSplited(OpKernelContext* ctx) {
       RETURN_AND_SUB();
       if (need_trace_ || (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats)) {
         RunMetadata metadata;
-        st = session_->RunCallable(this->handle_, real_inputs, &outputs, &metadata);
+        st = session_->RunCallable(this->handle_, real_inputs, &outputs, &metadata, ctx->stream_id());
         if (ctx->traced_infos() && ctx->traced_infos()->enable_sampling_prof_stats) {
           ctx->traced_infos()->UpdateProfStats(&metadata);
         }
@@ -362,7 +362,7 @@ Status BlazePredictor::ComputeSplited(OpKernelContext* ctx) {
           DumpFile(metadata, i);
         }
       } else {
-        st = session_->RunCallable(this->handle_, real_inputs, &outputs, nullptr);
+        st = session_->RunCallable(this->handle_, real_inputs, &outputs, nullptr, ctx->stream_id());
       }
       RETURN_AND_SUB();
       std::vector<Tensor> real_outputs(outputs.size());
@@ -458,13 +458,11 @@ Status BlazePredictor::SetDeviceInfo(OpKernelConstruction* ctx) {
       if (!dev_info) {
         return errors::Internal("get gpu device info failed");
       }
-      AllocatorAttributes alloc_attrs;
-      alloc_attrs.set_on_host(false);
-      blaze_allocator_ = blaze_device_->GetAllocator(alloc_attrs);
+      blaze_allocator_ = GetAllocator();
       if (!blaze_allocator_) {
         return errors::Internal("get gpu allocator failed");
       }
-      stream_ = GetStream();
+      auto stream_ = GetStream();
       if (!stream_) {
         return errors::Internal("get stream_ for ", blaze_device_, " failed" );
       }
@@ -473,15 +471,17 @@ Status BlazePredictor::SetDeviceInfo(OpKernelConstruction* ctx) {
   }
 }
 
-stream_executor::Stream* BlazePredictor::GetStream() const {
+stream_executor::Stream* BlazePredictor::GetStream(int stream_id) const {
   #if GOOGLE_CUDA
   TfGpuId tf_gpu_id(vgpu_id_);
-  auto* se = GpuIdUtil::ExecutorForTfGpuId(tf_gpu_id).ValueOrDie();
+  // turn off multi-stream, the original stream id is 0.
+  if (stream_id == -1) stream_id = 0;
+  auto* se = GpuIdUtil::ExecutorForTfGpuId(tf_gpu_id, stream_id).ValueOrDie();
 
   if (!se) { return nullptr; }
   static tensorflow::GPUOptions gpu_options;
   auto sg = tensorflow::StreamGroupFactory::Global().GetOrCreate(
-      tf_gpu_id, 0, se, gpu_options);
+      tf_gpu_id, stream_id, se, gpu_options);
   if (!sg) {
     VLOG(0) << "get stream group failed";
     return nullptr;
@@ -491,6 +491,15 @@ stream_executor::Stream* BlazePredictor::GetStream() const {
   #else
     return nullptr;
   #endif
+}
+
+Allocator* BlazePredictor::GetAllocator(int stream_id) const {
+  AllocatorAttributes alloc_attrs;
+  alloc_attrs.set_on_host(false);
+  if (stream_id == -1) {
+    return blaze_device_->GetAllocator(alloc_attrs);
+  }
+  return blaze_device_->GetStreamDevice(stream_id)->GetAllocator(alloc_attrs);
 }
 
 void BlazePredictor::RawInputsDebugLogging(OpKernelContext* ctx) const {
@@ -542,7 +551,7 @@ Status BlazePredictor::CopyTensorCPUToGPU(const std::vector<Tensor>& inputs,
       (*real_inputs)[i] = inputs[i];
       continue;
     }
-    Tensor copyed_tensor(blaze_allocator_, inputs[i].dtype(), inputs[i].shape());
+    Tensor copyed_tensor(GetAllocator(ctx->stream_id()), inputs[i].dtype(), inputs[i].shape());
     (*real_inputs)[i] = copyed_tensor;
 
     const uint8* input_ptr = (uint8*)GetTensorAddress(&inputs[i]);
@@ -556,7 +565,7 @@ Status BlazePredictor::CopyTensorCPUToGPU(const std::vector<Tensor>& inputs,
 #if GOOGLE_CUDA
       auto real_dev_ptr = AsDeviceMemory(real_ptr, real_size);
       bool copy_status =
-          GetStream()->ThenMemcpy(&real_dev_ptr, input_ptr, input_size).ok();
+          GetStream(ctx->stream_id())->ThenMemcpy(&real_dev_ptr, input_ptr, input_size).ok();
       if (!copy_status) {
         return errors::Internal("MemcpyH2D for padding inputs failed.");
       }
@@ -596,7 +605,7 @@ Status BlazePredictor::CopyTensorGPUToCPU(const std::vector<Tensor>& gpu_tensors
     TF_RETURN_IF_ERROR(ctx->allocate_temp(tmp_tensor.dtype(),
           tmp_tensor.shape(), &((*cpu_tensors)[i]), alloc_attrs));
     uint8* host_add = (uint8*)GetTensorAddress(&((*cpu_tensors)[i]));
-    auto stream = GetStream();
+    auto stream = GetStream(ctx->stream_id());
     stream->ThenMemcpy(host_add, tmp_dev_ptr, tmp_size);
     auto event = std::make_shared<Event>(stream->parent());
     if (!event->Init()) {

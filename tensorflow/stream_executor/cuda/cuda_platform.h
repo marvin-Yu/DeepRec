@@ -62,8 +62,8 @@ class CudaPlatform : public Platform {
 
   // Returns -1 as a sentinel on internal failure (and logs the error).
   int VisibleDeviceCount() const override;
-  int VirtualDeviceCount() const override;
-  port::Status SetVirtualDeviceCount(int count) override;
+  int VirtualDeviceCount(int physical_gpu_id) const override;
+  port::Status SetVirtualDeviceCount(int physical_gpu_id, int virtual_gpu_count) override;
 
   const string& Name() const override;
 
@@ -73,11 +73,15 @@ class CudaPlatform : public Platform {
   port::StatusOr<StreamExecutor*> ExecutorForDevice(int ordinal) override;
   port::StatusOr<StreamExecutor*> ExecutorForDevice(
       int ordinal, int virtual_ordinal) override;
+  port::StatusOr<StreamExecutor*> ExecutorForDevice(
+      int ordinal, int virtual_ordinal, int stream_id) override;
 
   port::StatusOr<StreamExecutor*> ExecutorForDeviceWithPluginConfig(
       int ordinal, const PluginConfig& config) override;
   port::StatusOr<StreamExecutor*> ExecutorForDeviceWithPluginConfig(
       int ordinal, int virtual_ordinal, const PluginConfig& config) override;
+  port::StatusOr<StreamExecutor*> ExecutorForDeviceWithPluginConfig(
+      int ordinal, int virtual_ordinal, const PluginConfig& config, int stream_id) override;
 
   port::StatusOr<StreamExecutor*> GetExecutor(
       const StreamExecutorConfig& config) override;
@@ -109,7 +113,7 @@ class CudaPlatform : public Platform {
   int limit_numa_node_;
 
   // Num of GPU virtual devices
-  int virtual_device_count_;
+  std::map<int, int> virtual_device_count_;
 
   SE_DISALLOW_COPY_AND_ASSIGN(CudaPlatform);
 };
