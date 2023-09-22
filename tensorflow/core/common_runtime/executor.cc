@@ -1284,6 +1284,7 @@ class ExecutorState {
   const bool log_memory_;
 
   int64 step_id_;
+  int64 query_priority_;
   int64 round_step_id_;
   // Not owned.
   Rendezvous* rendezvous_;
@@ -1437,6 +1438,7 @@ ExecutorState::ExecutorState(const Executor::Args& args, ExecutorImpl* impl)
       stream_id_(args.stream_id),
       log_memory_(LogMemory::IsEnabled()),
       step_id_(args.step_id),
+      query_priority_(args.query_priority),
       tensor_holder(args.tensor_holder),
       round_step_id_(args.round_step_id),
       rendezvous_(args.rendezvous),
@@ -1708,6 +1710,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
   params.stream_id = stream_id_;
 
   params.step_id = step_id_;
+  params.query_priority = query_priority_;
   params.round_step_id = round_step_id_;
   // Override device's threadpool if user provides an intra_op_threadpool
   Device* device = impl_->params_.device;

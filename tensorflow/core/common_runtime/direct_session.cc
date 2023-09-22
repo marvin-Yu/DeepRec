@@ -265,6 +265,7 @@ class DirectSessionRegistrar {
 static DirectSessionRegistrar registrar;
 
 std::atomic_int_fast64_t DirectSession::step_id_counter_(1);
+std::atomic_int_fast64_t DirectSession::query_priority_(1);
 
 static RunHandlerPool* GetOrCreateRunHandlerPool(
     const SessionOptions& options) {
@@ -748,7 +749,7 @@ Status DirectSession::DecorateAndPublishGraphForDebug(
 }
 
 Status DirectSession::RunInternal(
-    int64 step_id, const RunOptions& run_options,
+    int64 step_id, int64 query_priority, const RunOptions& run_options,
     CallFrameInterface* call_frame, ExecutorsAndKeys* executors_and_keys,
     RunMetadata* run_metadata,
     const thread::ThreadPoolOptions& threadpool_options, int blaze_stream_id,
@@ -823,6 +824,7 @@ Status DirectSession::RunInternal(
   Executor::Args args;
   args.AddSettings(run_options);
   args.step_id = step_id;
+  args.query_priority = query_priority;
   args.call_frame = call_frame;
   args.rendezvous = run_state.rendez;
   args.collective_executor =
@@ -1391,7 +1393,7 @@ static const void* GetTensorBasePtr(const Tensor &t){
   } while (0)
 
 void DirectSession::RunInternalAsync(
-    int64 step_id, const RunOptions& run_options,
+    int64 step_id, int64 query_priority, const RunOptions& run_options,
     CallFrameInterface* call_frame,
     ExecutorsAndKeys* executors_and_keys,
     RunMetadata* run_metadata,
@@ -1479,6 +1481,7 @@ void DirectSession::RunInternalAsync(
 
   args->AddSettings(run_options);
   args->step_id = step_id;
+  args->query_priority = query_priority;
   args->call_frame = call_frame;
   args->rendezvous = run_state->rendez;
   args->collective_executor =
@@ -1724,12 +1727,13 @@ void DirectSession::RunAsync(const RunOptions& run_options,
   const int64 step_id = run_options.has_run_id()
                             ? run_options.run_id().value()
                             : step_id_counter_.fetch_add(1);
+  const int64 query_priority = query_priority_.fetch_add(1);
 
   if (LogMemory::IsEnabled()) {
     LogMemory::RecordStep(step_id, run_state_args.handle);
   }
 
-  RunInternalAsync(step_id, run_options, &call_frame,
+  RunInternalAsync(step_id, query_priority, run_options, &call_frame,
       executors_and_keys, run_metadata,
       thread::ThreadPoolOptions(), inputs,
       output_names, target_nodes, outputs, frame, done, flops);
@@ -1795,12 +1799,13 @@ Status DirectSession::Run(const RunOptions& run_options,
   const int64 step_id = run_options.has_run_id()
                             ? run_options.run_id().value()
                             : step_id_counter_.fetch_add(1);
+  const int64 query_priority = query_priority_.fetch_add(1);
 
   if (LogMemory::IsEnabled()) {
     LogMemory::RecordStep(step_id, run_state_args.handle);
   }
 
-  TF_RETURN_IF_ERROR(RunInternal(step_id, run_options, &call_frame,
+  TF_RETURN_IF_ERROR(RunInternal(step_id, query_priority, run_options, &call_frame,
                                  executors_and_keys, run_metadata,
                                  thread::ThreadPoolOptions()));
 
@@ -1931,7 +1936,7 @@ Status DirectSession::RunForCapture(const RunOptions& run_options,
     LogMemory::RecordStep(step_id, run_state_args.handle);
   }
 
-  TF_RETURN_IF_ERROR(RunInternal(step_id, run_options, &call_frame,
+  TF_RETURN_IF_ERROR(RunInternal(step_id, -1, run_options, &call_frame,
                                  executors_and_keys, run_metadata,
                                  thread::ThreadPoolOptions(), -1,
                                  cuda_graph_meta));
@@ -3576,7 +3581,7 @@ class DirectSession::RunCallableCallFrame : public CallFrameInterface {
   run_options->mutable_padding_info()->set_after_padding(after_padding);
 
   TF_RETURN_IF_ERROR(RunInternal(
-      step_id, executors_and_keys->callable_options.run_options(), &call_frame,
+      step_id, -1, executors_and_keys->callable_options.run_options(), &call_frame,
       executors_and_keys.get(), run_metadata, threadpool_options, blaze_stream_id));
 
   if (fetch_tensors != nullptr) {

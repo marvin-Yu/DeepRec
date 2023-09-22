@@ -91,6 +91,7 @@ class Executor {
 
   struct Args {
     int64 step_id = 0;
+    int64 query_priority = 0;
     int64 round_step_id = 0;
     Rendezvous* rendezvous = nullptr;
     Rendezvous* global_rendezvous = nullptr;
