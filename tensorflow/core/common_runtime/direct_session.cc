@@ -1732,6 +1732,10 @@ void DirectSession::RunAsync(const RunOptions& run_options,
   if (LogMemory::IsEnabled()) {
     LogMemory::RecordStep(step_id, run_state_args.handle);
   }
+  if (IsTraceQueryDistribution(std::string("RunAsync"))) {
+    TimeStampRecorderFactory::Singleton()->get(
+                    std::string("RunAsync"))->Record();
+  }
 
   RunInternalAsync(step_id, query_priority, run_options, &call_frame,
       executors_and_keys, run_metadata,
@@ -1803,6 +1807,11 @@ Status DirectSession::Run(const RunOptions& run_options,
 
   if (LogMemory::IsEnabled()) {
     LogMemory::RecordStep(step_id, run_state_args.handle);
+  }
+
+  if (IsTraceQueryDistribution(std::string("RunSync"))) {
+    TimeStampRecorderFactory::Singleton()->get(
+                    std::string("RunSync"))->Record();
   }
 
   TF_RETURN_IF_ERROR(RunInternal(step_id, query_priority, run_options, &call_frame,
@@ -3574,6 +3583,11 @@ class DirectSession::RunCallableCallFrame : public CallFrameInterface {
 
   if (LogMemory::IsEnabled()) {
     LogMemory::RecordStep(step_id, run_state_args.handle);
+  }
+
+  if (IsTraceQueryDistribution(std::string("RunCallable"))) {
+    TimeStampRecorderFactory::Singleton()->get(
+                    std::string("RunCallable"))->Record();
   }
 
   auto run_options = executors_and_keys->callable_options.mutable_run_options();

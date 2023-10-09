@@ -31,6 +31,7 @@ limitations under the License.
 
 #include <memory>
 #include <string>
+#include <sys/time.h>
 
 #include "tensorflow/core/framework/allocator.h"
 #include "tensorflow/core/framework/control_flow.h"
@@ -50,6 +51,7 @@ limitations under the License.
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/public/session_options.h"
 #include "tensorflow/core/util/device_name_utils.h"
+#include "tensorflow/core/util/time_stamp.h"
 
 namespace tensorflow {
 
@@ -105,6 +107,10 @@ class Device : public DeviceBase {
   // Asynchronous kernel's compute.
   virtual void ComputeAsync(AsyncOpKernel* op_kernel, OpKernelContext* context,
                             AsyncOpKernel::DoneCallback done) {
+    if (IsTraceQueryDistribution(op_kernel->type_string())) {
+      TimeStampRecorderFactory::Singleton()->get(
+                 op_kernel->type_string() + "_" + op_kernel->name())->Record();
+    }
     op_kernel->ComputeAsync(context, std::move(done));
   }
 
