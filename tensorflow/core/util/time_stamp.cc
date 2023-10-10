@@ -9,10 +9,12 @@
 #include "tensorflow/core/lib/gtl/inlined_vector.h"
 #include "tensorflow/core/lib/strings/strcat.h"
 #include "tensorflow/core/platform/logging.h"
+#include "tensorflow/core/platform/env.h"
 #include <sys/time.h>
 #include <fstream>
 #include <iostream>
 #include <mutex>
+#include <pthread.h>
 
 namespace tensorflow {
 
@@ -39,6 +41,7 @@ QueryTimestampRecorder::QueryTimestampRecorder(const std::string scene)
   data_[1] = new struct TimeQuery[max_buffer_size_];
 
   std::function<void(void)> HandleQueue = [this]() {
+    pthread_setname_np(pthread_self(), "ts_recorder");
     LOG(INFO) << scene_ << " started recording query timestamps";
     while(!stop_) {
       if (!timestamp_queue_.empty()) {
@@ -52,13 +55,15 @@ QueryTimestampRecorder::QueryTimestampRecorder(const std::string scene)
         tq.tv_usec = tm.tv_usec;
         buffer_offset_++;
         VLOG(1) << "pop queue, query length " << timestamp_queue_.size() << ", buffer_offset " << buffer_offset_;
-      }
-      if (buffer_offset_ >= max_buffer_size_) {
-        buffer_offset_ = 0;
-        LOG(INFO) << "start to dump file";
-        DumpToFile();
-        LOG(INFO) << "end to dump file, queue length " << timestamp_queue_.size();
-        buffer_id_ = buffer_id_ ^ 0x1;
+        if (buffer_offset_ >= max_buffer_size_) {
+          buffer_offset_ = 0;
+          LOG(INFO) << "start to dump file";
+          DumpToFile();
+          LOG(INFO) << "end to dump file, queue length " << timestamp_queue_.size();
+          buffer_id_ = buffer_id_ ^ 0x1;
+        }
+      } else {
+        Env::Default()->SleepForMicroseconds(30);
       }
     }
   };
@@ -106,9 +111,6 @@ void QueryTimestampRecorder::DumpToFile() {
   outFile.close();
 }
 
-void QueryTimestampRecorder::Clear() {
-}
-
 QueryTimestampRecorder::~QueryTimestampRecorder() {
   delete [] data_[0];
   delete [] data_[1];
@@ -140,7 +142,7 @@ QueryTimestampRecorder* TimeStampRecorderFactory::get(const std::string & name) 
   return Register(name);
 }
 
-void TimeStampRecorderFactory::Clear() {
+TimeStampRecorderFactory::~TimeStampRecorderFactory() {
   std::lock_guard<std::mutex> guard(mu_);
   for (auto iter : recorder_map_) {
     delete iter.second;

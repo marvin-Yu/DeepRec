@@ -43,8 +43,6 @@ class QueryTimestampRecorder {
   explicit QueryTimestampRecorder(const std::string scene);
   ~QueryTimestampRecorder();
 
-  void Clear();
-
   void Record();
 
   void HandleQueue();
@@ -74,9 +72,10 @@ class TimeStampRecorderFactory {
 
   QueryTimestampRecorder* Register(const std::string& name);
   QueryTimestampRecorder* get(const std::string& name);
-  void Clear();
 
   TimeStampRecorderFactory() {}
+
+  ~TimeStampRecorderFactory();
 
   TimeStampRecorderFactory(const TimeStampRecorderFactory &) = delete;
 
