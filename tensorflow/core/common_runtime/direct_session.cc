@@ -1733,8 +1733,9 @@ void DirectSession::RunAsync(const RunOptions& run_options,
     LogMemory::RecordStep(step_id, run_state_args.handle);
   }
   if (IsTraceQueryDistribution(std::string("RunAsync"))) {
-    TimeStampRecorderFactory::Singleton()->get(
-                    std::string("RunAsync"))->Record();
+    QueryTimestampRecorder* recorder = TimeStampRecorderFactory::Singleton()->get(
+                    std::string("RunAsync"));
+    if (recorder) recorder->Record();
   }
 
   RunInternalAsync(step_id, query_priority, run_options, &call_frame,
@@ -1810,8 +1811,9 @@ Status DirectSession::Run(const RunOptions& run_options,
   }
 
   if (IsTraceQueryDistribution(std::string("RunSync"))) {
-    TimeStampRecorderFactory::Singleton()->get(
-                    std::string("RunSync"))->Record();
+    QueryTimestampRecorder* recorder = TimeStampRecorderFactory::Singleton()->get(
+                    std::string("RunSync"));
+    if (recorder) recorder->Record();
   }
 
   TF_RETURN_IF_ERROR(RunInternal(step_id, query_priority, run_options, &call_frame,
@@ -3586,8 +3588,9 @@ class DirectSession::RunCallableCallFrame : public CallFrameInterface {
   }
 
   if (IsTraceQueryDistribution(std::string("RunCallable"))) {
-    TimeStampRecorderFactory::Singleton()->get(
-                    std::string("RunCallable"))->Record();
+    QueryTimestampRecorder* recorder = TimeStampRecorderFactory::Singleton()->get(
+                    std::string("RunCallable"));
+    if (recorder) recorder->Record();
   }
 
   auto run_options = executors_and_keys->callable_options.mutable_run_options();

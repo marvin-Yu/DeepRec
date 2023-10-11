@@ -121,8 +121,8 @@ QueryTimestampRecorder* TimeStampRecorderFactory::Register(const std::string &na
   std::lock_guard<std::mutex> guard(mu_);
   const auto &iter = recorder_map_.find(name);
   if (iter != recorder_map_.end()) {
-    LOG(ERROR) << "QueryTimestampRecorder name=" << name << " has already been registered";
-    return nullptr;
+    LOG(WARNING) << "QueryTimestampRecorder name=" << name << " has already been registered";
+    return iter->second;
   }
   QueryTimestampRecorder* recorder = new QueryTimestampRecorder(name);
   recorder_map_[name] = recorder;
@@ -134,6 +134,7 @@ TimeStampRecorderFactory* TimeStampRecorderFactory::Singleton() {
   return instance;
 }
 
+// not thread safe
 QueryTimestampRecorder* TimeStampRecorderFactory::get(const std::string & name) {
   const auto &iter = recorder_map_.find(name);
   if (iter != recorder_map_.end()) {

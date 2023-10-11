@@ -108,8 +108,9 @@ class Device : public DeviceBase {
   virtual void ComputeAsync(AsyncOpKernel* op_kernel, OpKernelContext* context,
                             AsyncOpKernel::DoneCallback done) {
     if (IsTraceQueryDistribution(op_kernel->type_string())) {
-      TimeStampRecorderFactory::Singleton()->get(
-                 op_kernel->type_string() + "_" + op_kernel->name())->Record();
+      QueryTimestampRecorder* recorder = TimeStampRecorderFactory::Singleton()->get(
+                 op_kernel->type_string() + "_" + op_kernel->name());
+      if (recorder) recorder->Record();
     }
     op_kernel->ComputeAsync(context, std::move(done));
   }
