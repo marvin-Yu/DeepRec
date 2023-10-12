@@ -37,21 +37,25 @@ class StreamGPUDevice : public BaseGPUDevice {
             Bytes memory_limit, const DeviceLocality& locality,
             TfGpuId tf_gpu_id, const string& physical_device_desc,
             Allocator* gpu_allocator, Allocator* cpu_allocator,
-            const int stream_id)
+            const int stream_id, Device* real_device)
       : BaseGPUDevice(options, name,
                       memory_limit, locality, tf_gpu_id,
                       physical_device_desc, gpu_allocator, cpu_allocator,
                       false /* sync every op */, stream_id),
-        stream_id_(stream_id) {}
-//        device_(real_device) {}
+        stream_id_(stream_id),
+        device_(real_device) {}
 
  // const Device* GetRealDevice() const override { return device_; }
 
   const int stream_id() const override { return stream_id_; }
 
+  ResourceMgr* base_resource_manager() override {
+    return device_->resource_manager();
+  }
+
  private:
   int stream_id_ = 0;
-//  Device* device_ = nullptr;  // not owned, its real device
+  Device* device_ = nullptr;  // not owned, its real device
 };
 
 class GPUDevice : public BaseGPUDevice {
@@ -69,7 +73,7 @@ class GPUDevice : public BaseGPUDevice {
                                                i, ":", tf_gpu_id.value());
       stream_devices_.push_back(absl::make_unique<StreamGPUDevice>(
         options, stream_gpu_name, memory_limit / gpu_allocators.size(), locality, tf_gpu_id,
-        physical_device_desc, gpu_allocators[i], cpu_allocator, i /* stream id */));
+        physical_device_desc, gpu_allocators[i], cpu_allocator, i /* stream id */, this));
     }
   }
 

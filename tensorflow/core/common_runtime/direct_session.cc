@@ -819,7 +819,12 @@ Status DirectSession::RunInternal(
   if (is_blaze_) {
     stream_group_idx = blaze_stream_id;
   } else {
-    stream_group_idx = RequireStreamGroup(); 
+    stream_group_idx = RequireStreamGroup();
+    static int log_counter = 0;
+    if (log_counter < 50) {
+      log_counter++;
+      LOG(INFO) << "RunInternal with stream id " <<  stream_group_idx;
+    }
   }
   Executor::Args args;
   args.AddSettings(run_options);
@@ -1460,6 +1465,11 @@ void DirectSession::RunInternalAsync(
   auto args = std::make_shared<Executor::Args>();
 
   int stream_group_idx = RequireStreamGroup();
+  static int log_counter = 0;
+  if (log_counter < 50) {
+    log_counter++;
+    LOG(INFO) << "RunInternalAsync with stream id " <<  stream_group_idx;
+  }
 
   ExecutorBarrier* barrier = new ExecutorBarrier(
       num_executors, run_state->rendez, [this, run_state, done, run_options,
@@ -3657,7 +3667,7 @@ void DirectSession::ReleaseStreamGroup(const int stream_id) {
 }
 
 StreamGroupMgr::StreamGroupMgr(const size_t total_num)
-    : total_num_(total_num), swap_left_(1) {
+    : total_num_(total_num) {
   stream_group_heap_.resize(total_num);
   for (int i = 0; i < total_num; ++i) {
     stream_group_heap_[i] = absl::make_unique<StreamGroupNode>(i);
@@ -3671,10 +3681,21 @@ void StreamGroupMgr::swap(const size_t idx1, const size_t idx2) {
   std::swap(stream_group_heap_[idx1], stream_group_heap_[idx2]);
 }
 
+void StreamGroupMgr::reset_accumulators() {
+  VLOG(2) << "One of the Stream Group Node reaches access limit"
+          << ", reset...";
+  for (auto& node : stream_group_heap_) {
+    node->accumulator_ = 0;
+  }
+}
+
 int StreamGroupMgr::Require() {
   mutex_lock l(mu_);
   int ret(stream_group_heap_[0]->id_);
   ++stream_group_heap_[0]->workload_;
+  if (++stream_group_heap_[0]->accumulator_ < 0) {
+    reset_accumulators();
+  }
   size_t ptr(0);
   while (true) {
     if (2 * ptr + 2 >= total_num_) {
@@ -3704,14 +3725,13 @@ int StreamGroupMgr::Require() {
     } else {
       if (stream_group_heap_[ptr]->workload_ >
           stream_group_heap_[2 * ptr + 1]->workload_) {
-        if (swap_left_) {
+        if (stream_group_heap_[2 * ptr + 1]->accumulator_ <
+            stream_group_heap_[2 * ptr + 2]->accumulator_) {
           swap(ptr, 2 * ptr + 1);
           ptr = 2 * ptr + 1;
-          swap_left_--;
         } else {
           swap(ptr, 2 * ptr + 2);
           ptr = 2 * ptr + 2;
-          swap_left_++;
         }
       } else
         break;

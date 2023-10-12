@@ -45,7 +45,7 @@ const char XlaContext::kXlaContextResourceName[] = "_xla_context";
   // per-step context is looked up in the resource manager. The
   // JIT will prepopulate the JITContext.
   XlaContext* context;
-  TF_CHECK_OK(ctx->resource_manager()->Lookup(
+  TF_CHECK_OK(ctx->xla_resource_manager()->Lookup(
       ctx->step_container()->name(), kXlaContextResourceName, &context));
   // The resource manager handed us a fresh reference to 'context', but retains
   // a reference itself so the context won't be freed. The resource manager will

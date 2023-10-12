@@ -127,9 +127,9 @@ Status ExecuteGraph(XlaContext* xla_context, Graph* graph,
   Status status;
   auto step_container = absl::make_unique<ScopedStepContainer>(
       step_id, [&status, device](const string& name) {
-        status = device->resource_manager()->Cleanup(name);
+        status = device->base_resource_manager()->Cleanup(name);
       });
-  TF_RETURN_IF_ERROR(device->resource_manager()->Create(
+  TF_RETURN_IF_ERROR(device->base_resource_manager()->Create(
       step_container->name(), XlaContext::kXlaContextResourceName,
       xla_context));
 
@@ -464,7 +464,7 @@ XlaCompiler::XlaCompiler(XlaCompiler::Options options)
   CHECK(!options_.device_type.type_string().empty());
   if (options_.populate_resource_manager) {
     initialization_status_ =
-        (*options_.populate_resource_manager)(device_->resource_manager());
+        (*options_.populate_resource_manager)(device_->base_resource_manager());
   }
 
   local_flib_def_.reset(new FunctionLibraryDefinition(OpRegistry::Global(),

@@ -688,6 +688,9 @@ class OpKernelContext {
     // Shared resources accessible by this op kernel invocation.
     ResourceMgr* resource_manager = nullptr;
 
+    // Shared resources accessible by mult-stream for xla compilation.
+    ResourceMgr* xla_resource_manager = nullptr;
+
     // Per-step resources accessible by this op kernel invocation should be
     // stored in this container..
     ScopedStepContainer* step_container = nullptr;
@@ -1204,6 +1207,9 @@ class OpKernelContext {
 
   // Shared resources accessible to this kernel.
   ResourceMgr* resource_manager() const { return params_->resource_manager; }
+
+  // Shared resources accessible to mult-stream.
+  ResourceMgr* xla_resource_manager() const { return params_->xla_resource_manager; }
 
   checkpoint::TensorSliceReaderCacheWrapper* slice_reader_cache() const {
     return params_->slice_reader_cache;

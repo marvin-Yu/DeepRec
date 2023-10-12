@@ -232,6 +232,7 @@ class SingleThreadedExecutorImpl : public Executor {
     params.call_frame = args.call_frame;
     params.function_library = params_.function_library;
     params.resource_manager = device->resource_manager();
+    params.xla_resource_manager = device->base_resource_manager();
     params.step_container = args.step_container;
     params.slice_reader_cache = nullptr;  // TODO(mrry): Too severe?
     params.inputs = &node_inputs;
