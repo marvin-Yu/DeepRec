@@ -82,7 +82,7 @@ class StreamGroupMgr {
   struct StreamGroupNode {
     int id_;
     int workload_;
-    int   ;
+    int accumulator_;
     StreamGroupNode(const int id, const int workload = 0, const int accumulator = 0)
         : id_(id), workload_(workload), accumulator_(accumulator) {}
   };

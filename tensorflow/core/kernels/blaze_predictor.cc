@@ -493,6 +493,10 @@ stream_executor::Stream* BlazePredictor::GetStream(int stream_id) const {
   #endif
 }
 
+int BlazePredictor::GetStreamNum() const {
+  return blaze_device_->GetStreamNum() > 1 ? blaze_device_->GetStreamNum() : 1;
+}
+
 Allocator* BlazePredictor::GetAllocator(int stream_id) const {
   AllocatorAttributes alloc_attrs;
   alloc_attrs.set_on_host(false);

@@ -101,7 +101,7 @@ class DummyReadResourceOp : public XlaOpKernel {
  public:
   explicit DummyReadResourceOp(OpKernelConstruction* ctx) : XlaOpKernel(ctx) {}
   void Compile(XlaOpKernelContext* ctx) override {
-    ResourceMgr* rm = ctx->op_kernel_context()->xla_resource_manager();
+    ResourceMgr* rm = ctx->op_kernel_context()->resource_manager();
     OP_REQUIRES(ctx, rm, errors::Internal("No resource manager."));
     DummyResourceForTest* dummy;
     OP_REQUIRES_OK(ctx, rm->Lookup<DummyResourceForTest>(
