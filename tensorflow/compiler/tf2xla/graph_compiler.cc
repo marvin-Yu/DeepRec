@@ -338,6 +338,7 @@ void GraphCompiler::PartiallySetupParams(OpKernelContext::Params* params) {
   params->inputs = &tensor_inputs_;
   params->step_container = step_container_;
   params->resource_manager = device_->resource_manager();
+  params->xla_resource_manager = device_->base_resource_manager();
   params->function_library = flib_;
 }
 

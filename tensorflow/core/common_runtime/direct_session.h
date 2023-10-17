@@ -76,20 +76,25 @@ class StreamGroupMgr {
   // One stream group is represented by a node in the min-heap. The node
   // contains a workload counter to record how many workloads are running in the
   // stream group, and an accumulator to record how many times has the node been
-  // used for. New task should be allocated to the node of the lowest load.
+  // used for. New task should be allocated to the node of the lowest load. If
+  // two nodes have the same load, the task goes to the one with smaller
+  // accumulator count.
   struct StreamGroupNode {
     int id_;
     int workload_;
-    StreamGroupNode(const int id, const int workload = 0)
-        : id_(id), workload_(workload) {}
+    int accumulator_;
+    StreamGroupNode(const int id, const int workload = 0, const int accumulator = 0)
+        : id_(id), workload_(workload), accumulator_(accumulator) {}
   };
 
   // Swap two stream group nodes.
   void swap(const size_t, const size_t);
 
+  // Reset the accumulator of all stream group nodes.
+  void reset_accumulators();
+
   size_t total_num_;
   mutable mutex mu_;
-  int swap_left_ GUARDED_BY(mu_);
   std::vector<std::unique_ptr<StreamGroupNode>> stream_group_heap_
       GUARDED_BY(mu_);
   std::unordered_map<int, size_t> id2heap_map_ GUARDED_BY(mu_);

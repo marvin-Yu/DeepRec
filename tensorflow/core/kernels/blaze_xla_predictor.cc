@@ -80,75 +80,79 @@ Status BlazeXlaPredictor::Warmup(OpKernelContext* ctx) {
   if (warmuped_) {
     return Status::OK();
   }
-  int num_inputs = ctx->num_inputs();
-  std::vector<Tensor> inputs;
-  inputs.reserve(num_inputs);
-  for (int i = 0; i < num_inputs; ++i) {
-    inputs.push_back(ctx->input(i));
-  }
-
-  int batchsize = InferBatchSize(inputs);
-  if (batchsize == -1) {
-    return errors::Internal("Cannot infer inputs' batchsize");
-  }
-  auto max_bs = batch_sizes_[batch_sizes_.size() - 1];
-  if (max_bs < batchsize) {
-    mutex_lock l(batch_size_mu_);
-    max_bs = AddNewBatchSize(batchsize);
-  }
-  std::vector<Tensor> padded_inputs(num_inputs);
-  Status status;
-  if (same_device_) {
-    status = PadToStatic(inputs, &padded_inputs,
-        batchsize, max_bs, ctx);
-  } else {
-    status = PadToStaticCPUToGPU(inputs, &padded_inputs,
-        batchsize, max_bs, ctx);
-  }
-  if (!status.ok()) {
-    return status;
-  }
-
-  for (auto bs : batch_sizes_) {
-    VLOG(0) << "begin warmup " << bs;
-    auto start_us = Env::Default()->NowMicros();
-    int pad_to_batchsize = bs;
-
-    VLOG(1) << "batchsize = " << batchsize
-        << ", pad_to_batchsize = " << pad_to_batchsize;
-
-    // Pad inputs
-    std::vector<Tensor> sliced_inputs;
-    sliced_inputs.reserve(num_inputs);
-    for (int i = 0; i < padded_inputs.size(); ++i) {
-      const TensorShape& shape = inputs[i].shape();
-      int64 first_dim = shape.dim_size(0);
-      first_dim = (first_dim == 1) ? 1 : bs;
-      if (skip_padding_[i] || (bs > 1 && first_dim == 1)) {
-        sliced_inputs.push_back(padded_inputs[i]);
-      } else {
-        sliced_inputs.push_back(padded_inputs[i].Slice(0, bs));
-      }
+  // warmup all stream
+  for (int stream_id = 0; stream_id < GetStreamNum(); ++stream_id) {
+    int num_inputs = ctx->num_inputs();
+    std::vector<Tensor> inputs;
+    inputs.reserve(num_inputs);
+    for (int i = 0; i < num_inputs; ++i) {
+      inputs.push_back(ctx->input(i));
     }
-    // Call SessionRun
-    std::vector<Tensor> padded_outputs;
 
-    VLOG(0) << "RunCallable handle_ " << handle_ << " session_ " << session_.get();
-    if (need_trace_) {
-      RunMetadata metadata;
-      status = session_->RunCallable(
-          handle_, sliced_inputs, &padded_outputs, &metadata, ctx->stream_id());
+    int batchsize = InferBatchSize(inputs);
+    if (batchsize == -1) {
+      return errors::Internal("Cannot infer inputs' batchsize");
+    }
+    auto max_bs = batch_sizes_[batch_sizes_.size() - 1];
+    if (max_bs < batchsize) {
+      mutex_lock l(batch_size_mu_);
+      max_bs = AddNewBatchSize(batchsize);
+    }
+    std::vector<Tensor> padded_inputs(num_inputs);
+    Status status;
+    if (same_device_) {
+      status = PadToStatic(inputs, &padded_inputs,
+          batchsize, max_bs, ctx);
     } else {
-      status = session_->RunCallable(
-          handle_, sliced_inputs, &padded_outputs, nullptr, ctx->stream_id());
+      status = PadToStaticCPUToGPU(inputs, &padded_inputs,
+          batchsize, max_bs, ctx, stream_id);
     }
-    
-    VLOG(0) << "RunCallable handle_ " << handle_ << " session_ " << session_.get() << " finish";
     if (!status.ok()) {
       return status;
     }
-    auto end_us = Env::Default()->NowMicros();
-    VLOG(0) << "batch " <<  pad_to_batchsize << " has warmuped; cost us: " << (end_us - start_us);
+
+    for (auto bs : batch_sizes_) {
+      VLOG(0) << "begin warmup stream " << stream_id << " batch "<< bs;
+      auto start_us = Env::Default()->NowMicros();
+      int pad_to_batchsize = bs;
+
+      VLOG(1) << "batchsize = " << batchsize
+          << ", pad_to_batchsize = " << pad_to_batchsize;
+
+      // Pad inputs
+      std::vector<Tensor> sliced_inputs;
+      sliced_inputs.reserve(num_inputs);
+      for (int i = 0; i < padded_inputs.size(); ++i) {
+        const TensorShape& shape = inputs[i].shape();
+        int64 first_dim = shape.dim_size(0);
+        first_dim = (first_dim == 1) ? 1 : bs;
+        if (skip_padding_[i] || (bs > 1 && first_dim == 1)) {
+          sliced_inputs.push_back(padded_inputs[i]);
+        } else {
+          sliced_inputs.push_back(padded_inputs[i].Slice(0, bs));
+        }
+      }
+      // Call SessionRun
+      std::vector<Tensor> padded_outputs;
+
+      VLOG(0) << "RunCallable handle_ " << handle_ << " session_ " << session_.get();
+      if (need_trace_) {
+        RunMetadata metadata;
+        status = session_->RunCallable(
+            handle_, sliced_inputs, &padded_outputs, &metadata, stream_id);
+      } else {
+        status = session_->RunCallable(
+            handle_, sliced_inputs, &padded_outputs, nullptr, stream_id);
+      }
+
+      VLOG(0) << "RunCallable handle_ " << handle_ << " session_ " << session_.get() << " finish";
+      if (!status.ok()) {
+        return status;
+      }
+      auto end_us = Env::Default()->NowMicros();
+      VLOG(0) << "stream " << stream_id << " batch " << pad_to_batchsize
+              << " has warmuped; cost us: " << (end_us - start_us);
+    }
   }
   return Status::OK();
 }
@@ -193,7 +197,7 @@ int BlazeXlaPredictor::InferBatchSize(const std::vector<Tensor>& tensors) {
 Status BlazeXlaPredictor::PadToStaticCPUToGPU(const std::vector<Tensor>& inputs,
                                       std::vector<Tensor>* padded_inputs,
                                       int batchsize, int pad_to_batchsize,
-                                      OpKernelContext* ctx) {
+                                      OpKernelContext* ctx, int stream_id) {
   for (int i = 0; i < inputs.size(); ++i) {
     VLOG(1) << "Shape of input " << i << ": "
             << inputs[i].shape().DebugString();
@@ -216,7 +220,7 @@ Status BlazeXlaPredictor::PadToStaticCPUToGPU(const std::vector<Tensor>& inputs,
         return allocate_status;
       }
     } else {
-      Tensor padded_tensor(GetAllocator(ctx->stream_id()), inputs[i].dtype(), pad_to_shape);
+      Tensor padded_tensor(GetAllocator(stream_id), inputs[i].dtype(), pad_to_shape);
       (*padded_inputs)[i] = padded_tensor;
     }
     const uint8* input_ptr = (uint8*)GetTensorAddress(&inputs[i]);
@@ -257,13 +261,13 @@ Status BlazeXlaPredictor::PadToStaticCPUToGPU(const std::vector<Tensor>& inputs,
       auto padded_dev_ptr = AsDeviceMemory(padded_ptr, padded_size);
       if (DataTypeIsInteger(inputs[i].dtype())) {
         bool copy_status =
-            GetStream(ctx->stream_id())->ThenMemZero(&padded_dev_ptr, padded_size).ok();
+            GetStream(stream_id)->ThenMemZero(&padded_dev_ptr, padded_size).ok();
         if (!copy_status) {
           return errors::Internal("MemZero failed.");
         }
       }
       bool copy_status =
-          GetStream(ctx->stream_id())->ThenMemcpy(&padded_dev_ptr, input_ptr, input_size).ok();
+          GetStream(stream_id)->ThenMemcpy(&padded_dev_ptr, input_ptr, input_size).ok();
       if (!copy_status) {
         return errors::Internal("MemcpyH2D for padding inputs failed.");
       }
@@ -509,7 +513,7 @@ Status BlazeXlaPredictor::Compute(OpKernelContext* ctx) {
         batchsize, pad_to_batchsize, ctx);
     } else {
       status = PadToStaticCPUToGPU(inputs, &padded_inputs,
-        batchsize, pad_to_batchsize, ctx);
+        batchsize, pad_to_batchsize, ctx, ctx->stream_id());
     }
     if (!status.ok()) {
       return status;

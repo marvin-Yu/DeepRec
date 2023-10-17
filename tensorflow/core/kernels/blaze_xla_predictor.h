@@ -46,7 +46,7 @@ class BlazeXlaPredictor : public BlazePredictor {
   Status PadToStaticCPUToGPU(const std::vector<Tensor>& inputs,
                      std::vector<Tensor>* padded_inputs,
                      int batchsize, int pad_to_batchsize,
-                     OpKernelContext* ctx);
+                     OpKernelContext* ctx, int stream_id);
 
   Status SliceToDynamic(const std::vector<Tensor>& padded_outputs,
                         int batchsize, int pad_to_batchsize,

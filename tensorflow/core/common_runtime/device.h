@@ -188,6 +188,9 @@ class Device : public DeviceBase {
   // Returns the resource manager associated w/ this device.
   virtual ResourceMgr* resource_manager() { return rmgr_; }
 
+  // Returns the resource manager associated w/ mult-stream base device.
+  virtual ResourceMgr* base_resource_manager() { return rmgr_; }
+
   // Summarizes the status of this Device, for debugging.
   string DebugString() const { return ProtoDebugString(device_attributes_); }
 

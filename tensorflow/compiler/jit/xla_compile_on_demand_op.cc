@@ -168,7 +168,7 @@ Status XlaCompileOnDemandOp::Compile(
 
   // We store information about the JIT-compiled XLA computation
   // in the ResourceMgr.
-  ResourceMgr* rm = ctx->resource_manager();
+  ResourceMgr* rm = ctx->xla_resource_manager();
   CHECK(rm);
 
   XlaCompilationCache* cache;

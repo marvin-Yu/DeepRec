@@ -1733,6 +1733,7 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
   params.call_frame = call_frame_;
   params.function_library = impl_->params_.function_library;
   params.resource_manager = device->resource_manager();
+  params.xla_resource_manager = device->base_resource_manager();
   params.step_container = step_container_;
   params.slice_reader_cache = slice_reader_cache_;
   params.inputs = &inputs;

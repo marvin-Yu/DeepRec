@@ -287,7 +287,7 @@ static Status CompileToLocalExecutable(
     std::shared_ptr<InputsShapeInfo> inputs_shape_info=nullptr) {
   // We store information about the JIT-compiled XLA computation
   // in the ResourceMgr.
-  ResourceMgr* rm = ctx->resource_manager();
+  ResourceMgr* rm = ctx->xla_resource_manager();
   if (!rm) {
     return errors::Internal("No resource manager.");
   }
