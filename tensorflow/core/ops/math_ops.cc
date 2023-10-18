@@ -778,6 +778,71 @@ REGISTER_OP("_MklBatchMatMulV2")
     .Attr("adj_x: bool = false")
     .Attr("adj_y: bool = false")
     .SetShapeFn(shape_inference::BatchMatMulV2Shape);
+
+REGISTER_OP("_FusedBatchMatMul")
+    .Input("x: T")
+    .Input("y: T")
+    .Input("args: num_args * T")
+    .Output("output: T")
+    .Attr("T: {bfloat16, float}")
+    .Attr("adj_x: bool = false")
+    .Attr("adj_y: bool = false")
+    .Attr("num_args: int >= 0")
+    .Attr("fused_ops: list(string) = []")
+    .SetShapeFn(shape_inference::BatchMatMulShape)
+    .Doc(R"doc(
+*NOTE*: Do not invoke this operator directly in Python. Grappler is
+expected to create these operators.
+)doc");
+
+REGISTER_OP("_MklFusedBatchMatMul")
+    .Input("x: T")
+    .Input("y: T")
+    .Input("args: num_args * T")
+    .Output("output: T")
+    .Attr("T: {bfloat16, float}")
+    .Attr("adj_x: bool = false")
+    .Attr("adj_y: bool = false")
+    .Attr("num_args: int >= 0")
+    .Attr("fused_ops: list(string) = []")
+    .SetShapeFn(shape_inference::BatchMatMulShape)
+    .Doc(R"doc(
+*NOTE*: Do not invoke this operator directly in Python. Grappler is
+expected to create these operators.
+)doc");
+
+REGISTER_OP("_FusedBatchMatMulV2")
+    .Input("x: T")
+    .Input("y: T")
+    .Input("args: num_args * T")
+    .Output("output: T")
+    .Attr("T: {bfloat16, float}")
+    .Attr("adj_x: bool = false")
+    .Attr("adj_y: bool = false")
+    .Attr("num_args: int >= 0")
+    .Attr("fused_ops: list(string) = []")
+    .SetShapeFn(shape_inference::BatchMatMulV2Shape)
+    .Doc(R"doc(
+*NOTE*: Do not invoke this operator directly in Python. Grappler is
+expected to create these operators.
+)doc");
+
+REGISTER_OP("_MklFusedBatchMatMulV2")
+    .Input("x: T")
+    .Input("y: T")
+    .Input("args: num_args * T")
+    .Output("output: T")
+    .Attr("T: {bfloat16, float}")
+    .Attr("adj_x: bool = false")
+    .Attr("adj_y: bool = false")
+    .Attr("num_args: int >= 0")
+    .Attr("fused_ops: list(string) = []")
+    .SetShapeFn(shape_inference::BatchMatMulV2Shape)
+    .Doc(R"doc(
+*NOTE*: Do not invoke this operator directly in Python. Grappler is
+expected to create these operators.
+)doc");
+
 #endif  // INTEL_MKL
 
 // --------------------------------------------------------------------------
@@ -813,7 +878,7 @@ _HostCast requires its input and produces its output in host memory.
 REGISTER_OP("Abs")
     .Input("x: T")
     .Output("y: T")
-    .Attr("T: {bfloat16, half, float, double, int32, int64}")
+    .Attr("T: {bfloat16, half, float, double, int8, int16, int32, int64}")
     .SetShapeFn(shape_inference::UnchangedShape);
 
 REGISTER_OP("ComplexAbs")
@@ -1543,7 +1608,7 @@ REGISTER_OP("_MklMatMul")
     .Output("product: T")
     .Attr("transpose_a: bool = false")
     .Attr("transpose_b: bool = false")
-    .Attr("T: {float, double, complex64, complex128}")
+    .Attr("T: {bfloat16, float, double, complex64, complex128}")
     .SetShapeFn(shape_inference::MatMulShape);
 #endif  // INTEL_MKL
 
@@ -1566,11 +1631,17 @@ REGISTER_OP("_FusedMatMul")
     .Output("product: T")
     .Attr("transpose_a: bool = false")
     .Attr("transpose_b: bool = false")
+#if defined(INTEL_MKL)
+    .Attr("T: {bfloat16, float}")
+#else
     .Attr("T: {float}")
+#endif
     .Attr("num_args: int >= 0")
     .Attr("fused_ops: list(string) = []")
     // Attributes for the FusedBatchNorm ----------- //
     .Attr("epsilon: float = 0.0001")
+    // Attributes for the LeakyRelu ----------------------------------------- //
+    .Attr("leakyrelu_alpha: float = 0.2")
     // --------------------------------------------- //
     .SetShapeFn(shape_inference::MatMulShape)
     .Doc(R"doc(
@@ -2031,10 +2102,13 @@ Status RangeSize(const Tensor* start_t, const Tensor* limit_t,
     return errors::InvalidArgument("Requires delta != 0");
   }
 
-  int64 size =
-      (std::is_integral<T>::value
-           ? ((std::abs(limit - start) + std::abs(delta) - 1) / std::abs(delta))
-           : std::ceil(std::abs((limit - start) / delta)));
+  int64 size = (std::is_integral<T>::value
+                   ? ((Eigen::numext::abs(limit - start) +
+                       Eigen::numext::abs(delta) - T(1)) /
+                      Eigen::numext::abs(delta))
+                   : (Eigen::numext::ceil(
+                         Eigen::numext::abs((limit - start) / delta))));
+
   c->set_output(0, c->Vector(size));
   return Status::OK();
 }

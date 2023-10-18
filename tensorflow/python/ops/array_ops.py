@@ -4371,7 +4371,9 @@ def batch_gather_nd(params, indices, batch_dims, name=None):
 
 # Define quantize_v2 here in order to make name the second-to-last attribute,
 # because round_mode was added later.
+# (And also now because of 'axis' processing).
 @tf_export(v1=["quantize_v2"])
+@dispatch.add_dispatch_support
 @deprecation.deprecated(
     "2017-10-25",
     "`tf.quantize_v2` is deprecated, please use `tf.quantization.quantize` "
@@ -4383,7 +4385,29 @@ def quantize_v2(
     T,
     mode="MIN_COMBINED",
     name=None,
-    round_mode="HALF_AWAY_FROM_ZERO"):
+    round_mode="HALF_AWAY_FROM_ZERO",
+    narrow_range=False,
+    axis=None,
+    ensure_minimum_range=0.01):
+  if axis is None:
+    axis = -1
+  elif axis < 0:
+    if input.shape.ndims is None:
+      raise ValueError("input should have known rank to use negative axis.")
+    axis %= input.shape.ndims
+
+  if ensure_minimum_range != 0.01:
+    return gen_array_ops.quantize_v2(
+        input,
+        min_range,
+        max_range,
+        T=T,
+        mode=mode,
+        name=name,
+        round_mode=round_mode,
+        narrow_range=narrow_range,
+        axis=axis,
+        ensure_minimum_range=ensure_minimum_range)
   return gen_array_ops.quantize_v2(
       input,
       min_range,
@@ -4391,7 +4415,9 @@ def quantize_v2(
       T=T,
       mode=mode,
       name=name,
-      round_mode=round_mode)
+      round_mode=round_mode,
+      narrow_range=narrow_range,
+      axis=axis)
 
 
 quantize_v2.__doc__ = """Please use `tf.quantization.quantize` instead."""
@@ -4401,22 +4427,79 @@ quantize_v2.__doc__ = """Please use `tf.quantization.quantize` instead."""
 # tf.quantization.quantize; we can deprecate tf.quantization.quantize in next
 # version of TensorFlow.
 @tf_export("quantization.quantize", v1=["quantization.quantize", "quantize"])
+@dispatch.add_dispatch_support
 @deprecation.deprecated_endpoints("quantize")
-def quantize(input,  # pylint: disable=redefined-builtin
-             min_range,
-             max_range,
-             T,
-             mode="MIN_COMBINED",
-             round_mode="HALF_AWAY_FROM_ZERO",
-             name=None):
-  return gen_array_ops.quantize_v2(
+def quantize(
+    input,  # pylint: disable=redefined-builtin
+    min_range,
+    max_range,
+    T,
+    mode="MIN_COMBINED",
+    round_mode="HALF_AWAY_FROM_ZERO",
+    name=None,
+    narrow_range=False,
+    axis=None,
+    ensure_minimum_range=0.01):
+  """Quantize the input tensor."""
+  if ensure_minimum_range != 0.01:
+    return quantize_v2(
+        input,
+        min_range,
+        max_range,
+        T,
+        mode=mode,
+        round_mode=round_mode,
+        name=name,
+        narrow_range=narrow_range,
+        axis=axis,
+        ensure_minimum_range=ensure_minimum_range)
+  return quantize_v2(
       input,
       min_range,
       max_range,
       T,
       mode=mode,
       round_mode=round_mode,
-      name=name)
+      name=name,
+      narrow_range=narrow_range,
+      axis=axis)
+
+
+@tf_export("quantization.dequantize", v1=["quantization.dequantize",
+                                          "dequantize"])
+@dispatch.add_dispatch_support
+@deprecation.deprecated_endpoints("dequantize")
+def dequantize(  # pylint: disable=missing-docstring
+    input,  # pylint: disable=redefined-builtin
+    min_range,
+    max_range,
+    mode="MIN_COMBINED",
+    name=None,
+    axis=None,
+    narrow_range=False,
+    dtype=dtypes.float32):
+  if axis is None:
+    axis = -1
+  elif axis < 0:
+    if input.shape.ndims is None:
+      raise ValueError("input should have known rank to use negative axis.")
+    axis %= input.shape.ndims
+
+  if axis >= 0 or narrow_range:
+    return gen_array_ops.dequantize(
+        input,
+        min_range,
+        max_range,
+        mode=mode,
+        name=name,
+        narrow_range=narrow_range,
+        axis=axis,
+        dtype=dtype)
+  return gen_array_ops.dequantize(
+      input, min_range, max_range, mode=mode, name=name, dtype=dtype)
+
+
+dequantize.__doc__ = gen_array_ops.dequantize.__doc__
 
 
 @tf_export("quantization.quantize_and_dequantize")

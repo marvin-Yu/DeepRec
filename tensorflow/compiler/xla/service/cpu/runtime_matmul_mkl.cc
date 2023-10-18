@@ -31,7 +31,7 @@ namespace {
 
 // MatMul function is defined as: c = alpha * op(a) * op(b) + beta * c.
 // Since XLA MatMul does not used alpha, beta, we set them to 1.0 and 0.0.
-// Matrix lhs, rhs and out are all colum-major.
+// Matrix lhs, rhs and out are all column-major.
 void MatMulF32(const void* run_options_ptr, float* out, float* lhs, float* rhs,
                int64 m, int64 n, int64 k, int32 transpose_lhs,
                int32 transpose_rhs) {
@@ -60,7 +60,7 @@ void MatMulF32(const void* run_options_ptr, float* out, float* lhs, float* rhs,
 
 // MatMul function is defined as: c = alpha * op(a) * op(b) + beta * c.
 // Since XLA MatMul does not used alpha, beta, we set them to 1.0 and 0.0.
-// Matrix lhs, rhs and out are all colum-major.
+// Matrix lhs, rhs and out are all column-major.
 void MatMulF64(const void* run_options_ptr, double* out, double* lhs,
                double* rhs, int64 m, int64 n, int64 k, int32 transpose_lhs,
                int32 transpose_rhs) {
@@ -93,7 +93,7 @@ TF_ATTRIBUTE_NO_SANITIZE_MEMORY void __xla_cpu_runtime_MKLMatMulF32(
   const xla::ExecutableRunOptions* run_options =
       static_cast<const xla::ExecutableRunOptions*>(run_options_ptr);
   // BLAS GEMM MatMul uses OpenMP for parallelization, so we pass the thread
-  // number specified in intra_op_thread_pool to MKL.
+  // number specified in intra_op_thread_pool to OneDNN.
   int prev_num_threads = mkl_set_num_threads_local(
       run_options->intra_op_thread_pool()->numThreads());
   MatMulF32(run_options_ptr, out, lhs, rhs, m, n, k, transpose_lhs, transpose_rhs);

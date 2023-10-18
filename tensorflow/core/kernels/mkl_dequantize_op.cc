@@ -17,20 +17,20 @@ limitations under the License.
 
 #define EIGEN_USE_THREADS
 
+#include "dnnl.hpp"
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/type_traits.h"
 #include "tensorflow/core/framework/types.h"
+#include "tensorflow/core/graph/mkl_graph_util.h"
 #include "tensorflow/core/kernels/meta_support.h"
 #include "tensorflow/core/kernels/quantization_utils.h"
 #include "tensorflow/core/lib/core/errors.h"
-
-#include "tensorflow/core/graph/mkl_graph_util.h"
+#include "tensorflow/core/util/mkl_types.h"
 #include "tensorflow/core/util/mkl_util.h"
 
-#include "mkldnn.hpp"
-using mkldnn::primitive_attr;
-using mkldnn::stream;
+using dnnl::primitive_attr;
+using dnnl::stream;
 
 namespace tensorflow {
 
@@ -51,7 +51,7 @@ class MklDequantizeOp : public OpKernel {
   void Compute(OpKernelContext* ctx) override {
     try {
       // Using CPU device
-      auto cpu_engine = engine(engine::cpu, 0);
+      auto cpu_engine = engine(ENGINE_CPU, 0);
 
       // Get the inputs
       const Tensor& src_tensor = MklGetInput(ctx, kSrcIndex);
@@ -75,49 +75,57 @@ class MklDequantizeOp : public OpKernel {
       MklDnnData<T> src(&cpu_engine);
       MklDnnData<float> dst(&cpu_engine);
 
-      // If input is in MKL layout, then simply grab input layout; otherwise,
+      std::shared_ptr<stream> reorder_stream;
+      MklDnnThreadPool eigen_tp(ctx);
+      reorder_stream.reset(CreateStream(&eigen_tp, cpu_engine));
+
+      // If input is in OneDNN layout, then simply grab input layout; otherwise,
       // construct input TF layout. For TF layout, although input shape
-      // (src_dims) required is in MKL-DNN order, the layout is Tensorflow's
+      // (src_dims) required is in OneDNN order, the layout is Tensorflow's
       // layout
       auto src_md =
           src_mkl_shape.IsMklTensor()
               ? src_mkl_shape.GetMklLayout()
-              : memory::desc(src_dims, MklDnnType<T>(), memory::format::nhwc);
+              : memory::desc(src_dims, MklDnnType<T>(), MEMORY_FORMAT::nhwc);
 
       src.SetUsrMem(src_md, &src_tensor);
+      src.SetUsrMemDataHandle(&src_tensor, reorder_stream);
 
       Tensor* output_tensor = nullptr;
       MklDnnShape output_mkl_shape;
       TensorShape output_tf_shape;
+      memory::desc dst_md = memory::desc();
+      if (src_mkl_shape.IsMklTensor()) {
+        dst_md = memory::desc(src_mkl_shape.GetMklLayout().data);
+        // There is no API in OneDNN v1.x to construct memory descriptor with
+        // same .data field but different type.
+        dst_md.data.data_type = memory::convert_to_c(MklDnnType<float>());
+      } else {
+        dst_md =
+            memory::desc(src_dims, MklDnnType<float>(), MEMORY_FORMAT::nhwc);
+      }
 
-      memory::primitive_desc src_pd =
-          memory::primitive_desc(src_md, cpu_engine);
-      memory::desc dst_md = src_mkl_shape.IsMklTensor()
-                                ? src_md
-                                : memory::desc(src_dims, MklDnnType<float>(),
-                                               memory::format::nhwc);
-      memory::primitive_desc dst_pd =
-          memory::primitive_desc(dst_md, cpu_engine);
-
-      // If input is MKL shape, output is also MKL shape.
+      // If input is OneDNN shape, output is also OneDNN shape.
       // If input is TF shape, output is also TF shape.
       if (src_mkl_shape.IsMklTensor()) {
         output_mkl_shape.SetMklTensor(true);
-        output_mkl_shape.SetMklLayout(&dst_pd);
+        output_mkl_shape.SetMklLayout(&dst_md);
         output_mkl_shape.SetElemType(MklDnnType<float>());
         output_mkl_shape.SetTfLayout(src_mkl_shape.GetDimension(),
                                      src_mkl_shape.GetSizesAsMklDnnDims(),
                                      src_mkl_shape.GetTfDataFormat());
-        output_tf_shape.AddDim((dst_pd.get_size() / sizeof(float)));
+        output_tf_shape.AddDim(GET_MEMORY_SIZE_FROM_MD(dst_md, cpu_engine) /
+                               sizeof(float));
       } else {
         output_mkl_shape.SetMklTensor(false);
         output_tf_shape = MklDnnDimsToTFShape(output_dims);
       }
 
-      // Allocate MKL or TF output shape based on the above
+      // Allocate OneDNN or TF output shape based on the above
       AllocateOutputSetMklShape(ctx, 0, &output_tensor, output_tf_shape,
                                 output_mkl_shape);
       dst.SetUsrMem(dst_md, output_tensor);
+      dst.SetUsrMemDataHandle(output_tensor, reorder_stream);
 
       // The quantization logic here for mode SCALED is similar to the logic
       // in QuantizeAndDequantizeV2 and QuantizeAndDequantizeV3.
@@ -135,21 +143,24 @@ class MklDequantizeOp : public OpKernel {
       const float target_range =
           static_cast<float>((uint64_t{1} << target_bits) - 1);
       const float scale_factor = max_abs / target_range;
-
       std::vector<float> scales;
       scales.push_back(scale_factor);
       primitive_attr attr;
       attr.set_output_scales(0, scales);
-      attr.set_int_output_round_mode(mkldnn::round_mode::round_nearest);
-      mkldnn::reorder::primitive_desc reorder_pd =
-          mkldnn::reorder::primitive_desc(src_pd, dst_pd, attr);
-
-      // Execute MKL-DNN primitive
       std::vector<primitive> net;
-      net.push_back(
-          mkldnn::reorder(reorder_pd, *src.GetUsrMem(), *dst.GetUsrMem()));
-      stream(stream::kind::eager).submit(net).wait();
-    } catch (mkldnn::error& e) {
+
+      // Create reorder primitive and then execute.
+      auto reorder_pd = REORDER_PD_CONSTRUCTOR_WITH_ATTR(
+          GET_MEMORY_PRIMITIVE_DESC_FROM_MEM_PTR(src.GetUsrMem()),
+          GET_MEMORY_PRIMITIVE_DESC_FROM_MEM_PTR(dst.GetUsrMem()), cpu_engine,
+          attr);
+      net.push_back(reorder(reorder_pd));
+      std::vector<std::unordered_map<int, memory>> reorder_net_args;
+      reorder_net_args.push_back({{DNNL_ARG_FROM, *src.GetUsrMem()},
+                                  { DNNL_ARG_TO,
+                                    *dst.GetUsrMem() }});
+      execute_primitives(net, reorder_stream, reorder_net_args);
+    } catch (dnnl::error& e) {
       string error_msg = "Status: " + std::to_string(e.status) +
                          ", message: " + string(e.message) + ", in file " +
                          string(__FILE__) + ":" + std::to_string(__LINE__);

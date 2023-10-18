@@ -17,7 +17,7 @@ limitations under the License.
 
 #ifdef INTEL_MKL
 
-#include "mkldnn.hpp"
+#include "dnnl.hpp"
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/register_types.h"
@@ -26,10 +26,10 @@ limitations under the License.
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/gtl/array_slice.h"
 #include "tensorflow/core/platform/prefetch.h"
+#include "tensorflow/core/util/mkl_types.h"
 #include "tensorflow/core/util/mkl_util.h"
 
-using mkldnn::stream;
-using mkldnn::view;
+using dnnl::stream;
 
 namespace tensorflow {
 
@@ -57,7 +57,7 @@ gtl::InlinedVector<int64, 4> IntTensorToInt64Vec(const Tensor& tensor) {
 typedef Eigen::ThreadPoolDevice CPUDevice;
 
 // A version of SharedValidation (slice_op.h) written for input that is in
-// either Mkl layout or Tensorflow layout. A shared code to validate input
+// either OneDNN layout or Tensorflow layout. A shared code to validate input
 // shapes and check for identity, which is not dependent on the type of T.
 // We do this to reduce code size by not duplicating all this for all T
 // (float, double, int32, etc.)
@@ -76,7 +76,7 @@ static void ValidateMklInputs(OpKernelContext* context, bool* is_identity,
   GetMklShape(context, kInputBeginIndex, &begin_mkl_shape);
   GetMklShape(context, kInputSizeIndex, &size_mkl_shape);
 
-  // Begin and size tensors cannot be in MklDnn layout.
+  // Begin and size tensors cannot be in OneDNN layout.
   DCHECK_EQ(begin_mkl_shape.IsMklTensor(), false);
   DCHECK_EQ(size_mkl_shape.IsMklTensor(), false);
 
@@ -86,10 +86,11 @@ static void ValidateMklInputs(OpKernelContext* context, bool* is_identity,
   const int input_dims = input_tf_shape.dims();
 
   OP_REQUIRES(
-      context, context->op_kernel().IsLegacyVector(begin_tensor.shape()) &&
-                   context->op_kernel().IsLegacyVector(size_tensor.shape()) &&
-                   begin_tensor.NumElements() == input_dims &&
-                   size_tensor.NumElements() == input_dims,
+      context,
+      TensorShapeUtils::IsVector(begin_tensor.shape()) &&
+          TensorShapeUtils::IsVector(size_tensor.shape()) &&
+          begin_tensor.NumElements() == input_dims &&
+          size_tensor.NumElements() == input_dims,
       errors::InvalidArgument(
           "Expected begin and size arguments to be 1-D tensors of size ",
           input_dims, ", but got shapes ", begin_tensor.shape().DebugString(),
@@ -130,7 +131,7 @@ static void ValidateMklInputs(OpKernelContext* context, bool* is_identity,
 }
 
 // A version of SharedSliceCommonCases function written for input tensor
-// that may be in MklDnn layout or in Tensorflow layout.
+// that may be in OneDNN layout or in Tensorflow layout.
 template <typename T>
 static void CheckCommonCasesForMklInputs(OpKernelContext* context,
                                          gtl::InlinedVector<int64, 4>* begin,
@@ -149,7 +150,7 @@ static void CheckCommonCasesForMklInputs(OpKernelContext* context,
   if (is_identity) {
     VLOG(1) << "Slice identity";
     context->set_output(0, input);
-    // Mkl metadata tensor in this case can just be forwarded from input to
+    // OneDNN metadata tensor in this case can just be forwarded from input to
     // output.
     AllocateOutputSetMklShape(context, 0, input_mkl_shape);
     *done = true;
@@ -176,17 +177,26 @@ struct MklSliceParams {
 template <typename T>
 class MklSlicePrimitive : public MklPrimitive {
  public:
-  explicit MklSlicePrimitive(const MklSliceParams& sliceParams) {
-    context_.slice_stream.reset(new stream(stream::kind::eager));
+  explicit MklSlicePrimitive(const MklSliceParams& sliceParams)
+      : MklPrimitive(engine(ENGINE_CPU, 0)) {
     Setup(sliceParams);
   }
 
   ~MklSlicePrimitive() {}
 
-  void Execute(const MklSliceParams& sliceParams) {
+  void Execute(const MklSliceParams& sliceParams,
+               std::shared_ptr<stream> slice_stream) {
+#ifdef ENABLE_DNNL_THREADPOOL
+    context_.src_mem->set_data_handle(sliceParams.from->get_data_handle(),
+                                      *slice_stream);
+    context_.dst_mem->set_data_handle(sliceParams.to->get_data_handle(),
+                                      *slice_stream);
+#else
     context_.src_mem->set_data_handle(sliceParams.from->get_data_handle());
     context_.dst_mem->set_data_handle(sliceParams.to->get_data_handle());
-    context_.slice_stream->submit(context_.slice_primitives);
+#endif  // ENABLE_DNNL_THREADPOOL
+    execute_primitives(context_.slice_primitives, slice_stream,
+                       context_.slice_primitives_args);
 
     // We should set it back to DummyData so as to make the primitive
     // in cache pool stateless. Otherwise, if the result for previous
@@ -201,37 +211,39 @@ class MklSlicePrimitive : public MklPrimitive {
 
  private:
   struct SliceContext {
-    std::shared_ptr<mkldnn::memory> src_mem;
-    std::shared_ptr<mkldnn::memory> dst_mem;
+    std::shared_ptr<dnnl::memory> src_mem;
+    std::shared_ptr<dnnl::memory> dst_mem;
     std::shared_ptr<primitive> reorder_prim;
     std::shared_ptr<reorder::primitive_desc> reorder_pd;
-    std::shared_ptr<view::primitive_desc> view_pd;
-    std::shared_ptr<mkldnn::stream> slice_stream;
-    std::vector<mkldnn::primitive> slice_primitives;
+    std::shared_ptr<dnnl::stream> slice_stream;
+    std::vector<dnnl::primitive> slice_primitives;
+    std::shared_ptr<dnnl::memory> src_sub_mem;
+    std::vector<std::unordered_map<int, memory>> slice_primitives_args;
     SliceContext()
         : src_mem(nullptr), dst_mem(nullptr), reorder_prim(nullptr) {}
   } context_;
 
-  engine cpu_engine_ = engine(engine::cpu, 0);
-
   void Setup(const MklSliceParams& sliceParams) {
-    // Actually, this DummyData will not be used in computation,
-    // because the real data will be filled before real execution.
-    context_.src_mem.reset(
-        new memory({sliceParams.from->get_primitive_desc().desc(), cpu_engine_},
-                   DummyData));
-    context_.dst_mem.reset(new memory(
-        {sliceParams.to->get_primitive_desc().desc(), cpu_engine_}, DummyData));
-    auto src_pd = context_.src_mem->get_primitive_desc();
-    auto dst_pd = context_.dst_mem->get_primitive_desc();
-    context_.view_pd =
-        std::make_shared<view::primitive_desc>(view::primitive_desc(
-            src_pd, sliceParams.size_dims, sliceParams.begin_dims));
-    context_.reorder_pd =
-        std::make_shared<reorder::primitive_desc>(reorder::primitive_desc(
-            context_.view_pd->dst_primitive_desc(), dst_pd));
-    context_.reorder_prim = std::make_shared<mkldnn::reorder>(
-        reorder(*context_.reorder_pd, *context_.src_mem, *context_.dst_mem));
+    // Actually, DummyData will not be used in computation,
+    // because the real data will be filled before execution.
+    context_.src_mem.reset(new MEMORY_CONSTRUCTOR_WITH_MEM_PD(
+        sliceParams.from, cpu_engine_, DummyData));
+    context_.dst_mem.reset(new MEMORY_CONSTRUCTOR_WITH_MEM_PD(
+        sliceParams.to, cpu_engine_, DummyData));
+    auto src_pd = context_.src_mem->GET_DESC;
+    auto dst_pd = context_.dst_mem->GET_DESC;
+        auto src_sub_desc = context_.src_mem->get_desc().submemory_desc(
+        sliceParams.size_dims, sliceParams.begin_dims);
+    context_.src_sub_mem.reset(new memory(src_sub_desc, cpu_engine_, nullptr));
+    context_.reorder_pd = std::make_shared<reorder::primitive_desc>(
+        reorder::primitive_desc(*context_.src_sub_mem, *context_.dst_mem));
+    context_.reorder_prim =
+        std::make_shared<dnnl::reorder>(reorder(*context_.reorder_pd));
+
+    context_.slice_primitives_args.push_back(
+        {{DNNL_ARG_SRC, *context_.src_mem},
+         { DNNL_ARG_DST,
+           *context_.dst_mem }});
     context_.slice_primitives.push_back(*context_.reorder_prim);
   }
 };
@@ -262,27 +274,29 @@ class MklSlicePrimitiveFactory : public MklPrimitiveFactory<T> {
   static string CreateKey(const MklSliceParams& sliceParams) {
     string prefix = "reorder";
     FactoryKeyCreator key_creator;
-    auto const& from_desc = sliceParams.from->get_primitive_desc().desc().data;
-    auto const& to_desc = sliceParams.to->get_primitive_desc().desc().data;
+    auto const& from_desc = GET_MEMORY_DESC_FROM_MEM_PTR(sliceParams.from).data;
+    auto const& to_desc = GET_MEMORY_DESC_FROM_MEM_PTR(sliceParams.to).data;
     const int kIdxFirstStride = 0;
     memory::dims from_dims(from_desc.dims, &from_desc.dims[from_desc.ndims]);
     memory::dims to_dims(to_desc.dims, &to_desc.dims[to_desc.ndims]);
-    memory::dims from_strides(
-        from_desc.layout_desc.blocking.strides[kIdxFirstStride],
-        &from_desc.layout_desc.blocking
-             .strides[kIdxFirstStride][from_desc.ndims]);
-    memory::dims to_strides(
-        to_desc.layout_desc.blocking.strides[kIdxFirstStride],
-        &to_desc.layout_desc.blocking.strides[kIdxFirstStride][to_desc.ndims]);
+
+    // OneDNN removes "struct view". Submemory has similar capability.
+    auto from_strides = from_desc.MEMORY_FORMAT_DESC.blocking.strides;
+    auto to_strides = to_desc.MEMORY_FORMAT_DESC.blocking.strides;
+    memory::dims from_strides_outer_blocks(
+        GET_BLOCK_STRIDES(from_strides, kIdxFirstStride),
+        &GET_BLOCK_STRIDES(from_strides, kIdxFirstStride)[from_desc.ndims]);
+    memory::dims to_strides_outer_blocks(
+        GET_BLOCK_STRIDES(to_strides, kIdxFirstStride),
+        &GET_BLOCK_STRIDES(to_strides, kIdxFirstStride)[to_desc.ndims]);
+
     key_creator.AddAsKey(prefix);
-    key_creator.AddAsKey(static_cast<int>(from_desc.format));
     key_creator.AddAsKey(static_cast<int>(from_desc.data_type));
     key_creator.AddAsKey(from_dims);
-    key_creator.AddAsKey(from_strides);
-    key_creator.AddAsKey(static_cast<int>(to_desc.format));
+    key_creator.AddAsKey(from_strides_outer_blocks);
     key_creator.AddAsKey(static_cast<int>(to_desc.data_type));
     key_creator.AddAsKey(to_dims);
-    key_creator.AddAsKey(to_strides);
+    key_creator.AddAsKey(to_strides_outer_blocks);
     key_creator.AddAsKey(sliceParams.begin_dims);
     key_creator.AddAsKey(sliceParams.size_dims);
     return key_creator.GetKey();
@@ -299,7 +313,7 @@ class MklSlicePrimitiveFactory : public MklPrimitiveFactory<T> {
   }
 };
 
-// MKL-DNN implementation of Slice
+// OneDNN implementation of Slice
 template <typename Device, typename T>
 class MklSliceOp : public OpKernel {
  public:
@@ -316,7 +330,7 @@ class MklSliceOp : public OpKernel {
 
     if (!context->status().ok() || done == true) return;
 
-    // Though MKL-DNN supports more than 8 dimension and
+    // Though OneDNN supports more than 8 dimension and
     // less than 12 dimension tensor.
     // But we are mimicking functionality of Eigen Slice op for CPU.
     if (begin.size() >= 8) {
@@ -334,7 +348,7 @@ class MklSliceOp : public OpKernel {
                        const gtl::InlinedVector<int64, 4>& begin,
                        const gtl::InlinedVector<int64, 4>& size) {
     try {
-      // MKL-DNN API usage below is guided by description at:
+      // OneDNN API usage below is guided by description at:
       //  https://github.com/01org/mkl-dnn/issues/69
       //
       // Relevant part of the description is copied below:
@@ -357,7 +371,7 @@ class MklSliceOp : public OpKernel {
       // primitive descriptor. And the reorder uses source memory as input but
       // traverses it according to a view in_submem_pd.
 
-      auto cpu_engine = engine(engine::cpu, 0);
+      auto cpu_engine = engine(ENGINE_CPU, 0);
       MklDnnData<T> src(&cpu_engine);
       MklDnnData<T> output(&cpu_engine);
 
@@ -377,7 +391,7 @@ class MklSliceOp : public OpKernel {
       MklDnnShape output_mkl_shape;
 
       // If no dimension is selected in slice, the result should be empty.
-      // Just return an empty output tensor, and a dummy Mkl-shape tensor.
+      // Just return an empty output tensor, and a dummy OneDNN-shape tensor.
       if (empty) {  // for empty dims
         auto shape_to = MklDnnDimsToTFShape(size_dims);
         AllocateOutputSetMklShape(context, 0, &output_tensor, shape_to,
@@ -411,7 +425,7 @@ class MklSliceOp : public OpKernel {
         input_strides = CalculateTFStrides(input_dims);
       } else {
         // Initialize input dimensions and strides to be used when input is not
-        // in MklDnn layout.
+        // in OneDNN layout.
         input_dims = TFShapeToMklDnnDims(input_tensor.shape());
         input_strides = CalculateTFStrides(input_dims);
         // Create input memory descriptor.
@@ -424,14 +438,13 @@ class MklSliceOp : public OpKernel {
       // Or else do nothing for it.
       auto op_md =
           MklDnnData<T>::CreateBlockedMemDesc(input_dims, input_strides);
-      auto op_pd = memory::primitive_desc(op_md, cpu_engine);
-      src.CheckReorderToOpMem(op_pd);
+      src.CheckReorderToOpMem(op_md, cpu_engine, context);
 
       // Step 2 - Create memory for output.
       auto output_strides = CalculateTFStrides(size_dims);
       auto output_md =
           MklDnnData<T>::CreateBlockedMemDesc(size_dims, output_strides);
-      auto output_pd = memory::primitive_desc(output_md, cpu_engine);
+      auto output_pd = output_md;
       AllocateOutputTensor(context, input_mkl_shape, &output_pd, size_dims,
                            &output_tensor, &output_mkl_shape);
       DCHECK(output_tensor);
@@ -441,14 +454,17 @@ class MklSliceOp : public OpKernel {
       // Step 3 - create reorder primitive.
       MklSliceParams sliceParams(&src.GetOpMem(), output.GetUsrMem(),
                                  begin_dims, size_dims);
+      MklDnnThreadPool eigen_tp(context);
       MklSlicePrimitive<T>* reorder_prim =
           MklSlicePrimitiveFactory<T>::Get(sliceParams);
       // Execute slice reorder.
-      reorder_prim->Execute(sliceParams);
-    } catch (mkldnn::error& e) {
-      string error_msg = "Status: " + std::to_string(e.status) + ", message: " +
-                         string(e.message) + ", in file " + string(__FILE__) +
-                         ":" + std::to_string(__LINE__);
+      std::shared_ptr<stream> slice_stream;
+      slice_stream.reset(CreateStream(&eigen_tp, reorder_prim->GetEngine()));
+      reorder_prim->Execute(sliceParams, slice_stream);
+    } catch (dnnl::error& e) {
+      string error_msg = "Status: " + std::to_string(e.status) +
+                         ", message: " + string(e.message) + ", in file " +
+                         string(__FILE__) + ":" + std::to_string(__LINE__);
       OP_REQUIRES_OK(
           context,
           errors::Aborted("Operation received an exception:", error_msg));
@@ -458,7 +474,7 @@ class MklSliceOp : public OpKernel {
  private:
   void AllocateOutputTensor(OpKernelContext* context,
                             const MklDnnShape& input_mkl_shape,
-                            memory::primitive_desc* output_pd,
+                            MEMORY_PRIMITIVE_DESC* output_pd,
                             const memory::dims& output_dims,
                             Tensor** output_tensor,
                             MklDnnShape* output_mkl_shape) {
@@ -468,10 +484,10 @@ class MklSliceOp : public OpKernel {
     TensorShape output_tf_shape;
 
     if (input_mkl_shape.IsMklTensor()) {
-      // Since input tensor is in Mkl layout, output tensor will be in Mkl
+      // Since input tensor is in OneDNN layout, output tensor will be in OneDNN
       // layout.
 
-      // Allocate shape of Mkl tensor.
+      // Allocate shape of OneDNN tensor.
       output_mkl_shape->SetMklTensor(true);
       output_mkl_shape->SetMklLayout(output_pd);
       output_mkl_shape->SetElemType(MklDnnType<T>());
@@ -480,7 +496,7 @@ class MklSliceOp : public OpKernel {
 
       output_tf_shape.AddDim(output_pd->get_size() / sizeof(T));
     } else {
-      // If input is not in Mkl layout, then output won't be in Mkl layout.
+      // If input is not in OneDNN layout, then output won't be in OneDNN layout.
       output_mkl_shape->SetMklTensor(false);
       output_tf_shape = MklDnnDimsToTFShape(output_dims);
     }
@@ -490,7 +506,7 @@ class MklSliceOp : public OpKernel {
   }
 };
 
-// MKL-DNN Slice registration
+// OneDNN Slice registration
 #define REGISTER_MKL_SLICE(type)                               \
   REGISTER_KERNEL_BUILDER(                                     \
       Name("_MklSlice")                                        \

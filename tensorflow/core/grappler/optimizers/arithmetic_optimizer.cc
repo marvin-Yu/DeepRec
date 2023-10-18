@@ -217,7 +217,7 @@ bool GetElementUnexhaustive(const Tensor& t, int i, const std::set<int>& dtypes,
   if (dtypes.find(t.dtype()) == dtypes.end()) return false;
   switch (t.dtype()) {
     case DT_BFLOAT16:
-      *element = complex128(t.flat<bfloat16>()(i));
+      *element = complex128(static_cast<float>(t.flat<bfloat16>()(i)));
       return true;
     case DT_HALF:
       *element = complex128(static_cast<double>(t.flat<Eigen::half>()(i)), 0);
@@ -2297,7 +2297,7 @@ class FoldTransposeIntoMatMul : public ArithmeticOptimizerStage {
 
     const std::set<string> foldable_transpose_ops =
         !is_complex ? std::set<string>{"ConjugateTranspose", "Transpose"}
-                    : (node->op() == "BatchMatMul"
+                    : (IsAnyBatchMatMul(*node)
                            ? std::set<string>{"ConjugateTranspose"}
                            : std::set<string>{"Transpose"});
 
@@ -2310,8 +2310,7 @@ class FoldTransposeIntoMatMul : public ArithmeticOptimizerStage {
     NodeDef* new_op = AddCopyNode(optimized_node_name, node);
 
     if (a_is_foldable) {
-      const string attr_a =
-          node->op() == "BatchMatMul" ? "adj_x" : "transpose_a";
+      const string attr_a = IsAnyBatchMatMul(*node) ? "adj_x" : "transpose_a";
       FlipBooleanAttr(attr_a, new_op);
       new_op->set_input(0, a->input(0));
       ctx().node_map->UpdateInput(new_op->name(), a->name(), a->input(0));
@@ -2320,8 +2319,7 @@ class FoldTransposeIntoMatMul : public ArithmeticOptimizerStage {
     }
 
     if (b_is_foldable) {
-      const string attr_b =
-          node->op() == "BatchMatMul" ? "adj_y" : "transpose_b";
+      const string attr_b = IsAnyBatchMatMul(*node) ? "adj_y" : "transpose_b";
       FlipBooleanAttr(attr_b, new_op);
       new_op->set_input(1, b->input(0));
       ctx().node_map->UpdateInput(new_op->name(), b->name(), b->input(0));
@@ -2477,7 +2475,7 @@ class SimplifyAggregation : public ArithmeticOptimizerStage {
   ~SimplifyAggregation() override = default;
 
   bool IsSupported(const NodeDef* node) const override {
-    return IsAggregate(*node) && NumNonControlInputs(*node) > 0 &&
+    return IsAggregate(*node) && HasRegularInputs(*node) &&
            GetDataTypeFromAttr(*node, "T") !=
                DT_VARIANT;  // TODO(b/119787146): Enable for variants.
   }

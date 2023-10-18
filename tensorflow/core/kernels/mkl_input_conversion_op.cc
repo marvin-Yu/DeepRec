@@ -29,31 +29,35 @@ limitations under the License.
 #include "tensorflow/core/platform/macros.h"
 #include "tensorflow/core/util/tensor_format.h"
 
-#include "mkldnn.hpp"
+#include "dnnl.hpp"
 #include "tensorflow/core/kernels/mkl_tfconv_op.h"
 #include "tensorflow/core/util/mkl_util.h"
-using mkldnn::stream;
 
 namespace tensorflow {
-typedef Eigen::ThreadPoolDevice CPUDevice;
+
+#define ENGINE_CPU engine::kind::cpu
+#define GET_CHECK_REORDER_TO_OP_MEM_ARGS(md, tensor, net, net_args, engine) \
+  md, tensor, net, net_args, engine
+#define GET_TF_DATA_FORMAT(shape, mem_desc) shape.GetTfDataFormat()
+#define NET_ARGS_PTR &net_args
 
 ///////////////////////////////////////////////////////////
 //               Op kernel
-// Checks and ensures that the 2 inputs are compatible for mkl binary ops.
+// Checks and ensures that the 2 inputs are compatible for OneDNN binary ops.
 // Here's the basic logic:
 //
 // if both inputs are in TF format:
 //   pass the inputs through to the output
-// else if both inputs are in mkl format:
+// else if both inputs are in OneDNN format:
 //   if both have the same shape:
 //     pass the inputs through to the output
 //   else:
 //     convert both to TF
-// else if one is TF and one is MKL:
+// else if one is TF and one is OneDNN:
 //   if broadcast is needed:
-//     convert the MKL format input to TF format
+//     convert the OneDNN format input to TF format
 //   else:
-//     convert the TF format input to MKL format
+//     convert the TF format input to OneDNN format
 ///////////////////////////////////////////////////////////
 
 template <typename Device, typename T>
@@ -93,10 +97,10 @@ class MklInputConversionOp : public OpKernel {
     }
 
     // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-    // If both inputs are in MKL format
+    // If both inputs are in OneDNN format
     if (input_shape_0.IsMklTensor() && input_shape_1.IsMklTensor()) {
       // It is safer to compare the original TensorFlow shapes than to compare
-      // Mkl shapes since element wise ops are forwarded to Eigen
+      // OneDNN shapes since element wise ops are forwarded to Eigen
       // implementation.
       TensorShape tf_shape0 = input_shape_0.GetTfShape();
       TensorShape tf_shape1 = input_shape_1.GetTfShape();
@@ -107,7 +111,8 @@ class MklInputConversionOp : public OpKernel {
         auto input1_md = input_shape_1.GetMklLayout();
 
         // If both have the same shape and same format, pass them through
-        if (input0_md.data.format == input1_md.data.format) {
+        if (GET_TF_DATA_FORMAT(input_shape_0, input0_md) ==
+            GET_TF_DATA_FORMAT(input_shape_1, input1_md)) {
           VLOG(1) << "MklInputConversionOp: No conversion needed, "
                   << "copying MKL inputs with identical shapes to output";
 
@@ -119,7 +124,7 @@ class MklInputConversionOp : public OpKernel {
                      "different, "
                   << "need to convert to same format";
           // TODO: For now, input0 is converted and input1 is unchanged
-          //       we should choose the optimal MKL format to convert to.
+          //       we should choose the optimal OneDNN format to convert to.
           Tensor* tensor_out;
           MklDnnShape mkl_output_mkl_shape;
           mkl_output_mkl_shape.SetMklTensor(true);
@@ -128,27 +133,30 @@ class MklInputConversionOp : public OpKernel {
                                            input_shape_0.GetSizesAsMklDnnDims(),
                                            input_shape_0.GetTfDataFormat());
 
-          // Get MKL layout from input1 as destination layout
+          // Get OneDNN layout from input1 as destination layout
           mkl_output_mkl_shape.SetMklLayout(&input1_md);
 
-          // Create output Mkl tensor for index 0
+          // Create output OneDNN tensor for index 0
           AllocateOutputSetMklShape(context, kInputIndex_0, &tensor_out,
                                     input_tensor_0.shape(),
                                     mkl_output_mkl_shape);
 
-          // Create MklDnnData object for input0 tesnsor
-          auto cpu_engine = engine(engine::cpu, 0);
+          // Create MklDnnData object for input0 tensor
+          auto cpu_engine = engine(ENGINE_CPU, 0);
           MklDnnData<T> input(&cpu_engine);
           input.SetUsrMem(input0_md, &input_tensor_0);
-
           // Create reorder from input0's layout to input1's layout
           std::vector<primitive> net;
-          CHECK_EQ(input.CheckReorderToOpMem(
-                       memory::primitive_desc(input1_md, cpu_engine),
-                       tensor_out, &net),
-                   true);
-          stream(stream::kind::eager).submit(net).wait();
-
+          std::vector<MemoryArgsMap> net_args;
+          // TODO(bhavanis): Refactor CheckReorderToOpMem() to create and
+          // execute reorder
+          OP_REQUIRES(
+              context,
+              input.CheckReorderToOpMem(GET_CHECK_REORDER_TO_OP_MEM_ARGS(
+                  input1_md, tensor_out, net, net_args, cpu_engine)),
+              errors::Internal(
+                  "MklInputConversionOp: Failed to create reorder for input0"));
+          ExecutePrimitive(net, NET_ARGS_PTR, cpu_engine, context);
           // Input1 will be passed through
           ForwardMklTensorInToOut(context, kInputIndex_1, kInputIndex_1);
           return;
@@ -165,7 +173,7 @@ class MklInputConversionOp : public OpKernel {
 
       // Both have different shapes, so broadcast will be necessary.
       // Convert to TF and pass both tensors through (we can't do broadcast
-      // with MKL tensors)
+      // with OneDNN tensors)
       VLOG(1) << "MklInputConversionOp: Broadcast needed, "
               << "converted MKL inputs to TF format";
       // TODO: Cleanup op_data_type and has_avx512f_ after these two parameters
@@ -182,8 +190,8 @@ class MklInputConversionOp : public OpKernel {
     }
 
     // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-    // One input is MKL and one is TF. If no broadcast is needed, convert
-    // the TF tensor to MKL, otherwise convert the MKL tensor to TF format
+    // One input is OneDNN and one is TF. If no broadcast is needed, convert
+    // the TF tensor to OneDNN, otherwise convert the OneDNN tensor to TF format
     VLOG(1) << "MklInputConversionOp: Inputs in different formats (MKL/TF)";
 
     const Tensor* mkl_tensor;
@@ -212,12 +220,12 @@ class MklInputConversionOp : public OpKernel {
     // Broadcast is needed if the shapes are not the same
     if (mkl_shape->GetTfShape().num_elements() ==
         tf_tensor->shape().num_elements()) {
-      // Both shapes are same, convert the TF input to MKL
+      // Both shapes are same, convert the TF input to OneDNN
       VLOG(1) << "MklInputConversionOp: No broadcast needed.";
       VLOG(1) << "MklInputConversionOp: Converting input " << tf_tensor_index
               << " to MKL format";
 
-      // Create MklDnnShape for output Mkl tensor.
+      // Create MklDnnShape for output OneDNN tensor.
       Tensor* tensor_out;
       MklDnnShape mkl_output_mkl_shape;
       mkl_output_mkl_shape.SetMklTensor(true);
@@ -225,41 +233,44 @@ class MklInputConversionOp : public OpKernel {
       mkl_output_mkl_shape.SetTfLayout(mkl_shape->GetDimension(),
                                        mkl_shape->GetSizesAsMklDnnDims(),
                                        mkl_shape->GetTfDataFormat());
-      // ** Temporarily borrow the layout from the MKL input **
+      // ** Temporarily borrow the layout from the OneDNN input **
       auto output_mkl_md = mkl_shape->GetMklLayout();
       mkl_output_mkl_shape.SetMklLayout(&output_mkl_md);
 
-      // Create output Mkl tensor
+      // Create output OneDNN tensor
       AllocateOutputSetMklShape(context, tf_tensor_index, &tensor_out,
                                 mkl_tensor->shape(), mkl_output_mkl_shape);
 
       // Create MklDnnData object for input tensor. Input tensor is in
       // Tensorflow layout.
-      auto cpu_engine = engine(engine::cpu, 0);
+      auto cpu_engine = engine(ENGINE_CPU, 0);
       MklDnnData<T> tf_input(&cpu_engine);
       auto input_tf_md = mkl_output_mkl_shape.GetTfLayout();
       tf_input.SetUsrMem(input_tf_md, tf_tensor);
-
-      // Create reorder between tensorflow layout and Mkl layout if necessary
+      // Create reorder between TF layout and OneDNN layout if necessary
       std::vector<primitive> net;
-      bool reordered = tf_input.CheckReorderToOpMem(
-          memory::primitive_desc(output_mkl_md, cpu_engine), tensor_out, &net);
-
+      std::vector<MemoryArgsMap> net_args;
+      bool reordered =
+          tf_input.CheckReorderToOpMem(GET_CHECK_REORDER_TO_OP_MEM_ARGS(
+              output_mkl_md, tensor_out, net, net_args, cpu_engine));
       if (!reordered) {
         // This is the case that the TF tensor has the same shape and format of
-        // mkl tensor. However, tf_tensor can not be simply forwarded to the
-        // output tensor since mkl data tensor is always one dimensional tensor.
+        // OneDNN tensor. However, tf_tensor can not be simply forwarded to the
+        // output tensor since OneDNN data tensor is always one dimensional tensor.
         // Tensor::CopyFrom shares the buffer of the other tensor while set its
         // shape to the other tensor.
-        CHECK(tensor_out->CopyFrom(*tf_tensor, tensor_out->shape()));
+        OP_REQUIRES(context,
+                    tensor_out->CopyFrom(*tf_tensor, tensor_out->shape()),
+                    errors::Internal("MklInputConversionOp: Failed to forward "
+                                     "input tensor to output"));
       } else {
-        stream(stream::kind::eager).submit(net).wait();
+        ExecutePrimitive(net, NET_ARGS_PTR, cpu_engine, context);
       }
 
-      // -- The tensor in MKL format passes through --
+      // -- The tensor in OneDNN format passes through --
       ForwardMklTensorInToOut(context, mkl_tensor_index, mkl_tensor_index);
     } else {
-      // Broadcast is needed, so convert the MKL input to TF
+      // Broadcast is needed, so convert the OneDNN input to TF
       VLOG(1) << "MklInputConversionOp: Broadcast needed.";
       VLOG(1) << "MklInputConversionOp: Converting input " << mkl_tensor_index
               << " to TF format";
@@ -308,6 +319,12 @@ class MklInputConversionOp : public OpKernel {
 // TF_CALL_NUMBER_TYPES(REGISTER_CPU);
 TF_CALL_float(REGISTER_CPU);
 TF_CALL_bfloat16(REGISTER_CPU);
+
 #undef REGISTER_CPU
+#undef ENGINE_CPU
+#undef GET_CHECK_REORDER_TO_OP_MEM_ARGS
+#undef GET_TF_DATA_FORMAT
+#undef NET_ARGS_PTR
+
 }  // namespace tensorflow
 #endif  // INTEL_MKL
