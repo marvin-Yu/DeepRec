@@ -46,6 +46,8 @@ _TF_TENSORRT_HEADERS_V8 = [
     "NvInferRuntime.h",
     "NvInferRuntimeCommon.h",
     "NvInferPluginUtils.h",
+    "NvInferRuntimePlugin.h",
+    "NvInferRuntimeBase.h",
 ]
 
 _DEFINE_TENSORRT_SONAME_MAJOR = "#define NV_TENSORRT_SONAME_MAJOR"
