@@ -1948,6 +1948,7 @@ struct UserTracedInfos {
         prof_stats->pcie_h2d_size = run_metadata->prof_stats().pcie_h2d_size();
         prof_stats->pcie_d2h_times= run_metadata->prof_stats().pcie_d2h_times();
         prof_stats->pcie_d2h_size = run_metadata->prof_stats().pcie_d2h_size();
+        prof_stats->nan_qps = run_metadata->prof_stats().nan_qps();
       }
       if (traced_tensors) {
         const auto& tcs = run_metadata->traced_tensors();
@@ -1987,6 +1988,7 @@ struct UserTracedInfos {
           run_metadata->mutable_prof_stats()->set_gpu_kernels(prof_stats->gpu_kernels);
           run_metadata->mutable_prof_stats()->set_tao_op_calls(prof_stats->tao_op_calls);
           run_metadata->mutable_prof_stats()->set_dump_shapes(prof_stats->dump_shapes);
+          run_metadata->mutable_prof_stats()->set_nan_qps(prof_stats->nan_qps);
         }
       }
       if (traced_tensors) {
@@ -2029,6 +2031,7 @@ struct UserTracedInfos {
     prof_stats->pcie_h2d_size += run_metadata->prof_stats().pcie_h2d_size();
     prof_stats->pcie_d2h_times += run_metadata->prof_stats().pcie_d2h_times();
     prof_stats->pcie_d2h_size += run_metadata->prof_stats().pcie_d2h_size();
+    prof_stats->nan_qps = run_metadata->prof_stats().nan_qps();
   }
 
   void RecordFlops(uint64 flops, const string& device) {
@@ -2105,6 +2108,32 @@ struct UserTracedInfos {
       prof_stats->gpu_tensor_size += input_bytes + output_bytes;
     } else if(device_type == DEVICE_CPU) {
       prof_stats->cpu_tensor_size += input_bytes + output_bytes;
+    }
+  }
+
+  void RecordNanValue(std::vector<Tensor> *outputs) {
+    if (!enable_sampling_prof_stats || outputs == nullptr) {
+      return;
+    }
+    for (int i = 0; i < outputs->size(); ++i) {
+      const Tensor& output = (*outputs)[i];
+      // check type only support fp32
+      if (output.dtype() != DT_FLOAT) {
+        continue;
+      }
+      const int data_len = output.shape().num_elements();
+      int counts = 0;
+      auto output_data = output.flat<float>().data();
+      for (int j = 0; j < data_len; ++j) {
+        if (!std::isfinite(output_data[j])) {
+          prof_stats->nan_qps = true;
+          ++counts;
+        }
+      }
+      if (counts) {
+        LOG(INFO) << "Found " << counts << " nan or inf values in output tensor: "
+                  << output.DebugString();
+      }
     }
   }
 

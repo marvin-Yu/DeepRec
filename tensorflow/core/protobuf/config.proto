@@ -755,6 +755,7 @@ message RunMetadata {
     uint64 pcie_d2h_times = 14;
     uint64 pcie_d2h_size = 15;
     bool sampling_prof_stats = 16;
+    bool nan_qps = 17;
   }
 
   message BlazeMetrics {

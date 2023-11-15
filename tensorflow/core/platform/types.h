@@ -58,6 +58,7 @@ struct ProfStats {
   std::atomic<uint64> pcie_h2d_size;
   std::atomic<uint64> pcie_d2h_times;
   std::atomic<uint64> pcie_d2h_size;
+  std::atomic<bool> nan_qps;
 
   ProfStats() {
     flops = 0;
@@ -80,6 +81,7 @@ struct ProfStats {
     pcie_h2d_size = 0;
     pcie_d2h_times = 0;
     pcie_d2h_size = 0;
+    nan_qps = false;
   }
 };
 

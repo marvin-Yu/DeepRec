@@ -1484,6 +1484,7 @@ void DirectSession::RunInternalAsync(
       auto s = this->AfterRunAsync(run_options, output_names, target_nodes,
                                    outputs, frame, run_metadata, start_time_usecs);
       if (args->traced_infos) {
+        args->traced_infos->RecordNanValue(outputs);
         args->traced_infos->MergeTo(run_metadata);
       }
       done(s);
