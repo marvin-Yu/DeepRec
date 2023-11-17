@@ -494,6 +494,9 @@ stream_executor::Stream* BlazePredictor::GetStream(int stream_id) const {
 }
 
 int BlazePredictor::GetStreamNum() const {
+  if (blaze_device_ == nullptr) {
+    return 1;
+  }
   return blaze_device_->GetStreamNum() > 1 ? blaze_device_->GetStreamNum() : 1;
 }
 
