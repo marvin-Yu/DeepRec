@@ -22,16 +22,13 @@ limitations under the License.
 #ifdef INTEL_MKL
 
 #include <cstdlib>
+
 #include "tensorflow/core/common_runtime/bfc_allocator.h"
 #include "tensorflow/core/common_runtime/pool_allocator.h"
 #include "tensorflow/core/lib/strings/numbers.h"
 #include "tensorflow/core/lib/strings/str_util.h"
 #include "tensorflow/core/platform/mem.h"
 #include "tensorflow/core/platform/numa.h"
-
-#ifndef INTEL_MKL_DNN_ONLY
-#include "i_malloc.h"
-#endif
 
 #ifdef _WIN32
 typedef unsigned int uint;
@@ -126,8 +123,8 @@ class MklSmallSizeAllocator : public Allocator {
   AllocatorStats stats_ GUARDED_BY(mutex_);
 };
 
-/// CPU allocator for MKL that wraps BFC allocator and intercepts
-/// and redirects memory allocation calls from MKL.
+/// CPU allocator for OneDNN that wraps BFC allocator and intercepts
+/// and redirects memory allocation calls from OneDNN.
 class MklCPUAllocator : public Allocator {
  public:
   // Constructor and other standard functions
@@ -186,14 +183,6 @@ class MklCPUAllocator : public Allocator {
         new MklSmallSizeAllocator(sub_allocator_, max_mem_bytes, kName);
     large_size_allocator_ =
         new BFCAllocator(sub_allocator_, max_mem_bytes, kAllowGrowth, kName);
-#ifndef INTEL_MKL_DNN_ONLY
-    // For redirecting all allocations from MKL to this allocator
-    // From: http://software.intel.com/en-us/node/528565
-    i_malloc = MallocHook;
-    i_calloc = CallocHook;
-    i_realloc = ReallocHook;
-    i_free = FreeHook;
-#endif
     return Status::OK();
   }
 
@@ -273,7 +262,7 @@ class MklCPUAllocator : public Allocator {
   }
 
  private:
-  // Hooks provided by this allocator for memory allocation routines from MKL
+  // Hooks provided by this allocator for memory allocation routines from OneDNN
 
   static inline void* MallocHook(size_t size) {
     VLOG(3) << "MklCPUAllocator: In MallocHook";

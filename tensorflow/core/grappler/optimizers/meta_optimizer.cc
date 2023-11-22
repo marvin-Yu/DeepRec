@@ -36,6 +36,7 @@ limitations under the License.
 #include "tensorflow/core/grappler/optimizers/gemm_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/multi_dnn_switch_optimizer.h"
 #include "tensorflow/core/grappler/optimizers/dice_fusion.h"
+#include "tensorflow/core/grappler/optimizers/custom_matmul_bn_fusion.h"
 #include "tensorflow/core/grappler/optimizers/batch_mat_mul_compatible.h"
 #include "tensorflow/core/grappler/optimizers/gemm_compression.h"
 #include "tensorflow/core/grappler/optimizers/memory_access_optimizer.h"
@@ -105,7 +106,8 @@ bool IsRunOnceOptimizer(const string& name) {
          name == "memory_access" || name == "fold_continuous_fc" ||
          name == "fuse_cross_feature" || name == "gemm_compression" ||
          name == "batch_mat_mul_compatible" ||
-         name == "loop_optimizer" || name == "auto_mixed_precision";
+         name == "loop_optimizer" || name == "auto_mixed_precision" ||
+         name == "auto_mixed_precision_mkl";
 }
 
 // Creates a function library stub from a real function library: copy only
@@ -163,6 +165,12 @@ bool DiceFusionEnabled(RewriterConfig::Toggle opt_level) {
   return false;
 }
 
+// Helper function to decide whether to enable custom matmul bn fusion optimizer.
+bool CustomMatMulBNFusionEnabled() {
+  bool is_enabled = true;
+  TF_CHECK_OK(ReadBoolFromEnvVar("TF_CUSTOM_BN_FUSION", true, &is_enabled));
+  return is_enabled;
+}
 }  // namespace
 
 #define MK_OPT(NAME, VALUE) \
@@ -188,7 +196,9 @@ std::unique_ptr<GraphOptimizer> MetaOptimizer::MakeNewOptimizer(
   MK_OPT("merge_gemm", new MergeGemmOptimizer());
   MK_OPT("merge_gemm_second_stage", new MergeGemmOptimizerSecondStage());
   MK_OPT("auto_mixed_precision",
-         new AutoMixedPrecision(cfg_.auto_mixed_precision()));
+         new AutoMixedPrecision(AutoMixedPrecisionMode::CUDA));
+  MK_OPT("auto_mixed_precision_mkl",
+         new AutoMixedPrecision(AutoMixedPrecisionMode::MKL));
   MK_OPT("memory", new MemoryOptimizer(RewriterConfig::MANUAL));
   MK_OPT("arithmetic", new ArithmeticOptimizer(cfg_.arithmetic_optimization()));
   MK_OPT("autoparallel", new AutoParallel(cfg_.auto_parallel().num_replicas()));
@@ -200,6 +210,7 @@ std::unique_ptr<GraphOptimizer> MetaOptimizer::MakeNewOptimizer(
                                       cfg_.scoped_allocator_opts()));
   MK_OPT("pin_to_host",
          new PinToHostOptimizer(cfg_.pin_to_host_optimization()));
+  MK_OPT("custom_matmul_bn_fusion", new CustomMatMulBNFusion());
 
   return std::unique_ptr<GraphOptimizer>();
 }
@@ -266,6 +277,14 @@ Status MetaOptimizer::InitializeOptimizers(
   if (cfg_.shape_optimization() != RewriterConfig::OFF) {
     optimizers->push_back(MakeUnique<ShapeOptimizer>());
   }
+  if (AutoMixedPrecisionEnabled(cfg_.auto_mixed_precision())) {
+    optimizers->push_back(
+        MakeUnique<AutoMixedPrecision>(AutoMixedPrecisionMode::CUDA));
+  }
+  if (AutoMixedPrecisionEnabled(cfg_.auto_mixed_precision_mkl())) {
+    optimizers->push_back(
+        MakeUnique<AutoMixedPrecision>(AutoMixedPrecisionMode::MKL));
+  }
   if (cfg_.remapping() != RewriterConfig::OFF) {
     optimizers->push_back(MakeUnique<Remapper>(cfg_.remapping()));
   }
@@ -325,10 +344,6 @@ Status MetaOptimizer::InitializeOptimizers(
   if (cfg_.tile_equal() == RewriterConfig::ON) {
     optimizers->push_back(MakeUnique<TileOptimizer>());
   }
-  if (AutoMixedPrecisionEnabled(cfg_.auto_mixed_precision())) {
-    optimizers->push_back(
-        MakeUnique<AutoMixedPrecision>(cfg_.auto_mixed_precision()));
-  }
   if (cfg_.layout_optimizer() != RewriterConfig::OFF) {
     optimizers->push_back(MakeUnique<GenericLayoutOptimizer>());
   }
@@ -352,8 +367,11 @@ Status MetaOptimizer::InitializeOptimizers(
         cfg_.scoped_allocator_optimization(), cfg_.scoped_allocator_opts()));
   }
   if (cfg_.check_nan_optimization() == RewriterConfig::ON) {
-	LOG(INFO) << "check nan optimization push back";
+	  LOG(INFO) << "check nan optimization push back";
     optimizers->push_back(MakeUnique<CheckNanOptimizer>());
+  }
+  if (CustomMatMulBNFusionEnabled()) {
+    optimizers->push_back(MakeUnique<CustomMatMulBNFusion>());
   }
   return InitializeCustomGraphOptimizers(std::set<string>(), optimizers);
 }
@@ -948,6 +966,7 @@ bool MetaOptimizerEnabled(const ConfigProto& cfg) {
          rewrite_cfg.gemm_optimization() != RewriterConfig::OFF ||
          rewrite_cfg.check_nan_optimization() == RewriterConfig::ON ||
          AutoMixedPrecisionEnabled(rewrite_cfg.auto_mixed_precision()) ||
+         AutoMixedPrecisionEnabled(rewrite_cfg.auto_mixed_precision_mkl()) ||
          !rewrite_cfg.optimizers().empty() ||
          !rewrite_cfg.custom_optimizers().empty();
 }

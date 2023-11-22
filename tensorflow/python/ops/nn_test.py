@@ -128,6 +128,18 @@ class SoftmaxTest(test_lib.TestCase, parameterized.TestCase):
     self.assertAllClose(x_neg_axis_tf, y_pos_axis_tf, eps)
     self.assertAllClose(y_pos_axis_tf, z_gt_axis_tf, eps)
 
+  def testSoftmaxExtendType(self):
+    x_shape = [5, 10]
+    x_np = np.random.randn(*x_shape).astype(np.float32)
+
+    x_f32_tf = constant_op.constant(x_np)
+    x_bf16_tf = math_ops.cast(x_f32_tf, dtypes.bfloat16)
+    y_f32_tf = self.evaluate(nn_ops.softmax(x_f32_tf))
+    y_bf16_tf = self.evaluate(nn_ops.softmax(x_bf16_tf))
+    expected = math_ops.cast(y_f32_tf, dtypes.bfloat16)
+    tol = x_shape[1] * 1e-3
+    self.assertAllClose(y_bf16_tf, expected, rtol=tol, atol=tol)
+
   @parameterized.parameters(((5, 10),), ((2, 3, 4),))
   @test_util.run_deprecated_v1
   def testGradient(self, x_shape):
@@ -949,6 +961,29 @@ class ComputeSampledLogitsTest(test_lib.TestCase):
 
     self.assertAllClose(exp_sampled_softmax_loss,
                         self.evaluate(got_sampled_softmax_loss), 1e-1)
+
+
+class GeluTest(test_lib.TestCase):
+
+  def test(self):
+
+    def gelu(x, approximate=False):
+      if approximate:
+        return 0.5 * x * (1.0 + np.tanh(np.sqrt(2.0 / np.pi) *
+                                        (x + 0.044715 * np.power(x, 3))))
+      else:
+        from scipy.stats import norm  # pylint: disable=g-import-not-at-top
+        return x * norm.cdf(x)
+
+    np.random.seed(1)  # Make it reproducible.
+    x = np.random.randn(3, 4).astype(np.float32)
+    y = gelu(x)
+    z = self.evaluate(nn_ops.gelu(constant_op.constant(x)))
+    self.assertAllClose(y, z)
+
+    y = gelu(x, True)
+    z = self.evaluate(nn_ops.gelu(constant_op.constant(x), True))
+    self.assertAllClose(y, z)
 
 
 class CReluTest(test_lib.TestCase):

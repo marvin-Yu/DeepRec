@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include "tensorflow/core/grappler/optimizers/remapper.h"
+#include "tensorflow/core/graph/mkl_layout_pass_lists.h"
 
 #include "absl/container/flat_hash_set.h"
 #include "tensorflow/core/framework/versions.pb.h"
@@ -24,11 +25,13 @@ limitations under the License.
 #include "tensorflow/core/grappler/optimizers/constant_folding.h"
 #include "tensorflow/core/grappler/utils.h"
 #include "tensorflow/core/grappler/utils/graph_view.h"
+#include "tensorflow/core/grappler/utils/pattern_utils.h"
 #include "tensorflow/core/grappler/utils/symbolic_shapes.h"
 #include "tensorflow/core/grappler/utils/topological_sort.h"
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/util/env_var.h"
+#include "tensorflow/core/util/util.h"
 
 #if GOOGLE_CUDA
 #include "third_party/gpus/cudnn/cudnn.h"
@@ -47,9 +50,16 @@ namespace grappler {
 // MatMul + ... -> _FusedMatMul:
 //   (1) MatMul + BiasAdd + <Activation>
 //
+// DepthwiseConv2dNative + ... -> _FusedDepthwiseConv2dNative:
+//   (1) DepthwiseConv2dNative + BiasAdd + <Activation>
+//
 // FusedBatchNorm[$is_training] + ... -> _FusedBatchNormEx[$is_training]
 //   (1) FusedBatchNorm + <Activation>
 //   (2) FusedBatchNorm + SideInput + <Activation>
+//
+// Sigmoid + Mul -> Swish  // This fusion only work on Intel CPU.
+//
+// In all cases, the supported activation functions are Relu, Relu6, and Elu.
 //
 // Both Conv2D and MatMul implemented as Tensor contraction (on CPU), so all the
 // patterns are "ContractionWith...".
@@ -57,7 +67,12 @@ namespace {
 
 constexpr char kFusedConv2D[] = "_FusedConv2D";
 constexpr char kFusedMatMul[] = "_FusedMatMul";
+constexpr char kFusedMatMulGrad[] = "_FusedMatMulGrad";
+constexpr char kFusedBatchMatMul[] = "_FusedBatchMatMulV2";
+constexpr char kFusedDepthwiseConv2dNative[] = "_FusedDepthwiseConv2dNative";
 constexpr char kFusedBatchNormEx[] = "_FusedBatchNormEx";
+
+constexpr char kSwish[] = "_FusedSwish";
 
 constexpr char kDataFormat[] = "data_format";
 constexpr char kIsTraining[] = "is_training";
@@ -105,6 +120,17 @@ struct ContractionWithBiasAdd {
 
   int contraction = kMissingIndex;
   int bias_add = kMissingIndex;
+};
+
+// Contraction node followed by a BiasAddGrad.
+struct ContractionWithBiasAddGrad {
+  ContractionWithBiasAddGrad() = default;
+  ContractionWithBiasAddGrad(int contraction, int bias_add_grad)
+      : contraction(contraction), bias_add_grad(bias_add_grad) {}
+
+  int contraction = kMissingIndex;
+  int bias_add_grad = kMissingIndex;
+  std::vector<int> bias_add_grad_outs;
 };
 
 // Contraction node followed by a BiasAdd and Activation.
@@ -161,6 +187,17 @@ struct ContractionWithBatchNormAndActivation {
 };
 
 #ifdef INTEL_MKL
+// BatchMatMul + Mul fusion
+struct ContractionWithMul {
+  ContractionWithMul() = default;
+  ContractionWithMul(int contraction, int mul, int scalar)
+      : contraction(contraction), mul(mul), scalar(scalar) {}
+
+  int contraction = kMissingIndex;
+  int mul = kMissingIndex;
+  int scalar = kMissingIndex;
+};
+
 // Contraction node followed by a BiasAdd and Add.
 struct ContractionWithBiasAddAndAdd {
   ContractionWithBiasAddAndAdd() = default;
@@ -194,6 +231,25 @@ struct ContractionWithBiasAndAddActivation {
   int port_id = 0;
   int activation = kMissingIndex;
 };
+
+// Constraction Sigmoid and Mul nodes. fuse them into Swish. the port record
+// the common input index for mul and sigmoid.
+struct ContractionWithSwish {
+  ContractionWithSwish() = default;
+  ContractionWithSwish(int contraction, int sigmoid, int mul, int port)
+      : contraction(contraction), sigmoid(sigmoid), mul(mul), port(port) {}
+
+  int contraction = kMissingIndex;
+  int sigmoid = kMissingIndex;
+  int mul = kMissingIndex;
+  int port = kMissingIndex;
+};
+#endif  // INTEL_MKL
+
+#ifndef INTEL_MKL
+bool DisableMKL() {
+  return true;
+}
 #endif  // INTEL_MKL
 
 bool IsInPreserveSet(const RemapperContext& ctx, const NodeDef* node) {
@@ -218,13 +274,16 @@ bool HasDataType(const NodeDef* node, const DataType& expected,
 bool IsCpuCompatibleDataType(const NodeDef* contraction,
                              const string& type_attr = "T") {
   DataType dtype = GetDataTypeFromAttr(*contraction, type_attr);
-  if (IsConv2D(*contraction)) {
-    return dtype == DT_FLOAT || dtype == DT_DOUBLE;
-  } else if (IsMatMul(*contraction)) {
-    return dtype == DT_FLOAT;
+  if (!DisableMKL()) {
+    if (IsConv2D(*contraction) || IsDepthwiseConv2dNative(*contraction) ||
+        IsMatMul(*contraction))
+      return dtype == DT_FLOAT || dtype == DT_BFLOAT16;
   } else {
-    return false;
+    if (IsConv2D(*contraction)) return dtype == DT_FLOAT || dtype == DT_DOUBLE;
+    if (IsMatMul(*contraction)) return dtype == DT_FLOAT;
   }
+
+  return false;
 }
 
 bool IsGpuCompatibleDataType(const NodeDef* contraction,
@@ -240,7 +299,8 @@ bool IsGpuCompatibleDataType(const NodeDef* contraction,
 bool IsCpuCompatibleDataFormat(const NodeDef* conv2d) {
   DCHECK(IsConv2D(*conv2d)) << "Expected Conv2D op";
   const string& data_format = conv2d->attr().at(kDataFormat).s();
-  return data_format == "NHWC";
+  if (DisableMKL()) return data_format == "NHWC";
+  return data_format == "NHWC" || data_format == "NCHW";
 }
 
 bool IsGpuCompatibleDataFormat(const NodeDef* conv2d) {
@@ -263,13 +323,13 @@ bool IsGpuCompatibleConv2D(const NodeDef* conv2d) {
 
 bool IsCpuCompatibleMatMul(const NodeDef* matmul) {
   DCHECK(IsMatMul(*matmul)) << "Expected MatMul op";
-#ifndef INTEL_MKL
-  // Temporarily disable Matmul fusions if MKL is enabled.
-  // TODO(Intel) renable Matmul fusions when enabled by MKL DNN.
   return NodeIsOnCpu(matmul) && IsCpuCompatibleDataType(matmul);
-#else
-  return false;
-#endif  // !INTEL_MKL
+}
+
+bool IsCpuCompatibleDepthwiseConv2dNative(const NodeDef* dw_conv2d) {
+  DCHECK(IsDepthwiseConv2dNative(*dw_conv2d))
+      << "Expected DepthwiseConv2dNative op";
+  return NodeIsOnCpu(dw_conv2d) && IsCpuCompatibleDataType(dw_conv2d);
 }
 
 // Checks if we can rewrite a pattern to the `_Fused{Conv2D,MatMul}` on CPU.
@@ -278,6 +338,11 @@ bool IsCpuCompatible(const RemapperContext& ctx, const Pattern& matched) {
   const NodeDef& node = ctx.graph_view.graph()->node(matched.contraction);
   if (IsConv2D(node)) {
     return IsCpuCompatibleConv2D(&node);
+  } else if (IsDepthwiseConv2dNative(node)) {
+    if (DisableMKL()) {
+      return false;
+    }
+    return IsCpuCompatibleDepthwiseConv2dNative(&node);
   } else if (IsMatMul(node)) {
     return IsCpuCompatibleMatMul(&node);
   } else {
@@ -321,6 +386,12 @@ bool IsGpuCompatible(const RemapperContext& ctx,
                      const ContractionWithSqueezeAndBiasAdd& matched) {
   return false;
 }
+#ifdef INTEL_MKL
+bool IsGpuCompatible(const RemapperContext& ctx,
+                     const ContractionWithBiasAddGrad& matched) {
+  return false;
+}
+#endif
 
 // Returns true if the given pattern is supported on the assigned device.
 template <typename Pattern>
@@ -329,7 +400,11 @@ bool IsDeviceCompatible(const RemapperContext& ctx, Pattern& matched) {
 }
 
 bool IsSupportedActivation(const NodeDef& node) {
-  return IsRelu(node) || IsRelu6(node) || IsElu(node);
+  if (!DisableMKL()) {
+    return IsRelu(node) || IsRelu6(node) || IsElu(node) || IsGelu(node) ||
+           IsLeakyRelu(node) || IsTanh(node);
+  }
+  return IsRelu(node) || IsRelu6(node) || IsElu(node) || IsLeakyRelu(node);
 }
 
 inline bool HasControlFaninOrFanout(const utils::MutableNodeView& node_view) {
@@ -339,6 +414,32 @@ inline bool HasControlFaninOrFanout(const utils::MutableNodeView& node_view) {
 
 inline bool HasAtMostOneFanoutAtPort0(const utils::MutableNodeView& node_view) {
   return node_view.GetRegularFanout(0).size() <= 1;
+}
+
+// Returns true if at most one fanout reads actual tensor data at output port 0
+// (output used once for any data computation).
+inline bool HasAtMostOneDataFanoutAtPort0(
+    const utils::MutableNodeView& node_view) {
+  const auto predicate = [](const utils::MutableFaninView& fanout) -> bool {
+    const NodeDef* node = fanout.node_view()->node();
+    return !IsShape(*node) && !IsRank(*node);
+  };
+  return absl::c_count_if(node_view.GetRegularFanout(0), predicate) <= 1;
+}
+
+// Returns true if it is a scalar
+bool IsScalar(const TensorShapeProto& proto) {
+  // Returns false when rank is unknown
+  if (proto.unknown_rank()) {
+    return false;
+  }
+  // Returns false when dimension is unknown
+  for (const auto& dim : proto.dim()) {
+    if (dim.size() < 0) {
+      return false;
+    }
+  }
+  return (TensorShape(proto).num_elements() == 1);
 }
 
 bool FindContractionWithBias(const RemapperContext& ctx, int node_index,
@@ -358,15 +459,25 @@ bool FindContractionWithBias(const RemapperContext& ctx, int node_index,
   const auto* contraction_node_view = regular_fanin_0.node_view();
   const auto* contraction_node_def = contraction_node_view->node();
 
-  bool is_conv2d_or_matmul =
-      IsConv2D(*contraction_node_def) || IsMatMul(*contraction_node_def);
+  // Conv2D, MatMul or DepthwiseConv2D
+  bool is_contraction = IsConv2D(*contraction_node_def) ||
+                        IsMatMul(*contraction_node_def) ||
+                        IsDepthwiseConv2dNative(*contraction_node_def);
 
-  if (!is_conv2d_or_matmul ||
-      !HaveSameDataType(node_def, contraction_node_def) ||
+  if (!is_contraction || !HaveSameDataType(node_def, contraction_node_def) ||
       HasControlFaninOrFanout(*contraction_node_view) ||
       !HasAtMostOneFanoutAtPort0(*contraction_node_view) ||
       IsInPreserveSet(ctx, contraction_node_def))
     return false;
+
+  // Since FusedMatMul has transpose_a = true won't be rewritten
+  // in OneDNN layout pass, the fusion also needs to check "transpose_a".
+  bool transpose_a = false;
+  if (IsMatMul(*contraction_node_def)) {
+    TF_CHECK_OK(
+        GetNodeAttr(*contraction_node_def, "transpose_a", &transpose_a));
+    if (transpose_a) return false;
+  }
 
   // Check that data type and data format are supported on assigned device.
   const ContractionWithBiasAdd pattern{contraction_node_view->node_index(),
@@ -404,6 +515,29 @@ bool FindContractionWithBiasAndActivation(
       !HaveSameDataType(node_def, bias_add_node_def) ||
       IsInPreserveSet(ctx, bias_add_node_def))
     return false;
+
+  // Get the contraction node
+  const auto* contraction_node_view =
+      bias_add_node_view->GetRegularFanin(0).node_view();
+  const auto* contraction_node_def = contraction_node_view->node();
+
+  // Currently, only matmul + bias + gelu is enabled
+  if (!IsMatMul(*contraction_node_def) && IsGelu(*node_def)) return false;
+
+  // Currently, only (conv | matmul) + bias + leakyrelu is enabled
+#ifdef INTEL_MKL
+  if ((!IsConv2D(*contraction_node_def) && !IsMatMul(*contraction_node_def)) &&
+      IsLeakyRelu(*node_def))
+    return false;
+
+  if(IsMatMul(*contraction_node_def) && !MklLayoutPassLists::FindFusedMatMul() && IsLeakyRelu(*node_def))
+    return false;
+#else
+  if (!IsConv2D(*contraction_node_def) && IsLeakyRelu(*node_def)) return false;
+#endif //! INTEL_MKL
+
+  // Currently, only matmul + bias + tanh is enable
+  if (!IsMatMul(*contraction_node_def) && IsTanh(*node_def)) return false;
 
   // Check that data type and data format are supported on assigned device.
   const ContractionWithBiasAddAndActivation pattern{base.contraction,
@@ -557,6 +691,65 @@ bool FindConv2DWithBatchNormAndActivation(
 }
 
 #ifdef INTEL_MKL
+// Fuse BatchMatMul and Mul into FusedBatchMatmul if the other input of
+// Mul is a scalar. For example, we can optimize
+//
+//            Mul
+//           /  \
+//  BatchMatMul scale*  ->       FusedBatchMatmul
+//     /   \                     /      |       \
+// input1  input2             input1  input2   scale
+//
+// *) scale must be a scalar
+bool FindContractionWithMul(const RemapperContext& ctx, int node_index,
+                            ContractionWithMul* matched) {
+  const auto* node_view = ctx.graph_view.GetNode(node_index);
+  if (HasControlFaninOrFanout(*node_view)) return false;
+
+  const auto* node_def = node_view->node();
+  if (!IsAnyMul(*node_def)) return false;
+
+  // Mul has two inputs
+  const auto& props = ctx.graph_properties.GetInputProperties(node_def->name());
+  if (props.size() != 2) return false;
+
+  bool left_is_scalar = IsScalar(props[0].shape());
+  bool right_is_scalar = IsScalar(props[1].shape());
+
+  utils::MutableNodeView *const_node_view, *contraction_node_view;
+  if (left_is_scalar) {
+    const_node_view = node_view->GetRegularFanin(0).node_view();
+    contraction_node_view = node_view->GetRegularFanin(1).node_view();
+  } else if (right_is_scalar) {
+    const_node_view = node_view->GetRegularFanin(1).node_view();
+    contraction_node_view = node_view->GetRegularFanin(0).node_view();
+  } else {
+    return false;
+  }
+
+  // Currently we only fuse BatchMatMul with Mul
+  auto* contraction_node_def = contraction_node_view->node();
+  if (!IsAnyBatchMatMul(*contraction_node_def)) return false;
+
+  bool hasValidType = false;
+  hasValidType =
+      (HasDataType(node_def, DT_FLOAT) || HasDataType(node_def, DT_BFLOAT16));
+  if (!hasValidType) return false;
+
+  if (!HaveSameDataType(node_def, contraction_node_def) ||
+      HasControlFaninOrFanout(*contraction_node_view) ||
+      !HasAtMostOneFanoutAtPort0(*contraction_node_view) ||
+      IsInPreserveSet(ctx, contraction_node_def))
+    return false;
+
+  const ContractionWithMul pattern{contraction_node_view->node_index(),
+                                   node_index, const_node_view->node_index()};
+
+  *matched = pattern;
+
+  return true;
+}
+
 // As AddN has multiple inputs, this function tries to find Conv2D + Bias
 // pattern in specific input port.
 bool FindContractionWithBiasInPort(const RemapperContext& ctx,
@@ -567,16 +760,30 @@ bool FindContractionWithBiasInPort(const RemapperContext& ctx,
   if (add_node_view.NumRegularFanins() < port_id + 1) return false;
   const auto& bias_add_node_view =
       add_node_view.GetRegularFanin(port_id).node_view();
+  if (bias_add_node_view == nullptr) return false;
   const auto* bias_add_node_def = bias_add_node_view->node();
 
   if (!FindContractionWithBias(ctx, bias_add_node_view->node_index(), base,
                                /*check_device_compatible=*/false))
     return false;
+
   if (!HasAtMostOneFanoutAtPort0(*bias_add_node_view) ||
       !HaveSameDataType(&add_node_def, bias_add_node_def) ||
       IsInPreserveSet(ctx, bias_add_node_def))
     return false;
   return true;
+}
+
+bool IsAddWithNoBroadcast(const RemapperContext& ctx, const NodeDef& node) {
+  if (!IsAdd(node)) return false;
+
+  // Check if this is case of broadcasting - Add node supports broadcasting.
+  const auto& props = ctx.graph_properties.GetInputProperties(node.name());
+  if (props.size() == 2 &&
+      ShapesSymbolicallyEqual(props[0].shape(), props[1].shape())) {
+    return true;
+  }
+  return false;
 }
 
 bool FindContractionWithBiasAddAndAdd(const RemapperContext& ctx,
@@ -587,12 +794,14 @@ bool FindContractionWithBiasAddAndAdd(const RemapperContext& ctx,
   if (HasControlFaninOrFanout(node_view) || node_view.NumRegularFanins() != 2)
     return false;
 
-  // Root of the pattern must be a AddN
+  // Root of the pattern must be a AddN or Add with same input shapes
+  // (no broadcasting).
   const auto* node_def = node_view.node();
-  if (!IsAddN(*node_def)) return false;
+  if (!IsAddN(*node_def) && !IsAddWithNoBroadcast(ctx, *node_def)) return false;
 
-  // MKL AddN ops only support float data type.
-  if (!HasDataType(node_def, DT_FLOAT)) return false;
+  // OneDNN AddN ops only support float and bfloat16 data types.
+  if (!HasDataType(node_def, DT_FLOAT) && !HasDataType(node_def, DT_BFLOAT16))
+    return false;
 
   ContractionWithBiasAdd base;
   matched->port_id = 0;
@@ -607,11 +816,111 @@ bool FindContractionWithBiasAddAndAdd(const RemapperContext& ctx,
     }
   }
 
-  // We successfully found a Conv2D+BiasAdd+AddN pattern.
+  // We successfully found a Conv2D+BiasAdd+{AddN,Add} pattern.
   matched->contraction = base.contraction;
   matched->bias_add = base.bias_add;
   matched->add = node_view.node_index();
 
+  return true;
+}
+
+bool IsLegalMatMulGrad(const RemapperContext& ctx, int node_index,
+                       int node_dz) {
+  const auto* node_view = ctx.graph_view.GetNode(node_index);
+  const auto* node_def = node_view->node();
+  if (node_view == nullptr) return false;
+
+  const auto* grad_input = node_view->GetRegularFanin(1).node_view();
+  if (grad_input == nullptr) return false;
+
+  // Input grad tensor should have index 1
+  if (grad_input->node_index() != node_dz)
+    return false;
+
+  bool transpose_b = true;
+
+  if (!GetNodeAttr(*node_def, "transpose_b", &transpose_b).ok())
+    return false;
+
+  // Transposed input grad tensor is unsafe for BiasAddGrad fusion
+  if (transpose_b) return false;
+
+  return true;
+}
+
+bool FindContractionWithBiasAddGrad(const RemapperContext& ctx, int node_index,
+                                    ContractionWithBiasAddGrad* matched) {
+  const auto* node_view = ctx.graph_view.GetNode(node_index);
+  if (node_view == nullptr) return false;
+  // TODO(lyandy): Forward controls for patterns with control dependencies.
+  if (HasControlFaninOrFanout(*node_view)) return false;
+
+  // Need use BiasAddGrad to find the MatMulGradFilter
+  const auto* node_def = node_view->node();
+  if (!IsBiasAddGrad(*node_def)) return false;
+
+  // TODO(yifeng): OneDNN inner-product fp32 backward primitive shows poor
+  // performance. Remove this workaround when OneDNN is fixed.
+  if (!HasDataType(node_def, DT_BFLOAT16))
+    return false;
+
+  // BiasAddGrad, MatMulGradFilter and MatMulGradInput use the same input.
+  //
+  // OP                  | Input
+  // ---------------------------------------------------------------------
+  // BiasAddGrad         | dz
+  // MatMul(grad filter) | x and dz
+  // MatMul(grad input)  | y and dz
+  //
+  // MatMul(forward)     | 0: x, 1; y
+  //
+  // Need fuse the BiasAddGrad and MatMul. OneDNN inner-product backward
+  // primitive can compute gradients of weights and bias together based on
+  // dz and x/y, where BiasAddGrad shares dz with MatMul. Since current
+  // OneDNN inner-product backward primitive defaults the input:1 as dz,
+  // BiasAddGrad will be fused with the MatMul has dz at input:1, otherwise
+  // the FusedMatMulGrad kernel will need Transpose to maintain correctness.
+  // Furthermore, for x:(m, k) and y:(k, n), dz shape for BiasAddGrad should
+  // be (m, n). So the transpose_b of MatMul to be fused must be false.
+
+  const auto* dz = node_view->GetRegularFanin(0).node_view();
+  if (dz == nullptr) return false;
+  // The node index for MatMulGradFilter if found.
+  int matmul_grad_filter_idx = -1;
+
+  // Limit this patter that dz only has 3 output, BiasAddGrad, MatMulGradFilter
+  // and MatMulGradInput.
+  if (dz->NumRegularFanouts() != 3) return false;
+
+  std::vector<int> matmuls;
+  for (const auto dz_fanout_i : dz->GetRegularFanouts()) {
+    for (const auto dz_fanout : dz_fanout_i) {
+      if (IsMatMul(*(dz_fanout.node_view()->node()))) {
+        matmuls.push_back(dz_fanout.node_view()->node_index());
+      }
+    }
+  }
+
+  if (matmuls.size() != 2) return false;
+
+  if (IsLegalMatMulGrad(ctx, matmuls.at(0), dz->node_index())) {
+    matmul_grad_filter_idx = matmuls.at(0);
+  } else if (IsLegalMatMulGrad(ctx, matmuls.at(1), dz->node_index())) {
+    matmul_grad_filter_idx = matmuls.at(1);
+  }
+
+  if (matmul_grad_filter_idx < 0) return false;
+
+  // We successfully found a BiasAddGrad and MatMulGradFilter pattern.
+  matched->contraction = matmul_grad_filter_idx;
+  matched->bias_add_grad = node_view->node_index();
+
+  for (auto const bias_out : node_view->GetRegularFanouts()) {
+    for (auto const bias_out_i : bias_out) {
+      matched->bias_add_grad_outs.push_back(
+          bias_out_i.node_view()->node_index());
+    }
+  }
   return true;
 }
 
@@ -631,10 +940,15 @@ bool FindContractionWithBiasAndAddActivation(
 
   // Root of the pattern must be an activation node.
   const auto* node_def = node_view->node();
+  if (node_def == nullptr) return false;
   if (!IsSupportedActivation(*node_def)) return false;
 
-  // MKL activation op only supports float data type.
-  if (!HasDataType(node_def, DT_FLOAT)) return false;
+  // Currently, Contraction + Bias + Add + Tanh pattern is not supported
+  if (IsTanh(*node_def)) return false;
+
+  // OneDNN activation op only supports float and bfloat16 data types.
+  if (!HasDataType(node_def, DT_FLOAT) && !HasDataType(node_def, DT_BFLOAT16))
+    return false;
 
   // And input to activation must match ContractionWithBiasAddAndAdd pattern.
   if (node_view->NumRegularFanins() < 1) return false;
@@ -647,12 +961,103 @@ bool FindContractionWithBiasAndAddActivation(
     return false;
   }
 
+  // Get the contraction node
+  const auto* bias_add_node_view =
+      add_node_view->GetRegularFanin(base.port_id).node_view();
+  const auto* contraction_node_view =
+      bias_add_node_view->GetRegularFanin(0).node_view();
+  const auto* contraction_node_def = contraction_node_view->node();
+
+  // Currently, only conv + bias + add + leakyrelu is enabled
+  if (!IsConv2D(*contraction_node_def) && IsLeakyRelu(*node_def)) return false;
+
   // We successfully found a Conv2D+BiasAdd+AddN+activation pattern.
   const ContractionWithBiasAndAddActivation pattern{
       base.contraction, base.bias_add, base.add, base.port_id, node_index};
   *matched = pattern;
 
   return true;
+}
+
+// Helper function extracts Sigmoid and Mul to match Swish fusion patterns.
+// sigmoid_index record the sigmoid index of mul, mul_index record another mul
+// input, it is the common input for mul and sigmoid.
+bool HelperContractionWithSwish(
+    const RemapperContext& ctx, int node_index, int sigmoid_index,
+    int mul_index, ContractionWithSwish*& matched) {
+  const auto* node_view = ctx.graph_view.GetNode(node_index);
+  const auto* node_def = node_view->node();
+
+  const auto& regular_fanin_sigmoid = node_view->GetRegularFanin(sigmoid_index);
+  const auto* swish_node_view_sigmoid = regular_fanin_sigmoid.node_view();
+  const auto* swish_node_def_sigmoid = swish_node_view_sigmoid->node();
+  const auto& regular_fanin_mul = node_view->GetRegularFanin(mul_index);
+  const auto* swish_node_view_mul = regular_fanin_mul.node_view();
+  const auto* swish_node_def_mul = swish_node_view_mul->node();
+
+  if (HasControlFaninOrFanout(*swish_node_view_sigmoid) ||
+      !HasAtMostOneFanoutAtPort0(*swish_node_view_sigmoid) ||
+      !HasAtMostOneDataFanoutAtPort0(*swish_node_view_sigmoid) ||
+      IsInPreserveSet(ctx, swish_node_def_sigmoid) ||
+      !HaveSameDataType(node_def, swish_node_def_sigmoid))
+    return false;
+
+  if (swish_node_view_sigmoid->NumRegularFanins() < 1) return false;
+  const auto& sigmoid_fanin_node = swish_node_view_sigmoid->GetRegularFanin(0);
+  const auto* contraction_node_view = sigmoid_fanin_node.node_view();
+  const auto* contraction_node_def = contraction_node_view->node();
+
+  const int mul_index_port =
+      node_view->GetRegularFanin(mul_index).index();
+  const int sigmoid_index_port =
+      swish_node_view_sigmoid->GetRegularFanin(0).index();
+
+  // Make sure Mul's and Sigmoid's input is same and have the same input port.
+  if (swish_node_def_mul != contraction_node_def ||
+      mul_index_port != sigmoid_index_port)
+    return false;
+
+  *matched = {contraction_node_view->node_index(),
+              swish_node_view_sigmoid->node_index(), node_index,
+              mul_index};
+  return true;
+}
+
+bool FindContractionWithSwish(const RemapperContext& ctx,
+                                      int node_index,
+                                      ContractionWithSwish* matched) {
+  const auto* node_view = ctx.graph_view.GetNode(node_index);
+  // TODO(lyandy): Forward controls for patterns with control dependencies.
+  if (HasControlFaninOrFanout(*node_view) || node_view->NumRegularFanins() != 2)
+    return false;
+
+  // Root of the pattern must be an mul node.
+  const auto* node_def = node_view->node();
+  if (node_def == nullptr || !IsMul(*node_def)) return false;
+
+  // OneDNN mul op only supports float and bfloat16 data types.
+  if (!HasDataType(node_def, DT_FLOAT) && !HasDataType(node_def, DT_BFLOAT16))
+    return false;
+
+  const auto& regular_fanin_0 = node_view->GetRegularFanin(0);
+  const auto* swish_node_view_0 = regular_fanin_0.node_view();
+  const auto* swish_node_def_0 = swish_node_view_0->node();
+  const auto& regular_fanin_1 = node_view->GetRegularFanin(1);
+  const auto* swish_node_view_1 = regular_fanin_1.node_view();
+  const auto* swish_node_def_1 = swish_node_view_1->node();
+
+  if (!IsSigmoid(*swish_node_def_0) && !IsSigmoid(*swish_node_def_1)) return false;
+  if (IsSigmoid(*swish_node_def_0) && !IsSigmoid(*swish_node_def_1)) {
+    return HelperContractionWithSwish(ctx, node_index, 0, 1, matched);
+  }
+  if (!IsSigmoid(*swish_node_def_0) && IsSigmoid(*swish_node_def_1)) {
+    return HelperContractionWithSwish(ctx, node_index, 1, 0, matched);
+  }
+  if (IsSigmoid(*swish_node_def_0) && IsSigmoid(*swish_node_def_1)) {
+    return HelperContractionWithSwish(ctx, node_index, 0, 1, matched) ||
+           HelperContractionWithSwish(ctx, node_index, 1, 0, matched);
+  }
+  return false;
 }
 #endif
 
@@ -730,23 +1135,20 @@ bool FindFusedBatchNormEx(const RemapperContext& ctx, int node_index,
     const auto* fused_batch_norm_node_def = fused_batch_norm.node();
     if (!IsFusedBatchNorm(*fused_batch_norm_node_def)) return false;
 
-    // We fuse FusedBatchNorm only on GPU, because on CPU we fuse it with
-    // contraction (MatMul or Conv2D node).
-    if (!NodeIsOnGpu(fused_batch_norm_node_def)) return false;
+    if (DisableMKL()) return false;
 
     DataType t_dtype = GetDataTypeFromAttr(*fused_batch_norm_node_def, "T");
-    if (t_dtype != DT_FLOAT && t_dtype != DT_HALF) return false;
+    if (t_dtype != DT_FLOAT && t_dtype != DT_BFLOAT16) return false;
 
     // Get the FusedBatchNorm training mode.
     bool is_training;
     if (!GetNodeAttr(*fused_batch_norm_node_def, kIsTraining, &is_training)
              .ok())
       return false;
-
     // In training mode we rely on cuDNN for computing FusedBatchNorm with side
     // inputs and activation, and it has its own limitations. In inference mode
     // we have a custom CUDA kernel that doesn't not have these constraints.
-    if (is_training) {
+    if (is_training && NodeIsOnGpu(fused_batch_norm_node_def)) {
       // cuDNN only supports NHWC data layout.
       string data_format;
       if (!GetNodeAttr(*fused_batch_norm_node_def, kDataFormat, &data_format)
@@ -777,7 +1179,7 @@ bool FindFusedBatchNormEx(const RemapperContext& ctx, int node_index,
 
     // Check that only one node consumes the 0-th output of a FusedBatchNorm.
     if (HasControlFaninOrFanout(fused_batch_norm) ||
-        !HasAtMostOneFanoutAtPort0(fused_batch_norm) ||
+        !HasAtMostOneDataFanoutAtPort0(fused_batch_norm) ||
         IsInPreserveSet(ctx, fused_batch_norm_node_def))
       return false;
 
@@ -798,6 +1200,12 @@ bool FindFusedBatchNormEx(const RemapperContext& ctx, int node_index,
 
   // Input to a Relu can be an Add node with FusedBatchNorm as one of the inputs
   if (IsAdd(*relu_fanin_0_node_def)) {
+    // Currently no CPU implementation for "FusedBatchNorm + SideInput +
+    // <Activation>""
+#ifdef INTEL_MKL
+    return false;
+#endif
+
     // Check that only Relu node consumes the output of an Add node.
     if (HasControlFaninOrFanout(*relu_fanin_0_node_view) ||
         !HasAtMostOneFanoutAtPort0(*relu_fanin_0_node_view) ||
@@ -837,7 +1245,8 @@ bool FindFusedBatchNormEx(const RemapperContext& ctx, int node_index,
   return false;
 }
 
-void CopyConv2DAttributes(const NodeDef& conv2d, NodeDef* fused_conv2d) {
+void CopyConv2DAttributes(const NodeDef& conv2d, NodeDef* fused_conv2d,
+                          const NodeDef* activation = nullptr) {
   DCHECK(IsConv2D(conv2d)) << "Input node must be a Conv2D";
 
   auto* attr = fused_conv2d->mutable_attr();
@@ -850,6 +1259,36 @@ void CopyConv2DAttributes(const NodeDef& conv2d, NodeDef* fused_conv2d) {
   (*attr)["dilations"] = src_attr.at("dilations");
   (*attr)["data_format"] = src_attr.at("data_format");
   (*attr)["use_cudnn_on_gpu"] = src_attr.at("use_cudnn_on_gpu");
+  float leakyrelu_alpha = 0.0;
+  // Copy LeakyRelu's attr alpha to FusedConv2D's attr leakyrelu_alpha
+  if (activation != nullptr && IsLeakyRelu(*activation)) {
+    auto& activation_attr = activation->attr();
+    leakyrelu_alpha = activation_attr.at("alpha").f();
+  }
+  SetAttrValue(leakyrelu_alpha, &(*attr)["leakyrelu_alpha"]);
+}
+
+void CopyDepthwiseConv2dNativeAttributes(const NodeDef& dw_conv2d,
+                                         NodeDef* fused_dw_conv2d,
+                                         const NodeDef* activation = nullptr) {
+  DCHECK(IsDepthwiseConv2dNative(dw_conv2d))
+      << "Input node must be a DepthwiseConv2dNative";
+
+  auto* attr = fused_dw_conv2d->mutable_attr();
+  auto& src_attr = dw_conv2d.attr();
+
+  (*attr)["T"] = src_attr.at("T");
+  (*attr)["strides"] = src_attr.at("strides");
+  (*attr)["padding"] = src_attr.at("padding");
+  (*attr)["dilations"] = src_attr.at("dilations");
+  (*attr)["data_format"] = src_attr.at("data_format");
+  float leakyrelu_alpha = 0.0;
+  // Copy LeakyRelu's attr alpha to FusedDepthwiseConv2d's attr leakyrelu_alpha
+  if (activation != nullptr && IsLeakyRelu(*activation)) {
+    auto& activation_attr = activation->attr();
+    leakyrelu_alpha = activation_attr.at("alpha").f();
+  }
+  SetAttrValue(leakyrelu_alpha, &(*attr)["leakyrelu_alpha"]);
 }
 
 void CopyFusedBatchNormAttributes(const NodeDef& fused_batch_norm,
@@ -864,16 +1303,22 @@ void CopyFusedBatchNormAttributes(const NodeDef& fused_batch_norm,
   (*attr)["is_training"] = src_attr.at("is_training");
   (*attr)["data_format"] = src_attr.at("data_format");
   (*attr)["epsilon"] = src_attr.at("epsilon");
+  (*attr)["exponential_avg_factor"] = src_attr.at("exponential_avg_factor");
 
   // FusedBatchNormV2 and V3 have an extra type parameter.
   if (fused_batch_norm.op() != "FusedBatchNorm") {
-    (*attr)["U"] = src_attr.at("U");
+    SetAttrValue(src_attr.at("U"), &(*attr)["U"]);
   } else {
-    (*attr)["U"] = src_attr.at("T");
+#ifndef INTEL_MKL
+    SetAttrValue(src_attr.at("T"), &(*attr)["U"]);
+#else
+    SetAttrValue(DT_FLOAT, &(*attr)["U"]);
+#endif
   }
 }
 
-void CopyMatMulAttributes(const NodeDef& matmul, NodeDef* fused_matmul) {
+void CopyMatMulAttributes(const NodeDef& matmul, NodeDef* fused_matmul,
+                          const NodeDef* activation = nullptr) {
   DCHECK(IsMatMul(matmul)) << "Input node must be a MatMul";
 
   auto* attr = fused_matmul->mutable_attr();
@@ -882,6 +1327,35 @@ void CopyMatMulAttributes(const NodeDef& matmul, NodeDef* fused_matmul) {
   (*attr)["T"] = src_attr.at("T");
   (*attr)["transpose_a"] = src_attr.at("transpose_a");
   (*attr)["transpose_b"] = src_attr.at("transpose_b");
+  // Copy LeakyRelu's attr alpha to _FusedMatMul's attr leakyrelu_alpha
+  if (activation != nullptr && IsLeakyRelu(*activation)) {
+    auto& activation_attr = activation->attr();
+    (*attr)["leakyrelu_alpha"] = activation_attr.at("alpha");
+  }
+  else{
+    SetAttrValue(0.2f, &(*attr)["leakyrelu_alpha"]);  // required only for LeakyRelu
+  }
+}
+
+void CopyBatchMatMulAttributes(const NodeDef& batchmatmul,
+                               NodeDef* fused_batch_matmul) {
+  DCHECK(IsAnyBatchMatMul(batchmatmul)) << "Input node must be a BatchMatMul";
+
+  auto* attr = fused_batch_matmul->mutable_attr();
+  auto& src_attr = batchmatmul.attr();
+
+  (*attr)["T"] = src_attr.at("T");
+  (*attr)["adj_x"] = src_attr.at("adj_x");
+  (*attr)["adj_y"] = src_attr.at("adj_y");
+}
+
+void CopyAttributesAll(const NodeDef& from, NodeDef* to) {
+  auto* attr = to->mutable_attr();
+  auto& src_attr = from.attr();
+  for (auto iter = src_attr.begin(); iter != src_attr.end(); ++iter) {
+    auto name = iter->first;
+    (*attr)[name] = src_attr.at(name);
+  }
 }
 
 void SetFusedOpAttributes(NodeDef* fused,
@@ -891,6 +1365,157 @@ void SetFusedOpAttributes(NodeDef* fused,
   SetAttrValue(fused_ops, &(*attr)["fused_ops"]);
   SetAttrValue(num_args, &(*attr)["num_args"]);
   SetAttrValue(epsilon, &(*attr)["epsilon"]);  // required only for BatchNorm
+}
+
+bool FindMatMulWithBiasAndAGelu(RemapperContext* ctx, int node_index,
+                                std::map<string, int>* node_label_to_index,
+                                std::vector<bool>* nodes_to_delete,
+                                bool approximate) {
+  using namespace grappler::utils;
+  auto GetGeluPattern = [](bool approximate) -> OpTypePattern {
+    // clang-format off
+    if (approximate) {
+      return
+      {"Mul", "my_gelu", NodeStatus::kReplace,
+        {
+          {"BiasAdd", "my_bias_add", NodeStatus::kRemove,
+            {
+              {"MatMul", "my_matmul", NodeStatus::kRemove},
+              {"*", "my_bias", NodeStatus::kRemain}
+            }
+          },
+          {"Mul", "mul_2", NodeStatus::kRemove,
+            {
+              {"Const", "mul_2_x", NodeStatus::kRemain},
+              {"AddV2", "add_1", NodeStatus::kRemove,
+                {
+                  {"Const", "add_1_x", NodeStatus::kRemain},
+                  {"Tanh", "tanh", NodeStatus::kRemove,
+                    {
+                      {"Mul", "mul_1", NodeStatus::kRemove,
+                        {
+                          {"Const", "mul_1_x", NodeStatus::kRemain},
+                          {"AddV2", "add", NodeStatus::kRemove,
+                            {
+                              {"BiasAdd", "my_bias_add", NodeStatus::kRemove},
+                              {"Mul", "mul", NodeStatus::kRemove,
+                                {
+                                  {"Const", "mul_x", NodeStatus::kRemain},
+                                  {"Pow", "pow", NodeStatus::kRemove,
+                                    {
+                                      {"BiasAdd", "my_bias_add", NodeStatus::kRemove},
+                                      {"Const", "pow_y", NodeStatus::kRemain}
+                                    }
+                                  },
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      };
+    } else {
+      return
+      {"Mul", "my_gelu", NodeStatus::kReplace,
+        {
+          {"Mul", "my_one_half_times_erf_plus_one", NodeStatus::kRemove,
+            {
+              {"Const", "my_one_half", NodeStatus::kRemain},
+              {"BiasAdd", "my_bias_add", NodeStatus::kRemove,
+                {
+                  {"MatMul", "my_matmul", NodeStatus::kRemove},
+                  {"*", "my_bias", NodeStatus::kRemain}
+                }
+              }
+            }
+          },
+          {"AddV2", "my_erf_plus_one", NodeStatus::kRemove,
+            {
+              {"Const", "my_one", NodeStatus::kRemain},
+              {"Erf", "my_erf", NodeStatus::kRemove,
+                {
+                  {"Mul", "my_bias_add_times_const", NodeStatus::kRemove,
+                    {
+                      {"BiasAdd", "my_bias_add", NodeStatus::kRemove},
+                      {"Const", "my_one_over_square_root_two", NodeStatus::kRemain}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      };
+    }
+    // clang-format on
+  };
+  OpTypePattern pattern_syntax = GetGeluPattern(approximate);
+
+  SubGraphMatcher<MatchingDirection::kFollowInputs> graph_matcher(
+      &(ctx->graph_view));
+  std::set<int> remove_node_indices;
+  bool found_match = graph_matcher.GetMatchedNodes(
+      pattern_syntax, ctx->graph_view.GetNode(node_index), node_label_to_index,
+      &remove_node_indices);
+
+  // Add additional condition here
+  if (found_match) {
+    // 1. Check if the MatMul to be fused is CPU compatible
+    NodeDef* matmul_node =
+        ctx->graph_view.GetNode(node_label_to_index->at("my_matmul"))->node();
+    if (!IsCpuCompatibleMatMul(matmul_node)) {
+      node_label_to_index->clear();
+      return false;
+    }
+
+    // All conditions are satisfied now. Also the remove_candidate_indices
+    // are safe this moment.
+    for (const auto& safe_node_idx : remove_node_indices) {
+      (*nodes_to_delete)[safe_node_idx] = true;
+    }
+  }
+  return found_match;
+}
+
+// WIP: Not yet implemented.
+Status AddFusedMatMulWithBiasAndGelu(RemapperContext* ctx,
+                                     std::map<string, int>& node_label_to_index,
+                                     std::vector<bool>* invalidated_nodes,
+                                     bool approximate) {
+  auto* old_gelu_node =
+      ctx->graph_view.GetNode(node_label_to_index["my_gelu"])->node();
+  auto* old_matmul_node =
+      ctx->graph_view.GetNode(node_label_to_index["my_matmul"])->node();
+  auto* old_bias_add_node =
+      ctx->graph_view.GetNode(node_label_to_index["my_bias_add"])->node();
+
+  NodeDef fused_node;
+  string gelu_kind = approximate ? "Gelu" : "Gelu_erf";
+  // Fused node should have the name of terminal node of the fusion.
+  fused_node.set_name(old_gelu_node->name());
+  fused_node.set_op("_FusedMatMul");
+  fused_node.set_device(old_matmul_node->device());
+  fused_node.add_input(old_matmul_node->input(0));
+  fused_node.add_input(old_matmul_node->input(1));
+  fused_node.add_input(old_bias_add_node->input(1));
+  CopyMatMulAttributes(*old_matmul_node, &fused_node);
+  SetFusedOpAttributes(&fused_node, {"BiasAdd", gelu_kind});
+
+  utils::Mutation* mutation = ctx->graph_view.GetMutationBuilder();
+  Status status;
+  mutation->AddNode(std::move(fused_node), &status);
+  TF_RETURN_IF_ERROR(status);
+  TF_RETURN_IF_ERROR(mutation->Apply());
+  (*invalidated_nodes)[node_label_to_index["gelu"]] = true;
+
+  return Status::OK();
 }
 
 Status AddFusedContractionNode(RemapperContext* ctx,
@@ -916,6 +1541,9 @@ Status AddFusedContractionNode(RemapperContext* ctx,
   if (IsConv2D(contraction)) {
     fused_op.set_op(kFusedConv2D);
     CopyConv2DAttributes(contraction, &fused_op);
+  } else if (IsDepthwiseConv2dNative(contraction)) {
+    fused_op.set_op(kFusedDepthwiseConv2dNative);
+    CopyDepthwiseConv2dNativeAttributes(contraction, &fused_op);
   } else if (IsMatMul(contraction)) {
     fused_op.set_op(kFusedMatMul);
     CopyMatMulAttributes(contraction, &fused_op);
@@ -944,6 +1572,7 @@ Status AddFusedContractionNode(
   const NodeDef& contraction = graph->node(matched.contraction);
   const NodeDef& bias_add = graph->node(matched.bias_add);
   const NodeDef& activation = graph->node(matched.activation);
+
   VLOG(2) << "Fuse " << contraction.op() << " with BiasAdd and "
           << activation.op() << ":"
           << " activation=" << activation.name()
@@ -959,13 +1588,22 @@ Status AddFusedContractionNode(
 
   if (IsConv2D(contraction)) {
     fused_op.set_op(kFusedConv2D);
-    CopyConv2DAttributes(contraction, &fused_op);
+    // leaky relu has a special attribute alpha
+    CopyConv2DAttributes(contraction, &fused_op, &activation);
+  } else if (IsDepthwiseConv2dNative(contraction)) {
+    fused_op.set_op(kFusedDepthwiseConv2dNative);
+    CopyDepthwiseConv2dNativeAttributes(contraction, &fused_op);
   } else if (IsMatMul(contraction)) {
     fused_op.set_op(kFusedMatMul);
-    CopyMatMulAttributes(contraction, &fused_op);
+    CopyMatMulAttributes(contraction, &fused_op, &activation);
   }
 
-  SetFusedOpAttributes(&fused_op, {"BiasAdd", activation.op()});
+  // Set different algorithm for Gelu according to approximate.
+  string new_op = activation.op();
+  if (new_op == "Gelu" && !(activation.attr().at("approximate").b())) {
+    new_op += "_erf";
+  }
+  SetFusedOpAttributes(&fused_op, {"BiasAdd", new_op});
 
   utils::Mutation* mutation = ctx->graph_view.GetMutationBuilder();
   Status status;
@@ -1094,7 +1732,7 @@ Status AddFusedConv2DNode(RemapperContext* ctx,
   fused_conv2d.add_input(fused_batch_norm.input(3));  // 4: mean
   fused_conv2d.add_input(fused_batch_norm.input(4));  // 5: variance
 
-  CopyConv2DAttributes(contraction, &fused_conv2d);
+  CopyConv2DAttributes(contraction, &fused_conv2d, &activation);
   SetFusedOpAttributes(&fused_conv2d, {"FusedBatchNorm", activation.op()},
                        /*num_args=*/4, /*epsilon=*/matched.epsilon);
 
@@ -1113,6 +1751,43 @@ Status AddFusedConv2DNode(RemapperContext* ctx,
 
 #ifdef INTEL_MKL
 Status AddFusedContractionNode(RemapperContext* ctx,
+                               const ContractionWithMul& matched,
+                               std::vector<bool>* invalidated_nodes,
+                               std::vector<bool>* nodes_to_delete) {
+  const GraphDef* graph = ctx->graph_view.graph();
+  const NodeDef& contraction = graph->node(matched.contraction);
+  const NodeDef& mul = graph->node(matched.mul);
+  const NodeDef& scalar = graph->node(matched.scalar);
+  VLOG(2) << "Fuse " << contraction.op() << " with Mul: "
+          << " mul=" << mul.name() << " contraction=" << contraction.name();
+
+  NodeDef fused_op;
+  fused_op.set_name(mul.name());
+  fused_op.set_device(contraction.device());
+  fused_op.add_input(contraction.input(0));  // 0: input
+  fused_op.add_input(contraction.input(1));  // 1: filter
+  fused_op.add_input(scalar.name());         // 2: scale
+  fused_op.set_op(kFusedBatchMatMul);
+
+  CopyBatchMatMulAttributes(contraction, &fused_op);
+  auto* attr = fused_op.mutable_attr();
+  SetAttrValue(absl::Span<const absl::string_view>({"Mul"}),
+               &(*attr)["fused_ops"]);
+  SetAttrValue(1, &(*attr)["num_args"]);
+
+  utils::Mutation* mutation = ctx->graph_view.GetMutationBuilder();
+  Status status;
+  mutation->AddNode(std::move(fused_op), &status);
+  TF_RETURN_IF_ERROR(status);
+  TF_RETURN_IF_ERROR(mutation->Apply());
+
+  (*invalidated_nodes)[matched.mul] = true;
+  (*nodes_to_delete)[matched.contraction] = true;
+
+  return Status::OK();
+}
+
+Status AddFusedContractionNode(RemapperContext* ctx,
                                const ContractionWithBiasAddAndAdd& matched,
                                std::vector<bool>* invalidated_nodes,
                                std::vector<bool>* nodes_to_delete) {
@@ -1120,28 +1795,34 @@ Status AddFusedContractionNode(RemapperContext* ctx,
   const NodeDef& contraction = graph->node(matched.contraction);
   const NodeDef& bias_add = graph->node(matched.bias_add);
 
-  // MKL version only support fusion for Conv2D
-  DCHECK(IsConv2D(contraction));
+  // OneDNN version only support fusion for Conv2D and MatMul
+  DCHECK(IsConv2D(contraction) || IsMatMul(contraction));
 
-  NodeDef fused_conv2d;
+  NodeDef contraction_node;
   const NodeDef& add = graph->node(matched.add);
-  fused_conv2d.set_name(add.name());
-  fused_conv2d.set_op(kFusedConv2D);
-  fused_conv2d.set_device(contraction.device());
-  fused_conv2d.add_input(contraction.input(0));  // 0: input
-  fused_conv2d.add_input(contraction.input(1));  // 1: filter
-  fused_conv2d.add_input(bias_add.input(1));     // 2: bias
+  contraction_node.set_name(add.name());
+  contraction_node.set_device(contraction.device());
+  contraction_node.add_input(contraction.input(0));  // 0: input
+  contraction_node.add_input(contraction.input(1));  // 1: filter
+  contraction_node.add_input(bias_add.input(1));     // 2: bias
 
-  // Add OP has two inputs, one is conv+bias pattern matched previously,
-  // the other input to add is fused here.
-  fused_conv2d.add_input(add.input(1 - matched.port_id));
+  // Add OP has two inputs, one is conv+bias/matmul+bias pattern matched
+  // previously, the other input to add is fused here.
+  contraction_node.add_input(add.input(1 - matched.port_id));
 
-  CopyConv2DAttributes(contraction, &fused_conv2d);
-  SetFusedOpAttributes(&fused_conv2d, {"BiasAdd", "Add"}, 2);
+  if (IsConv2D(contraction)) {
+    contraction_node.set_op(kFusedConv2D);
+    CopyConv2DAttributes(contraction, &contraction_node);
+  } else if (IsMatMul(contraction)) {
+    contraction_node.set_op(kFusedMatMul);
+    CopyMatMulAttributes(contraction, &contraction_node);
+  }
+
+  SetFusedOpAttributes(&contraction_node, {"BiasAdd", "Add"}, 2);
 
   utils::Mutation* mutation = ctx->graph_view.GetMutationBuilder();
   Status status;
-  mutation->AddNode(std::move(fused_conv2d), &status);
+  mutation->AddNode(std::move(contraction_node), &status);
   TF_RETURN_IF_ERROR(status);
   TF_RETURN_IF_ERROR(mutation->Apply());
 
@@ -1156,7 +1837,7 @@ Status AddFusedContractionNode(
     RemapperContext* ctx, const ContractionWithBiasAndAddActivation& matched,
     std::vector<bool>* invalidated_nodes, std::vector<bool>* nodes_to_delete) {
   const GraphDef* graph = ctx->graph_view.graph();
-  // MKL version only support fusion for Conv2D
+  // OneDNN version only support fusion for Conv2D
   const NodeDef& contraction = graph->node(matched.contraction);
   DCHECK(IsConv2D(contraction));
   const NodeDef& activation = graph->node(matched.activation);
@@ -1176,7 +1857,7 @@ Status AddFusedContractionNode(
   fused_conv2d.add_input(add.input(1 - matched.port_id));
 
   CopyConv2DAttributes(contraction, &fused_conv2d);
-  SetFusedOpAttributes(&fused_conv2d, {"BiasAdd", "Add", "Relu"}, 2);
+  SetFusedOpAttributes(&fused_conv2d, {"BiasAdd", "Add", activation.op()}, 2);
 
   utils::Mutation* mutation = ctx->graph_view.GetMutationBuilder();
   Status status;
@@ -1189,6 +1870,111 @@ Status AddFusedContractionNode(
   (*nodes_to_delete)[matched.bias_add] = true;
   (*nodes_to_delete)[matched.contraction] = true;
 
+  return Status::OK();
+}
+
+void SetGradFusedOpAttributes(
+    NodeDef* fused, const absl::Span<const absl::string_view> fused_ops) {
+  auto* attr = fused->mutable_attr();
+  SetAttrValue(fused_ops, &(*attr)["fused_ops"]);
+}
+
+Status AddFusedContractionGradNode(RemapperContext* ctx,
+                                   const ContractionWithBiasAddGrad& matched,
+                                   std::vector<bool>* invalidated_nodes,
+                                   std::vector<bool>* nodes_to_delete) {
+  DCHECK(IsDeviceCompatible(*ctx, matched)) << "Unsupported fusion pattern";
+
+  const GraphDef* graph = ctx->graph_view.graph();
+  const NodeDef& contraction = graph->node(matched.contraction);
+  const NodeDef& bias_add_grad = graph->node(matched.bias_add_grad);
+  DCHECK(IsMatMul(contraction)) << "Input node must be a MatMul";
+
+  VLOG(2) << "Fuse " << contraction.op() << " with BiasAddGrad: "
+          << " bias_add_grad=" << bias_add_grad.name()
+          << " contraction=" << contraction.name();
+
+  NodeDef fused_op;
+  fused_op.set_name(contraction.name());
+  fused_op.set_device(contraction.device());
+  fused_op.set_op(kFusedMatMulGrad);
+  auto* fused_op_attr = fused_op.mutable_attr();
+  auto& contraction_attr = contraction.attr();
+
+  // dz should come from input:1
+  fused_op.add_input(contraction.input(0));  // 0: input
+  // to infer transpose_{a/b} of forward MatMul for OneDNN's requirement
+  const tensorflow::AttrValue ta_attr = contraction_attr.at("transpose_a");
+  SetAttrValue(!ta_attr.b(), &(*fused_op_attr)["transpose_a"]);
+  (*fused_op_attr)["transpose_b"] = contraction_attr.at("transpose_b");
+
+  fused_op.add_input(bias_add_grad.input(0));  // 1: dz
+  (*fused_op_attr)["T"] = contraction_attr.at("T");
+
+  std::vector<NodeDef> bias_add_grad_outs;
+  bias_add_grad_outs.resize(matched.bias_add_grad_outs.size());
+  for (int i = 0; i < matched.bias_add_grad_outs.size(); ++i) {
+    const NodeDef& out_i = graph->node(matched.bias_add_grad_outs[i]);
+    bias_add_grad_outs[i].set_name(out_i.name());
+    bias_add_grad_outs[i].set_device(out_i.device());
+    bias_add_grad_outs[i].set_op(out_i.op());
+    for (int j = 0; j < out_i.input_size(); ++j) {
+      auto out_i_input = out_i.input(j);
+      if (out_i_input == bias_add_grad.name()) {
+        out_i_input = contraction.name() + ":1";
+      }
+      bias_add_grad_outs[i].add_input(out_i_input);
+    }
+    CopyAttributesAll(out_i, &bias_add_grad_outs[i]);
+  }
+
+  SetGradFusedOpAttributes(&fused_op, {"BiasAddGrad"});
+
+  utils::Mutation* mutation = ctx->graph_view.GetMutationBuilder();
+  Status status;
+  mutation->AddNode(std::move(fused_op), &status);
+  for (int i = 0; i < matched.bias_add_grad_outs.size(); ++i) {
+    mutation->AddNode(std::move(bias_add_grad_outs[i]), &status);
+  }
+  TF_RETURN_IF_ERROR(status);
+  TF_RETURN_IF_ERROR(mutation->Apply());
+
+  (*invalidated_nodes)[matched.contraction] = true;
+  (*nodes_to_delete)[matched.bias_add_grad] = true;
+  for (int i = 0; i < matched.bias_add_grad_outs.size(); ++i) {
+    (*invalidated_nodes)[matched.bias_add_grad_outs[i]] = true;
+  }
+
+  return Status::OK();
+}
+
+Status AddFusedContractionNode(RemapperContext* ctx,
+                               const ContractionWithSwish& matched,
+                               std::vector<bool>* invalidated_nodes,
+                               std::vector<bool>* nodes_to_delete) {
+  const GraphDef* graph = ctx->graph_view.graph();
+  const NodeDef& contraction = graph->node(matched.contraction);
+  const NodeDef& sigmoid = graph->node(matched.sigmoid);
+  const NodeDef& mul = graph->node(matched.mul);
+
+  NodeDef fused_op;
+  fused_op.set_name(mul.name());
+  fused_op.set_op(kSwish);
+  fused_op.set_device(mul.device());
+  fused_op.add_input(mul.input(matched.port));  // 0: input
+
+  auto* attr = fused_op.mutable_attr();
+  auto& src_attr = mul.attr();
+  (*attr)["T"] = src_attr.at("T");
+
+  utils::Mutation* mutation = ctx->graph_view.GetMutationBuilder();
+  Status status;
+  mutation->AddNode(std::move(fused_op), &status);
+  TF_RETURN_IF_ERROR(status);
+  TF_RETURN_IF_ERROR(mutation->Apply());
+
+  (*invalidated_nodes)[matched.mul] = true;
+  (*nodes_to_delete)[matched.sigmoid] = true;
   return Status::OK();
 }
 #endif
@@ -1445,10 +2231,74 @@ Status AddBatchNormNodes(RemapperContext* ctx, const FusedBatchNorm& matched) {
   return mutation->Apply();
 }
 
+#ifdef INTEL_MKL
+bool IsConv2DOrMatMul(const NodeDef& node) {
+  return IsConv2D(node) || IsMatMul(node);
+}
+
+bool IsContractionWithAdd(const RemapperContext& ctx, int node_index) {
+  const auto* node_view = ctx.graph_view.GetNode(node_index);
+
+  if (node_view == nullptr) return false;
+
+  // Candidate for Conv2D + Add or Conv2D + BiasAdd + Add fusion.
+  //               MatMul + Add or MatMul + BiasAdd + Add fusion.
+  auto is_supported_add_input =
+      [](const utils::MutableNodeView* node_view) -> bool {
+    // Currently only support Conv2D and MatMul
+    if (IsConv2DOrMatMul(*node_view->node())) return true;
+    if (IsBiasAdd(*node_view->node())) {
+      if (node_view->NumRegularFanins() < 2) return false;
+      const auto& bias_add_fanin_0 = node_view->GetRegularFanin(0);
+      const auto& bias_add_fanin_1 = node_view->GetRegularFanin(1);
+      return IsConv2DOrMatMul(*bias_add_fanin_0.node_view()->node()) ||
+             IsConv2DOrMatMul(*bias_add_fanin_1.node_view()->node());
+    }
+    return false;
+  };
+
+  auto is_supported_add = [&](const utils::MutableNodeView* node_view) -> bool {
+    const auto* node_def = node_view->node();
+    if (IsAdd(*node_def)) {
+      if (node_view->NumRegularFanins() < 2) return false;
+      const auto& add_fanin_0 = node_view->GetRegularFanin(0);
+      const auto& add_fanin_1 = node_view->GetRegularFanin(1);
+      return is_supported_add_input(add_fanin_0.node_view()) ||
+             is_supported_add_input(add_fanin_1.node_view());
+    }
+    return false;
+  };
+
+  bool ret = false;
+  for (int i = 0; i < node_view->NumRegularFanins(); i++) {
+    const auto& fanin_i = node_view->GetRegularFanin(i);
+    ret = is_supported_add(fanin_i.node_view());
+    if (ret) break;
+  }
+
+  return ret;
+}
+
+bool IsBatchMatMulWithMul(const RemapperContext& ctx, int node_index) {
+  const auto* node_view = ctx.graph_view.GetNode(node_index);
+  const auto* node_def = node_view->node();
+
+  if (!IsAnyMul(*node_def)) return false;
+  if (node_view->NumRegularFanins() < 2) return false;
+  const auto& mul_fanin_0 = node_view->GetRegularFanin(0);
+  const auto& mul_fanin_1 = node_view->GetRegularFanin(1);
+
+  return IsAnyBatchMatMul(*(mul_fanin_0.node_view()->node())) ||
+         IsAnyBatchMatMul(*(mul_fanin_1.node_view()->node()));
+}
+#endif
+
 // Check if a node is a candidate to one of the patterns that require inferred
 // shapes:
 //   (1) Splitting FusedBatchNorm into primitives.
 //   (2) Fusing side input and/or activation into FusedBatchNorm.
+//   (3) Fusing Conv2D biasadd and relu on GPU
+//   (4) INTEL_MKL specific: Conv2D -> Add or Conv2D -> BiasAdd -> Add.
 bool RequiresInferredShapes(const RemapperContext& ctx, int node_index) {
   // Candidate for a FusedBatchNorm splitting.
   const auto* node_view = ctx.graph_view.GetNode(node_index);
@@ -1460,6 +2310,31 @@ bool RequiresInferredShapes(const RemapperContext& ctx, int node_index) {
     bool is_training = true;
     if (!TryGetNodeAttr(*node_def, kIsTraining, &is_training)) return false;
     if (is_training) return false;
+
+    return true;
+  };
+
+  const auto is_relu_biasadd_conv2d_candidate = [&]() -> bool {
+    if (!IsRelu(*node_def)) return false;
+    if (GetDataTypeFromAttr(*node_def, "T") != DT_FLOAT) return false;
+
+    if (node_view->NumRegularFanins() < 1) return false;
+    const auto& relu_fanin_0 = node_view->GetRegularFanin(0);
+    const auto* relu_fanin_0_node_view = relu_fanin_0.node_view();
+    const auto* relu_fanin_0_node_def = relu_fanin_0_node_view->node();
+
+    if (!IsBiasAdd(*relu_fanin_0_node_def)) return false;
+    if (GetDataTypeFromAttr(*relu_fanin_0_node_def, "T") != DT_FLOAT)
+      return false;
+
+    if (relu_fanin_0_node_view->NumRegularFanins() < 1) return false;
+
+    const auto& biasadd_fanin_0 = relu_fanin_0_node_view->GetRegularFanin(0);
+    const auto* biasadd_fanin_0_node_def = biasadd_fanin_0.node_view()->node();
+
+    if (!IsConv2D(*biasadd_fanin_0_node_def)) return false;
+    if (GetDataTypeFromAttr(*biasadd_fanin_0_node_def, "T") != DT_FLOAT)
+      return false;
 
     return true;
   };
@@ -1494,7 +2369,15 @@ bool RequiresInferredShapes(const RemapperContext& ctx, int node_index) {
     return false;
   };
 
-  return is_batch_norm_candidate() || is_batch_norm_fusion_candidate();
+#ifdef INTEL_MKL
+  if (!DisableMKL()) {
+    return is_batch_norm_candidate() || is_batch_norm_fusion_candidate() ||
+           IsContractionWithAdd(ctx, node_index) ||
+           IsBatchMatMulWithMul(ctx, node_index);
+  }
+#endif
+  return is_relu_biasadd_conv2d_candidate() || is_batch_norm_candidate() ||
+         is_batch_norm_fusion_candidate();
 }
 
 }  // namespace
@@ -1509,7 +2392,6 @@ Status Remapper::Optimize(Cluster* cluster, const GrapplerItem& item,
   // longer chains of dependent ops in one pass.
   TF_RETURN_IF_ERROR(
       ctx.graph_view.SortTopologically(/*ignore_cycles=*/false, {}));
-
   const int num_nodes = item.graph.node_size();
   // Skip nodes that were invalidated by a remapper, e.g. do not process BiasAdd
   // and Activation nodes that were fused into a Conv2D node.
@@ -1527,91 +2409,6 @@ Status Remapper::Optimize(Cluster* cluster, const GrapplerItem& item,
       continue;
     }
 
-#ifdef INTEL_MKL
-    ContractionWithBiasAddAndAdd contract_with_bias_and_add;
-    ContractionWithBiasAndAddActivation contract_with_bias_and_add_activation;
-
-    if (!item.optimization_options().is_eager_mode) {
-      // Remap Conv2D+BiasAdd+Add+relu into the _FusedConv2D.
-      if (FindContractionWithBiasAndAddActivation(
-              ctx, i, &contract_with_bias_and_add_activation)) {
-        TF_RETURN_IF_ERROR(
-            AddFusedContractionNode(&ctx, contract_with_bias_and_add_activation,
-                                    &invalidated_nodes, &nodes_to_delete));
-        continue;
-      }
-
-      // Remap Conv2D+BiasAdd+Add into the _FusedConv2D.
-      if (FindContractionWithBiasAddAndAdd(ctx, i,
-                                           &contract_with_bias_and_add)) {
-        TF_RETURN_IF_ERROR(
-            AddFusedContractionNode(&ctx, contract_with_bias_and_add,
-                                    &invalidated_nodes, &nodes_to_delete));
-        continue;
-      }
-    }
-#endif  //! INTEL_MKL
-
-    // Remap {Conv2D,MatMul}+BiasAdd into the _Fused{Conv2D,MatMul}
-    ContractionWithBiasAdd contract_with_bias;
-    if (allow_non_differentiable_rewrites &&
-        FindContractionWithBias(ctx, i, &contract_with_bias)) {
-      TF_RETURN_IF_ERROR(AddFusedContractionNode(
-          &ctx, contract_with_bias, &invalidated_nodes, &nodes_to_delete));
-      continue;
-    }
-
-    // Remap {Conv2D,MatMul}+BiasAdd+Activation into the _Fused{Conv2D,MatMul}.
-    ContractionWithBiasAddAndActivation contract_with_bias_and_activation;
-    if (allow_non_differentiable_rewrites &&
-        FindContractionWithBiasAndActivation(
-            ctx, i, &contract_with_bias_and_activation)) {
-      TF_RETURN_IF_ERROR(
-          AddFusedContractionNode(&ctx, contract_with_bias_and_activation,
-                                  &invalidated_nodes, &nodes_to_delete));
-      continue;
-    }
-
-// NOTE: We can only fuse BatchNorm into Conv2D nodes. In theory we can do
-// it for MatMul as well, but in practice this pattern does not appear in
-// real Tensorflow graphs.
-
-// TODO(penporn):
-// Remove this once TF-MKL supports _FusedConv2D with these operations.
-#ifndef INTEL_MKL
-    // Remap Conv2D+Squeeze+BiasAdd into the _FusedConv2D+Squeeze.
-    ContractionWithSqueezeAndBiasAdd contract_with_squeeze_and_bias;
-    if (allow_non_differentiable_rewrites &&
-        FindConv2DWithSqueezeAndBias(ctx, i, &contract_with_squeeze_and_bias)) {
-      TF_RETURN_IF_ERROR(
-          AddFusedConv2DNode(&ctx, contract_with_squeeze_and_bias,
-                             &invalidated_nodes, &nodes_to_delete));
-      continue;
-    }
-
-    // Remap Conv2D+FusedBatchNorm into the _FusedConv2D;
-    ContractionWithBatchNorm contract_with_batch_norm;
-    if (allow_non_differentiable_rewrites &&
-        FindConv2DWithBatchNorm(ctx, i, &contract_with_batch_norm)) {
-      TF_RETURN_IF_ERROR(AddFusedConv2DNode(&ctx, contract_with_batch_norm,
-                                            &invalidated_nodes,
-                                            &nodes_to_delete));
-      continue;
-    }
-
-    // Remap Conv2D+FusedBatchNorm+Activation into the _FusedConv2D;
-    ContractionWithBatchNormAndActivation
-        contract_with_batch_norm_and_activation;
-    if (allow_non_differentiable_rewrites &&
-        FindConv2DWithBatchNormAndActivation(
-            ctx, i, &contract_with_batch_norm_and_activation)) {
-      TF_RETURN_IF_ERROR(
-          AddFusedConv2DNode(&ctx, contract_with_batch_norm_and_activation,
-                             &invalidated_nodes, &nodes_to_delete));
-      continue;
-    }
-#endif  // !INTEL_MKL
-
     // Infer properties lazily in case they are not needed.
     if (!ctx.inferred_graph_properties && RequiresInferredShapes(ctx, i)) {
       const bool assume_valid_feeds = opt_level_ == RewriterConfig::AGGRESSIVE;
@@ -1623,13 +2420,150 @@ Status Remapper::Optimize(Cluster* cluster, const GrapplerItem& item,
       ctx.inferred_graph_properties = true;
     }
 
-    // Remap FusedBatchNorm+<SideInput>+<Activation> into the _FusedBatchNormEx.
-    FusedBatchNormEx fused_batch_norm_ex;
+#ifdef INTEL_MKL
+    if (!DisableMKL()) {
+      ContractionWithBiasAddAndAdd contract_with_bias_and_add;
+      ContractionWithBiasAndAddActivation contract_with_bias_and_add_activation;
+      ContractionWithMul contract_with_mul;
+      ContractionWithSwish contract_with_swish;
+      ContractionWithBiasAddGrad contract_with_bias_grad;
+
+      if (!item.optimization_options().is_eager_mode) {
+        // Remap Conv2D+BiasAdd+Add+relu into the _FusedConv2D.
+        if (MklLayoutPassLists::FindFusedMatMul() &&
+              FindContractionWithBiasAndAddActivation(
+                ctx, i, &contract_with_bias_and_add_activation)) {
+          TF_RETURN_IF_ERROR(AddFusedContractionNode(
+              &ctx, contract_with_bias_and_add_activation, &invalidated_nodes,
+              &nodes_to_delete));
+          continue;
+        }
+
+        // // Remap Conv2D+BiasAdd+Add into the _FusedConv2D.
+        if (MklLayoutPassLists::FindFusedMatMul() &&
+              FindContractionWithBiasAddAndAdd(ctx, i,
+                                             &contract_with_bias_and_add)) {
+          TF_RETURN_IF_ERROR(
+              AddFusedContractionNode(&ctx, contract_with_bias_and_add,
+                                      &invalidated_nodes, &nodes_to_delete));
+          continue;
+        }
+
+        // Remap BatchMatMul+Mul into the _FusedBatchMatMul.
+        if (FindContractionWithMul(ctx, i, &contract_with_mul)) {
+          TF_RETURN_IF_ERROR(AddFusedContractionNode(
+              &ctx, contract_with_mul, &invalidated_nodes, &nodes_to_delete));
+          continue;
+        }
+
+        // MatMul + BiasAdd + Gelu fusion
+        std::map<string, int> node_label_to_index;
+        if (MklLayoutPassLists::FindFusedMatMul() &&
+              FindMatMulWithBiasAndAGelu(&ctx, i, &node_label_to_index,
+                                       &nodes_to_delete, true)) {
+          TF_RETURN_IF_ERROR(AddFusedMatMulWithBiasAndGelu(
+              &ctx, node_label_to_index, &invalidated_nodes, true));
+          continue;
+        };
+
+        // MatMul + BiasAdd + Gelu_erf fusion
+        if (MklLayoutPassLists::FindFusedMatMul() &&
+              FindMatMulWithBiasAndAGelu(&ctx, i, &node_label_to_index,
+                                       &nodes_to_delete, false)) {
+          TF_RETURN_IF_ERROR(AddFusedMatMulWithBiasAndGelu(
+              &ctx, node_label_to_index, &invalidated_nodes, false));
+          continue;
+        };
+        // Remap Mul(x, Sigmoid(x)) pattern, fuse then into the Swish(x).
+        // Now INTEL do not support native format.
+        if (FindContractionWithSwish(ctx, i, &contract_with_swish)) {
+          TF_RETURN_IF_ERROR(
+              AddFusedContractionNode(&ctx, contract_with_swish,
+                                      &invalidated_nodes, &nodes_to_delete));
+          continue;
+        }
+        // Remap MatMul+BiasAddGrad into the _fusedMatMulGrad
+        if (FindContractionWithBiasAddGrad(ctx, i, &contract_with_bias_grad)) {
+          TF_RETURN_IF_ERROR(
+              AddFusedContractionGradNode(&ctx, contract_with_bias_grad,
+                                          &invalidated_nodes, &nodes_to_delete));
+          continue;
+        }
+      }
+    }
+#endif  //! INTEL_MKL
+
+    // Remap {Conv2D,DepthwiseConv2D,MatMul}+BiasAdd into the
+    // _Fused{Conv2D,DepthwiseConv2dNative,MatMul}
+    ContractionWithBiasAdd contract_with_bias;
     if (allow_non_differentiable_rewrites &&
-        FindFusedBatchNormEx(ctx, i, &fused_batch_norm_ex)) {
-      TF_RETURN_IF_ERROR(AddFusedBatchNormExNode(
-          &ctx, fused_batch_norm_ex, &invalidated_nodes, &nodes_to_delete));
+        FindContractionWithBias(ctx, i, &contract_with_bias)) {
+      TF_RETURN_IF_ERROR(AddFusedContractionNode(
+          &ctx, contract_with_bias, &invalidated_nodes, &nodes_to_delete));
       continue;
+    }
+
+    // Remap {Conv2D,DepthwiseConv2D,MatMul}+BiasAdd+Activation into the
+    // _Fused{Conv2D,DepthwiseConv2dNative,MatMul}.
+    ContractionWithBiasAddAndActivation contract_with_bias_and_activation;
+    if (allow_non_differentiable_rewrites &&
+        FindContractionWithBiasAndActivation(
+            ctx, i, &contract_with_bias_and_activation)) {
+      TF_RETURN_IF_ERROR(
+          AddFusedContractionNode(&ctx, contract_with_bias_and_activation,
+                                  &invalidated_nodes, &nodes_to_delete));
+      continue;
+    }
+
+    // NOTE: We can only fuse BatchNorm into Conv2D nodes. In theory we can do
+    // it for MatMul as well, but in practice this pattern does not appear in
+    // real Tensorflow graphs.
+
+    // TODO(penporn):
+    // Remove this once TF-OneDNN supports _FusedConv2D with these operations.
+    if (DisableMKL()) {
+      // Remap Conv2D+Squeeze+BiasAdd into the _FusedConv2D+Squeeze.
+      ContractionWithSqueezeAndBiasAdd contract_with_squeeze_and_bias;
+      if (allow_non_differentiable_rewrites &&
+          FindConv2DWithSqueezeAndBias(ctx, i,
+                                       &contract_with_squeeze_and_bias)) {
+        TF_RETURN_IF_ERROR(
+            AddFusedConv2DNode(&ctx, contract_with_squeeze_and_bias,
+                               &invalidated_nodes, &nodes_to_delete));
+        continue;
+      }
+
+      // Remap Conv2D+FusedBatchNorm into the _FusedConv2D;
+      ContractionWithBatchNorm contract_with_batch_norm;
+      if (allow_non_differentiable_rewrites &&
+          FindConv2DWithBatchNorm(ctx, i, &contract_with_batch_norm)) {
+        TF_RETURN_IF_ERROR(AddFusedConv2DNode(&ctx, contract_with_batch_norm,
+                                              &invalidated_nodes,
+                                              &nodes_to_delete));
+        continue;
+      }
+
+      // Remap Conv2D+FusedBatchNorm+Activation into the _FusedConv2D;
+      ContractionWithBatchNormAndActivation
+          contract_with_batch_norm_and_activation;
+      if (allow_non_differentiable_rewrites &&
+          FindConv2DWithBatchNormAndActivation(
+              ctx, i, &contract_with_batch_norm_and_activation)) {
+        TF_RETURN_IF_ERROR(
+            AddFusedConv2DNode(&ctx, contract_with_batch_norm_and_activation,
+                               &invalidated_nodes, &nodes_to_delete));
+        continue;
+      }
+    } else {
+      // Remap FusedBatchNorm+<SideInput>+<Activation> into the
+      // _FusedBatchNormEx.
+      FusedBatchNormEx fused_batch_norm_ex;
+      if (allow_non_differentiable_rewrites &&
+          FindFusedBatchNormEx(ctx, i, &fused_batch_norm_ex)) {
+        TF_RETURN_IF_ERROR(AddFusedBatchNormExNode(
+            &ctx, fused_batch_norm_ex, &invalidated_nodes, &nodes_to_delete));
+        continue;
+      }
     }
 
     // During inference, most of the inputs to FusedBatchNorm are constant, and

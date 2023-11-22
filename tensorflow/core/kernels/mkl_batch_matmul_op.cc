@@ -15,20 +15,16 @@ limitations under the License.
 
 // See docs in ../ops/math_ops.cc.
 
-// This file uses MKL CBLAS batched xGEMM for acceleration of TF Batch
-// Matrix-Matrix Multiplication (MatMul) operations.
-// We currently register this kernel only for MKL supported data
-// types (float, double, complex64, complex128). The macro INTEL_MKL is defined
-// by the build system only when MKL is chosen as an option at configure stage
-// and when it is undefined at build time, this file becomes an empty
-// compilation unit
+// This file uses oneDNN library for acceleration of Batch Matrix-Matrix
+// Multiplication (MatMul) operations. We currently register this kernel only
+// for oneDNN supported data types (float, bfloat16). The maximum number of
+// dimensions (rank) for output tensor is 12 in oneDNN. If output tensor rank
+// exceeds 12, we fall back to Eigen library based kernel.
 
 #define EIGEN_USE_THREADS
 
-#if defined(INTEL_MKL) && !defined(INTEL_MKL_DNN_ONLY)
-#include <vector>
+#if defined(INTEL_MKL)
 
-#include "mkl_cblas.h"
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_kernel.h"
@@ -39,6 +35,8 @@ limitations under the License.
 #include "tensorflow/core/framework/types.h"
 #include "tensorflow/core/kernels/batch_matmul_op_impl.h"
 #include "tensorflow/core/kernels/fill_functor.h"
+#include "tensorflow/core/kernels/mkl_matmul_ops_common.h"
+#include "tensorflow/core/kernels/no_op.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/util/matmul_bcast.h"
@@ -53,16 +51,28 @@ typedef Eigen::ThreadPoolDevice CPUDevice;
 template <typename Device, typename Scalar, bool v2_bcast>
 class BatchMatMulMkl : public OpKernel {
  public:
-  explicit BatchMatMulMkl(OpKernelConstruction *context) : OpKernel(context) {
+  explicit BatchMatMulMkl(OpKernelConstruction* context)
+      : OpKernel(context), eigen_batch_mm_v2_(context) {
     OP_REQUIRES_OK(context, context->GetAttr("adj_x", &adj_x_));
     OP_REQUIRES_OK(context, context->GetAttr("adj_y", &adj_y_));
+
+    alpha_ = 1.0f;
+    beta_ = 0.0f;
   }
 
   virtual ~BatchMatMulMkl() {}
 
-  void Compute(OpKernelContext *ctx) override {
-    const Tensor &lhs = ctx->input(0);
-    const Tensor &rhs = ctx->input(1);
+  void Compute(OpKernelContext* ctx) override {
+    const Tensor& lhs = ctx->input(0);
+    const Tensor& rhs = ctx->input(1);
+ 
+    if (fuse_mul_) {
+      const Tensor& scale = ctx->input(2);
+      OP_REQUIRES(ctx, scale.NumElements() == 1,
+                  errors::InvalidArgument("scale Tensor must be a scalar"));
+      alpha_ = static_cast<float>(scale.flat<Scalar>()(0));
+      beta_ = 0.0f;
+    }
 
     if (!v2_bcast) {
       // Using V1, so check to make sure lhs and rhs dimensions are correct and
@@ -92,8 +102,8 @@ class BatchMatMulMkl : public OpKernel {
     }
 
     // lhs and rhs can have different dimensions
-    const int ndims_lhs = lhs.dims();
-    const int ndims_rhs = rhs.dims();
+    const auto ndims_lhs = lhs.dims();
+    const auto ndims_rhs = rhs.dims();
 
     // Get broadcast info
     MatMulBCast bcast(lhs.shape().dim_sizes(), rhs.shape().dim_sizes());
@@ -104,7 +114,6 @@ class BatchMatMulMkl : public OpKernel {
             lhs.shape().DebugString(), " vs. ", rhs.shape().DebugString()));
 
     TensorShape out_shape = bcast.output_batch_shape();
-    auto batch_size = bcast.output_batch_size();
 
     auto lhs_rows = lhs.dim_size(ndims_lhs - 2);
     auto lhs_cols = lhs.dim_size(ndims_lhs - 1);
@@ -121,8 +130,14 @@ class BatchMatMulMkl : public OpKernel {
 
     out_shape.AddDim(lhs_rows);
     out_shape.AddDim(rhs_cols);
+    // The maximum number of dimensions for a tensor in DNNL is 12.
+    OP_REQUIRES(
+        ctx, out_shape.dims() <= 12,
+        errors::InvalidArgument(
+            "Rank of output tensor must be <= 12, but is ", out_shape.dims(),
+            ". Current implementation supports upto rank 12 tensors."));
 
-    Tensor *out = nullptr;
+    Tensor* out = nullptr;
     OP_REQUIRES_OK(ctx, ctx->allocate_output(0, out_shape, &out));
     if (out->NumElements() == 0) {
       return;
@@ -133,137 +148,135 @@ class BatchMatMulMkl : public OpKernel {
       return;
     }
 
-    auto rhs_reshaped = rhs.template flat_inner_dims<Scalar, 3>();
-    auto lhs_reshaped = lhs.template flat_inner_dims<Scalar, 3>();
-    auto out_reshaped = out->template flat_inner_dims<Scalar, 3>();
-    const uint64 M = lhs_reshaped.dimension(adj_x_ ? 2 : 1);
-    const uint64 K = lhs_reshaped.dimension(adj_x_ ? 1 : 2);
-    const uint64 N = rhs_reshaped.dimension(adj_y_ ? 1 : 2);
+    // Compute parameters for DNNL matmul primitive.
+    auto params = CreateMatMulParams(lhs.shape(), rhs.shape(), out_shape);
 
-    std::vector<MKL_INT> m_array(batch_size, M);
-    std::vector<MKL_INT> n_array(batch_size, N);
-    std::vector<MKL_INT> k_array(batch_size, K);
-    std::vector<MKL_INT> lda_array(batch_size, adj_x_ ? M : K);
-    std::vector<MKL_INT> ldb_array(batch_size, adj_y_ ? K : N);
-    std::vector<MKL_INT> ldc_array(batch_size, N);
-    std::vector<MKL_INT> group_size(1, batch_size);
-    std::vector<const Scalar *> a_array;
-    std::vector<const Scalar *> b_array;
-    std::vector<Scalar *> c_array;
-    a_array.reserve(batch_size);
-    b_array.reserve(batch_size);
-    c_array.reserve(batch_size);
+    if (alpha_ != 1.0f)
+      params->post_op_params.push_back({"output_scale", { alpha_ }});
 
-    if (!bcast.IsBroadcastingRequired()) {
-      for (int64 i = 0; i < batch_size; i++) {
-        a_array.push_back(&lhs_reshaped(i, 0, 0));
-        b_array.push_back(&rhs_reshaped(i, 0, 0));
-        c_array.push_back(&out_reshaped(i, 0, 0));
-      }
-    } else {
-      // Broadcasting is needed, so get the mapping from flattened output batch
-      // indices to x's and y's flattened batch indices.
-      const std::vector<int64> &a_batch_indices = bcast.x_batch_indices();
-      const std::vector<int64> &b_batch_indices = bcast.y_batch_indices();
-
-      for (int64 i = 0; i < batch_size; i++) {
-        a_array.push_back(&lhs_reshaped(a_batch_indices[i], 0, 0));
-        b_array.push_back(&rhs_reshaped(b_batch_indices[i], 0, 0));
-        c_array.push_back(&out_reshaped(i, 0, 0));
-      }
-    }
-
-    MklCblasGemmBatch(CblasRowMajor, adj_x_, adj_y_, &m_array[0], &n_array[0],
-                      &k_array[0], &a_array[0], &lda_array[0], &b_array[0],
-                      &ldb_array[0], &c_array[0], &ldc_array[0], 1,
-                      &group_size[0]);
+    MklDnnThreadPool eigen_tp(ctx);
+    // Create or retrieve matmul primitive from cache.
+    MklMatMulPrimitive<Scalar>* matmul_prim =
+        MklMatMulPrimitiveFactory<Scalar>::Get(
+            *params, false /* value for do_not_cache */);
+    // Execute matmul primitive.
+    std::shared_ptr<stream> cpu_stream;
+    cpu_stream.reset(CreateStream(&eigen_tp, matmul_prim->GetEngine()));
+    matmul_prim->Execute(lhs.flat<Scalar>().data(), rhs.flat<Scalar>().data(),
+                         out->flat<Scalar>().data(), cpu_stream);
   }
+ protected:
+  void set_fuse_mul(bool fuse_mul) { fuse_mul_ = fuse_mul; }
 
  private:
   bool adj_x_;
   bool adj_y_;
+  bool fuse_mul_ = false;
+  float alpha_;
+  float beta_;
+  BatchMatMulV2Op<CPUDevice, Scalar> eigen_batch_mm_v2_;
 
-  void MklCblasGemmBatch(const CBLAS_LAYOUT Layout, const bool TransA,
-                         const bool TransB, const MKL_INT *M_Array,
-                         const MKL_INT *N_Array, const MKL_INT *K_Array,
-                         const float **A_Array, const MKL_INT *lda_Array,
-                         const float **B_Array, const MKL_INT *ldb_Array,
-                         float **C_Array, const MKL_INT *ldc_Array,
-                         const MKL_INT group_count, const MKL_INT *group_size) {
-    std::vector<CBLAS_TRANSPOSE> TransA_Array(
-        group_size[0], TransA ? CblasTrans : CblasNoTrans);
-    std::vector<CBLAS_TRANSPOSE> TransB_Array(
-        group_size[0], TransB ? CblasTrans : CblasNoTrans);
-    std::vector<float> alpha_Array(group_size[0], 1.0);
-    std::vector<float> beta_Array(group_size[0], 0.0);
-    cblas_sgemm_batch(Layout, &TransA_Array[0], &TransB_Array[0], M_Array,
-                      N_Array, K_Array, &alpha_Array[0], A_Array, lda_Array,
-                      B_Array, ldb_Array, &beta_Array[0], C_Array, ldc_Array,
-                      group_count, group_size);
+  using dims = dnnl::memory::dims;
+
+  // This method makes the rank (ndims) of input same as the output by adding
+  // new axes to the input. For example, if input shape is [a, b, c, d] and
+  // output shape is [e, f, g, h, i, j], then the reshaped input would have a
+  // shape of [1, 1, a, b, c, d].
+  void ExpandInputDimsToOutputShape(const TensorShape& input_shape,
+                                    const TensorShape& output_shape,
+                                    dims* reshaped_dims) {
+    auto ndims_input = input_shape.dims();
+    auto ndims_output = output_shape.dims();
+    auto dim_offset = ndims_output - ndims_input;
+    DCHECK(dim_offset > 0);
+    reshaped_dims->clear();
+    reshaped_dims->resize(ndims_output, 1);
+    auto input_dims = input_shape.dim_sizes();
+    for (int dim_idx = 0; dim_idx < ndims_input; ++dim_idx)
+      reshaped_dims->at(dim_idx + dim_offset) = input_dims[dim_idx];
   }
 
-  void MklCblasGemmBatch(const CBLAS_LAYOUT Layout, const bool TransA,
-                         const bool TransB, const MKL_INT *M_Array,
-                         const MKL_INT *N_Array, const MKL_INT *K_Array,
-                         const double **A_Array, const MKL_INT *lda_Array,
-                         const double **B_Array, const MKL_INT *ldb_Array,
-                         double **C_Array, const MKL_INT *ldc_Array,
-                         const MKL_INT group_count, const MKL_INT *group_size) {
-    std::vector<CBLAS_TRANSPOSE> TransA_array(
-        group_size[0], TransA ? CblasTrans : CblasNoTrans);
-    std::vector<CBLAS_TRANSPOSE> TransB_array(
-        group_size[0], TransB ? CblasTrans : CblasNoTrans);
-    std::vector<double> alpha_Array(group_size[0], 1.0);
-    std::vector<double> beta_Array(group_size[0], 0.0);
-    cblas_dgemm_batch(Layout, &TransA_array[0], &TransB_array[0], M_Array,
-                      N_Array, K_Array, &alpha_Array[0], A_Array, lda_Array,
-                      B_Array, ldb_Array, &beta_Array[0], C_Array, ldc_Array,
-                      group_count, group_size);
+  std::unique_ptr<MklMatMulParams> CreateMatMulParams(
+      const TensorShape& lhs_shape, const TensorShape& rhs_shape,
+      const TensorShape& out_shape) {
+    const auto ndims_lhs = lhs_shape.dims();
+    const auto ndims_rhs = rhs_shape.dims();
+    const auto ndims_out = out_shape.dims();
+    auto lhs_dims = TFShapeToMklDnnDims(lhs_shape);
+    auto rhs_dims = TFShapeToMklDnnDims(rhs_shape);
+    auto out_dims = TFShapeToMklDnnDims(out_shape);
+
+    // DNNL matmul_primitive requires ranks of inputs and output to be same.
+    // Create dnnl::memory::dims for inputs and output of same rank.
+    // It is assumed here that MatMulBCast object creates output_batch_shape as
+    // a conforming superset of input batch shapes, i.e., ndims_out >=
+    // ndims_lhs and ndims_out >= ndims_rhs.
+    if (ndims_lhs < ndims_out) {
+      ExpandInputDimsToOutputShape(lhs_shape, out_shape, &lhs_dims);
+    }
+    if (ndims_rhs < ndims_out) {
+      ExpandInputDimsToOutputShape(rhs_shape, out_shape, &rhs_dims);
+    }
+
+    using dim = dnnl::memory::dim;
+    dim m;  // number of rows in x
+    dim k;  // number of columns in x
+    dim n;  // number of columns in y
+    auto lhs_strides = CalculateTFStrides(lhs_dims);
+    auto rhs_strides = CalculateTFStrides(rhs_dims);
+    auto out_strides = CalculateTFStrides(out_dims);
+
+    if (adj_x_) {
+      int m_idx = ndims_out - 1;
+      int k_idx = ndims_out - 2;
+      m = lhs_dims[m_idx];
+      k = lhs_dims[k_idx];
+      std::swap(lhs_dims[m_idx], lhs_dims[k_idx]);
+      lhs_strides[m_idx] = m;
+      lhs_strides[k_idx] = 1;
+    }
+
+    if (adj_y_) {
+      int k_idx = ndims_out - 1;
+      int n_idx = ndims_out - 2;
+      k = rhs_dims[k_idx];
+      n = rhs_dims[n_idx];
+      std::swap(rhs_dims[k_idx], rhs_dims[n_idx]);
+      rhs_strides[k_idx] = k;
+      rhs_strides[n_idx] = 1;
+    }
+    return absl::make_unique<MklMatMulParams>(
+        lhs_dims, rhs_dims, out_dims, lhs_strides, rhs_strides, out_strides);
+  }
+};
+
+template <typename Device, typename Scalar, bool v2_bcast>
+class FusedBatchMatMulMkl : public BatchMatMulMkl<Device, Scalar, v2_bcast> {
+ public:
+  explicit FusedBatchMatMulMkl(OpKernelConstruction* context)
+      : BatchMatMulMkl<Device, Scalar, v2_bcast>(context) {
+    std::vector<string> fused_ops;
+    OP_REQUIRES_OK(context, context->GetAttr("fused_ops", &fused_ops));
+    OP_REQUIRES(context, !fused_ops.empty(),
+                errors::InvalidArgument(
+                    "Fused BatchMatMul must have at least one fused op."));
+
+    int num_args;
+    OP_REQUIRES_OK(context, context->GetAttr("num_args", &num_args));
+
+    if (fused_ops == std::vector<string>{"Mul"}) {
+      this->set_fuse_mul(true);
+      OP_REQUIRES(context, num_args == 1,
+                  errors::InvalidArgument(
+                      "Fused BatchMatmul must have one extra argument: Mul."));
+    } else {
+      OP_REQUIRES(context, false,
+                  errors::Unimplemented("Fusion is not implemented: [",
+                                        absl::StrJoin(fused_ops, ","), "]"));
+    }
   }
 
-  void MklCblasGemmBatch(const CBLAS_LAYOUT Layout, const bool TransA,
-                         const bool TransB, const MKL_INT *M_Array,
-                         const MKL_INT *N_Array, const MKL_INT *K_Array,
-                         const complex64 **A_Array, const MKL_INT *lda_Array,
-                         const complex64 **B_Array, const MKL_INT *ldb_Array,
-                         complex64 **C_Array, const MKL_INT *ldc_Array,
-                         const MKL_INT group_count, const MKL_INT *group_size) {
-    std::vector<CBLAS_TRANSPOSE> TransA_array(
-        group_size[0], TransA ? CblasConjTrans : CblasNoTrans);
-    std::vector<CBLAS_TRANSPOSE> TransB_array(
-        group_size[0], TransB ? CblasConjTrans : CblasNoTrans);
-    std::vector<complex64> alpha_Array(group_size[0], {1.0f, 0.0f});
-    std::vector<complex64> beta_Array(group_size[0], {0.0f, 0.0f});
-    cblas_cgemm_batch(
-        Layout, &TransA_array[0], &TransB_array[0], M_Array, N_Array, K_Array,
-        static_cast<const void *>(&alpha_Array[0]),
-        reinterpret_cast<const void **>(A_Array), lda_Array,
-        reinterpret_cast<const void **>(B_Array), ldb_Array,
-        static_cast<const void *>(&beta_Array[0]),
-        reinterpret_cast<void **>(C_Array), ldc_Array, group_count, group_size);
-  }
-
-  void MklCblasGemmBatch(const CBLAS_LAYOUT Layout, const bool TransA,
-                         const bool TransB, const MKL_INT *M_Array,
-                         const MKL_INT *N_Array, const MKL_INT *K_Array,
-                         const complex128 **A_Array, const MKL_INT *lda_Array,
-                         const complex128 **B_Array, const MKL_INT *ldb_Array,
-                         complex128 **C_Array, const MKL_INT *ldc_Array,
-                         const MKL_INT group_count, const MKL_INT *group_size) {
-    std::vector<CBLAS_TRANSPOSE> TransA_array(
-        group_size[0], TransA ? CblasConjTrans : CblasNoTrans);
-    std::vector<CBLAS_TRANSPOSE> TransB_array(
-        group_size[0], TransB ? CblasConjTrans : CblasNoTrans);
-    std::vector<complex128> alpha_Array(group_size[0], {1.0f, 0.0f});
-    std::vector<complex128> beta_Array(group_size[0], {0.0f, 0.0f});
-    cblas_zgemm_batch(
-        Layout, &TransA_array[0], &TransB_array[0], M_Array, N_Array, K_Array,
-        static_cast<const void *>(&alpha_Array[0]),
-        reinterpret_cast<const void **>(A_Array), lda_Array,
-        reinterpret_cast<const void **>(B_Array), ldb_Array,
-        static_cast<const void *>(&beta_Array[0]),
-        reinterpret_cast<void **>(C_Array), ldc_Array, group_count, group_size);
-  }
+  virtual ~FusedBatchMatMulMkl() {}
 };
 
 #define REGISTER_BATCH_MATMUL_MKL(TYPE)                                       \
@@ -280,16 +293,32 @@ class BatchMatMulMkl : public OpKernel {
                               .Label(mkl_op_registry::kMklNameChangeOpLabel), \
                           BatchMatMulMkl<CPUDevice, TYPE, true>)
 
+#define REGISTER_FUSED_BATCH_MATMUL_MKL(TYPE)                                 \
+  REGISTER_KERNEL_BUILDER(                                                    \
+      Name("_FusedBatchMatMul").Device(DEVICE_CPU).TypeConstraint<TYPE>("T"), \
+      NoOp);                                                                  \
+  REGISTER_KERNEL_BUILDER(Name("_FusedBatchMatMulV2")                         \
+                              .Device(DEVICE_CPU)                             \
+                              .TypeConstraint<TYPE>("T"),                     \
+                          NoOp);                                              \
+  REGISTER_KERNEL_BUILDER(Name("_MklFusedBatchMatMul")                        \
+                              .Device(DEVICE_CPU)                             \
+                              .TypeConstraint<TYPE>("T")                      \
+                              .Label(mkl_op_registry::kMklNameChangeOpLabel), \
+                          FusedBatchMatMulMkl<CPUDevice, TYPE, false>)        \
+  REGISTER_KERNEL_BUILDER(Name("_MklFusedBatchMatMulV2")                      \
+                              .Device(DEVICE_CPU)                             \
+                              .TypeConstraint<TYPE>("T")                      \
+                              .Label(mkl_op_registry::kMklNameChangeOpLabel), \
+                          FusedBatchMatMulMkl<CPUDevice, TYPE, true>)
+
 #ifdef ENABLE_MKL
 TF_CALL_float(REGISTER_BATCH_MATMUL_MKL);
-TF_CALL_double(REGISTER_BATCH_MATMUL_MKL);
-TF_CALL_complex64(REGISTER_BATCH_MATMUL_MKL);
-TF_CALL_complex128(REGISTER_BATCH_MATMUL_MKL);
-
 TF_CALL_float(REGISTER_BATCH_MATMUL_MKL_V2);
-TF_CALL_double(REGISTER_BATCH_MATMUL_MKL_V2);
-TF_CALL_complex64(REGISTER_BATCH_MATMUL_MKL_V2);
-TF_CALL_complex128(REGISTER_BATCH_MATMUL_MKL_V2);
+TF_CALL_float(REGISTER_FUSED_BATCH_MATMUL_MKL);
+TF_CALL_bfloat16(REGISTER_BATCH_MATMUL_MKL);
+TF_CALL_bfloat16(REGISTER_BATCH_MATMUL_MKL_V2);
+TF_CALL_bfloat16(REGISTER_FUSED_BATCH_MATMUL_MKL);
 #endif  // ENABLE_MKL
 
 }  // end namespace tensorflow

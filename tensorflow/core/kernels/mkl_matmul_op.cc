@@ -15,28 +15,23 @@ limitations under the License.
 
 // See docs in ../ops/math_ops.cc.
 
-// This file uses MKL CBLAS xGEMM for acceleration of TF Matrix-Matrix
+// This file uses OneDNN CBLAS xGEMM for acceleration of TF Matrix-Matrix
 // Multiplication (MatMul) operations.
-// We currently register this kernel only for MKL supported data
+// We currently register this kernel only for OneDNN supported data
 // types (float, double, complex64, complex128). The macro INTEL_MKL is defined
-// by the build system only when MKL is chosen as an option at configure stage
+// by the build system only when OneDNN is chosen as an option at configure stage
 // and when it is undefined at build time, this file becomes an empty
 // compilation unit
 
 #if defined(INTEL_MKL)
 
+#include "dnnl.hpp"
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/register_types.h"
 #include "tensorflow/core/kernels/fill_functor.h"
+#include "tensorflow/core/kernels/mkl_matmul_ops_common.h"
 #include "tensorflow/core/util/mkl_util.h"
-
-// This header file is part of MKL ML, need equivalent file in MKL DNN
-#ifndef INTEL_MKL_DNN_ONLY
-#include "mkl_cblas.h"
-#else
-#include "mkldnn.h"
-#endif
 
 namespace tensorflow {
 
@@ -48,6 +43,13 @@ class MklMatMulOp : public OpKernel {
   explicit MklMatMulOp(OpKernelConstruction* ctx) : OpKernel(ctx) {
     OP_REQUIRES_OK(ctx, ctx->GetAttr("transpose_a", &transpose_a_));
     OP_REQUIRES_OK(ctx, ctx->GetAttr("transpose_b", &transpose_b_));
+    string _onednn_fpmath_mode = "";
+    string _dnnl_fpmath_mode = "";
+    OP_REQUIRES_OK(ctx, ReadStringFromEnvVar("ONEDNN_DEFAULT_FPMATH_MODE",
+                                                "", &_onednn_fpmath_mode));
+    OP_REQUIRES_OK(ctx, ReadStringFromEnvVar("DNNL_DEFAULT_FPMATH_MODE",
+                                                "", &_dnnl_fpmath_mode));
+    FPMATH_MODE = _onednn_fpmath_mode != "" | _dnnl_fpmath_mode != "";
   }
 
   void Compute(OpKernelContext* ctx) override {
@@ -100,13 +102,14 @@ class MklMatMulOp : public OpKernel {
     auto b_ptr = (b.template flat<T>().data());
     auto c_ptr = (out->template flat<T>().data());
 
-    MklBlasGemm(transpose_a, transpose_b, m, n, k, a_ptr, transpose_a ? m : k,
-                b_ptr, transpose_b ? k : n, c_ptr, n);
+    MklBlasGemm(ctx, transpose_a, transpose_b, m, n, k, a_ptr,
+                transpose_a ? m : k, b_ptr, transpose_b ? k : n, c_ptr, n);
   }
 
  private:
   bool transpose_a_;
   bool transpose_b_;
+  bool FPMATH_MODE;
   // --------------------------------------------------------------------------
   //
   // @brief Matrix-Matrix Multiplication with FP32 tensors, a, b, c using CBLAS
@@ -147,78 +150,57 @@ class MklMatMulOp : public OpKernel {
   // layout, leading dimension is the stride between consecutive rows, max(1,n)
   //
   // --------------------------------------------------------------------------
-  void MklBlasGemm(bool transa, bool transb, const int m, const int n,
-                   const int k, const float* a, const int lda, const float* b,
-                   const int ldb, float* c, const int ldc) {
+  void MklBlasGemm(OpKernelContext* ctx, bool transa, bool transb, const int m,
+                   const int n, const int k, const float* a, const int lda,
+                   const float* b, const int ldb, float* c, const int ldc) {
     // BLAS GEMM API defines Matrix Multiplication as c = alpha * op(a) * op(b)
     // + beta * c.
     // Since TF MatMul does not have parameters for alpha, beta, we set them to
     // 1.0 and 0.0 respectively.
     const float alpha = 1.0f;
     const float beta = 0.0f;
-#if defined(INTEL_MKL_DNN_ONLY)
-    const char* const ftrans[] = {"N", "T", "C"};
-    int index_transa = transa ? 1 : 0;
-    int index_transb = transb ? 1 : 0;
+    char char_transa = transa ? 'T' : 'N';
+    char char_transb = transb ? 'T' : 'N';
     VLOG(2) << "MKL DNN SGEMM called";
-    // MKL DNN only supports the Fortran api and requires column major while
-    // Tensorflow uses row major so we reverse the order A and B
-    mkldnn_sgemm(ftrans[index_transb], ftrans[index_transa], &n, &m, &k, &alpha,
-                 b, &ldb, a, &lda, &beta, c, &ldc);
+#ifdef ENABLE_DNNL_THREADPOOL
+    // With threadpool , the runtime overhead is comparable to the kernel
+    // execution for small kernel sizes. For such sizes, it may be better to run
+    // the kernel single threaded. Here we are coming up with a cost model based
+    // on L1 sizes. If we find that matrices are small enough, we will execute
+    // single threaded. This may need tuning.
+    if (FPMATH_MODE){
+      dnnl_gemm<float>(char_transa, char_transb, m, n, k,
+                        alpha, a, lda, b, ldb, beta, c, ldc, ctx);
+      return;
+    }
+    if (ExecuteSingleThreadedGemm(m, n, k)) {
+      // For now, call single-threaded gemm.
+      MklDnnThreadPool eigen_tp(ctx, 1);
+      sgemm(char_transa, char_transb, m, n, k, alpha, a, lda, b, ldb,
+                    beta, c, ldc, &eigen_tp);
+    } else {
+      MklDnnThreadPool eigen_tp(ctx);
+      sgemm(char_transa, char_transb, m, n, k, alpha, a, lda, b, ldb,
+                    beta, c, ldc, &eigen_tp);
+    }
 #else
-    // MKL ML binary uses CBLAS API
-    cblas_sgemm(CblasRowMajor, transa ? CblasTrans : CblasNoTrans,
-                transb ? CblasTrans : CblasNoTrans, m, n, k, alpha, a, lda, b,
-                ldb, beta, c, ldc);
-#endif
+    dnnl_sgemm(char_transa, char_transb, m, n, k, alpha, a, lda, b, ldb, beta,
+               c, ldc);
+#endif  // ENABLE_DNNL_THREADPOOL
   }
 
-  // MKLDNN only supports SGEMM
-#ifndef INTEL_MKL_DNN_ONLY
-
-  // Matrix-Matrix Multiplication with FP64 tensors. For detailed info about
-  // parameters, look at FP32 function description.
-  void MklBlasGemm(bool transa, bool transb, const int m, const int n,
-                   const int k, const double* a, const int lda, const double* b,
-                   const int ldb, double* c, const int ldc) {
-    const double alpha = 1.0;
-    const double beta = 0.0;
-    cblas_dgemm(CblasRowMajor, transa ? CblasTrans : CblasNoTrans,
-                transb ? CblasTrans : CblasNoTrans, m, n, k, alpha, a, lda, b,
-                ldb, beta, c, ldc);
-  }
-
-  // Matrix-Matrix Multiplication with Complex64 (std::complex<float>) tensors.
-  // For detailed info about parameters, look at FP32 function description.
-  void MklBlasGemm(bool transa, bool transb, const int m, const int n,
-                   const int k, const complex64* a, const int lda,
-                   const complex64* b, const int ldb, complex64* c,
-                   int const ldc) {
-    const MKL_Complex8 alpha = {1.0f, 0.0f};
-    const MKL_Complex8 beta = {0.0f, 0.0f};
-    cblas_cgemm(CblasRowMajor, transa ? CblasTrans : CblasNoTrans,
-                transb ? CblasTrans : CblasNoTrans, m, n, k, &alpha,
-                reinterpret_cast<const MKL_Complex8*>(a), lda,
-                reinterpret_cast<const MKL_Complex8*>(b), ldb, &beta,
-                reinterpret_cast<MKL_Complex8*>(c), ldc);
-  }
-
-  // Matrix-Matrix Multiplication with Complex128 (std::complex<double>)
-  // tensors. For detailed info about parameters, look at FP32 function
-  // description.
-  void MklBlasGemm(bool transa, bool transb, const int m, const int n,
-                   const int k, const complex128* a, const int lda,
-                   const complex128* b, const int ldb, complex128* c,
+  void MklBlasGemm(OpKernelContext* ctx, bool transa, bool transb, const int m,
+                   const int n, const int k, const bfloat16* a, const int lda,
+                   const bfloat16* b, const int ldb, bfloat16* c,
                    const int ldc) {
-    const MKL_Complex16 alpha = {1.0, 0.0};
-    const MKL_Complex16 beta = {0.0, 0.0};
-    cblas_zgemm(CblasRowMajor, transa ? CblasTrans : CblasNoTrans,
-                transb ? CblasTrans : CblasNoTrans, m, n, k, &alpha,
-                reinterpret_cast<const MKL_Complex16*>(a), lda,
-                reinterpret_cast<const MKL_Complex16*>(b), ldb, &beta,
-                reinterpret_cast<MKL_Complex16*>(c), ldc);
+    const float alpha = 1.0f;
+    const float beta = 0.0f;
+    const int index_transa = transa ? 1 : 0;
+    const int index_transb = transb ? 1 : 0;
+    const char ftrans[] = {'N', 'T', 'C'};
+    dnnl_gemm<bfloat16>(ftrans[index_transa], ftrans[index_transb], m, n, k,
+                        alpha, a, lda, b, ldb, beta, c, ldc, ctx);
   }
-#endif  // !INTEL_MKL_DNN_ONLY
 };
 
 #define REGISTER_CPU(T)                                   \
@@ -233,13 +215,7 @@ class MklMatMulOp : public OpKernel {
 // TODO(inteltf) Consider template specialization when adding/removing
 // additional types
 TF_CALL_float(REGISTER_CPU);
-
-#ifndef INTEL_MKL_DNN_ONLY
-TF_CALL_double(REGISTER_CPU);
-TF_CALL_complex64(REGISTER_CPU);
-TF_CALL_complex128(REGISTER_CPU);
-#endif  // !INTEL_MKL_DNN_ONLY
+TF_CALL_bfloat16(REGISTER_CPU);
 #endif  // ENABLE_MKL
-
 }  // namespace tensorflow
 #endif  // INTEL_MKL

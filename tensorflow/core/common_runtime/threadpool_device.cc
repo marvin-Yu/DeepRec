@@ -38,6 +38,7 @@ limitations under the License.
 #include <omp.h>
 #endif
 #include "tensorflow/core/common_runtime/mkl_cpu_allocator.h"
+#include "tensorflow/core/common_runtime/tensorpool_allocator.h"
 #include "tensorflow/core/platform/cpu_info.h"
 #endif
 
@@ -51,13 +52,13 @@ ThreadPoolDevice::ThreadPoolDevice(const SessionOptions& options,
                                name, DEVICE_CPU, memory_limit, locality)),
       allocator_(allocator),
       scoped_allocator_mgr_(new ScopedAllocatorMgr(name)) {
-#ifdef INTEL_MKL
-  // Early return when MKL is disabled
+#if !defined(ENABLE_DNNL_THREADPOOL) && defined(INTEL_MKL)
+  // Early return when OneDNN is disabled
   if (DisableMKL()) return;
 #ifdef _OPENMP
   const char* user_omp_threads = getenv("OMP_NUM_THREADS");
   if (user_omp_threads == nullptr) {
-    // OMP_NUM_THREADS controls MKL's intra-op parallelization
+    // OMP_NUM_THREADS controls OneDNN's intra-op parallelization
     // Default to available physical cores
     const int mkl_intra_op = port::NumSchedulableCPUs();
     const int ht = port::NumHyperthreadsPerCore();
@@ -70,7 +71,7 @@ ThreadPoolDevice::ThreadPoolDevice(const SessionOptions& options,
     }
   }
 #endif  // _OPENMP
-#endif  // INTEL_MKL
+#endif  // !defined(ENABLE_DNNL_THREADPOOL) && defined(INTEL_MKL)
 }
 
 ThreadPoolDevice::~ThreadPoolDevice() {}
@@ -108,7 +109,7 @@ Status ThreadPoolDevice::MakeTensorFromProto(
     }
   }
   return errors::InvalidArgument("Cannot parse tensor from proto: ",
-                                 ProtoDebugString(tensor_proto));
+                                 tensor_proto.DebugString());
 }
 
 void ThreadPoolDevice::CopyTensorInSameDevice(
@@ -130,12 +131,30 @@ class MklCPUAllocatorFactory : public AllocatorFactory {
  public:
   bool NumaEnabled() override { return false; }
 
-  Allocator* CreateAllocator() override { return new MklCPUAllocator; }
+  Allocator* CreateAllocator() override { return new TensorPoolAllocator; }
 
   // Note: Ignores numa_node, for now.
   virtual SubAllocator* CreateSubAllocator(int numa_node) {
-    return new MklSubAllocator;
+    return new TensorPoolSubAllocator(new TensorPoolAllocator);
   }
+
+ private:
+  class TensorPoolSubAllocator : public SubAllocator {
+   public:
+    explicit TensorPoolSubAllocator(TensorPoolAllocator* allocator)
+      : SubAllocator({}, {}), allocator_(allocator) {}
+
+    void* Alloc(size_t alignment, size_t num_bytes) override {
+      return allocator_->AllocateRaw(alignment, num_bytes);
+    }
+
+    void Free(void* ptr, size_t num_bytes) override {
+      allocator_->DeallocateRaw(ptr);
+    }
+
+   private:
+    TensorPoolAllocator* allocator_;
+  };
 };
 
 #ifdef ENABLE_MKL

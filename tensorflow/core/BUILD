@@ -87,6 +87,7 @@ load(
     "tf_gen_op_libs",
     "tf_generate_proto_text_sources",
     "tf_genrule_cmd_append_to_srcs",
+    "tf_openmp_copts",
     "tf_opts_nortti_if_android",
     "tf_opts_nortti_if_emscripten",
     "transitive_hdrs",
@@ -159,7 +160,6 @@ load("@io_bazel_rules_closure//closure:defs.bzl", "closure_proto_library")
 load(
     "//third_party/mkl:build_defs.bzl",
     "if_mkl",
-    "mkl_deps",
 )
 # Placeholder for Google-internal load statements.
 
@@ -982,6 +982,7 @@ tf_cuda_library(
             "util/memmapped_file_system_writer.h",
         ],
     }) + if_mkl([
+        "util/mkl_threadpool.h",
         "util/mkl_util.h",
     ]),
     visibility = ["//visibility:public"],
@@ -1662,6 +1663,7 @@ cc_library(
         "//tensorflow/core/kernels:mkl_batch_matmul_op",
         "//tensorflow/core/kernels:mkl_matmul_op",
         "//tensorflow/core/kernels:mkl_tfconv_op",
+        "//tensorflow/core/kernels:mkl_tmp_bf16_ops",
     ]) + if_cuda([
         "//tensorflow/core/grappler/optimizers:gpu_swapping_kernels",
         "//tensorflow/core/grappler/optimizers:gpu_swapping_ops",
@@ -1829,7 +1831,6 @@ filegroup(
         "//tensorflow/core/platform:legacy_srcs_no_runtime",
         "//tensorflow/core/profiler:mobile_srcs",
         "//tensorflow/core/lib/bfloat16:bfloat16.h",
-        "//tensorflow/core/lib/bfloat16:bfloat16.cc",
         "//tensorflow/core/lib/gtl:legacy_lib_gtl_all_headers",
         "//tensorflow/core/lib/random:legacy_lib_random_all_headers",
         "//tensorflow/core/lib/random:legacy_lib_random_all_srcs",
@@ -3007,7 +3008,7 @@ tf_cuda_library(
     ] + if_static(
         extra_deps = ["@com_google_protobuf//:protobuf"],
         otherwise = ["@com_google_protobuf//:protobuf_headers"],
-    ) + mkl_deps(),
+    ),
     alwayslink = 1,
 )
 
@@ -3103,6 +3104,7 @@ GRAPH_HDRS = [
     "graph/graph_def_builder_util.h",
     "graph/graph_partition.h",
     "graph/mkl_layout_pass.h",
+    "graph/mkl_layout_pass_lists.h",
     "graph/mkl_tfconversion_pass.h",
     "graph/node_builder.h",
     "graph/optimizer_cse.h",
@@ -3239,6 +3241,7 @@ CORE_CPU_LIB_HEADERS = CORE_CPU_BASE_HDRS + [
     "common_runtime/lower_case_op.h",
     "common_runtime/lower_functional_ops.h",
     "common_runtime/lower_while_op.h",
+    "common_runtime/memory_planner.h",
     "common_runtime/memory_types.h",
     "common_runtime/metrics.h",
     "common_runtime/mkl_cpu_allocator.h",
@@ -3259,6 +3262,7 @@ CORE_CPU_LIB_HEADERS = CORE_CPU_BASE_HDRS + [
     "common_runtime/single_threaded_cpu_device.h",
     "common_runtime/stats_publisher_interface.h",
     "common_runtime/step_stats_collector.h",
+    "common_runtime/tensorpool_allocator.h",
     "common_runtime/threadpool_device.h",
     "common_runtime/process_state.h",
     "common_runtime/pool_allocator.h",
@@ -3302,6 +3306,7 @@ tf_cuda_library(
         "common_runtime/lower_functional_ops.cc",
         "common_runtime/lower_if_op.cc",
         "common_runtime/lower_while_op.cc",
+        "common_runtime/memory_planner.cc",
         "common_runtime/memory_types.cc",
         "common_runtime/metrics.cc",
         "common_runtime/mkl_cpu_allocator.cc",
@@ -3328,6 +3333,7 @@ tf_cuda_library(
         "common_runtime/single_threaded_cpu_device.cc",
         "common_runtime/stats_publisher_interface.cc",
         "common_runtime/step_stats_collector.cc",
+        "common_runtime/tensorpool_allocator.cc",
         "common_runtime/threadpool_device.cc",
         "common_runtime/threadpool_device_factory.cc",
         "graph/gradients.cc",
@@ -3339,7 +3345,7 @@ tf_cuda_library(
         "public/version.h",
     ],
     hdrs = CORE_CPU_LIB_HEADERS,
-    copts = tf_copts(),
+    copts = tf_copts() + tf_openmp_copts(),
     deps = [
         ":bfc_allocator",
         ":graph",
@@ -3358,7 +3364,7 @@ tf_cuda_library(
         "//tensorflow/core/grappler/utils:functions",
         "//tensorflow/core/profiler/lib:traceme",
         "//tensorflow/core/profiler/internal:traceme_recorder",
-    ] + mkl_deps(),
+    ],
     alwayslink = 1,
 )
 
@@ -3404,7 +3410,7 @@ tf_cuda_library(
         "//tensorflow/core/grappler/clusters:virtual_cluster",
         "//tensorflow/core/grappler/optimizers:meta_optimizer",
         "//third_party/eigen3",
-    ] + mkl_deps() + tf_additional_core_deps() + if_static([
+    ] + tf_additional_core_deps() + if_static([
         ":core_cpu_impl",
         ":function_ops_op_lib",
         ":functional_grad",
@@ -4197,6 +4203,22 @@ tf_cc_test(
 )
 
 tf_cc_test(
+    name = "tensorpool_allocator_test",
+    size = "medium",
+    srcs = ["common_runtime/tensorpool_allocator_test.cc"],
+    deps = [
+        ":core",
+        ":core_cpu",
+        ":framework",
+        ":framework_internal",
+        ":lib",
+        ":lib_internal",
+        ":test",
+        ":test_main",
+    ],
+)
+
+tf_cc_test(
     name = "framework_op_gen_lib_test",
     size = "small",
     srcs = ["framework/op_gen_lib_test.cc"],
@@ -4613,6 +4635,7 @@ tf_cc_test_mkl(
         "//tensorflow/core/kernels:mkl_softmax_op",
         "//tensorflow/core/kernels:mkl_tfconv_op",
         "//tensorflow/core/kernels:mkl_transpose_op",
+        "//tensorflow/core/kernels:mkl_tmp_bf16_ops",
     ]),
 )
 
@@ -4731,7 +4754,7 @@ tf_cuda_only_cc_test(
         ":test",
         ":test_main",
         "//third_party/eigen3",
-    ] + mkl_deps(),
+    ],
 )
 
 tf_cc_test_gpu(

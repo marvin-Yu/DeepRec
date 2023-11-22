@@ -51,10 +51,13 @@ bool IsAnyDiv(const NodeDef& node) {
          node.op() == "FloorDiv" || node.op() == "TruncateDiv";
 }
 
+bool IsAnyBatchMatMul(const NodeDef& node) {
+  return node.op() == "BatchMatMul" || node.op() == "BatchMatMulV2";
+}
+
 bool IsAnyMatMul(const NodeDef& node) {
-  const auto& op = node.op();
-  return op == "MatMul" || op == "BatchMatMul" || op == "SparseMatMul" ||
-         IsQuantizedMatMul(node);
+  return node.op() == "MatMul" || node.op() == "SparseMatMul" ||
+         IsAnyBatchMatMul(node) || IsQuantizedMatMul(node);
 }
 
 bool IsAnyMax(const NodeDef& node) {
@@ -271,6 +274,8 @@ bool IsFuseRecv(const NodeDef& node) {
 
 bool IsGather(const NodeDef& node) { return node.op() == "Gather" || node.op() == "GatherV2"; }
 
+bool IsGelu(const NodeDef& node) { return node.op() == "Gelu"; }
+
 bool IsGreater(const NodeDef& node) { return node.op() == "Greater"; }
 
 bool IsGreaterEqual(const NodeDef& node) { return node.op() == "GreaterEqual"; }
@@ -312,6 +317,12 @@ bool IsImmutableConst(const NodeDef& node) {
 }
 
 bool IsInvGrad(const NodeDef& node) { return node.op() == "InvGrad"; }
+
+bool IsLeakyRelu(const NodeDef& node) { return node.op() == "LeakyRelu"; }
+
+bool IsLeakyReluGrad(const NodeDef& node) {
+    return node.op() == "LeakyReluGrad";
+}
 
 bool IsLess(const NodeDef& node) { return node.op() == "Less"; }
 
@@ -481,6 +492,8 @@ bool IsShapeN(const NodeDef& node) { return node.op() == "ShapeN"; }
 
 bool IsShuffle(const NodeDef& node) { return node.op() == "Shuffle"; }
 
+bool IsSigmoid(const NodeDef& node) { return node.op() == "Sigmoid"; }
+
 bool IsSigmoidGrad(const NodeDef& node) { return node.op() == "SigmoidGrad"; }
 
 bool IsSize(const NodeDef& node) { return node.op() == "Size"; }
@@ -551,6 +564,8 @@ bool IsSwitch(const NodeDef& node) {
 bool IsSymbolicGradient(const NodeDef& node) {
   return node.op() == "SymbolicGradient";
 }
+
+bool IsTanh(const NodeDef& node) { return node.op() == "Tanh"; }
 
 bool IsTanhGrad(const NodeDef& node) { return node.op() == "TanhGrad"; }
 
@@ -868,6 +883,7 @@ bool NeverForwardsInputs(const NodeDef& node) {
                                 "ArgMin",
                                 "AudioSpectrogram",
                                 "BatchMatMul",
+                                "BatchMatMulV2",
                                 "BatchToSpace",
                                 "BatchToSpaceND",
                                 "Bincount",
