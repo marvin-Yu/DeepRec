@@ -86,7 +86,7 @@ int NumIterations(const RewriterConfig& cfg) {
 bool IsRunOnceOptimizer(const string& name) {
   return name == "layout" || name == "memory_optimizer" ||
          name == "loop_optimizer" || name == "auto_mixed_precision" ||
-	 name == "auto_mixed_precision_mkl";
+         name == "auto_mixed_precision_mkl";
 }
 
 // Creates a function library stub from a real function library: copy only
@@ -145,6 +145,8 @@ std::unique_ptr<GraphOptimizer> MetaOptimizer::MakeNewOptimizer(
          new AutoMixedPrecision(AutoMixedPrecisionMode::CUDA));
 #ifdef INTEL_MKL
   if (IsMKLEnabled()) {
+    MK_OPT("auto_mixed_precision",
+           new AutoMixedPrecision(AutoMixedPrecisionMode::FP16_CPU));
     MK_OPT("auto_mixed_precision_mkl",
            new AutoMixedPrecision(AutoMixedPrecisionMode::BF16));
     MK_OPT("auto_mixed_precision_onednn_bfloat16",
@@ -202,6 +204,8 @@ Status MetaOptimizer::InitializeOptimizers(
     optimizers->push_back(MakeUnique<ShapeOptimizer>());
   }
   if (AutoMixedPrecisionEnabled(cfg_.auto_mixed_precision())) {
+    optimizers->push_back(
+        MakeUnique<AutoMixedPrecision>(AutoMixedPrecisionMode::FP16_CPU));
     optimizers->push_back(
         MakeUnique<AutoMixedPrecision>(AutoMixedPrecisionMode::CUDA));
   }
