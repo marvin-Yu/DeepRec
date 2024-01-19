@@ -87,35 +87,56 @@ void VerifyGraphsEquivalent(const GraphDef& original_graph,
   }
 }
 
-// Currently, this test suite only passes when TensorFlow passes with CUDA,
-// because otherwise the optimizer will not turn clearlist nodes to float16.
-// When looking at clearlist nodes, this optimizer checks if the nodes have a
-// float16 GPU OpKernel, but without CUDA there are no GPU OpKernels at all.
-#if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
-
+// Currently on GPU, this test suite only passes when TensorFlow passes with
+// CUDA/HIP, because otherwise the optimizer will not turn clearlist nodes to
+// float16. When looking at clearlist nodes, this optimizer checks if the nodes
+// have a float16 GPU OpKernel, but without CUDA/HIP there are no GPU OpKernels
+// at all. And on CPU, this test suite passes when AMX FP16 is supported.
 const std::pair<int, int> kMinGPUArch = {7, 0};
 
 class AutoMixedPrecisionTest : public GrapplerTest {
  protected:
+  void SetMode(AutoMixedPrecisionMode mode) {
+    mode_ = mode;
+  }
   void SetUp() override {
-    int num_gpus = GetNumAvailableGPUs();
-    // If GPUs are available, require that they all satisfy the min arch.
-    gpu_available_ = (num_gpus > 0);
+    if (mode_ == AutoMixedPrecisionMode::CUDA) {
+      int num_gpus = GetNumAvailableGPUs();
+      // If GPUs are available, require that they all satisfy the min arch.
+      gpu_available_ = (num_gpus > 0);
 #if GOOGLE_CUDA
-    gpu_available_ =
-        gpu_available_ && (num_gpus == GetNumAvailableGPUs(kMinGPUArch));
+      gpu_available_ =
+          gpu_available_ && (num_gpus == GetNumAvailableGPUs(kMinGPUArch));
+#else  // Here we force Tensorflow to use the virtual GFX906
+      gpu_available_ = false;
 #endif
-    if (gpu_available_) {
-      virtual_cluster_.reset(new SingleMachine(/* timeout_s = */ 10, 1, 1));
-    } else {
+      if (gpu_available_) {
+        virtual_cluster_.reset(new SingleMachine(/* timeout_s = */ 10, 1, 1));
+      } else {
+        DeviceProperties device_properties;
+        device_properties.set_type("GPU");
+#if GOOGLE_CUDA
+        device_properties.mutable_environment()->insert({"architecture", "7"});
+        device_properties.mutable_environment()->insert({"cuda", "9010"});
+#else
+        device_properties.mutable_environment()->insert(
+            {"architecture", "gfx906"});
+#endif
+        virtual_cluster_.reset(
+            new VirtualCluster({{"/GPU:1", device_properties}}));
+      }
+    } else if (mode_ == AutoMixedPrecisionMode::FP16_CPU) {
       DeviceProperties device_properties;
-      device_properties.set_type("GPU");
-#if GOOGLE_CUDA
-      device_properties.mutable_environment()->insert({"architecture", "7"});
-      device_properties.mutable_environment()->insert({"cuda", "9010"});
-#endif
-      virtual_cluster_.reset(
-          new VirtualCluster({{"/GPU:1", device_properties}}));
+      device_properties.set_type("CPU");
+      virtual_cluster_.reset(new SingleMachine(/* timeout_s = */ 10, 1, 0));
+
+      bool is_fp16_enabled_on_cpu = false;
+#if defined(INTEL_MKL) && defined(ENABLE_ONEDNN_V3)
+      is_fp16_enabled_on_cpu = IsAMXDataTypeSupportedByOneDNNOnThisCPU(DT_HALF);
+#endif  // INTEL_MKL && ENABLE_ONEDNN_V3
+      if(!IsMKLEnabled() || !is_fp16_enabled_on_cpu) {
+        GTEST_SKIP() << "This device doesn't support FP16";
+      }
     }
     TF_CHECK_OK(virtual_cluster_->Provision());
     tf32_cache_ = tensorflow::tensor_float_32_execution_enabled();
@@ -187,7 +208,7 @@ class AutoMixedPrecisionTest : public GrapplerTest {
     std::vector<std::pair<string, Tensor>> feed = {{"input", input_tensor}};
     auto tensors_expected = EvaluateNodes(item.graph, item.fetch, feed);
 
-    AutoMixedPrecision optimizer;
+    AutoMixedPrecision optimizer(mode_);
     GraphDef output;
     TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
 
@@ -211,9 +232,23 @@ class AutoMixedPrecisionTest : public GrapplerTest {
   std::unique_ptr<Cluster> virtual_cluster_;
   bool gpu_available_;
   bool tf32_cache_;
+  AutoMixedPrecisionMode mode_;
 };
 
-TEST_F(AutoMixedPrecisionTest, NoOp) {
+class AutoMixedPrecisionParamTest : public AutoMixedPrecisionTest,
+                                    public ::testing::WithParamInterface<
+                                        AutoMixedPrecisionMode> {
+
+  protected:
+  void SetUp() override {
+    mode_ = GetParam();
+    AutoMixedPrecisionTest::SetMode(mode_);
+    AutoMixedPrecisionTest::SetUp();
+  }
+  AutoMixedPrecisionMode mode_;
+};
+
+TEST_P(AutoMixedPrecisionParamTest, NoOp) {
   tensorflow::Scope s = tensorflow::Scope::NewRootScope();
   Output input = ops::Const(s.WithOpName("input"), 1.234f, {32});
   Output deny1 = ops::Exp(s.WithOpName("deny1"), input);
@@ -227,7 +262,7 @@ TEST_F(AutoMixedPrecisionTest, NoOp) {
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
   auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
 
-  AutoMixedPrecision optimizer;
+  AutoMixedPrecision optimizer(mode_);
   GraphDef output;
   TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
 
@@ -250,7 +285,7 @@ TEST_F(AutoMixedPrecisionTest, NoOp) {
   }
 }
 
-TEST_F(AutoMixedPrecisionTest, AlreadyFp16) {
+TEST_P(AutoMixedPrecisionParamTest, AlreadyFp16) {
   tensorflow::Scope s = tensorflow::Scope::NewRootScope();
   Output input = ops::Const(s.WithOpName("input"), 1.f, {32, 32});
   Output cst1 = ops::Cast(s.WithOpName("cst1"), input, DT_HALF);
@@ -265,7 +300,7 @@ TEST_F(AutoMixedPrecisionTest, AlreadyFp16) {
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
   auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
 
-  AutoMixedPrecision optimizer;
+  AutoMixedPrecision optimizer(mode_);
   GraphDef output;
   TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
   VLOG(1) << output.DebugString();
@@ -288,7 +323,7 @@ TEST_F(AutoMixedPrecisionTest, AlreadyFp16) {
   }
 }
 
-TEST_F(AutoMixedPrecisionTest, Simple) {
+TEST_P(AutoMixedPrecisionParamTest, Simple) {
   tensorflow::Scope s = tensorflow::Scope::NewRootScope();
   Output input = ops::Const(s.WithOpName("input"), 1.f / 32, {32, 32});
   Output deny1 = ops::Exp(s.WithOpName("deny1"), input);
@@ -308,7 +343,7 @@ TEST_F(AutoMixedPrecisionTest, Simple) {
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
   auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
 
-  AutoMixedPrecision optimizer;
+  AutoMixedPrecision optimizer(mode_);
   GraphDef output;
   TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
 
@@ -353,7 +388,7 @@ TEST_F(AutoMixedPrecisionTest, BidirectionalClearChain) {
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
   auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
 
-  AutoMixedPrecision optimizer;
+  AutoMixedPrecision optimizer(mode_);
   GraphDef output;
   TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
 
@@ -376,7 +411,7 @@ TEST_F(AutoMixedPrecisionTest, BidirectionalClearChain) {
   }
 }
 
-TEST_F(AutoMixedPrecisionTest, PreserveFetches) {
+TEST_P(AutoMixedPrecisionParamTest, PreserveFetches) {
   tensorflow::Scope s = tensorflow::Scope::NewRootScope();
   Output input = ops::Const(s.WithOpName("input"), 1.f / 32, {32, 32});
   Output allow1 = ops::MatMul(s.WithOpName("allow1"), input, input);
@@ -394,7 +429,7 @@ TEST_F(AutoMixedPrecisionTest, PreserveFetches) {
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
   auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
 
-  AutoMixedPrecision optimizer;
+  AutoMixedPrecision optimizer(mode_);
   GraphDef output;
   TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
 
@@ -421,7 +456,10 @@ TEST_F(AutoMixedPrecisionTest, PreserveFetches) {
   }
 }
 
-TEST_F(AutoMixedPrecisionTest, PreserveCPUNodes) {
+TEST_P(AutoMixedPrecisionParamTest, PreserveCPUNodes) {
+  if (mode_ == AutoMixedPrecisionMode::FP16_CPU) {
+    GTEST_SKIP() << "This test is not required on CPU";
+  }
   tensorflow::Scope s = tensorflow::Scope::NewRootScope();
   Output input = ops::Const(s.WithOpName("input"), 1.f / 32, {32, 32});
   Output clr1 = ops::Relu(s.WithOpName("clr1"), input);
@@ -439,7 +477,7 @@ TEST_F(AutoMixedPrecisionTest, PreserveCPUNodes) {
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
   auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
 
-  AutoMixedPrecision optimizer;
+  AutoMixedPrecision optimizer(mode_);
   GraphDef output;
   TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
 
@@ -462,7 +500,7 @@ TEST_F(AutoMixedPrecisionTest, PreserveCPUNodes) {
   }
 }
 
-TEST_F(AutoMixedPrecisionTest, PreserveIdentityAfterVariable) {
+TEST_P(AutoMixedPrecisionParamTest, PreserveIdentityAfterVariable) {
   tensorflow::Scope s = tensorflow::Scope::NewRootScope();
   Output input = ops::Const(s.WithOpName("input"), 1.f / 32, {32, 32});
   Output var1 = ops::Variable(s.WithOpName("var1"), {32, 32}, DT_FLOAT);
@@ -482,7 +520,7 @@ TEST_F(AutoMixedPrecisionTest, PreserveIdentityAfterVariable) {
   std::vector<std::pair<string, Tensor>> feed = {{"var1", var1_tensor}};
   auto tensors_expected = EvaluateNodes(item.graph, item.fetch, feed);
 
-  AutoMixedPrecision optimizer;
+  AutoMixedPrecision optimizer(mode_);
   GraphDef output;
   TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
 
@@ -506,7 +544,7 @@ TEST_F(AutoMixedPrecisionTest, PreserveIdentityAfterVariable) {
   }
 }
 
-TEST_F(AutoMixedPrecisionTest, FusedBatchNorm) {
+TEST_P(AutoMixedPrecisionParamTest, FusedBatchNorm) {
   tensorflow::Scope s = tensorflow::Scope::NewRootScope();
   // Uses NHWC data format because non-GPU execution does not support NCHW.
   Output input = ops::Const(s.WithOpName("input"), 1.f / 32, {8, 56, 56, 16});
@@ -539,7 +577,7 @@ TEST_F(AutoMixedPrecisionTest, FusedBatchNorm) {
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
   auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
 
-  AutoMixedPrecision optimizer;
+  AutoMixedPrecision optimizer(mode_);
   GraphDef output;
   TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
 
@@ -565,7 +603,7 @@ TEST_F(AutoMixedPrecisionTest, FusedBatchNorm) {
   }
 }
 
-TEST_F(AutoMixedPrecisionTest, RepeatedAndListTypeAttrs) {
+TEST_P(AutoMixedPrecisionParamTest, RepeatedAndListTypeAttrs) {
   tensorflow::Scope s = tensorflow::Scope::NewRootScope();
   Output input = ops::Const(s.WithOpName("input"), 1.f / 32, {32, 32});
   Output allow1 = ops::MatMul(s.WithOpName("allow1"), input, input);
@@ -581,7 +619,7 @@ TEST_F(AutoMixedPrecisionTest, RepeatedAndListTypeAttrs) {
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
   auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
 
-  AutoMixedPrecision optimizer;
+  AutoMixedPrecision optimizer(mode_);
   GraphDef output;
   TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
 
@@ -605,7 +643,7 @@ TEST_F(AutoMixedPrecisionTest, RepeatedAndListTypeAttrs) {
   }
 }
 
-TEST_F(AutoMixedPrecisionTest, ExistingCast) {
+TEST_P(AutoMixedPrecisionParamTest, ExistingCast) {
   tensorflow::Scope s = tensorflow::Scope::NewRootScope();
   Output input = ops::Const(s.WithOpName("input"), true, {32, 32});
   Output cst1 = ops::Cast(s.WithOpName("cst1"), input, DT_FLOAT);
@@ -617,7 +655,7 @@ TEST_F(AutoMixedPrecisionTest, ExistingCast) {
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
   auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
 
-  AutoMixedPrecision optimizer;
+  AutoMixedPrecision optimizer(mode_);
   GraphDef output;
   TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
 
@@ -637,7 +675,7 @@ TEST_F(AutoMixedPrecisionTest, ExistingCast) {
   }
 }
 
-TEST_F(AutoMixedPrecisionTest, RecurrentEdgeColorMismatch) {
+TEST_P(AutoMixedPrecisionParamTest, RecurrentEdgeColorMismatch) {
   tensorflow::Scope s = tensorflow::Scope::NewRootScope();
   Output input = ops::Const(s.WithOpName("input"), 1.f / 32, {32, 32});
   Output deny1 = ops::Exp(s.WithOpName("deny1"), input);
@@ -670,7 +708,7 @@ TEST_F(AutoMixedPrecisionTest, RecurrentEdgeColorMismatch) {
   const_node->add_input("^mrg1");
   auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
 
-  AutoMixedPrecision optimizer;
+  AutoMixedPrecision optimizer(mode_);
   GraphDef output;
   TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
 
@@ -699,7 +737,7 @@ TEST_F(AutoMixedPrecisionTest, RecurrentEdgeColorMismatch) {
   }
 }
 
-TEST_F(AutoMixedPrecisionTest, TensorListSetGet) {
+TEST_P(AutoMixedPrecisionParamTest, TensorListSetGet) {
   tensorflow::Scope s = tensorflow::Scope::NewRootScope();
   tensorflow::Input shape = {32, 32};
   auto tl1 = ops::TensorListReserve(s.WithOpName("tl1"), {32, 32}, 8, DT_FLOAT);
@@ -741,7 +779,7 @@ TEST_F(AutoMixedPrecisionTest, TensorListSetGet) {
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
   auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
 
-  AutoMixedPrecision optimizer;
+  AutoMixedPrecision optimizer(mode_);
   GraphDef output;
   TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
 
@@ -770,7 +808,7 @@ TEST_F(AutoMixedPrecisionTest, TensorListSetGet) {
   }
 }
 
-TEST_F(AutoMixedPrecisionTest, TensorListPushPop) {
+TEST_P(AutoMixedPrecisionParamTest, TensorListPushPop) {
   tensorflow::Scope s = tensorflow::Scope::NewRootScope();
   tensorflow::Input shape = {32, 32};
   auto tl1 = ops::EmptyTensorList(s.WithOpName("tl1"), {32, 32}, 8, DT_FLOAT);
@@ -804,7 +842,7 @@ TEST_F(AutoMixedPrecisionTest, TensorListPushPop) {
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
   auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
 
-  AutoMixedPrecision optimizer;
+  AutoMixedPrecision optimizer(mode_);
   GraphDef output;
   TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
 
@@ -833,7 +871,7 @@ TEST_F(AutoMixedPrecisionTest, TensorListPushPop) {
   }
 }
 
-TEST_F(AutoMixedPrecisionTest, TensorListFromTensor) {
+TEST_P(AutoMixedPrecisionParamTest, TensorListFromTensor) {
   tensorflow::Scope s = tensorflow::Scope::NewRootScope();
   tensorflow::Input shape = {32};
   Output input = ops::Const(s.WithOpName("input"), 1.f / 32, {32, 32});
@@ -858,7 +896,7 @@ TEST_F(AutoMixedPrecisionTest, TensorListFromTensor) {
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
   auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
 
-  AutoMixedPrecision optimizer;
+  AutoMixedPrecision optimizer(mode_);
   GraphDef output;
   TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
 
@@ -883,7 +921,7 @@ TEST_F(AutoMixedPrecisionTest, TensorListFromTensor) {
   }
 }
 
-TEST_F(AutoMixedPrecisionTest, TensorListPushBackBatchAndConcatLists) {
+TEST_P(AutoMixedPrecisionParamTest, TensorListPushBackBatchAndConcatLists) {
   tensorflow::Scope s = tensorflow::Scope::NewRootScope();
   tensorflow::Input shape = {32, 32};
   auto tl1 = ops::EmptyTensorList(s.WithOpName("tl1"), {32, 32}, 8, DT_FLOAT);
@@ -918,7 +956,7 @@ TEST_F(AutoMixedPrecisionTest, TensorListPushBackBatchAndConcatLists) {
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
   auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
 
-  AutoMixedPrecision optimizer;
+  AutoMixedPrecision optimizer(mode_);
   GraphDef output;
   TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
 
@@ -943,7 +981,7 @@ TEST_F(AutoMixedPrecisionTest, TensorListPushBackBatchAndConcatLists) {
   }
 }
 
-TEST_F(AutoMixedPrecisionTest, TensorListThroughFunction) {
+TEST_P(AutoMixedPrecisionParamTest, TensorListThroughFunction) {
   // This test passes a tensor list handle through a function with its own
   // Tensor List ops inside to test that the types are not changed to a
   // conflicting state.
@@ -1004,7 +1042,7 @@ TEST_F(AutoMixedPrecisionTest, TensorListThroughFunction) {
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
   auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
 
-  AutoMixedPrecision optimizer;
+  AutoMixedPrecision optimizer(mode_);
   GraphDef output;
   TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
 
@@ -1054,7 +1092,7 @@ TEST_F(AutoMixedPrecisionTest, BatchMatMul) {
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
   auto tensors_expected = EvaluateNodes(item.graph, item.fetch);
 
-  AutoMixedPrecision optimizer;
+  AutoMixedPrecision optimizer(mode_);
   GraphDef output;
   TF_ASSERT_OK(optimizer.Optimize(virtual_cluster_.get(), item, &output));
 
@@ -1078,7 +1116,7 @@ TEST_F(AutoMixedPrecisionTest, BatchMatMul) {
   }
 }
 
-TEST_F(AutoMixedPrecisionTest, EluOp) {
+TEST_P(AutoMixedPrecisionParamTest, EluOp) {
   TestSimpleUnaryInferOp(
       -5, 5, 1.0e-3, 1.0e-3,
       [](const tensorflow::Scope& scope, Output input) -> Output {
@@ -1086,7 +1124,7 @@ TEST_F(AutoMixedPrecisionTest, EluOp) {
       });
 }
 
-TEST_F(AutoMixedPrecisionTest, ErfOp) {
+TEST_P(AutoMixedPrecisionParamTest, ErfOp) {
   TestSimpleUnaryInferOp(
       -5, 5, 1.0e-3, -1,
       [](const tensorflow::Scope& scope, Output input) -> Output {
@@ -1094,7 +1132,7 @@ TEST_F(AutoMixedPrecisionTest, ErfOp) {
       });
 }
 
-TEST_F(AutoMixedPrecisionTest, ErfcOp) {
+TEST_P(AutoMixedPrecisionParamTest, ErfcOp) {
   TestSimpleUnaryInferOp(
       -5, 5, 1.0e-3, -1,
       [](const tensorflow::Scope& scope, Output input) -> Output {
@@ -1102,7 +1140,7 @@ TEST_F(AutoMixedPrecisionTest, ErfcOp) {
       });
 }
 
-TEST_F(AutoMixedPrecisionTest, InvOp) {
+TEST_P(AutoMixedPrecisionParamTest, InvOp) {
   TestSimpleUnaryInferOp(
       0.01, 10, -1, 1.0e-3,
       [](const tensorflow::Scope& scope, Output input) -> Output {
@@ -1110,7 +1148,7 @@ TEST_F(AutoMixedPrecisionTest, InvOp) {
       });
 }
 
-TEST_F(AutoMixedPrecisionTest, LogOp) {
+TEST_P(AutoMixedPrecisionParamTest, LogOp) {
   TestSimpleUnaryInferOp(
       0.01, 10, 1.0e-3, 2.0e-3,
       [](const tensorflow::Scope& scope, Output input) -> Output {
@@ -1118,7 +1156,7 @@ TEST_F(AutoMixedPrecisionTest, LogOp) {
       });
 }
 
-TEST_F(AutoMixedPrecisionTest, Log1pOp) {
+TEST_P(AutoMixedPrecisionParamTest, Log1pOp) {
   TestSimpleUnaryInferOp(
       -0.99, 9, 1.0e-3, 5.0e-3,
       [](const tensorflow::Scope& scope, Output input) -> Output {
@@ -1126,7 +1164,7 @@ TEST_F(AutoMixedPrecisionTest, Log1pOp) {
       });
 }
 
-TEST_F(AutoMixedPrecisionTest, LogSoftmaxOp) {
+TEST_P(AutoMixedPrecisionParamTest, LogSoftmaxOp) {
   TestSimpleUnaryInferOp(
       -8, 8, -1, 1.0e-2,
       [](const tensorflow::Scope& scope, Output input) -> Output {
@@ -1134,7 +1172,7 @@ TEST_F(AutoMixedPrecisionTest, LogSoftmaxOp) {
       });
 }
 
-TEST_F(AutoMixedPrecisionTest, ReciprocalOp) {
+TEST_P(AutoMixedPrecisionParamTest, ReciprocalOp) {
   TestSimpleUnaryInferOp(
       0.01, 10, -1, 1.0e-3,
       [](const tensorflow::Scope& scope, Output input) -> Output {
@@ -1142,7 +1180,7 @@ TEST_F(AutoMixedPrecisionTest, ReciprocalOp) {
       });
 }
 
-TEST_F(AutoMixedPrecisionTest, SigmoidOp) {
+TEST_P(AutoMixedPrecisionParamTest, SigmoidOp) {
   TestSimpleUnaryInferOp(
       -5, 5, 1.0e-3, -1,
       [](const tensorflow::Scope& scope, Output input) -> Output {
@@ -1150,7 +1188,7 @@ TEST_F(AutoMixedPrecisionTest, SigmoidOp) {
       });
 }
 
-TEST_F(AutoMixedPrecisionTest, SoftmaxOp) {
+TEST_P(AutoMixedPrecisionParamTest, SoftmaxOp) {
   TestSimpleUnaryInferOp(
       -8, 8, 2.0e-3, -1,
       [](const tensorflow::Scope& scope, Output input) -> Output {
@@ -1158,7 +1196,7 @@ TEST_F(AutoMixedPrecisionTest, SoftmaxOp) {
       });
 }
 
-TEST_F(AutoMixedPrecisionTest, SoftplusOp) {
+TEST_P(AutoMixedPrecisionParamTest, SoftplusOp) {
   TestSimpleUnaryInferOp(
       -5, 5, 1.0e-3, 1.0e-3,
       [](const tensorflow::Scope& scope, Output input) -> Output {
@@ -1166,7 +1204,7 @@ TEST_F(AutoMixedPrecisionTest, SoftplusOp) {
       });
 }
 
-TEST_F(AutoMixedPrecisionTest, SqrtOp) {
+TEST_P(AutoMixedPrecisionParamTest, SqrtOp) {
   TestSimpleUnaryInferOp(
       0, 10, 1.0e-3, 1.0e-3,
       [](const tensorflow::Scope& scope, Output input) -> Output {
@@ -1174,7 +1212,7 @@ TEST_F(AutoMixedPrecisionTest, SqrtOp) {
       });
 }
 
-TEST_F(AutoMixedPrecisionTest, TanhOp) {
+TEST_P(AutoMixedPrecisionParamTest, TanhOp) {
   TestSimpleUnaryInferOp(
       -5, 5, 1.0e-3, -1,
       [](const tensorflow::Scope& scope, Output input) -> Output {
@@ -1182,6 +1220,17 @@ TEST_F(AutoMixedPrecisionTest, TanhOp) {
       });
 }
 
+INSTANTIATE_TEST_SUITE_P(AutoMixedPrecisionTest, AutoMixedPrecisionParamTest,
+                         ::testing::ValuesIn({
+#if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
+                           AutoMixedPrecisionMode::CUDA,
+#endif
+#if INTEL_MKL
+                           AutoMixedPrecisionMode::FP16_CPU
+#endif
+                          }));
+
+#if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 class AutoMixedPrecisionCpuTest : public GrapplerTest {
  protected:
   void SetUp() override {

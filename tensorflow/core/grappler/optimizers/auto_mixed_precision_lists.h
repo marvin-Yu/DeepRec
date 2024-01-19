@@ -19,6 +19,7 @@ limitations under the License.
 #include "tensorflow/core/lib/gtl/flatset.h"
 #include "tensorflow/core/lib/strings/str_util.h"
 #include "tensorflow/core/util/env_var.h"
+#include "tensorflow/core/util/util.h"
 
 namespace tensorflow {
 namespace grappler {
@@ -92,7 +93,7 @@ class AutoMixedPrecisionLists {
   }
 };
 
-class AutoMixedPrecisionListsCuda : public AutoMixedPrecisionLists {
+class AutoMixedPrecisionListsFp16 : public AutoMixedPrecisionLists {
  private:
   static bool IsPseudoFastMath() {
     string optimization_level;
@@ -104,48 +105,75 @@ class AutoMixedPrecisionListsCuda : public AutoMixedPrecisionLists {
   }
 
  public:
-  AutoMixedPrecisionListsCuda(int cuda_version, int cudnn_version)
-      : cuda_version_(cuda_version), cudnn_version_(cudnn_version) {}
+  AutoMixedPrecisionListsFp16(int cuda_version, int cudnn_version,
+                              AutoMixedPrecisionMode mode)
+      : cuda_version_(cuda_version), cudnn_version_(cudnn_version) {
+    if (mode == AutoMixedPrecisionMode::CUDA ||
+        mode == AutoMixedPrecisionMode::CPU) {
+      // Note: this is not a typo here. use_cuda_ is set to true for the CPU
+      // intentionally to make CPU and GPU have the same fp16 ops.
+      use_cuda_ = true;
+      use_onednn_ = false;
+    } else if (mode == AutoMixedPrecisionMode::FP16_CPU) {
+      use_onednn_ = true;
+      use_cuda_ = false;
+    }
+  }
 
   gtl::FlatSet<string> AllowList() override {
     auto list = gtl::FlatSet<string>{
-        "BlockLSTM",
-        "BlockLSTMV2",
-        "BlockLSTMGrad",
-        "BlockLSTMGradV2",
         "Conv2D",
         "Conv2DBackpropFilter",
         "Conv2DBackpropInput",
-        "CudnnRNN",
-        "CudnnRNNBackprop",
-        "CudnnRNNBackpropV2",
-        "CudnnRNNBackpropV3",
-        "CudnnRNNV2",
-        "CudnnRNNV3",
         "Einsum",
-        "GRUBlockCell",
-        "GRUBlockCellGrad",
-        "LSTMBlockCell",
-        "LSTMBlockCellGrad",
-        // TODO(benbarsdell): Enable these when fast and safe fp16 kernels are
-        // available for depthwise convolutions.
-        // "DepthwiseConv2dNative",
-        // "DepthwiseConv2dNativeBackpropFilter",
-        // "DepthwiseConv2dNativeBackpropInput",
         "MatMul",
     };
-    if (cuda_version_ >= 9010) {
+    if (use_cuda_) {
+      list.insert("BlockLSTM");
+      list.insert("BlockLSTMV2");
+      list.insert("BlockLSTMGrad");
+      list.insert("BlockLSTMGradV2");
+      list.insert("CudnnRNN");
+      list.insert("CudnnRNNBackprop");
+      list.insert("CudnnRNNBackpropV2");
+      list.insert("CudnnRNNBackpropV3");
+      list.insert("CudnnRNNV2");
+      list.insert("CudnnRNNV3");
+      list.insert("FusedConv2DBiasActivation");
+      list.insert("FusedSparseConvGpuV2");
+      list.insert("GRUBlockCell");
+      list.insert("GRUBlockCellGrad");
+      list.insert("LSTMBlockCell");
+      list.insert("LSTMBlockCellGrad");
+      list.insert("Mha");
+      list.insert("MhaV2");
+      list.insert("Tmlp");
+      list.insert("TmlpV2");
+      list.insert("TmlpV3");
+      list.insert("Pmlp");
+      list.insert("FastUnsortedSegmentMax");
+    }
+#if TENSORFLOW_USE_ROCM
+    if (true) {
+#else
+    if ((use_cuda_ && cuda_version_ >= 9010) || use_onednn_) {
       // Fp16 BatchMatMul is slow before CUDA 9.1.
+#endif
       list.insert("BatchMatMul");
       list.insert("BatchMatMulV2");
     }
-    if (cudnn_version_ >= 7602) {
+    if ((use_cuda_ && cudnn_version_ >= 7602) || use_onednn_) {
       // Fp16 3D conv is slow before CUDNN 7.6.2.
       list.insert("Conv3D");
       list.insert("Conv3DBackpropFilter");
       list.insert("Conv3DBackpropFilterV2");
       list.insert("Conv3DBackpropInput");
       list.insert("Conv3DBackpropInputV2");
+    }
+    if ((use_cuda_ && cudnn_version_ >= 8000) || use_onednn_) {
+      list.insert("DepthwiseConv2dNative");
+      list.insert("DepthwiseConv2dNativeBackpropFilter");
+      list.insert("DepthwiseConv2dNativeBackpropInput");
     }
     UpdateList("ALLOWLIST", &list);
     // For backwards compatibility, keeping the original env variable here.
@@ -156,7 +184,7 @@ class AutoMixedPrecisionListsCuda : public AutoMixedPrecisionLists {
   }
 
   gtl::FlatSet<string> InferList() override {
-    if (IsPseudoFastMath()) {
+    if (IsPseudoFastMath() && use_cuda_) {
       return gtl::FlatSet<string>{};
     }
 
@@ -205,6 +233,11 @@ class AutoMixedPrecisionListsCuda : public AutoMixedPrecisionLists {
         "Tanh",
         "TanhGrad",
     };
+    if (use_onednn_) {
+      list.insert("Rsqrt");
+      list.insert("Square");
+      list.insert("SquaredDifference");
+    }
     UpdateList("INFERLIST", &list);
     // For backwards compatibility, keeping the original env variable here.
     // TODO(reedwm): This should be removed if we don't have active users.
@@ -213,7 +246,7 @@ class AutoMixedPrecisionListsCuda : public AutoMixedPrecisionLists {
   }
 
   gtl::FlatSet<string> DenyList() override {
-    if (IsPseudoFastMath()) {
+    if (IsPseudoFastMath() && use_cuda_) {
       return gtl::FlatSet<string>{};
     }
 
@@ -236,7 +269,7 @@ class AutoMixedPrecisionListsCuda : public AutoMixedPrecisionLists {
   }
 
   gtl::FlatSet<string> ClearList() override {
-    if (IsPseudoFastMath()) {
+    if (IsPseudoFastMath() && use_cuda_) {
       return gtl::FlatSet<string>{};
     }
 
@@ -344,6 +377,8 @@ class AutoMixedPrecisionListsCuda : public AutoMixedPrecisionLists {
  private:
   int cuda_version_;
   int cudnn_version_;
+  bool use_cuda_;
+  bool use_onednn_;
 };
 
 class AutoMixedPrecisionListsMkl : public AutoMixedPrecisionLists {
@@ -374,26 +409,50 @@ class AutoMixedPrecisionListsMkl : public AutoMixedPrecisionLists {
   }
 
   gtl::FlatSet<string> InferList() override {
-    auto list = gtl::FlatSet<string>{
-        "Add",
-        "AddN",
-        "AddV2",
-        "AvgPool",
-        "AvgPool3D",
-        "AvgPool3DGrad",
-        "AvgPoolGrad",
-        "BiasAdd",
-        "BiasAddGrad",
-        "BiasAddV1",
-        "FusedBatchNormV2",
-        "FusedBatchNormGradV2",
-        "FusedBatchNormV3",
-        "FusedBatchNormGradV3",
-        "LeakyRelu",
-        "LeakyReluGrad",
-        "Mul",
-        "Sub",
-    };
+    auto list = gtl::FlatSet<string>{"Add",
+                                     "AddN",
+                                     "AddV2",
+                                     "AvgPool",
+                                     "AvgPool3D",
+                                     "AvgPool3DGrad",
+                                     "AvgPoolGrad",
+                                     "BiasAdd",
+                                     "BiasAddGrad",
+                                     "BiasAddV1",
+                                     "Erf",
+                                     "FusedBatchNormV2",
+                                     "FusedBatchNormGradV2",
+                                     "FusedBatchNormV3",
+                                     "FusedBatchNormGradV3",
+                                     "LeakyRelu",
+                                     "LeakyReluGrad",
+                                     "Mul",
+                                     "Sub",
+                                     "Elu",
+                                     "EluGrad",
+                                     "FloorDiv",
+                                     "_FusedBatchNormEx",
+                                     "Log",
+                                     "Log1p",
+                                     "LogSoftmax",
+                                     "Prod",
+                                     "RealDiv",
+                                     "Reciprocal",
+                                     "Rsqrt",
+                                     "Selu",
+                                     "SeluGrad",
+                                     "Sigmoid",
+                                     "SigmoidGrad",
+                                     "Softmax",
+                                     "Softplus",
+                                     "SoftplusGrad",
+                                     "Softsign",
+                                     "SoftsignGrad",
+                                     "Sqrt",
+                                     "Square",
+                                     "SquaredDifference",
+                                     "Tanh",
+                                     "TanhGrad"};
     UpdateList("INFERLIST", &list);
     // For backwards compatibility, keeping the original env variable here.
     // TODO(reedwm): This should be removed if we don't have active users.
