@@ -954,6 +954,7 @@ TEST_F(FilterCacheTest, Conv2DFilterCacheTest) {
   Run<float>(DT_FLOAT, image, filter, expected, true);
 }
 
+#ifndef ENABLE_ONEDNN_V3
 // Testing fusion of MatMul and BiasAdd
 template <typename T>
 class MklFusedMatMulOpTest : public OpsTestBase {

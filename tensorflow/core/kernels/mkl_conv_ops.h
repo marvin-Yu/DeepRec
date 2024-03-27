@@ -49,7 +49,6 @@ namespace tensorflow {
 
 #define DNNL_SIZE_DTYPE memory::dim
 
-using ConvFwdDesc = dnnl::convolution_forward::desc;
 using ConvFwdPd = dnnl::convolution_forward::primitive_desc;
 
 class MklDnnConvUtil {
