@@ -15,7 +15,7 @@ limitations under the License.
 
 #ifndef TENSORFLOW_CORE_UTIL_MKL_UTIL_H_
 #define TENSORFLOW_CORE_UTIL_MKL_UTIL_H_
-#if defined(INTEL_MKL) && !defined(ENABLE_ONEDNN_V3)
+#ifdef INTEL_MKL
 
 #include <list>
 #include <memory>
@@ -252,7 +252,7 @@ class MklDnnShape {
     MklTensorFormat tf_data_format_ = MklTensorFormat::FORMAT_BLOCKED;
     memory::data_type T_ = memory::data_type::undef;
     // MKL layout
-    dnnl_memory_desc_t mkl_md_;
+    memory::desc mkl_md_;
     /// TF dimension corresponding to this OneDNN dimension
     dnnl_dims_t map_;
   } MklShapeData;
@@ -286,11 +286,10 @@ class MklDnnShape {
     // If input tensors are in OneDNN layout, then we check for dimensions and
     // sizes.
     if (this->IsMklTensor()) {
-      const dnnl_memory_desc_t& cur_md = (this->GetMklLayout()).data;
-      const dnnl_memory_desc_t& input_shape_md =
-          input_shape.GetMklLayout().data;
-      return this->GetTfShape() == input_shape.GetTfShape() &&
-             dnnl_memory_desc_equal(&cur_md, &input_shape_md);
+      auto const& cur_md = this->GetMklLayout();
+      auto const& input_shape_md = input_shape.GetMklLayout();
+      return (this->GetTfShape() == input_shape.GetTfShape()) &&
+             (cur_md == input_shape_md);
     }
 
     // Both inputs are not OneDNN tensors.
@@ -419,10 +418,7 @@ class MklDnnShape {
   inline void SetElemType(memory::data_type dt) { data_.T_ = dt; }
   inline const memory::data_type GetElemType() { return data_.T_; }
 
-  inline void SetMklLayout(memory::desc* md) {
-    CHECK_NOTNULL(md);
-    data_.mkl_md_ = md->data;
-  }
+  inline void SetMklLayout(const memory::desc& md) { data_.mkl_md_ = md; }
 
   inline const memory::desc GetMklLayout() const {
     return memory::desc(data_.mkl_md_);
@@ -1209,9 +1205,9 @@ inline Status CreateBlockedMemDescHelper(const memory::dims& dim,
     input_strides[i] = strides[i];
   }
   try {
-    dnnl_memory_desc_init_by_strides(blocked_md, kNumDims, input_dims,
-                                       memory::convert_to_c(dtype),
-                                       input_strides);
+    dnnl_memory_desc_create_with_strides(blocked_md, kNumDims, input_dims,
+                                         memory::convert_to_c(dtype),
+                                         input_strides);
     delete[] input_dims;
     delete[] input_strides;
   } catch (dnnl::error& e) {
@@ -1386,11 +1382,7 @@ class MklDnnData {
                                   std::shared_ptr<stream> t_stream = nullptr) {
     CHECK_NOTNULL(user_memory_);
     CHECK_NOTNULL(data_buffer);
-#ifdef ENABLE_DNNL_THREADPOOL
-    user_memory_->set_data_handle(data_buffer, *t_stream);
-#else
     user_memory_->set_data_handle(data_buffer);
-#endif  // ENABLE_DNNL_THREADPOOL
   }
 
   /// Set function for data buffer of user memory primitive.
@@ -1919,6 +1911,7 @@ template <typename T>
 class MklReorderPrimitiveFactory : public MklPrimitiveFactory<T> {
  public:
   static MklReorderPrimitive* Get(const memory* from, const memory* to) {
+#ifndef ENABLE_ONEDNN_V3
     auto reorderPrim = static_cast<MklReorderPrimitive*>(
         MklReorderPrimitiveFactory<T>::GetInstance().GetReorder(from, to));
     if (reorderPrim == nullptr) {
@@ -1928,8 +1921,14 @@ class MklReorderPrimitiveFactory : public MklPrimitiveFactory<T> {
     }
     reorderPrim->SetMemory(from, to);
     return reorderPrim;
+#else
+    // TODO(bhavanis): Enable reorder primitive cache for v3.x
+    auto reorderPrim = new MklReorderPrimitive(from, to);
+    return reorderPrim;
+#endif  // !ENABLE_ONEDNN_V3
   }
 
+#ifndef ENABLE_ONEDNN_V3
   static MklReorderPrimitiveFactory& GetInstance() {
     static MklReorderPrimitiveFactory instance_;
     return instance_;
@@ -1983,11 +1982,13 @@ class MklReorderPrimitiveFactory : public MklPrimitiveFactory<T> {
     key_creator.AddAsKey(to_strides_outer_blocks);
     return key_creator.GetKey();
   }
+#endif  // !ENABLE_ONEDNN_V3
 
  private:
   MklReorderPrimitiveFactory() {}
   ~MklReorderPrimitiveFactory() {}
 
+#ifndef ENABLE_ONEDNN_V3
   MklPrimitive* GetReorder(const memory* from, const memory* to) {
     string key = CreateKey(from, to);
     return this->GetOp(key);
@@ -1997,6 +1998,7 @@ class MklReorderPrimitiveFactory : public MklPrimitiveFactory<T> {
     string key = CreateKey(from, to);
     this->SetOp(key, op);
   }
+#endif  // !ENABLE_ONEDNN_V3
 };
 
 /// Function to find(or create) a reorder from memory pointed by
