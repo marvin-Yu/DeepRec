@@ -23,7 +23,7 @@ limitations under the License.
 
 #define EIGEN_USE_THREADS
 
-#if defined(INTEL_MKL)
+#if defined(INTEL_MKL) && !defined(ENABLE_ONEDNN_V3)
 
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
 #include "tensorflow/core/framework/op.h"

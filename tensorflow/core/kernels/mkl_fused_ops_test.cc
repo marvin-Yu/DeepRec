@@ -1445,6 +1445,7 @@ TEST_F(BiasCacheTest, Conv2DBiasCacheTest) {
              max_filter, min_output, max_output, expected, true);
 }
 
+// Disabling for oneDNN v3.x since INT8 is not supported in this branch
 class MklQuantizedConv2DTest : public OpsTestBase {
  public:
   template <typename Tinput, typename Toutput>
@@ -1738,6 +1739,7 @@ TEST_F(MklQuantizedConv2DTest, WithBiasLeakyReluAndSumAndRequantizeTest_S8in) {
   string node_op = "_MklQuantizedConv2DWithBiasReluAndSumAndRequantize";
   Run<qint8, qint8>(node_op, {18, -20}, 0.2);
 }
+#endif  // !ENABLE_ONEDNN_V3
 
 // Testing fusion of pad and fusedconv2d
 template <typename T>
