@@ -293,7 +293,7 @@ def tf_copts(
         (if_not_windows(["-fno-exceptions"]) if not allow_exceptions else []) +
         if_cuda(["-DGOOGLE_CUDA=1"]) +
         if_tensorrt(["-DGOOGLE_TENSORRT=1"]) +
-        if_mkl(["-DINTEL_MKL=1"]) +
+        if_mkl(["-DINTEL_MKL=1", "-DENABLE_ONEDNN_V3"]) +
         if_mkl_open_source_only(["-DINTEL_MKL_DNN_ONLY"]) +
         if_mkldnn_threadpool(["-DENABLE_DNNL_THREADPOOL"]) +
         if_enable_mkl(["-DENABLE_MKL"]) +
