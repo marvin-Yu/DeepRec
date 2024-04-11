@@ -30,7 +30,6 @@ limitations under the License.
 #include "tensorflow/core/platform/mutex.h"
 #endif
 
-using dnnl::inner_product_backward_weights;
 using dnnl::inner_product_forward;
 using dnnl::primitive_attr;
 using dnnl::prop_kind;

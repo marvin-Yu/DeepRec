@@ -2097,36 +2097,6 @@ REGISTER_TEST_ALL_TYPES(NodeRewrite_FusedBatchMatMul_Positive)
 REGISTER_TEST_ALL_TYPES(NodeRewrite_FusedBatchMatMulV2_Positive)
 #undef REGISTER_TEST
 
-// Test set: _FusedMatMul -> MklFusedMatMul rewrite tests
-#define REGISTER_TEST(NAME, T, INPUT)                                          \
-  TEST_F(MklLayoutPassTest, NAME##_##T) {                                      \
-  InitGraph(                                                                   \
-      "node { name: 'A' op: '" #INPUT "'}"                                     \
-      "node { name: 'B' op: '" #INPUT "'}"                                     \
-      "node { name: 'C' op: '" #INPUT "'}"                                     \
-      "node { name: 'D' op: '_FusedMatMul'"                                    \
-      " attr { key: 'T'                value { type: " #T "} }"                \
-      " attr { key: 'transpose_a'      value { b: false } }"                   \
-      " attr { key: 'transpose_b'      value { b: false } }"                   \
-      " attr { key: 'num_args'         value { i: 1 } }"                       \
-      " attr { key: 'fused_ops'"                                               \
-      "              value { list: {s: 'BiasAdd', s: 'LeakyRelu'} } }"         \
-      " attr { key: 'epsilon'          value { f: 0.001 }}"                    \
-      " attr { key: 'leakyrelu_alpha'  value { f: 0.3 }}"                      \
-      " input: ['A', 'B', 'C']}"                                               \
-      "node { name: 'Z' op: 'Zeta'"                                            \
-      " attr {key: 'T'                 value { type: " #T " } }"               \
-      " input: ['D', 'C']}");                                                  \
-  EXPECT_EQ(DoMklLayoutOptimizationPass(),                                     \
-            "A(" #INPUT ");B(" #INPUT ");C(" #INPUT ");D(_MklFusedMatMul);"    \
-            "DMT/_0(Const);DMT/_1(Const);DMT/_2(Const);Z(Zeta)"                \
-            "|A->D;A:control->DMT/_0:control;A:control->DMT/_1:control;"       \
-            "A:control->DMT/_2:control;B->D:1;C->D:2;C->Z:1;D->Z;"             \
-            "DMT/_0->D:3;DMT/_1->D:4;DMT/_2->D:5");                            \
-}
-REGISTER_TEST_ALL_TYPES(NodeRewrite_FusedMatMul_LeakyRelu_Positive);
-#undef REGISTER_TEST
-
 // Merge test for PadWithFusedConv2D Op with BiasAdd fusion
 // padding is VALID type
 // A = input(image), B = input(paddings), C = Pad(A, B) = input of conv2D,
@@ -3295,6 +3265,23 @@ REGISTER_TEST_ALL_TYPES(NodeRewrite_TanhGrad_Positive);
             "DMT/_1->C:3");                                                    \
 }
 REGISTER_TEST_ALL_TYPES(NodeRewrite_TanhTanhGrad_Positive);
+#undef REGISTER_TEST
+
+#define REGISTER_TEST(NAME, T, INPUT)                                        \
+  TEST_F(MklLayoutPassTest, NAME##_##T) {                                    \
+    DCHECK_EQ(kTensorOrdering, MklTfTensorOrdering::TENSORS_CONTIGUOUS);     \
+    InitGraph(                                                               \
+      "node { name: 'A' op: '" #INPUT "'}"                                   \
+      "node { name: 'B' op: '_FusedSwish'"                                   \
+      " attr { key: 'T'                value { type: " #T " } }"             \
+      " input: ['A'] }"                                                      \
+      "node { name: 'C' op: 'Zeta' attr { key: 'T' value { type: " #T " } }" \
+      " input: ['A', 'B'] }");                                               \
+  EXPECT_EQ(DoMklLayoutOptimizationPass(),                                   \
+            "A(" #INPUT ");B(_MklSwish);C(Zeta);DMT/_0(Const)|A->B;A->C;"    \
+            "A:control->DMT/_0:control;B->C:1;DMT/_0->B:1");                 \
+}
+REGISTER_TEST_ALL_TYPES(NodeRewrite_Swish_Positive);
 #undef REGISTER_TEST
 // clang-format on
 
@@ -4496,6 +4483,29 @@ TEST_F(MklLayoutPassTest, NodeRewrite_ConcatV2_DeviceTest) {
       "node { name: 'E' op: 'Zeta' attr { key: 'T' value { type: DT_FLOAT } }"
       " input: ['C', 'D'] }",
       kGPUDevice);
+  EXPECT_EQ(DoMklLayoutOptimizationPass(),
+            "A(Const);B(InputList);C(Input);D(ConcatV2);E(Zeta)|"
+            "A->D:2;B->D;B:1->D:1;C->E;D->E:1");
+}
+
+
+TEST_F(MklLayoutPassTest, NodeRewrite_ConcatV2_IndexTest) {
+  InitGraph(
+      "node { name: 'A' op: 'Const' "
+      " attr { key: 'dtype' value { type: DT_INT64 } }"
+      " attr { key: 'value' value { "
+      "    tensor { dtype: DT_INT32 tensor_shape { dim { size: 1 } } "
+      "    int_val: 0 } } } }"
+      "node { name: 'B' op: 'InputList'"
+      " attr { key: 'N'                value { i: 2 } }}"
+      "node { name: 'C' op: 'Input'}"
+      "node { name: 'D' op: 'ConcatV2'"
+      " attr { key: 'T'                value { type: DT_FLOAT } }"
+      " attr { key: 'Tidx'             value { type: DT_INT64 } }"
+      " attr { key: 'N'                value { i: 2 } }"
+      " input: ['B:0', 'B:1', 'A']}"
+      "node { name: 'E' op: 'Zeta' attr { key: 'T' value { type: DT_FLOAT } }"
+      " input: ['C', 'D'] }");
   EXPECT_EQ(DoMklLayoutOptimizationPass(),
             "A(Const);B(InputList);C(Input);D(ConcatV2);E(Zeta)|"
             "A->D:2;B->D;B:1->D:1;C->E;D->E:1");

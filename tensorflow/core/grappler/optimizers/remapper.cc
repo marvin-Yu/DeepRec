@@ -360,7 +360,7 @@ bool IsGpuCompatible(const RemapperContext& ctx,
   if (ctx.xla_on_) return false;
 
   const GraphDef* graph = ctx.graph_view.graph();
-  
+
   // We rely on cuDNN for fused convolution and cublasLt for fused matmul.
   const NodeDef& activation_node = graph->node(matched.activation);
   if (!IsRelu(activation_node)) return false;
@@ -1687,6 +1687,36 @@ Status AddFusedContractionNode(
   (*nodes_to_delete)[matched.bias_add] = true;
   (*nodes_to_delete)[matched.contraction] = true;
 
+  return Status::OK();
+}
+
+Status AddFusedContractionNode(RemapperContext* ctx,
+                               const ContractionWithSwish& matched,
+                               std::vector<bool>* invalidated_nodes,
+                               std::vector<bool>* nodes_to_delete) {
+  const GraphDef* graph = ctx->graph_view.graph();
+  const NodeDef& contraction = graph->node(matched.contraction);
+  const NodeDef& sigmoid = graph->node(matched.sigmoid);
+  const NodeDef& mul = graph->node(matched.mul);
+
+  NodeDef fused_op;
+  fused_op.set_name(mul.name());
+  fused_op.set_op(kSwish);
+  fused_op.set_device(mul.device());
+  fused_op.add_input(mul.input(matched.port));  // 0: input
+
+  auto* attr = fused_op.mutable_attr();
+  auto& src_attr = mul.attr();
+  (*attr)["T"] = src_attr.at("T");
+
+  utils::Mutation* mutation = ctx->graph_view.GetMutationBuilder();
+  Status status;
+  mutation->AddNode(std::move(fused_op), &status);
+  TF_RETURN_IF_ERROR(status);
+  TF_RETURN_IF_ERROR(mutation->Apply());
+
+  (*invalidated_nodes)[matched.mul] = true;
+  (*nodes_to_delete)[matched.sigmoid] = true;
   return Status::OK();
 }
 #endif
