@@ -278,7 +278,6 @@ class MklLayoutRewritePass : public GraphOptimizationPass {
     csinfo_.fused_matmul = "_FusedMatMul";
     csinfo_.fused_batch_matmul = "_FusedBatchMatMul";
     csinfo_.fused_batch_matmul_v2 = "_FusedBatchMatMulV2";
-    csinfo_.fused_matmul_grad = "_FusedMatMulGrad";
     csinfo_.identity = "Identity";
     csinfo_.leakyrelu = "LeakyRelu";
     csinfo_.leakyrelu_grad = "LeakyReluGrad";
@@ -305,7 +304,6 @@ class MklLayoutRewritePass : public GraphOptimizationPass {
     csinfo_.mkl_fused_matmul = "_MklFusedMatMul";
     csinfo_.mkl_fused_batch_matmul = "_MklFusedBatchMatMul";
     csinfo_.mkl_fused_batch_matmul_v2 = "_MklFusedBatchMatMulV2";
-    csinfo_.mkl_fused_matmul_grad = "_MklFusedMatMulGrad";
     csinfo_.mkl_native_conv2d_with_bias = "_MklNativeConv2DWithBias";
     csinfo_.mkl_native_conv2d_grad_filter_with_bias =
         "_MklNativeConv2DBackpropFilterWithBias";
@@ -524,12 +522,11 @@ class MklLayoutRewritePass : public GraphOptimizationPass {
     rinfo_.push_back({csinfo_.fused_batch_matmul_v2,
                       csinfo_.mkl_fused_batch_matmul_v2, CopyAttrsAll,
                       AlwaysRewrite, kRewriteForOpNameChange});
+
     rinfo_.push_back({csinfo_.identity,
                       mkl_op_registry::GetMklOpName(csinfo_.identity),
                       CopyAttrsAll, RewriteIfAtleastOneMklInput,
                       GetRewriteCause()});
-    rinfo_.push_back({csinfo_.fused_matmul_grad, csinfo_.mkl_fused_matmul_grad,
-                      CopyAttrsAll, AlwaysRewrite, GetRewriteCause()});
     rinfo_.push_back({csinfo_.lrn, mkl_op_registry::GetMklOpName(csinfo_.lrn),
                       CopyAttrsAll, LrnRewrite, GetRewriteCause()});
     rinfo_.push_back(
@@ -976,7 +973,6 @@ class MklLayoutRewritePass : public GraphOptimizationPass {
     string fused_matmul;
     string fused_batch_matmul;
     string fused_batch_matmul_v2;
-    string fused_matmul_grad;
     string identity;
     string leakyrelu;
     string leakyrelu_grad;
@@ -1001,7 +997,6 @@ class MklLayoutRewritePass : public GraphOptimizationPass {
     string mkl_fused_matmul;
     string mkl_fused_batch_matmul;
     string mkl_fused_batch_matmul_v2;
-    string mkl_fused_matmul_grad;
     string mkl_native_conv2d_with_bias;
     string mkl_native_conv2d_grad_filter_with_bias;
     string mkl_native_fused_batch_norm_ex;
@@ -3906,7 +3901,6 @@ MklLayoutRewritePass::CheckForNodeRewrite(const Node* n) const {
       n->type_string() != csinfo_.fused_batch_matmul &&
       n->type_string() != csinfo_.fused_batch_matmul_v2 &&
       n->type_string() != csinfo_.fused_swish &&
-      n->type_string() != csinfo_.fused_matmul_grad &&
       !mkl_op_registry::IsMklOp(mkl_op_registry::GetMklOpName(n->type_string()),
                                 T)) {
     return nullptr;
