@@ -1516,30 +1516,30 @@ class MklQuantizedConv2DTest : public OpsTestBase {
     const int stride = 1;
 
     TF_EXPECT_OK(NodeDefBuilder(node_name, node_op)
-                     .Input(FakeInput(in_dtype))  // Input
-                     .Input(FakeInput(DT_QINT8))  // Filter
-                     .Input(FakeInput(DT_FLOAT))  // Bias
-                     .Input(FakeInput(DT_FLOAT))  // Min-input
-                     .Input(FakeInput(DT_FLOAT))  // Max-input
-                     .Input(FakeInput(DT_FLOAT))  // Min-filter
-                     .Input(FakeInput(DT_FLOAT))  // Max-filter
-                     .Input(FakeInput(DT_FLOAT))  // Min-output
-                     .Input(FakeInput(DT_FLOAT))  // Max-output
-                     .Input(FakeInput(out_dtype)) // Summand
-                     .Input(FakeInput(DT_FLOAT))  // Min-summand
-                     .Input(FakeInput(DT_FLOAT))  // Max-summand
-                     .Input(FakeInput(DT_UINT8))  // OneDNN second tensor
-                     .Input(FakeInput(DT_UINT8))  // OneDNN second tensor
-                     .Input(FakeInput(DT_UINT8))  // OneDNN second tensor
-                     .Input(FakeInput(DT_UINT8))  // OneDNN second tensor
-                     .Input(FakeInput(DT_UINT8))  // OneDNN second tensor
-                     .Input(FakeInput(DT_UINT8))  // OneDNN second tensor
-                     .Input(FakeInput(DT_UINT8))  // OneDNN second tensor
-                     .Input(FakeInput(DT_UINT8))  // OneDNN second tensor
-                     .Input(FakeInput(DT_UINT8))  // OneDNN second tensor
-                     .Input(FakeInput(DT_UINT8))  // OneDNN second tensor
-                     .Input(FakeInput(DT_UINT8))  // OneDNN second tensor
-                     .Input(FakeInput(DT_UINT8))  // OneDNN second tensor
+                     .Input(FakeInput(in_dtype))   // Input
+                     .Input(FakeInput(DT_QINT8))   // Filter
+                     .Input(FakeInput(DT_FLOAT))   // Bias
+                     .Input(FakeInput(DT_FLOAT))   // Min-input
+                     .Input(FakeInput(DT_FLOAT))   // Max-input
+                     .Input(FakeInput(DT_FLOAT))   // Min-filter
+                     .Input(FakeInput(DT_FLOAT))   // Max-filter
+                     .Input(FakeInput(DT_FLOAT))   // Min-output
+                     .Input(FakeInput(DT_FLOAT))   // Max-output
+                     .Input(FakeInput(out_dtype))  // Summand
+                     .Input(FakeInput(DT_FLOAT))   // Min-summand
+                     .Input(FakeInput(DT_FLOAT))   // Max-summand
+                     .Input(FakeInput(DT_UINT8))   // OneDNN second tensor
+                     .Input(FakeInput(DT_UINT8))   // OneDNN second tensor
+                     .Input(FakeInput(DT_UINT8))   // OneDNN second tensor
+                     .Input(FakeInput(DT_UINT8))   // OneDNN second tensor
+                     .Input(FakeInput(DT_UINT8))   // OneDNN second tensor
+                     .Input(FakeInput(DT_UINT8))   // OneDNN second tensor
+                     .Input(FakeInput(DT_UINT8))   // OneDNN second tensor
+                     .Input(FakeInput(DT_UINT8))   // OneDNN second tensor
+                     .Input(FakeInput(DT_UINT8))   // OneDNN second tensor
+                     .Input(FakeInput(DT_UINT8))   // OneDNN second tensor
+                     .Input(FakeInput(DT_UINT8))   // OneDNN second tensor
+                     .Input(FakeInput(DT_UINT8))   // OneDNN second tensor
                      .Attr("Tinput", in_dtype)
                      .Attr("Tfilter", DT_QINT8)
                      .Attr("Tbias", DT_FLOAT)
