@@ -477,8 +477,6 @@ bool IsShapeN(const NodeDef& node) { return node.op() == "ShapeN"; }
 
 bool IsShuffle(const NodeDef& node) { return node.op() == "Shuffle"; }
 
-bool IsSigmoid(const NodeDef& node) { return node.op() == "Sigmoid"; }
-
 bool IsSigmoidGrad(const NodeDef& node) { return node.op() == "SigmoidGrad"; }
 
 bool IsSize(const NodeDef& node) { return node.op() == "Size"; }
