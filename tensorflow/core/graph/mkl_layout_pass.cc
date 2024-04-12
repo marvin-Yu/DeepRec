@@ -713,8 +713,6 @@ class MklLayoutRewritePass : public GraphOptimizationPass {
     rinfo_.push_back(
         {csinfo_.tanh_grad, mkl_op_registry::GetMklOpName(csinfo_.tanh_grad),
          CopyAttrsAll, AlwaysRewrite, GetRewriteCause()});
-    rinfo_.push_back({csinfo_.fused_swish, csinfo_.mkl_swish, CopyAttrsAll,
-                      AlwaysRewrite, GetRewriteCause()});
     rinfo_.push_back(
         {csinfo_.slice, mkl_op_registry::GetMklOpName(csinfo_.slice),
          CopyAttrsAll, RewriteIfAtleastOneMklInput, GetRewriteCause()});
@@ -3885,7 +3883,6 @@ MklLayoutRewritePass::CheckForNodeRewrite(const Node* n) const {
       n->type_string() != csinfo_.fused_matmul &&
       n->type_string() != csinfo_.fused_batch_matmul &&
       n->type_string() != csinfo_.fused_batch_matmul_v2 &&
-      n->type_string() != csinfo_.fused_swish &&
       !mkl_op_registry::IsMklOp(mkl_op_registry::GetMklOpName(n->type_string()),
                                 T)) {
     return nullptr;
