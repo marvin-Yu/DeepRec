@@ -15,7 +15,7 @@ limitations under the License.
 
 // See docs in ../ops/nn_ops.cc.
 
-#if defined(INTEL_MKL) && !defined(ENABLE_ONEDNN_V3)
+#ifdef INTEL_MKL
 
 #include "dnnl.hpp"
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
@@ -67,7 +67,7 @@ class MklSoftmaxPrimitive : public MklPrimitive {
 #ifdef DNNL_AARCH64_USE_ACL
     mutex_lock lock(primitive_execution_mu_);
 #endif
-#ifdef ENABLE_DNNL_THREADPOOL
+#if defined(ENABLE_DNNL_THREADPOOL) && !defined(ENABLE_ONEDNN_V3)
     context_.src_mem->set_data_handle(
         static_cast<void*>(const_cast<T*>(src_data)), *fwd_cpu_stream);
     context_.dst_mem->set_data_handle(static_cast<void*>(dst_data),
@@ -76,7 +76,7 @@ class MklSoftmaxPrimitive : public MklPrimitive {
     context_.src_mem->set_data_handle(
         static_cast<void*>(const_cast<T*>(src_data)));
     context_.dst_mem->set_data_handle(static_cast<void*>(dst_data));
-#endif  // ENABLE_DNNL_THREADPOOL
+#endif  // ENABLE_DNNL_THREADPOOL && !ENABLE_ONEDNN_V3
     DCHECK_EQ(context_.fwd_primitives.size(), context_.fwd_net_args.size());
     execute_primitives(context_.fwd_primitives, fwd_cpu_stream,
                        context_.fwd_net_args);
@@ -97,7 +97,9 @@ class MklSoftmaxPrimitive : public MklPrimitive {
     std::shared_ptr<memory> dst_mem;
 
     // Primitive descriptor.
+#ifndef ENABLE_ONEDNN_V3
     std::shared_ptr<dnnl::softmax_forward::desc> fwd_desc;
+#endif  // !ENABLE_ONEDNN_V3
 
     // Memory descriptor.
     std::shared_ptr<memory::desc> src_md;
@@ -112,7 +114,9 @@ class MklSoftmaxPrimitive : public MklPrimitive {
     SoftmaxFwdContext()
         : src_mem(nullptr),
           dst_mem(nullptr),
+#ifndef ENABLE_ONEDNN_V3
           fwd_desc(nullptr),
+#endif  // !ENABLE_ONEDNN_V3
           src_md(nullptr),
           fwd_pd(nullptr),
           softmax_fwd(nullptr) {}
@@ -126,10 +130,17 @@ class MklSoftmaxPrimitive : public MklPrimitive {
         new memory::desc({fwdParams.src_dims}, MklDnnType<T>(), src_format));
 
     // Create softmax descriptor and primitive descriptor.
+#ifndef ENABLE_ONEDNN_V3
     context_.fwd_desc.reset(new dnnl::softmax_forward::desc(
         prop_kind::forward_scoring, *context_.src_md, fwdParams.axis));
     context_.fwd_pd.reset(new dnnl::softmax_forward::primitive_desc(
         *context_.fwd_desc, cpu_engine_));
+#else
+    context_.fwd_pd.reset(new dnnl::softmax_forward::primitive_desc(
+        cpu_engine_, prop_kind::forward_inference,
+        dnnl::algorithm::softmax_accurate, *context_.src_md,
+        *context_.src_md /* dst_md */, fwdParams.axis));
+#endif  // !ENABLE_ONEDNN_V3
 
     // Create memory primitive based on dummy data.
     context_.src_mem.reset(new MEMORY_CONSTRUCTOR_USING_MD(
@@ -306,7 +317,11 @@ class MklSoftmaxOp : public OpKernel {
       // If input is TF shape, output is also TF shape.
       if (src_mkl_shape.IsMklTensor()) {
         output_mkl_shape.SetMklTensor(true);
+#ifndef ENABLE_ONEDNN_V3
         output_mkl_shape.SetMklLayout(&dst_pd);
+#else
+        output_mkl_shape.SetMklLayout(dst_pd);
+#endif  // !ENABLE_ONEDNN_V3
         output_mkl_shape.SetElemType(MklDnnType<T>());
         output_mkl_shape.SetTfLayout(src_dims.size(), src_dims, layout_type);
         output_tf_shape.AddDim((dst_pd.get_size() / sizeof(T)));
@@ -334,8 +349,8 @@ class MklSoftmaxOp : public OpKernel {
   }
 };
 
-/* Register DNN kernels for supported operations and supported types - right now
- * it is only Softmax and f32 */
+/* Register oneDNN kernels for supported operations and supported types:
+ * right now it is Softmax for fp32 and bf16 */
 #define REGISTER_SOFTMAX_MKL_SUPPORTED_KERNELS_TYPES(type)     \
   REGISTER_KERNEL_BUILDER(                                     \
       Name("_MklSoftmax")                                      \
