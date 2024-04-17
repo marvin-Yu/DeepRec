@@ -954,7 +954,6 @@ TEST_F(FilterCacheTest, Conv2DFilterCacheTest) {
   Run<float>(DT_FLOAT, image, filter, expected, true);
 }
 
-#ifndef ENABLE_ONEDNN_V3
 // Testing fusion of MatMul and BiasAdd
 template <typename T>
 class MklFusedMatMulOpTest : public OpsTestBase {
@@ -1196,6 +1195,7 @@ using MklFusedMatMulDataTypes = ::testing::Types<float>;
 INSTANTIATE_TYPED_TEST_CASE_P(Test, MklFusedMatMulOpTest,
                               MklFusedMatMulDataTypes);
 
+#ifndef ENABLE_ONEDNN_V3
 // Test the performance of MklFusedMatMul weight cache.
 // For the first time B matrix will be reordered and cached which will be
 // used for subsequent runs

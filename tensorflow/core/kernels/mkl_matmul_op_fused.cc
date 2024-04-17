@@ -17,7 +17,7 @@ limitations under the License.
 
 // This file uses OneDNN InnerProduct for acceleration of TF Matrix-Matrix
 // Multiplication (MatMul) with bias (BiasAdd) operations.
-#if defined(INTEL_MKL) && !defined(ENABLE_ONEDNN_V3)
+#ifdef INTEL_MKL
 
 #include "tensorflow/core/framework/register_types.h"
 #include "tensorflow/core/kernels/fill_functor.h"
@@ -228,6 +228,8 @@ class MklFusedMatMulOp : public MklDnnMatMulOpBase<T, T> {
       if (IS_WEIGHTS_REORDER_NEEDED(weight_md, matmul_pd, matmul_prim)) {
         T* cached_weight_data = nullptr;
 
+#ifndef ENABLE_ONEDNN_V3
+        // TODO(intel-tf): Enable weight caching for oneDNN v3.x
         if (this->is_weight_const_) {
           if (this->IsWeightCacheEmpty(ctx)) {
             this->CacheWeight(ctx, matmul_pd, cached_weight_data, weight_tensor,
@@ -236,6 +238,7 @@ class MklFusedMatMulOp : public MklDnnMatMulOpBase<T, T> {
           cached_weight_data = this->GetCachedWeight(
               ctx, GET_WEIGHTS_DESC_FROM_OP_PD(matmul_pd));
         }
+#endif  // !ENABLE_ONEDNN_V3
 
         // Cache weight may fail when it gets different format in different
         // iteration. Fallback to reoder if it happens.
@@ -257,7 +260,7 @@ class MklFusedMatMulOp : public MklDnnMatMulOpBase<T, T> {
       cpu_stream.reset(CreateStream(&eigen_tp, matmul_prim->GetEngine()));
       // Execute fused matmul op.
       matmul_prim->Execute(src_data, weight_data, bias_data, dst_data,
-                           cpu_stream);
+                           matmul_params, cpu_stream);
     } catch (dnnl::error& e) {
       string error_msg = "Status: " + std::to_string(e.status) +
                          ", message: " + string(e.message) + ", in file " +
