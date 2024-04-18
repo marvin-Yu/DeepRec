@@ -24,6 +24,8 @@ limitations under the License.
 #include "dnnl.hpp"
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_kernel.h"
+#include "tensorflow/core/framework/tensor_util.h"
+#include "tensorflow/core/kernels/mkl_kernel_util.h"
 #include "tensorflow/core/util/mkl_types.h"
 #include "tensorflow/core/util/mkl_util.h"
 #ifdef DNNL_AARCH64_USE_ACL
@@ -498,6 +500,13 @@ class MklDnnMatMulOpBase : public OpKernel {
       return;
     }
 
+#ifdef ENABLE_ONEDNN_V3
+    // For now, cache weights only for blocked format
+    if (weight_md.get_format_kind() != memory::format_kind::blocked) {
+      return;
+    }
+#endif  // ENABLE_ONEDNN_V3
+
     // reorder and cache the weight
     weight.SetUsrMem(weight_md, &weight_tensor);
     weight.CheckReorderToOpMem(
@@ -521,6 +530,7 @@ class MklDnnMatMulOpBase : public OpKernel {
 
     // cache the memory descriptor
     auto expected_md = GET_WEIGHTS_DESC_FROM_OP_PD(matmul_fwd_pd);
+#ifndef ENABLE_ONEDNN_V3
     Tensor* weight_md_tensor_ptr = nullptr;
     TensorShape weight_mkl_format;
     weight_mkl_format.AddDim(sizeof(expected_md) / sizeof(Tweight));
@@ -531,6 +541,13 @@ class MklDnnMatMulOpBase : public OpKernel {
                                               &weight_md_tensor_ptr));
     *reinterpret_cast<memory::desc*>(
         weight_md_tensor_ptr->flat<Tweight>().data()) = expected_md;
+#else
+    weight_oi_md_ = FilterMemoryDesc(
+        expected_md.get_ndims(), expected_md.get_inner_nblks(),
+        expected_md.get_data_type(), expected_md.get_dims(),
+        expected_md.get_inner_blks(), expected_md.get_inner_idxs(),
+        expected_md.get_strides());
+#endif  // !ENABLE_ONEDNN_V3
   }
 
   Tweight* GetCachedWeight(OpKernelContext* context,
@@ -538,6 +555,7 @@ class MklDnnMatMulOpBase : public OpKernel {
       LOCKS_EXCLUDED(mu_) {
     tf_shared_lock lock(mu_);
     const Tensor& weight_t = *weight_oi_.AccessTensor(context);
+#ifndef ENABLE_ONEDNN_V3
     const Tensor& weight_md_t = *weight_oi_md_.AccessTensor(context);
 
     // Check if the memory descriptor of the cached weight is same as
@@ -551,6 +569,25 @@ class MklDnnMatMulOpBase : public OpKernel {
       }
     }
     return nullptr;
+#else
+    // Return the cached weights only if the dimensions of the cached weights
+    // and the current weights match. Otherwise, return nullptr.
+    //
+    // TODO(intel-tf): The following check assumes that all dimensions are
+    // known before checking for equality. We may have to modify it in the
+    // future once we support runtime dimensions (especially if the dimensions
+    // are still unknown at this point).
+    if (weight_oi_md_ ==
+        FilterMemoryDesc(expected_md.get_ndims(), expected_md.get_inner_nblks(),
+                         expected_md.get_data_type(), expected_md.get_dims(),
+                         expected_md.get_inner_blks(),
+                         expected_md.get_inner_idxs(),
+                         expected_md.get_strides())) {
+      return static_cast<Tweight*>(
+          const_cast<Tweight*>(weight_t.flat<Tweight>().data()));
+    }
+    return nullptr;
+#endif  // !ENABLE_ONEDNN_V3
   }
 
   engine cpu_engine_ = engine(ENGINE_CPU, 0);
@@ -559,7 +596,11 @@ class MklDnnMatMulOpBase : public OpKernel {
   // Tensor to save reordered weight
   mutex mu_;
   PersistentTensor weight_oi_ GUARDED_BY(mu_);
+#ifndef ENABLE_ONEDNN_V3
   PersistentTensor weight_oi_md_ GUARDED_BY(mu_);
+#else
+  FilterMemoryDesc weight_oi_md_ GUARDED_BY(mu_);
+#endif  // !ENABLE_ONEDNN_V3
 
   bool is_weight_const_ = false;
 

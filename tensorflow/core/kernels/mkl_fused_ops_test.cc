@@ -1195,7 +1195,6 @@ using MklFusedMatMulDataTypes = ::testing::Types<float>;
 INSTANTIATE_TYPED_TEST_CASE_P(Test, MklFusedMatMulOpTest,
                               MklFusedMatMulDataTypes);
 
-#ifndef ENABLE_ONEDNN_V3
 // Test the performance of MklFusedMatMul weight cache.
 // For the first time B matrix will be reordered and cached which will be
 // used for subsequent runs
@@ -1299,6 +1298,9 @@ TEST_F(MklFusedMatMulCacheTest, WeightCached) {
   }
 }
 
+#ifndef ENABLE_ONEDNN_V3
+// Disabling for oneDNN v3.x since this is needed only for INT8, which is not
+// supported in this branch
 class BiasCacheTest : public OpsTestBase {
  public:
   template <typename T>
