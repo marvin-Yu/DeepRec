@@ -228,9 +228,12 @@ class MklFusedMatMulOp : public MklDnnMatMulOpBase<T, T> {
       if (IS_WEIGHTS_REORDER_NEEDED(weight_md, matmul_pd, matmul_prim)) {
         T* cached_weight_data = nullptr;
 
-#ifndef ENABLE_ONEDNN_V3
-        // TODO(intel-tf): Enable weight caching for oneDNN v3.x
         if (this->is_weight_const_) {
+          // TODO(intel-tf): When oneDNN major version changes to v4.x, weight
+          // caching may not work as expected if the underlying memory
+          // descriptor has changed (i.e. compared to v3.x). We have to return
+          // a status here to catch oneDNN major version change to avoid
+          // unexpected results.
           if (this->IsWeightCacheEmpty(ctx)) {
             this->CacheWeight(ctx, matmul_pd, cached_weight_data, weight_tensor,
                               weight_mkl, weight_md);
@@ -238,7 +241,6 @@ class MklFusedMatMulOp : public MklDnnMatMulOpBase<T, T> {
           cached_weight_data = this->GetCachedWeight(
               ctx, GET_WEIGHTS_DESC_FROM_OP_PD(matmul_pd));
         }
-#endif  // !ENABLE_ONEDNN_V3
 
         // Cache weight may fail when it gets different format in different
         // iteration. Fallback to reoder if it happens.
