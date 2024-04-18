@@ -7582,6 +7582,7 @@ tf_mkl_kernel_library(
 tf_mkl_kernel_library(
     name = "mkl_conv_op",
     hdrs = [
+        "mkl_kernel_util.h",
         "mkl_quantized_conv_ops.h",
         "no_op.h",
     ],
@@ -7842,6 +7843,14 @@ tf_mkl_kernel_library(
     ],
     prefix = "mkl_cwise_ops_common",
     deps = NN_DEPS + mkl_deps() + [":cwise_op"],
+)
+
+tf_mkl_kernel_library(
+    name = "mkl_kernel_util",
+    srcs = ["mkl_kernel_util.h"],
+    deps = NN_DEPS + mkl_deps() + [
+        "//tensorflow/core:direct_session",
+    ],
 )
 
 tf_mkl_kernel_library(
