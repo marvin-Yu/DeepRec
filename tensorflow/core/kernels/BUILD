@@ -3753,6 +3753,7 @@ tf_mkl_kernel_library(
     srcs = ["mkl_batch_matmul_op.cc"],
     hdrs = [
         "batch_matmul_op_impl.h",
+        "mkl_kernel_util.h",
         "mkl_matmul_ops_common.h",
         "no_op.h"
     ],
@@ -3846,7 +3847,10 @@ tf_mkl_kernel_library(
         "mkl_matmul_op.cc",
         "mkl_matmul_op_fused.cc",
     ],
-    hdrs = ["mkl_matmul_ops_common.h"],
+    hdrs = [
+        "mkl_kernel_util.h",
+        "mkl_matmul_ops_common.h",
+    ],
     deps = MATH_DEPS + mkl_deps(),
 )
 

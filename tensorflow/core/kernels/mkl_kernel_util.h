@@ -22,6 +22,8 @@ limitations under the License.
 #include "tensorflow/core/graph/testlib.h"
 #include "tensorflow/core/public/session.h"
 
+using dnnl::memory;
+
 namespace tensorflow {
 #ifdef ENABLE_ONEDNN_V3
 // Since oneDNN v3.x exposes only an opaque memory descriptor, it is no longer
