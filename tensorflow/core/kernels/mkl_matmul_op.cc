@@ -154,14 +154,14 @@ class MklMatMulOp : public OpKernel {
     char char_transa = transa ? 'T' : 'N';
     char char_transb = transb ? 'T' : 'N';
     VLOG(2) << "MKL DNN SGEMM called";
-#ifdef ENABLE_DNNL_THREADPOOL
+#if defined(ENABLE_DNNL_THREADPOOL) && !defined(ENABLE_ONEDNN_V3)
     MklDnnThreadPool eigen_tp(ctx);
     dnnl::threadpool_interop::sgemm(char_transa, char_transb, m, n, k, alpha, a,
                                     lda, b, ldb, beta, c, ldc, &eigen_tp);
 #else
     dnnl_sgemm(char_transa, char_transb, m, n, k, alpha, a, lda, b, ldb, beta,
                c, ldc);
-#endif  // ENABLE_DNNL_THREADPOOL
+#endif  // ENABLE_DNNL_THREADPOOL && !ENABLE_ONEDNN_V3
   }
 
   void MklBlasGemm(OpKernelContext* ctx, bool transa, bool transb, const int m,
