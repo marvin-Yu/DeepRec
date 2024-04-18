@@ -136,4 +136,17 @@ bool DisableMKL() {
   return status == MKL_OFF ? true : false;
 }
 #endif  // INTEL_MKL
+
+bool IsBF16SupportedByOneDNNOnThisCPU() {
+#ifdef INTEL_MKL
+  if (port::TestCPUFeature(port::CPUFeature::AVX512F) ||
+      port::TestCPUFeature(port::CPUFeature::AVX_NE_CONVERT)) {
+    return true;
+  } else {
+    return false;
+  }
+#endif  // INTEL_MKL
+  return false;
+}
+
 }  // namespace tensorflow

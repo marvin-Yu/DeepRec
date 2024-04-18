@@ -18,6 +18,7 @@ limitations under the License.
 
 #include "tensorflow/core/framework/tensor_shape.h"
 #include "tensorflow/core/lib/core/stringpiece.h"
+#include "tensorflow/core/platform/cpu_info.h"
 
 namespace tensorflow {
 
@@ -60,6 +61,9 @@ string SliceDebugString(const TensorShape& shape, const int64 flat);
 #ifdef INTEL_MKL
 bool DisableMKL();
 #endif  // INTEL_MKL
+
+// Check if BF16 is supported
+bool IsBF16SupportedByOneDNNOnThisCPU();
 
 }  // namespace tensorflow
 

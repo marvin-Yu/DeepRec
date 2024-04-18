@@ -120,8 +120,22 @@ enum CPUFeature {
   AVX512DQ = 33,       // Dword and qword
   AVX512VBMI = 34,     // Bit manipulation
   AVX512IFMA = 35,     // Integer multiply-add
-  AVX512_4VNNIW = 36,  // Integer neural network
+  AVX512_4VNNIW = 36,  // Integer neural network (Intel Xeon Phi only)
   AVX512_4FMAPS = 37,  // Floating point neural network
+  AVX512_BF16 = 38,    // Bfloat16 neural network
+  AVX512_FP16 = 39,    // Float16 neural network
+  AVX512_VNNI = 40,    // Integer neural network
+
+  // AVX version of AVX512_VNNI in CPUs such as Alder Lake and Sapphire Rapids
+  AVX_VNNI = 41,  // Integer neural network
+
+  AVX_VNNI_INT8 = 42,   // VNNI instructions for combinations of u8, s8 dtypes
+  AVX_NE_CONVERT = 43,  // Instructions for faster bfloat16, float16 convert
+
+  AMX_TILE = 44,  // Tile configuration and load/store
+  AMX_BF16 = 45,  // Bfloat16 tile matrix multiplication
+  AMX_FP16 = 46,  // Float16 tile matrix multiplication
+  AMX_INT8 = 47,  // Int8 tile matrix multiplication
 };
 
 // Checks whether the current processor supports one of the features above.
