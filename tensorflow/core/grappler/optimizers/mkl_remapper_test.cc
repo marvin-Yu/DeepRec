@@ -310,7 +310,6 @@ CREATE_CONV2DFUSION_ADD_BCAST_TEST(AddV2);
 REGISTER_TEST_ALL_TYPES(FuseDepthwiseConv2DWithBiasAndActivation);
 #undef REGISTER_TEST
 
-#ifndef ENABLE_ONEDNN_V3
 TEST_F(MklRemapperTest, FuseBatchNormWithRelu) {
   using ::tensorflow::ops::Placeholder;
 
@@ -448,6 +447,7 @@ TEST_F(MklRemapperTest, FuseBatchNormWithRelu) {
   }
 }
 
+#ifndef ENABLE_ONEDNN_V3
 class MklFuseBatchMatMulWithMul : public MklRemapperTest {
  public:
   void VerifyFused(bool adjx, bool adjy) {
@@ -539,6 +539,7 @@ TEST_F(MklFuseBatchMatMulWithMul, a1b1) {
   bool adjy = true;
   this->VerifyFused(adjx, adjy);
 }
+#endif  // !ENABLE_ONEDNN_V3
 
 TEST_F(MklRemapperTest, FuseMatMulWithBiasAndGelu) {
   using ::tensorflow::ops::Placeholder;
@@ -692,7 +693,6 @@ TEST_F(MklRemapperTest, FuseMatMulWithBiasAddAndAdd) {
   EXPECT_EQ(1, tensors.size());
   test::ExpectClose(tensors_expected[0], tensors[0], 0, 1e-6);
 }
-#endif  // !ENABLE_ONEDNN_V3
 
 }  // namespace grappler
 }  // namespace tensorflow
