@@ -83,6 +83,36 @@ class CPUFeatureGuard {
 #ifdef __AVX512F__
     CheckFeatureOrDie(CPUFeature::AVX512F, "AVX512F");
 #endif  // __AVX512F__
+#ifdef __AVX512VNNI__
+    CheckFeatureOrDie(CPUFeature::AVX512_VNNI, "AVX512_VNNI");
+#endif  // __AVX512VNNI__
+#ifdef __AVX512BF16__
+    CheckFeatureOrDie(CPUFeature::AVX512_BF16, "AVX512_BF16");
+#endif  // __AVX512BF16__
+#ifdef __AVX512FP16__
+    CheckFeatureOrDie(CPUFeature::AVX512_FP16, "AVX512_FP16");
+#endif  // __AVX512FP16__
+#ifdef __AVXVNNI__
+    CheckFeatureOrDie(CPUFeature::AVX_VNNI, "AVX_VNNI");
+#endif  // __AVXVNNI__
+#ifdef __AVXVNNIINT8__
+    CheckFeatureOrDie(CPUFeature::AVX_VNNI_INT8, "AVX_VNNI_INT8");
+#endif  // __AVXVNNIINT8__
+#ifdef __AVXNECONVERT__
+    CheckFeatureOrDie(CPUFeature::AVX_NE_CONVERT, "AVX_NE_CONVERT");
+#endif  // __AVXNECONVERT__
+#ifdef __AMXTILE__
+    CheckFeatureOrDie(CPUFeature::AMX_TILE, "AMX_TILE");
+#endif  // __AMXTILE__
+#ifdef __AMXINT8__
+    CheckFeatureOrDie(CPUFeature::AMX_INT8, "AMX_INT8");
+#endif  // __AMXINT8__
+#ifdef __AMXBF16__
+    CheckFeatureOrDie(CPUFeature::AMX_BF16, "AMX_BF16");
+#endif  // __AMXBF16__
+#ifdef __AMXFP16__
+    CheckFeatureOrDie(CPUFeature::AMX_FP16, "AMX_FP16");
+#endif  // __AMXFP16__
 #ifdef __FMA__
     CheckFeatureOrDie(CPUFeature::FMA, "FMA");
 #endif  // __FMA__
