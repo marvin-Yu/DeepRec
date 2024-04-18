@@ -109,7 +109,7 @@ class MklConvBwdFilterPrimitive : public MklPrimitive {
                const T* diff_bias_data, const T* diff_dst_data,
                std::shared_ptr<stream> bwd_filter_stream) {
     // TODO: Create a common function and avoid the duplicate code
-#ifdef ENABLE_DNNL_THREADPOOL
+#if defined(ENABLE_DNNL_THREADPOOL) && !defined(ENABLE_ONEDNN_V3)
     context_.src_mem->set_data_handle(
         static_cast<void*>(const_cast<T*>(src_data)), *bwd_filter_stream);
     context_.diff_filter_mem->set_data_handle(
@@ -133,7 +133,7 @@ class MklConvBwdFilterPrimitive : public MklPrimitive {
     }
     context_.diff_dst_mem->set_data_handle(
         static_cast<void*>(const_cast<T*>(diff_dst_data)));
-#endif  // ENABLE_DNNL_THREADPOOL
+#endif  // ENABLE_DNNL_THREADPOOL && !ENABLE_ONEDNN_V3
     execute_primitives(context_.bwd_filter_primitives, bwd_filter_stream,
                        context_.bwd_filter_primitives_args);
 
