@@ -207,6 +207,9 @@ Returns:
 %unignore tensorflow::swig::AssertSameStructureForData;
 %noexception tensorflow::swig::AssertSameStructureForData;
 
+%unignore tensorflow::swig::IsBF16SupportedByOneDNNOnThisCPU;
+%noexception tensorflow::swig::IsBF16SupportedByOneDNNOnThisCPU;
+
 %include "tensorflow/python/util/util.h"
 
 %unignoreall

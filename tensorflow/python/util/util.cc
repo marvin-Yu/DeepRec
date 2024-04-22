@@ -1033,5 +1033,19 @@ PyObject* AssertSameStructureForData(PyObject* o1, PyObject* o2,
   Py_RETURN_NONE;
 }
 
+// TODO(intel-tf): Refactor this function to use pybind11 bindings
+// and to re-use IsDataTypeSupportedByOneDNNOnThisCPU()
+bool IsBF16SupportedByOneDNNOnThisCPU() {
+  bool result = false;
+#ifdef INTEL_MKL
+  using port::CPUFeature;
+  using port::TestCPUFeature;
+  result = (TestCPUFeature(CPUFeature::AVX512F) ||
+            TestCPUFeature(CPUFeature::AVX_NE_CONVERT));
+  if (result) VLOG(2) << "CPU supports " << DataType_Name(dt);
+#endif  // INTEL_MKL
+  return result;
+}
+
 }  // namespace swig
 }  // namespace tensorflow

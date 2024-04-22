@@ -19,6 +19,9 @@ limitations under the License.
 
 #include <Python.h>
 
+#include "tensorflow/core/platform/cpu_info.h"
+#include "tensorflow/core/platform/logging.h"
+
 namespace tensorflow {
 namespace swig {
 
@@ -246,6 +249,9 @@ PyObject* AssertSameStructureForData(PyObject* o1, PyObject* o2,
 // RegisterType is used to pass PyTypeObject (which is defined in python) for an
 // arbitrary identifier `type_name` into C++.
 PyObject* RegisterType(PyObject* type_name, PyObject* type);
+
+// Check if BF16 is supported on CPU when oneDNN is enabled
+bool IsBF16SupportedByOneDNNOnThisCPU();
 
 }  // namespace swig
 }  // namespace tensorflow
