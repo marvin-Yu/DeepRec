@@ -959,14 +959,14 @@ class AutoMixedPrecisionImpl {
     switch (mode_) {
       case AutoMixedPrecisionMode::CUDA:
         return absl::make_unique<AutoMixedPrecisionListsCuda>(cuda_version_,
-                                                             cudnn_version_);
+                                                              cudnn_version_);
       case AutoMixedPrecisionMode::MKL:
-        return std::make_unique<AutoMixedPrecisionListsMkl>();
+        return absl::make_unique<AutoMixedPrecisionListsMkl>();
       case AutoMixedPrecisionMode::CPU:
         // Note: this is not a typo here. AutoMixedPrecisionListsCuda is used
         // intentionally to make CPU and GPU have the same fp16 ops.
-        return std::make_unique<AutoMixedPrecisionListsCuda>(cuda_version_,
-                                                             cudnn_version_);
+        return absl::make_unique<AutoMixedPrecisionListsCuda>(cuda_version_,
+                                                              cudnn_version_);
     }
   }
   Status PrintDebugLogs(bool preop, size_t timestamp);
@@ -1008,11 +1008,11 @@ class AutoMixedPrecisionImpl {
   NodeDef BuildCastNode(const MutableGraphView::OutputPort& src,
                         const MutableGraphView::InputPort& dst, bool to_f16,
                         const string& device) const;
-  StatusOr<NodeDef*> InsertCastNodeAtFanout(
+  NodeDef* InsertCastNodeAtFanout(
       const absl::flat_hash_set<int>& allow_set, const bool src_is_allow,
       const CastType& cast_type, NodeDef* node,
       MutableGraphView::OutputPort& src);
-  StatusOr<DataType> GetCastToType(const NodeDef* node) const;
+  DataType GetCastToType(const NodeDef* node) const;
   void CollectOutputPorts(
       const TypeAttrId& type_attr, NodeDef* node,
       std::vector<MutableGraphView::OutputPort>& output_ports) const;
@@ -1917,7 +1917,7 @@ void AutoMixedPrecisionImpl::MakeCastsAllowIfAllOutputsAllow(
 //   FP16: cast to float16
 //   FP32: cast to float32
 //   AUTO: cast to a data type that matches the fanout data type
-StatusOr<NodeDef*> AutoMixedPrecisionImpl::InsertCastNodeAtFanout(
+NodeDef* AutoMixedPrecisionImpl::InsertCastNodeAtFanout(
     const absl::flat_hash_set<int>& allow_set, const bool src_is_allow,
     const CastType& cast_type, NodeDef* node,
     MutableGraphView::OutputPort& src) {
@@ -1930,9 +1930,9 @@ StatusOr<NodeDef*> AutoMixedPrecisionImpl::InsertCastNodeAtFanout(
     const absl::optional<int> maybe_dst_type_idx =
         graph_type_view_.GetNodeIndex(dst.node->name(), dst_type_attr);
     if (!maybe_dst_type_idx.has_value()) {
-      return errors::Internal("Type attribute ", dst_type_attr.DebugString(),
-                              " of ", dst.node->op(), " node ",
-                              dst.node->name(), " not found in graph view");
+      LOG(FATAL) << "Type attribute " << dst_type_attr.DebugString() <<
+                              " of " << dst.node->op() << " node " <<
+                              dst.node->name() << " not found in graph view";
     }
     int dst_type_idx = maybe_dst_type_idx.value();
     bool dst_is_allow = allow_set.count(dst_type_idx);
@@ -1954,8 +1954,8 @@ StatusOr<NodeDef*> AutoMixedPrecisionImpl::InsertCastNodeAtFanout(
         should_cast = true;
         break;
       default:
-        return errors::Internal("Invalid Cast Type: ",
-                                static_cast<int>(cast_type));
+        LOG(FATAL) << "Invalid Cast Type: " << static_cast<int>(cast_type);
+        break;
     }
 
     if (!should_cast) continue;
@@ -1971,15 +1971,18 @@ StatusOr<NodeDef*> AutoMixedPrecisionImpl::InsertCastNodeAtFanout(
         ++num_nonvar_casts_to_f16_;
       }
     }
-    TF_RETURN_IF_ERROR(graph_view_.UpdateRegularFaninByPort(
-        dst.node->name(), dst.port_id, {added_cast_node->name(), 0}));
+    Status s = graph_view_.UpdateRegularFaninByPort(
+        dst.node->name(), dst.port_id, {added_cast_node->name(), 0});
+    if (s != Status::OK()) {
+      LOG(FATAL) << s.error_message();
+    }
   }
   return added_cast_node;
 }
 
 // Get the destination data type of a cast op. Return error if the node is not
 // a Cast op.
-StatusOr<DataType> AutoMixedPrecisionImpl::GetCastToType(
+DataType AutoMixedPrecisionImpl::GetCastToType(
     const NodeDef* node) const {
   CHECK_EQ(node->op(), "Cast")  // Crash OK
       << "Node " << node->name() << " is not a Cast op";
@@ -2041,24 +2044,20 @@ Status AutoMixedPrecisionImpl::ChangeTypeAttrsAndAddCasts(
           for (int port_id : node_type_map_.GetInputPorts(*node, type_attr)) {
             MutableGraphView::InputPort dst(node, port_id);
             MutableGraphView::OutputPort src = graph_view_.GetRegularFanin(dst);
-            TF_ASSIGN_OR_RETURN(DataType cast_to_type, GetCastToType(src.node));
+            DataType cast_to_type = GetCastToType(src.node);
             if (cast_to_type == DT_HALF) {
               // This check is to guarantee that when a fp16 Cast op is followed
               // by multiple emulated fp16 ops in the fanout, only a common f32
               // cast is needed.
-              TF_RETURN_IF_ERROR(
-                  InsertCastNodeAtFanout(allow_set, /*src_is_allow=*/true,
-                                         CastType::FP32, node, src)
-                      .status());
+              InsertCastNodeAtFanout(allow_set, /*src_is_allow=*/true,
+                                     CastType::FP32, node, src);
             }
           }
           // Cast to fp16 at outputs
           for (int port_id : node_type_map_.GetOutputPorts(*node, type_attr)) {
             MutableGraphView::OutputPort src(node, port_id);
-            TF_ASSIGN_OR_RETURN(
-                NodeDef * added_cast_node,
-                InsertCastNodeAtFanout(allow_set, src_is_allow, CastType::FP16,
-                                       node, src));
+            NodeDef* added_cast_node = InsertCastNodeAtFanout(
+                allow_set, src_is_allow, CastType::FP16, node, src);
             if (added_cast_node != nullptr) {
               output_ports.emplace_back(added_cast_node, /*port_id=*/0);
             }
@@ -2080,10 +2079,8 @@ Status AutoMixedPrecisionImpl::ChangeTypeAttrsAndAddCasts(
       // Insert cast nodes at the outputs based on the required data type at
       // fanouts.
       for (auto output_port : output_ports) {
-        TF_RETURN_IF_ERROR(InsertCastNodeAtFanout(allow_set, src_is_allow,
-                                                  CastType::AUTO, node,
-                                                  output_port)
-                               .status());
+        InsertCastNodeAtFanout(allow_set, src_is_allow, CastType::AUTO, node,
+                               output_port);
       }
     }
   }
