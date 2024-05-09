@@ -24,6 +24,7 @@ limitations under the License.
 #include "tensorflow/core/grappler/utils/grappler_test.h"
 #include "tensorflow/core/lib/core/status_test_util.h"
 #include "tensorflow/core/platform/test.h"
+#include "tensorflow/core/util/util.h"
 
 #if GOOGLE_CUDA
 #include "third_party/gpus/cudnn/cudnn.h"
@@ -695,10 +696,7 @@ TEST_F(RemapperTest, FuseMatMulWithBiasAndActivation) {
     ASSERT_EQ(tensors_expected.size(), 1);
     auto tensors = EvaluateNodes(output, item.fetch, item.feed);
     ASSERT_EQ(tensors.size(), 1);
-    if (DTYPE == DT_BFLOAT16)
-      test::ExpectClose(tensors[0], tensors_expected[0], 1e-2, 1e-2);
-    else
-      test::ExpectClose(tensors[0], tensors_expected[0], 1e-6);
+    test::ExpectClose(tensors[0], tensors_expected[0], 1e-6);
   }
 }
 
@@ -884,6 +882,7 @@ TEST_F(RemapperTest, FuseConv2DWithBatchNormAndActivation) {
   }
 }
 
+// Disabling for now since it will be enabled when adding PR #51702
 TEST_F(RemapperTest, FuseConv2DWithSqueezeAndBias) {
   using ops::Placeholder;
 
