@@ -1009,7 +1009,7 @@ REGISTER_OP("_FusedMatMul")
     .Attr("transpose_a: bool = false")
     .Attr("transpose_b: bool = false")
 #if defined(INTEL_MKL)
-    .Attr("T: {bfloat16, float}")
+    .Attr("T: {bfloat16, float, half}")
 #else
     .Attr("T: {float}")
 #endif
