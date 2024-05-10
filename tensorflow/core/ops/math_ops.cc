@@ -1064,7 +1064,11 @@ REGISTER_OP("_FusedMatMul")
     .Output("product: T")
     .Attr("transpose_a: bool = false")
     .Attr("transpose_b: bool = false")
-    .Attr("T: {bfloat16, half, float}")
+#if defined(INTEL_MKL)
+    .Attr("T: {bfloat16, float, half}")
+#else
+    .Attr("T: {half, float}")
+#endif
     .Attr("num_args: int >= 0")
     .Attr("fused_ops: list(string) = []")
     // Attributes for the FusedBatchNorm ----------- //
