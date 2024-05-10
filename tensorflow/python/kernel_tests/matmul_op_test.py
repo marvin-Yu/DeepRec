@@ -225,7 +225,11 @@ class MatMulInfixOperatorTest(test_lib.TestCase):
 if __name__ == "__main__":
   sizes = [1, 3, 5]
   trans_options = [[False, False], [True, False], [False, True]]
-  dtypes_to_test = [np.int32, np.int64, np.float16, np.float32, np.float64]
+  if test_util.IsMklEnabled():
+    # TODO(intel-tf): Re-enable fp16 tests once BMM and fusions are enabled
+    dtypes_to_test = [np.int32, np.int64, np.float32, np.float64]
+  else:
+    dtypes_to_test = [np.int32, np.int64, np.float16, np.float32, np.float64]
   if not test_lib.is_built_with_rocm():
     # ROCm does not support BLAS operations for complex types
     dtypes_to_test += [np.complex64, np.complex128]

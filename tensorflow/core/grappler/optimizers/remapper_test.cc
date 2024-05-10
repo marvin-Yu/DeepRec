@@ -396,6 +396,11 @@ class RemapperFuseMatMulWithBiasTest : public RemapperTest {
  public:
   template <DataType DTYPE>
   void RunTest() {
+    if (!IsMKLEnabled()) GTEST_SKIP() << "Test only applicable to oneDNN.";
+    if (!IsDataTypeSupportedByOneDNNOnThisCPU(DTYPE))
+      GTEST_SKIP()
+          << "Intel oneDNN with " << DataType_Name(DTYPE)
+          << " is not supported, skipping RemapperFuseMatMulWithBiasTest test.";
     using ::tensorflow::ops::Placeholder;
 
     tensorflow::Scope s = tensorflow::Scope::NewRootScope();
@@ -453,7 +458,7 @@ class RemapperFuseMatMulWithBiasTest : public RemapperTest {
     ASSERT_EQ(tensors_expected.size(), 1);
     auto tensors = EvaluateNodes(output, item.fetch, item.feed);
     ASSERT_EQ(tensors.size(), 1);
-    if (DTYPE == DT_BFLOAT16)
+    if (DTYPE == DT_BFLOAT16 || DTYPE == DT_HALF)
       test::ExpectClose(tensors[0], tensors_expected[0], 1e-2, 1e-2);
     else
       test::ExpectClose(tensors[0], tensors_expected[0], 1e-6);
@@ -462,12 +467,9 @@ class RemapperFuseMatMulWithBiasTest : public RemapperTest {
 
 TEST_F(RemapperFuseMatMulWithBiasTest, F32) { RunTest<DT_FLOAT>(); }
 
-TEST_F(RemapperFuseMatMulWithBiasTest, Bf16) {
-  if (!IsMKLEnabled() || !IsDataTypeSupportedByOneDNNOnThisCPU(DT_BFLOAT16))
-    GTEST_SKIP() << "Intel oneDNN with bfloat16 support is not supported, "
-                    "skipping FuseMatMulWithBias with bfloat16.";
-  RunTest<DT_BFLOAT16>();  // NOLINT
-}
+TEST_F(RemapperFuseMatMulWithBiasTest, Bf16) { RunTest<DT_BFLOAT16>(); }
+
+TEST_F(RemapperFuseMatMulWithBiasTest, Fp16) { RunTest<DT_HALF>(); }
 
 // TODO(b/161005848): Fix flaky test.
 TEST_F(RemapperTest, DISABLED_FuseConv2DWithBiasAndActivationOnGPU) {

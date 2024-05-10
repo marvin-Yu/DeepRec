@@ -130,7 +130,12 @@ class CommonTestUtilities : public OpsTestBase {
     ASSERT_EQ(conv_2d.dtype(), fused_conv_2d.dtype());
     ASSERT_EQ(conv_2d.shape(), fused_conv_2d.shape());
 
-    test::ExpectClose(conv_2d, fused_conv_2d, 1e-5);
+    float atol = 1e-2, rtol = 1e-2;  // tolerances for bfloat16 and float16
+    if (dtype == DT_FLOAT) {
+      atol = 1e-5;
+      rtol = 1e-5;
+    }
+    test::ExpectClose(conv_2d, fused_conv_2d, atol, rtol);
   }
 
   static void VerifyFusedTensorsClose(int depth, int image_width,
@@ -160,7 +165,12 @@ class CommonTestUtilities : public OpsTestBase {
     ASSERT_EQ(conv_2d.dtype(), fused_conv_2d.dtype());
     ASSERT_EQ(conv_2d.shape(), fused_conv_2d.shape());
 
-    test::ExpectClose(conv_2d, fused_conv_2d, 1e-5);
+    float atol = 1e-2, rtol = 1e-2;  // tolerances for bfloat16 and float16
+    if (dtype == DT_FLOAT) {
+      atol = 1e-5;
+      rtol = 1e-5;
+    }
+    test::ExpectClose(conv_2d, fused_conv_2d, atol, rtol);
   }
 
   static void VerifyFusedMatrixClose(int depth, int batch, int weight_count,
@@ -187,7 +197,12 @@ class CommonTestUtilities : public OpsTestBase {
     ASSERT_EQ(output.dtype(), fused_output.dtype());
     ASSERT_EQ(output.shape(), fused_output.shape());
 
-    test::ExpectClose(output, fused_output, 1e-5);
+    float atol = 1e-2, rtol = 1e-2;  // tolerances for bfloat16 and float16
+    if (dtype == DT_FLOAT) {
+      atol = 1e-5;
+      rtol = 1e-5;
+    }
+    test::ExpectClose(output, fused_output, atol, rtol);
   }
 
  private:
@@ -362,7 +377,7 @@ class MklFusedConv2DWithBiasOpTest : public MklFusedConv2DOpTest<T> {};
 TYPED_TEST_CASE_P(MklFusedConv2DWithBiasOpTest);
 
 // -------------------------------------------------------------------------- //
-// Conv2D + BiasAdd + {Activation}                                            //
+// Conv2D + BiasAdd + {Activation} -- fp32                                    //
 // -------------------------------------------------------------------------- //
 
 TYPED_TEST_P(MklFusedConv2DWithBiasOpTest, OneByOneConvolution) {
@@ -503,9 +518,79 @@ REGISTER_TYPED_TEST_CASE_P(
     OneByOneConvolutionAndAddElu, SpatialConvolutionAndAddElu,
     OneByOneConvolutionAndAddLeakyRelu, SpatialConvolutionAndAddLeakyRelu);
 
+// TODO(intel-tf): Enable the following tests for bfloat16
 using MklFusedBiasAddDataTypes = ::testing::Types<float>;
 INSTANTIATE_TYPED_TEST_CASE_P(Test, MklFusedConv2DWithBiasOpTest,
                               MklFusedBiasAddDataTypes);
+
+#ifdef ENABLE_ONEDNN_V3
+template <typename T>
+class MklFusedConv2DWithBiasHalfOpTest : public MklFusedConv2DOpTest<T> {};
+
+TYPED_TEST_CASE_P(MklFusedConv2DWithBiasHalfOpTest);
+
+// -------------------------------------------------------------------------- //
+// Conv2D + BiasAdd + {Activation} -- fp16                                    //
+// -------------------------------------------------------------------------- //
+
+TYPED_TEST_P(MklFusedConv2DWithBiasHalfOpTest, OneByOneConvolution) {
+  const int kFilterSize = 1;
+  const int kFilterCount = 12;
+  this->VerifyFusedConv2D(kFilterSize, kFilterCount, {"BiasAdd"});
+}
+
+TYPED_TEST_P(MklFusedConv2DWithBiasHalfOpTest, SpatialConvolution) {
+  const int kFilterSize = 3;
+  const int kFilterCount = 12;
+  this->VerifyFusedConv2D(kFilterSize, kFilterCount, {"BiasAdd"});
+}
+
+TYPED_TEST_P(MklFusedConv2DWithBiasHalfOpTest, OneByOneConvolutionAndRelu) {
+  const int kFilterSize = 1;
+  const int kFilterCount = 12;
+  this->VerifyFusedConv2D(kFilterSize, kFilterCount, {"BiasAdd", "Relu"});
+}
+
+TYPED_TEST_P(MklFusedConv2DWithBiasHalfOpTest, SpatialConvolutionAndRelu) {
+  const int kFilterSize = 3;
+  const int kFilterCount = 12;
+  this->VerifyFusedConv2D(kFilterSize, kFilterCount, {"BiasAdd", "Relu"});
+}
+
+TYPED_TEST_P(MklFusedConv2DWithBiasHalfOpTest,
+             OneByOneConvolutionAndLeakyRelu) {
+  const int kFilterSize = 1;
+  const int kFilterCount = 12;
+  this->VerifyFusedConv2D(kFilterSize, kFilterCount, {"BiasAdd", "LeakyRelu"});
+}
+
+TYPED_TEST_P(MklFusedConv2DWithBiasHalfOpTest, SpatialConvolutionAndLeakyRelu) {
+  const int kFilterSize = 3;
+  const int kFilterCount = 12;
+  this->VerifyFusedConv2D(kFilterSize, kFilterCount, {"BiasAdd", "LeakyRelu"});
+}
+
+TYPED_TEST_P(MklFusedConv2DWithBiasHalfOpTest, SpatialConvolutionAndRelu6) {
+  const int kFilterSize = 3;
+  const int kFilterCount = 12;
+  this->VerifyFusedConv2D(kFilterSize, kFilterCount, {"BiasAdd", "Relu6"});
+}
+
+TYPED_TEST_P(MklFusedConv2DWithBiasHalfOpTest, OneByOneConvolutionAndElu) {
+  const int kFilterSize = 1;
+  const int kFilterCount = 12;
+  this->VerifyFusedConv2D(kFilterSize, kFilterCount, {"BiasAdd", "Elu"});
+}
+
+REGISTER_TYPED_TEST_CASE_P(
+    MklFusedConv2DWithBiasHalfOpTest, OneByOneConvolution, SpatialConvolution,
+    OneByOneConvolutionAndRelu, SpatialConvolutionAndRelu,
+    SpatialConvolutionAndRelu6, OneByOneConvolutionAndElu,
+    OneByOneConvolutionAndLeakyRelu, SpatialConvolutionAndLeakyRelu);
+
+INSTANTIATE_TYPED_TEST_CASE_P(Test, MklFusedConv2DWithBiasHalfOpTest,
+                              ::testing::Types<Eigen::half>);
+#endif  // ENABLE_ONEDNN_V3
 
 // Testing OneDNN's fused depthwise convolution ops
 template <typename T>
@@ -740,9 +825,14 @@ REGISTER_TYPED_TEST_SUITE_P(
     OneByOneConvolutionAndRelu6, SpatialConvolutionAndRelu6,
     OneByOneConvolutionAndElu, SpatialConvolutionAndElu);
 
-using MklFusedBiasAddDataTypes = ::testing::Types<float>;
+#ifdef ENABLE_ONEDNN_V3
+// TODO(intel-tf): Enable the following tests for bfloat16
+using FusedDWConvDataTypes = ::testing::Types<float, Eigen::half>;
+#else
+using FusedDWConvDataTypes = ::testing::Types<float>;
+#endif  // ENABLE_ONEDNN_V3
 INSTANTIATE_TYPED_TEST_SUITE_P(Test, MklFusedDepthwiseConv2DWithBiasOpTest,
-                               MklFusedBiasAddDataTypes);
+                               FusedDWConvDataTypes);
 
 // Testing fusion of pad and convolution
 
@@ -1191,7 +1281,12 @@ REGISTER_TYPED_TEST_CASE_P(MklFusedMatMulOpTest,  //
                            WithBiasAndGeluErf,    //
                            WithBiasAndAdd);
 
+#ifdef ENABLE_ONEDNN_V3
+// TODO(intel-tf): Enable the following tests for bfloat16
+using MklFusedMatMulDataTypes = ::testing::Types<float, Eigen::half>;
+#else
 using MklFusedMatMulDataTypes = ::testing::Types<float>;
+#endif  // ENABLE_ONEDNN_V3
 INSTANTIATE_TYPED_TEST_CASE_P(Test, MklFusedMatMulOpTest,
                               MklFusedMatMulDataTypes);
 
