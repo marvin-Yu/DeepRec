@@ -163,6 +163,46 @@ void InfoAboutUnusedCPUFeatures() {
 #ifndef __AVX512F__
     CheckIfFeatureUnused(CPUFeature::AVX512F, "AVX512F", missing_instructions);
 #endif  // __AVX512F__
+#ifndef __AVX512VNNI__
+    CheckIfFeatureUnused(CPUFeature::AVX512_VNNI, "AVX512_VNNI",
+                         missing_instructions);
+#endif  // __AVX512VNNI__
+#ifndef __AVX512BF16__
+    CheckIfFeatureUnused(CPUFeature::AVX512_BF16, "AVX512_BF16",
+                         missing_instructions);
+#endif  // __AVX512BF16__
+#ifndef __AVX512FP16__
+    CheckIfFeatureUnused(CPUFeature::AVX512_FP16, "AVX512_FP16",
+                         missing_instructions);
+#endif  // __AVX512FP16__
+#ifndef __AVXVNNI__
+    CheckIfFeatureUnused(CPUFeature::AVX_VNNI, "AVX_VNNI",
+                         missing_instructions);
+#endif  // __AVXVNNI__
+#ifndef __AVXVNNIINT8__
+    CheckIfFeatureUnused(CPUFeature::AVX_VNNI_INT8, "AVX_VNNI_INT8",
+                         missing_instructions);
+#endif  // __AVXVNNIINT8__
+#ifndef __AVXNECONVERT__
+    CheckIfFeatureUnused(CPUFeature::AVX_NE_CONVERT, "AVX_NE_CONVERT",
+                         missing_instructions);
+#endif  // __AVXNECONVERT__
+#ifndef __AMX_TILE__
+    CheckIfFeatureUnused(CPUFeature::AMX_TILE, "AMX_TILE",
+                         missing_instructions);
+#endif  // __AMX_TILE__
+#ifndef __AMX_INT8__
+    CheckIfFeatureUnused(CPUFeature::AMX_INT8, "AMX_INT8",
+                         missing_instructions);
+#endif  // __AMX_INT8__
+#ifndef __AMX_BF16__
+    CheckIfFeatureUnused(CPUFeature::AMX_BF16, "AMX_BF16",
+                         missing_instructions);
+#endif  // __AMX_BF16__
+#ifndef __AMX_FP16__
+    CheckIfFeatureUnused(CPUFeature::AMX_FP16, "AMX_FP16",
+                         missing_instructions);
+#endif  // __AMX_FP16__
 #ifndef __FMA__
     CheckIfFeatureUnused(CPUFeature::FMA, "FMA", missing_instructions);
 #endif  // __FMA__
@@ -172,10 +212,11 @@ void InfoAboutUnusedCPUFeatures() {
       LOG(INFO) << "Your CPU supports instructions that this TensorFlow "
                 << "binary was not compiled to use:" << missing_instructions;
 #else
-      LOG(INFO) << "This TensorFlow binary is optimized with Intel(R) MKL-DNN "
-                << "to use the following CPU instructions in performance "
-                << "critical operations: " << missing_instructions << std::endl
-                << "To enable them in non-MKL-DNN operations, rebuild "
+      LOG(INFO) << "This TensorFlow binary is optimized "
+                << "to use available CPU instructions in performance-"
+                << "critical operations: " << std::endl
+                << "To enable the following instructions:"
+                << missing_instructions << ", in other operations, rebuild "
                 << "TensorFlow with the appropriate compiler flags.";
 #endif
     }
