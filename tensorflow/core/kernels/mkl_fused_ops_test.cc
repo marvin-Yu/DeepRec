@@ -507,6 +507,70 @@ using MklFusedBiasAddDataTypes = ::testing::Types<float>;
 INSTANTIATE_TYPED_TEST_CASE_P(Test, MklFusedConv2DWithBiasOpTest,
                               MklFusedBiasAddDataTypes);
 
+#ifdef ENABLE_ONEDNN_V3
+template <typename T>
+class MklFusedConv2DWithBiasHalfOpTest : public MklFusedConv2DOpTest<T> {};
+
+TYPED_TEST_CASE_P(MklFusedConv2DWithBiasHalfOpTest);
+
+// -------------------------------------------------------------------------- //
+// Conv2D + BiasAdd + {Activation} -- fp16                                    //
+// -------------------------------------------------------------------------- //
+
+TYPED_TEST_P(MklFusedConv2DWithBiasHalfOpTest, OneByOneConvolution) {
+  const int kFilterSize = 1;
+  const int kFilterCount = 12;
+  this->VerifyFusedConv2D(kFilterSize, kFilterCount, {"BiasAdd"});
+}
+
+TYPED_TEST_P(MklFusedConv2DWithBiasHalfOpTest, SpatialConvolution) {
+  const int kFilterSize = 3;
+  const int kFilterCount = 12;
+  this->VerifyFusedConv2D(kFilterSize, kFilterCount, {"BiasAdd"});
+}
+
+TYPED_TEST_P(MklFusedConv2DWithBiasHalfOpTest, OneByOneConvolutionAndRelu) {
+  const int kFilterSize = 1;
+  const int kFilterCount = 12;
+  this->VerifyFusedConv2D(kFilterSize, kFilterCount, {"BiasAdd", "Relu"});
+}
+
+TYPED_TEST_P(MklFusedConv2DWithBiasHalfOpTest, SpatialConvolutionAndRelu) {
+  const int kFilterSize = 3;
+  const int kFilterCount = 12;
+  this->VerifyFusedConv2D(kFilterSize, kFilterCount, {"BiasAdd", "Relu"});
+}
+
+TYPED_TEST_P(MklFusedConv2DWithBiasHalfOpTest,
+             OneByOneConvolutionAndLeakyRelu) {
+  const int kFilterSize = 1;
+  const int kFilterCount = 12;
+  this->VerifyFusedConv2D(kFilterSize, kFilterCount, {"BiasAdd", "LeakyRelu"});
+}
+
+TYPED_TEST_P(MklFusedConv2DWithBiasHalfOpTest, SpatialConvolutionAndLeakyRelu) {
+  const int kFilterSize = 3;
+  const int kFilterCount = 12;
+  this->VerifyFusedConv2D(kFilterSize, kFilterCount, {"BiasAdd", "LeakyRelu"});
+}
+
+TYPED_TEST_P(MklFusedConv2DWithBiasHalfOpTest, OneByOneConvolutionAndElu) {
+  const int kFilterSize = 1;
+  const int kFilterCount = 12;
+  this->VerifyFusedConv2D(kFilterSize, kFilterCount, {"BiasAdd", "Elu"});
+}
+
+REGISTER_TYPED_TEST_CASE_P(MklFusedConv2DWithBiasHalfOpTest,
+                           OneByOneConvolution, SpatialConvolution,
+                           OneByOneConvolutionAndRelu,
+                           SpatialConvolutionAndRelu, OneByOneConvolutionAndElu,
+                           OneByOneConvolutionAndLeakyRelu,
+                           SpatialConvolutionAndLeakyRelu);
+
+INSTANTIATE_TYPED_TEST_CASE_P(Test, MklFusedConv2DWithBiasHalfOpTest,
+                              ::testing::Types<Eigen::half>);
+#endif  // ENABLE_ONEDNN_V3
+
 // Testing OneDNN's fused depthwise convolution ops
 template <typename T>
 class MklFusedDepthwiseConv2DOpTest : public OpsTestBase {
