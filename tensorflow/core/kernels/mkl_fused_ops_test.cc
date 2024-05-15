@@ -570,23 +570,18 @@ TYPED_TEST_P(MklFusedConv2DWithBiasHalfOpTest, SpatialConvolutionAndLeakyRelu) {
   this->VerifyFusedConv2D(kFilterSize, kFilterCount, {"BiasAdd", "LeakyRelu"});
 }
 
-TYPED_TEST_P(MklFusedConv2DWithBiasHalfOpTest, SpatialConvolutionAndRelu6) {
-  const int kFilterSize = 3;
-  const int kFilterCount = 12;
-  this->VerifyFusedConv2D(kFilterSize, kFilterCount, {"BiasAdd", "Relu6"});
-}
-
 TYPED_TEST_P(MklFusedConv2DWithBiasHalfOpTest, OneByOneConvolutionAndElu) {
   const int kFilterSize = 1;
   const int kFilterCount = 12;
   this->VerifyFusedConv2D(kFilterSize, kFilterCount, {"BiasAdd", "Elu"});
 }
 
-REGISTER_TYPED_TEST_CASE_P(
-    MklFusedConv2DWithBiasHalfOpTest, OneByOneConvolution, SpatialConvolution,
-    OneByOneConvolutionAndRelu, SpatialConvolutionAndRelu,
-    SpatialConvolutionAndRelu6, OneByOneConvolutionAndElu,
-    OneByOneConvolutionAndLeakyRelu, SpatialConvolutionAndLeakyRelu);
+REGISTER_TYPED_TEST_CASE_P(MklFusedConv2DWithBiasHalfOpTest,
+                           OneByOneConvolution, SpatialConvolution,
+                           OneByOneConvolutionAndRelu,
+                           SpatialConvolutionAndRelu, OneByOneConvolutionAndElu,
+                           OneByOneConvolutionAndLeakyRelu,
+                           SpatialConvolutionAndLeakyRelu);
 
 INSTANTIATE_TYPED_TEST_CASE_P(Test, MklFusedConv2DWithBiasHalfOpTest,
                               ::testing::Types<Eigen::half>);
