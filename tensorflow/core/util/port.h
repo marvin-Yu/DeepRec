@@ -16,6 +16,9 @@ limitations under the License.
 #ifndef TENSORFLOW_CORE_UTIL_PORT_H_
 #define TENSORFLOW_CORE_UTIL_PORT_H_
 
+#include "tensorflow/core/platform/cpu_info.h"
+#include "tensorflow/core/platform/logging.h"
+
 namespace tensorflow {
 
 // Returns true if GOOGLE_CUDA is defined.
@@ -37,6 +40,9 @@ bool GpuSupportsHalfMatMulAndConv();
 
 // Returns true if INTEL_MKL is defined
 bool IsMklEnabled();
+
+// Check if BF16 is supported on CPU when oneDNN is enabled
+bool IsBF16SupportedByOneDNNOnThisCPU();
 
 }  // end namespace tensorflow
 

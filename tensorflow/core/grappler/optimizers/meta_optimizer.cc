@@ -57,6 +57,7 @@ limitations under the License.
 #include "tensorflow/core/util/env_var.h"
 #include "tensorflow/core/util/ptr_util.h"
 #include "tensorflow/core/util/xla_config_registry.h"
+#include "tensorflow/core/util/util.h"
 
 namespace tensorflow {
 namespace grappler {
@@ -211,7 +212,6 @@ std::unique_ptr<GraphOptimizer> MetaOptimizer::MakeNewOptimizer(
   MK_OPT("layout", new GenericLayoutOptimizer());
   MK_OPT("auto_mixed_precision",
          new AutoMixedPrecision(AutoMixedPrecisionMode::CUDA));
-#ifdef INTEL_MKL
   if (IsMKLEnabled()) {
     MK_OPT("auto_mixed_precision",
            new AutoMixedPrecision(AutoMixedPrecisionMode::FP16_CPU));
@@ -220,7 +220,6 @@ std::unique_ptr<GraphOptimizer> MetaOptimizer::MakeNewOptimizer(
     MK_OPT("auto_mixed_precision_onednn_bfloat16",
            new AutoMixedPrecision(AutoMixedPrecisionMode::BF16));
   }
-#endif
   MK_OPT("memory", new MemoryOptimizer(RewriterConfig::MANUAL));
   MK_OPT("arithmetic", new ArithmeticOptimizer(cfg_.arithmetic_optimization()));
   MK_OPT("autoparallel", new AutoParallel(cfg_.auto_parallel().num_replicas()));
@@ -288,7 +287,6 @@ Status MetaOptimizer::InitializeOptimizers(
   if (cfg_.remapping() != RewriterConfig::OFF) {
     optimizers->push_back(MakeUnique<Remapper>(cfg_.remapping(), xla_on_));
   }
-#ifdef INTEL_MKL
   if (AutoMixedPrecisionEnabled(cfg_.auto_mixed_precision_onednn_bfloat16()) &&
       IsMKLEnabled()) {
     optimizers->push_back(
@@ -296,13 +294,12 @@ Status MetaOptimizer::InitializeOptimizers(
   }
   if (AutoMixedPrecisionEnabled(cfg_.auto_mixed_precision_mkl()) &&
       IsMKLEnabled()) {
-    LOG_FIRST_N(WARNING, 1)
+    LOG(WARNING)
         << "NOTE: auto_mixed_precision_mkl is deprecated."
            " Please use auto_mixed_precision_onednn_bfloat16 instead";
     optimizers->push_back(
         MakeUnique<AutoMixedPrecision>(AutoMixedPrecisionMode::BF16));
   }
-#endif  // INTEL_MKL
   if (AutoMixedPrecisionEnabled(cfg_.auto_mixed_precision_cpu())) {
     optimizers->push_back(
         MakeUnique<AutoMixedPrecision>(AutoMixedPrecisionMode::CPU));
