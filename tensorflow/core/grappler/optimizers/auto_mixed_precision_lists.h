@@ -472,7 +472,6 @@ class AutoMixedPrecisionListsMkl : public AutoMixedPrecisionLists {
         "Mean",
         "Pow",
         "SaveV2",
-        "Softmax",
         "SoftmaxCrossEntropyWithLogits",
         "SparseSoftmaxCrossEntropyWithLogits",
         "Sum",

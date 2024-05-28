@@ -291,6 +291,10 @@ def IsMklEnabled():
   return pywrap_tensorflow.IsMklEnabled()
 
 
+def IsBF16SupportedByOneDNNOnThisCPU():
+  return pywrap_tensorflow.IsBF16SupportedByOneDNNOnThisCPU()
+
+
 def InstallStackTraceHandler():
   pywrap_tensorflow.InstallStacktraceHandler()
 

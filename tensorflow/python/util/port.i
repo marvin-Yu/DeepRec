@@ -25,5 +25,6 @@ limitations under the License.
 %unignore tensorflow::IsBuiltWithROCm;
 %unignore tensorflow::GpuSupportsHalfMatMulAndConv;
 %unignore tensorflow::IsMklEnabled;
+%unignore tensorflow::IsBF16SupportedByOneDNNOnThisCPU;
 %include "tensorflow/core/util/port.h"
 %unignoreall

@@ -250,9 +250,6 @@ PyObject* AssertSameStructureForData(PyObject* o1, PyObject* o2,
 // arbitrary identifier `type_name` into C++.
 PyObject* RegisterType(PyObject* type_name, PyObject* type);
 
-// Check if BF16 is supported on CPU when oneDNN is enabled
-bool IsBF16SupportedByOneDNNOnThisCPU();
-
 }  // namespace swig
 }  // namespace tensorflow
 
