@@ -50,4 +50,19 @@ bool IsMklEnabled() {
   return false;
 #endif  // INTEL_MKL && ENABLE_MKL
 }
+
+// TODO(intel-tf): Use IsDataTypeSupportedByOneDNNOnThisCPU() instead
+bool IsBF16SupportedByOneDNNOnThisCPU() {
+  bool result = false;
+#ifdef INTEL_MKL
+  using port::CPUFeature;
+  using port::TestCPUFeature;
+  result = (TestCPUFeature(CPUFeature::AVX512F) ||
+            TestCPUFeature(CPUFeature::AVX_NE_CONVERT));
+  if (result) LOG(INFO) << "CPU supports BF16";
+  else  LOG(INFO) << "CPU does not support BF16";
+#endif  // INTEL_MKL
+  return result;
+}
+
 }  // end namespace tensorflow
