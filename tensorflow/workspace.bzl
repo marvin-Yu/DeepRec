@@ -155,6 +155,7 @@ def tf_repositories(path_prefix = "", tf_repo_name = ""):
     tf_http_archive(
         name = "com_google_absl",
         build_file = clean_dep("//third_party:com_google_absl.BUILD"),
+        patch_file = clean_dep("//third_party:com_google_absl_fix.patch"),
         sha256 = "acd93f6baaedc4414ebd08b33bebca7c7a46888916101d8c0b8083573526d070",
         strip_prefix = "abseil-cpp-43ef2148c0936ebf7cb4be6b19927a9d9d145b8f",
         urls = [
@@ -523,6 +524,17 @@ def tf_repositories(path_prefix = "", tf_repo_name = ""):
     )
 
     tf_http_archive(
+        name = "upb",
+        sha256 = "61d0417abd60e65ed589c9deee7c124fe76a4106831f6ad39464e1525cef1454",
+        patch_file = clean_dep("//third_party/grpc:upb_gcc_11_fix.patch"),
+        strip_prefix = "upb-9effcbcb27f0a665f9f345030188c0b291e32482",
+        urls = [
+            "https://storage.googleapis.com/mirror.tensorflow.org/github.com/protocolbuffers/upb/archive/9effcbcb27f0a665f9f345030188c0b291e32482.tar.gz",
+            "https://github.com/protocolbuffers/upb/archive/9effcbcb27f0a665f9f345030188c0b291e32482.tar.gz",
+        ],
+    )
+
+    tf_http_archive(
         name = "linenoise",
         build_file = clean_dep("//third_party:linenoise.BUILD"),
         sha256 = "7f51f45887a3d31b4ce4fa5965210a5e64637ceac12720cfce7954d6a2e812f7",
@@ -572,6 +584,7 @@ def tf_repositories(path_prefix = "", tf_repo_name = ""):
 
     tf_http_archive(
         name = "boringssl",
+        patch_file = clean_dep("//third_party:boringssl_fix.patch"),
         sha256 = "1188e29000013ed6517168600fc35a010d58c5d321846d6a6dfee74e4c788b45",
         strip_prefix = "boringssl-7f634429a04abc48e2eb041c81c5235816c96514",
         system_build_file = clean_dep("//third_party/systemlibs:boringssl.BUILD"),

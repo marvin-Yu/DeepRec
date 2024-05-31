@@ -1,0 +1,26 @@
+From b214cb1db3a4f0ace2be0a3ad876c9e231a34ff9 Mon Sep 17 00:00:00 2001
+From: Bhavani Subramanian <bhavani1.subramanian@intel.com>
+Date: Fri, 31 May 2024 12:06:12 -0700
+Subject: [PATCH] Added a fix for upb build failure with GCC-11
+
+---
+ upb/upb.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/upb/upb.c b/upb/upb.c
+index 266ea7d7..6279829d 100644
+--- a/upb/upb.c
++++ b/upb/upb.c
+@@ -37,7 +37,8 @@ const char *upb_status_errmsg(const upb_status *status) { return status->msg; }
+ void upb_status_seterrmsg(upb_status *status, const char *msg) {
+   if (!status) return;
+   status->ok = false;
+-  strncpy(status->msg, msg, sizeof(status->msg));
++  // https://github.com/tensorflow/tensorflow/issues/39467#issue-616925216
++  strncpy(status->msg, msg, sizeof(status->msg) - 1);
+   nullz(status);
+ }
+ 
+-- 
+2.39.1
+
