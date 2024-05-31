@@ -1,0 +1,65 @@
+From ea4d96f60bf30b6d2f8fca728c227f57d9707521 Mon Sep 17 00:00:00 2001
+From: Bhavani Subramanian <bhavani1.subramanian@intel.com>
+Date: Fri, 31 May 2024 10:39:15 -0700
+Subject: [PATCH] Added a fix for boringssl build failure with GCC-11
+
+---
+ src/crypto/fipsmodule/bn/internal.h | 3 ++-
+ src/third_party/fiat/curve25519.c   | 6 ++++--
+ src/third_party/fiat/internal.h     | 2 +-
+ 3 files changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/src/crypto/fipsmodule/bn/internal.h b/src/crypto/fipsmodule/bn/internal.h
+index 9796831f5..44bc4acc5 100644
+--- a/src/crypto/fipsmodule/bn/internal.h
++++ b/src/crypto/fipsmodule/bn/internal.h
+@@ -285,7 +285,8 @@ void bn_mul_comba4(BN_ULONG r[8], const BN_ULONG a[4], const BN_ULONG b[4]);
+ void bn_mul_comba8(BN_ULONG r[16], const BN_ULONG a[8], const BN_ULONG b[8]);
+ 
+ // bn_sqr_comba8 sets |r| to |a|^2.
+-void bn_sqr_comba8(BN_ULONG r[16], const BN_ULONG a[4]);
++// https://boringssl-review.googlesource.com/c/boringssl/+/46404/2/crypto/fipsmodule/bn/internal.h
++void bn_sqr_comba8(BN_ULONG r[16], const BN_ULONG a[8]);
+ 
+ // bn_sqr_comba4 sets |r| to |a|^2.
+ void bn_sqr_comba4(BN_ULONG r[8], const BN_ULONG a[4]);
+diff --git a/src/third_party/fiat/curve25519.c b/src/third_party/fiat/curve25519.c
+index 60da1c890..45b519b57 100644
+--- a/src/third_party/fiat/curve25519.c
++++ b/src/third_party/fiat/curve25519.c
+@@ -1584,7 +1584,8 @@ static void ge_p3_tobytes(uint8_t s[32], const ge_p3 *h) {
+   s[31] ^= fe_isnegative(&x) << 7;
+ }
+ 
+-int x25519_ge_frombytes_vartime(ge_p3 *h, const uint8_t *s) {
++// https://boringssl.googlesource.com/boringssl/+/92c6fbfc4c44dc8462d260d836020d2b793e7804%5E%21/#F0
++int x25519_ge_frombytes_vartime(ge_p3 *h, const uint8_t s[32]) {
+   fe u;
+   fe_loose v;
+   fe v3;
+@@ -1902,7 +1903,8 @@ static void table_select(ge_precomp *t, int pos, signed char b) {
+ //
+ // Preconditions:
+ //   a[31] <= 127
+-void x25519_ge_scalarmult_base(ge_p3 *h, const uint8_t *a) {
++// https://boringssl.googlesource.com/boringssl/+/92c6fbfc4c44dc8462d260d836020d2b793e7804%5E%21/#F0
++void x25519_ge_scalarmult_base(ge_p3 *h, const uint8_t a[32]) {
+   signed char e[64];
+   signed char carry;
+   ge_p1p1 r;
+diff --git a/src/third_party/fiat/internal.h b/src/third_party/fiat/internal.h
+index be3e265a5..e1ebc62a9 100644
+--- a/src/third_party/fiat/internal.h
++++ b/src/third_party/fiat/internal.h
+@@ -114,7 +114,7 @@ typedef struct {
+ } ge_cached;
+ 
+ void x25519_ge_tobytes(uint8_t s[32], const ge_p2 *h);
+-int x25519_ge_frombytes_vartime(ge_p3 *h, const uint8_t *s);
++int x25519_ge_frombytes_vartime(ge_p3 *h, const uint8_t s[32]);
+ void x25519_ge_p3_to_cached(ge_cached *r, const ge_p3 *p);
+ void x25519_ge_p1p1_to_p2(ge_p2 *r, const ge_p1p1 *p);
+ void x25519_ge_p1p1_to_p3(ge_p3 *r, const ge_p1p1 *p);
+-- 
+2.39.1
+
