@@ -59,8 +59,8 @@ bool IsBF16SupportedByOneDNNOnThisCPU() {
   using port::TestCPUFeature;
   result = (TestCPUFeature(CPUFeature::AVX512F) ||
             TestCPUFeature(CPUFeature::AVX_NE_CONVERT));
-  if (result) LOG(INFO) << "CPU supports BF16";
-  else  LOG(INFO) << "CPU does not support BF16";
+  if (result) VLOG(2) << "CPU supports BF16";
+  else  VLOG(2) << "CPU does not support BF16";
 #endif  // INTEL_MKL
   return result;
 }
