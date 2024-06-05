@@ -62,4 +62,34 @@ index be3e265a5..e1ebc62a9 100644
  void x25519_ge_p1p1_to_p3(ge_p3 *r, const ge_p1p1 *p);
 -- 
 2.39.1
+diff --git a/src/crypto/x509v3/v3_utl.c b/src/crypto/x509v3/v3_utl.c
+index 589e296de..eb17cf0d0 100644
+--- a/src/crypto/x509v3/v3_utl.c
++++ b/src/crypto/x509v3/v3_utl.c
+@@ -1210,8 +1210,9 @@ static int ipv6_from_asc(unsigned char *v6, const char *in)
+         if (v6stat.total != 16)
+             return 0;
+     } else {
++        /* https://boringssl-review.googlesource.com/c/boringssl/+/54245/4/crypto/x509v3/v3_utl.c#b1245 */
+         /* If '::' must have less than 16 bytes */
+-        if (v6stat.total == 16)
++        if (v6stat.total >= 16)
+             return 0;
+         /* More than three zeroes is an error */
+         if (v6stat.zero_cnt > 3)
+@@ -1266,7 +1267,11 @@ static int ipv6_cb(const char *elem, int len, void *usr)
+         /* If we've already got a :: its an error */
+         else if (s->zero_pos != s->total)
+             return 0;
+-        s->zero_cnt++;
++        /* https://boringssl-review.googlesource.com/c/boringssl/+/54245/4/crypto/x509v3/v3_utl.c#b1245 */
++        if (s->zero_cnt >= 3) {
++          // More than three zeros is an error.
++          s->zero_cnt++;
++        }
+     } else {
+         /* If more than 4 characters could be final a.b.c.d form */
+         if (len > 4) {
+-- 
+2.39.1
 
