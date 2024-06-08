@@ -20,7 +20,6 @@ limitations under the License.
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/lib/strings/str_util.h"
 #include "tensorflow/core/lib/strings/strcat.h"
-#include "tensorflow/core/platform/errors.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/macros.h"
 #include "tensorflow/core/util/overflow.h"
@@ -352,10 +351,10 @@ void TensorShapeRep::ClearAllButDataType() {
 }
 
 template <class Shape>
-void TensorShapeBase<Shape>::RecomputeNumElements() {
+Status TensorShapeBase<Shape>::RecomputeNumElements() {
   if (unknown_rank()) {
     set_num_elements(-1);
-    return;
+    return Status::OK();
   }
   int64 n = 1;
   for (auto dim : *this) {
@@ -364,9 +363,14 @@ void TensorShapeBase<Shape>::RecomputeNumElements() {
       break;
     }
     n = MultiplyWithoutOverflow(n, dim.size);
-    CHECK_LE(0, n);
+    if (TF_PREDICT_FALSE(n < 0)) {
+      return errors::InvalidArgument(
+          "Shape ", this->DebugString(),
+          " results in overflow when computing number of elements");
+    }
   }
   set_num_elements(n);
+  return Status::OK();
 }
 
 template <class Shape>
