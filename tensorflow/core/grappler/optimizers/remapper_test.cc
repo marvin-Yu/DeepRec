@@ -453,10 +453,12 @@ class RemapperFuseMatMulWithBiasTest : public RemapperTest {
     ASSERT_EQ(tensors_expected.size(), 1);
     auto tensors = EvaluateNodes(output, item.fetch, item.feed);
     ASSERT_EQ(tensors.size(), 1);
-    if (DTYPE == DT_BFLOAT16)
-      test::ExpectClose(tensors[0], tensors_expected[0], 1e-2, 1e-2);
-    else
-      test::ExpectClose(tensors[0], tensors_expected[0], 1e-6);
+    float atol = 1e-6, rtol = 1e-6;
+    if (DTYPE == DT_BFLOAT16 || DTYPE == DT_HALF) {
+      atol = 1e-2;
+      rtol = 1e-2;
+    }
+    test::ExpectClose(tensors[0], tensors_expected[0], atol, rtol);
   }
 };
 
@@ -622,83 +624,107 @@ TEST_F(RemapperTest, FuseConv2DWithBiasAndActivation) {
   }
 }
 
-TEST_F(RemapperTest, FuseMatMulWithBiasAndActivation) {
-  using ::tensorflow::ops::Placeholder;
+class RemapperFuseMatMulWithBiasAndActivationTest : public RemapperTest {
+ public:
+  template <DataType DTYPE>
+  void RunTest() {
+    if (!IsMKLEnabled()) GTEST_SKIP() << "Test only applicable to oneDNN.";
+    if (!IsDataTypeSupportedByOneDNNOnThisCPU(DTYPE))
+      GTEST_SKIP() << "Intel oneDNN with " << DataType_Name(DTYPE)
+                   << " is not supported, skipping "
+                   << " RemapperFuseMatMulWithBiasAndActivationTest test.";
+    using ::tensorflow::ops::Placeholder;
 
-  for (const string& activation : {"Relu", "Relu6", "Elu"}) {
-    tensorflow::Scope s = tensorflow::Scope::NewRootScope();
+    for (const string& activation : {"Relu", "Relu6", "Elu"}) {
+      tensorflow::Scope s = tensorflow::Scope::NewRootScope();
 
-    auto lhs_shape = ops::Placeholder::Shape({8, 32});
-    auto rhs_shape = ops::Placeholder::Shape({32, 64});
-    auto bias_shape = ops::Placeholder::Shape({64});
+      auto lhs_shape = ops::Placeholder::Shape({8, 32});
+      auto rhs_shape = ops::Placeholder::Shape({32, 64});
+      auto bias_shape = ops::Placeholder::Shape({64});
 
-    auto lhs = Placeholder(s.WithOpName("lhs"), DT_FLOAT, lhs_shape);
-    auto rhs = Placeholder(s.WithOpName("rhs"), DT_FLOAT, rhs_shape);
-    auto bias = Placeholder(s.WithOpName("bias"), DT_FLOAT, bias_shape);
+      auto lhs = Placeholder(s.WithOpName("lhs"), DTYPE, lhs_shape);
+      auto rhs = Placeholder(s.WithOpName("rhs"), DTYPE, rhs_shape);
+      auto bias = Placeholder(s.WithOpName("bias"), DTYPE, bias_shape);
 
-    auto matmul = ops::MatMul(s.WithOpName("matmul"), lhs, rhs);
-    auto bias_add = ops::BiasAdd(s.WithOpName("bias_add"), matmul, bias);
+      auto matmul = ops::MatMul(s.WithOpName("matmul"), lhs, rhs);
+      auto bias_add = ops::BiasAdd(s.WithOpName("bias_add"), matmul, bias);
 
-    ops::Identity fetch = [&]() -> ops::Identity {
-      auto activate = s.WithOpName("activation");
-      auto fetch = s.WithOpName("fetch");
+      ops::Identity fetch = [&]() -> ops::Identity {
+        auto activate = s.WithOpName("activation");
+        auto fetch = s.WithOpName("fetch");
 
-      if (activation == "Relu") {
-        return ops::Identity(fetch, ops::Relu(activate, bias_add));
-      } else if (activation == "Relu6") {
-        return ops::Identity(fetch, ops::Relu6(activate, bias_add));
-      } else if (activation == "Elu") {
-        return ops::Identity(fetch, ops::Elu(activate, bias_add));
+        if (activation == "Relu") {
+          return ops::Identity(fetch, ops::Relu(activate, bias_add));
+        } else if (activation == "Relu6") {
+          return ops::Identity(fetch, ops::Relu6(activate, bias_add));
+        } else if (activation == "Elu") {
+          return ops::Identity(fetch, ops::Elu(activate, bias_add));
+        }
+
+        return ops::Identity(fetch, bias);
+      }();
+
+      auto lhs_t = GenerateTensorWithSetRandom<DTYPE>({8, 32});
+      auto rhs_t = GenerateTensorWithSetRandom<DTYPE>({32, 64});
+      auto bias_t = GenerateTensorWithSetRandom<DTYPE>({64});
+
+      GrapplerItem item;
+      item.fetch = {"fetch"};
+      item.feed = {{"lhs", lhs_t}, {"rhs", rhs_t}, {"bias", bias_t}};
+      TF_ASSERT_OK(s.ToGraphDef(&item.graph));
+
+      // Place all nodes on CPU.
+      for (int i = 0; i < item.graph.node_size(); ++i) {
+        item.graph.mutable_node(i)->set_device("/device:CPU:0");
       }
 
-      return ops::Identity(fetch, bias);
-    }();
+      Remapper optimizer(RewriterConfig::ON);
+      GraphDef output;
+      TF_ASSERT_OK(optimizer.Optimize(nullptr, item, &output));
 
-    auto lhs_t = GenerateRandomTensor<DT_FLOAT>({8, 32});
-    auto rhs_t = GenerateRandomTensor<DT_FLOAT>({32, 64});
-    auto bias_t = GenerateRandomTensor<DT_FLOAT>({64});
+      int found = 0;
+      for (const NodeDef& node : output.node()) {
+        if (node.name() == "activation") {
+          EXPECT_EQ(node.op(), "_FusedMatMul");
+          ASSERT_GE(node.input_size(), 3);
+          EXPECT_EQ(node.input(0), "lhs");
+          EXPECT_EQ(node.input(1), "rhs");
 
-    GrapplerItem item;
-    item.fetch = {"fetch"};
-    item.feed = {{"lhs", lhs_t}, {"rhs", rhs_t}, {"bias", bias_t}};
-    TF_ASSERT_OK(s.ToGraphDef(&item.graph));
+          EXPECT_EQ(node.attr().at("num_args").i(), 1);
+          EXPECT_EQ(node.input(2), "bias");
 
-    // Place all nodes on CPU.
-    for (int i = 0; i < item.graph.node_size(); ++i) {
-      item.graph.mutable_node(i)->set_device("/device:CPU:0");
-    }
-
-    Remapper optimizer(RewriterConfig::ON);
-    GraphDef output;
-    TF_ASSERT_OK(optimizer.Optimize(nullptr, item, &output));
-
-    int found = 0;
-    for (const NodeDef& node : output.node()) {
-      if (node.name() == "activation") {
-        EXPECT_EQ(node.op(), "_FusedMatMul");
-        ASSERT_GE(node.input_size(), 3);
-        EXPECT_EQ(node.input(0), "lhs");
-        EXPECT_EQ(node.input(1), "rhs");
-
-        EXPECT_EQ(node.attr().at("num_args").i(), 1);
-        EXPECT_EQ(node.input(2), "bias");
-
-        const auto fused_ops = node.attr().at("fused_ops").list().s();
-        ASSERT_EQ(fused_ops.size(), 2);
-        EXPECT_EQ(fused_ops[0], "BiasAdd");
-        EXPECT_EQ(fused_ops[1], activation);
-        found++;
+          const auto fused_ops = node.attr().at("fused_ops").list().s();
+          ASSERT_EQ(fused_ops.size(), 2);
+          EXPECT_EQ(fused_ops[0], "BiasAdd");
+          EXPECT_EQ(fused_ops[1], activation);
+          found++;
+        }
       }
-    }
-    EXPECT_EQ(1, found);
+      EXPECT_EQ(1, found);
 
-    auto tensors_expected = EvaluateNodes(item.graph, item.fetch, item.feed);
-    ASSERT_EQ(tensors_expected.size(), 1);
-    auto tensors = EvaluateNodes(output, item.fetch, item.feed);
-    ASSERT_EQ(tensors.size(), 1);
-    test::ExpectClose(tensors[0], tensors_expected[0], 1e-6);
+      auto tensors_expected = EvaluateNodes(item.graph, item.fetch, item.feed);
+      ASSERT_EQ(tensors_expected.size(), 1);
+      auto tensors = EvaluateNodes(output, item.fetch, item.feed);
+      ASSERT_EQ(tensors.size(), 1);
+      float atol = 1e-6, rtol = 1e-6;
+      if (DTYPE == DT_BFLOAT16 || DTYPE == DT_HALF) {
+        atol = 1e-2;
+        rtol = 1e-2;
+      }
+      test::ExpectClose(tensors[0], tensors_expected[0], atol, rtol);
+    }
   }
+};
+
+TEST_F(RemapperFuseMatMulWithBiasAndActivationTest, F32) {
+  RunTest<DT_FLOAT>();
 }
+
+TEST_F(RemapperFuseMatMulWithBiasAndActivationTest, BF16) {
+  RunTest<DT_BFLOAT16>();
+}
+
+TEST_F(RemapperFuseMatMulWithBiasAndActivationTest, F16) { RunTest<DT_HALF>(); }
 
 #ifndef INTEL_MKL
 TEST_F(RemapperTest, FuseConv2DWithBatchNorm) {

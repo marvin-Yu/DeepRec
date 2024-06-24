@@ -607,10 +607,12 @@ TEST_F(MklRemapperTest, FuseMatMulWithBiasAddAndAdd) {
 
 class MklFusedBatchMatMul : public MklRemapperTest {
  public:
-  template <typename T>
+  template <DataType DTYPE>
   void VerifyFused(bool adjx, bool adjy) {
+    if (!IsDataTypeSupportedByOneDNNOnThisCPU(DTYPE))
+      GTEST_SKIP() << "Intel oneDNN with " << DataType_Name(DTYPE)
+                   << " is not supported, skipping MklFusedBatchMatMul test.";
     using ::tensorflow::ops::Placeholder;
-    using normal_generator = Eigen::internal::NormalRandomGenerator<T>;
 
     int b0 = 2;
     int b1 = 2;
@@ -630,35 +632,31 @@ class MklFusedBatchMatMul : public MklRemapperTest {
     auto weight_placeholder_shape = ops::Placeholder::Shape(weight_shape);
     auto add_placeholder_shape = ops::Placeholder::Shape(add_shape);
 
-    auto input = Placeholder(s.WithOpName("input"), DataTypeToEnum<T>::v(),
-                             input_placeholder_shape);
-    auto weight = Placeholder(s.WithOpName("weight"), DataTypeToEnum<T>::v(),
-                              weight_placeholder_shape);
-    auto addend = Placeholder(s.WithOpName("addend"), DataTypeToEnum<T>::v(),
-                              add_placeholder_shape);
+    auto input =
+        Placeholder(s.WithOpName("input"), DTYPE, input_placeholder_shape);
+    auto weight =
+        Placeholder(s.WithOpName("weight"), DTYPE, weight_placeholder_shape);
+    auto addend =
+        Placeholder(s.WithOpName("addend"), DTYPE, add_placeholder_shape);
 
     auto batchmatmul =
         ops::BatchMatMulV2(s.WithOpName("batchmatmul"), input, weight,
                            ops::BatchMatMulV2::Attrs().AdjX(adjx).AdjY(adjy));
     auto scale_const = ops::Const(s.WithOpName("scale_const"), {0.1f});
-    auto scale =
-        ops::Cast(s.WithOpName("scale"), scale_const, DataTypeToEnum<T>::v());
+    auto scale = ops::Cast(s.WithOpName("scale"), scale_const, DTYPE);
     auto mul = ops::Multiply(s.WithOpName("mul"), batchmatmul, scale);
     auto add = ops::AddV2(s.WithOpName("add"), mul, addend);
     auto fetch = ops::Identity(s.WithOpName("fetch"), add);
 
-    Tensor input_t = Tensor(DataTypeToEnum<T>::v(), input_shape);
-    Tensor weight_t = Tensor(DataTypeToEnum<T>::v(), weight_shape);
-    Tensor add_t = Tensor(DataTypeToEnum<T>::v(), add_shape);
-    input_t.flat<T>() =
-        input_t.flat<T>().template setRandom<normal_generator>();
-    weight_t.flat<T>() =
-        weight_t.flat<T>().template setRandom<normal_generator>();
-    add_t.flat<T>() = add_t.flat<T>().template setRandom<normal_generator>();
+    Tensor input_tensor = GenerateTensorWithSetRandom<DTYPE>(input_shape);
+    Tensor weight_tensor = GenerateTensorWithSetRandom<DTYPE>(weight_shape);
+    Tensor add_tensor = GenerateTensorWithSetRandom<DTYPE>(add_shape);
 
     GrapplerItem item;
     item.fetch = {"fetch"};
-    item.feed = {{"input", input_t}, {"weight", weight_t}, {"addend", add_t}};
+    item.feed = {{"input", input_tensor},
+                 {"weight", weight_tensor},
+                 {"addend", add_tensor}};
     TF_CHECK_OK(s.ToGraphDef(&item.graph));
 
     // Place all nodes on CPU.
@@ -690,17 +688,21 @@ class MklFusedBatchMatMul : public MklRemapperTest {
 
     auto tensors_expected = EvaluateNodes(item.graph, item.fetch, item.feed);
     auto tensors = EvaluateNodes(output, item.fetch, item.feed);
-    std::is_same<T, float>::value
-        ? test::ExpectClose(tensors_expected[0], tensors[0], 1e-6, 1e-6)
-        : test::ExpectClose(tensors_expected[0], tensors[0], 1e-2, 1e-2);
+    float atol = 1e-6, rtol = 1e-6;
+    if (DTYPE == DT_BFLOAT16 || DTYPE == DT_HALF) {
+      atol = 1e-2;
+      rtol = 1e-2;
+    }
+    test::ExpectClose(tensors_expected[0], tensors[0], atol, rtol);
   }
 };
 
 TEST_F(MklFusedBatchMatMul, MulAndAdd) {
   for (const auto adjx : {false, true})
     for (const auto adjy : {false, true}) {
-      this->VerifyFused<float>(adjx, adjy);
-      this->VerifyFused<bfloat16>(adjx, adjy);
+      this->VerifyFused<DT_FLOAT>(adjx, adjy);
+      this->VerifyFused<DT_BFLOAT16>(adjx, adjy);
+      this->VerifyFused<DT_HALF>(adjx, adjy);
     }
 }
 
