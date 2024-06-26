@@ -68,8 +68,6 @@ namespace {
 
 constexpr char kFusedConv2D[] = "_FusedConv2D";
 constexpr char kFusedMatMul[] = "_FusedMatMul";
-constexpr char kFusedMatMulGrad[] = "_FusedMatMulGrad";
-constexpr char kFusedBatchMatMul[] = "_FusedBatchMatMulV2";
 
 constexpr char kFusedDepthwiseConv2dNative[] = "_FusedDepthwiseConv2dNative";
 constexpr char kFusedBatchNormEx[] = "_FusedBatchNormEx";
@@ -176,17 +174,6 @@ struct ContractionWithBatchNormAndActivation {
 };
 
 #ifdef INTEL_MKL
-// BatchMatMul + Mul fusion
-struct ContractionWithMul {
-  ContractionWithMul() = default;
-  ContractionWithMul(int contraction, int mul, int scalar)
-      : contraction(contraction), mul(mul), scalar(scalar) {}
-
-  int contraction = kMissingIndex;
-  int mul = kMissingIndex;
-  int scalar = kMissingIndex;
-};
-
 // Contraction node followed by a BiasAdd and Add.
 struct ContractionWithBiasAddAndAdd {
   ContractionWithBiasAddAndAdd() = default;
@@ -417,21 +404,6 @@ inline bool HasAtMostOneDataFanoutAtPort0(
     return !IsShape(*node) && !IsRank(*node);
   };
   return absl::c_count_if(node_view.GetRegularFanout(0), predicate) <= 1;
-}
-
-// Returns true if it is a scalar
-bool IsScalar(const TensorShapeProto& proto) {
-  // Returns false when rank is unknown
-  if (proto.unknown_rank()) {
-    return false;
-  }
-  // Returns false when dimension is unknown
-  for (const auto& dim : proto.dim()) {
-    if (dim.size() < 0) {
-      return false;
-    }
-  }
-  return (TensorShape(proto).num_elements() == 1);
 }
 
 bool FindContractionWithBias(const RemapperContext& ctx, int node_index,
@@ -674,65 +646,6 @@ bool FindConv2DWithBatchNormAndActivation(
 }
 
 #ifdef INTEL_MKL
-// Fuse BatchMatMul and Mul into FusedBatchMatmul if the other input of
-// Mul is a scalar. For example, we can optimize
-//
-//            Mul
-//           /  \
-//  BatchMatMul scale*  ->       FusedBatchMatmul
-//     /   \                     /      |       \
-// input1  input2             input1  input2   scale
-//
-// *) scale must be a scalar
-bool FindContractionWithMul(const RemapperContext& ctx, int node_index,
-                            ContractionWithMul* matched) {
-  const auto* node_view = ctx.graph_view.GetNode(node_index);
-  if (HasControlFaninOrFanout(*node_view)) return false;
-
-  const auto* node_def = node_view->node();
-  if (!IsAnyMul(*node_def)) return false;
-
-  // Mul has two inputs
-  const auto& props = ctx.graph_properties.GetInputProperties(node_def->name());
-  if (props.size() != 2) return false;
-
-  bool left_is_scalar = IsScalar(props[0].shape());
-  bool right_is_scalar = IsScalar(props[1].shape());
-
-  utils::MutableNodeView *const_node_view, *contraction_node_view;
-  if (left_is_scalar) {
-    const_node_view = node_view->GetRegularFanin(0).node_view();
-    contraction_node_view = node_view->GetRegularFanin(1).node_view();
-  } else if (right_is_scalar) {
-    const_node_view = node_view->GetRegularFanin(1).node_view();
-    contraction_node_view = node_view->GetRegularFanin(0).node_view();
-  } else {
-    return false;
-  }
-
-  // Currently we only fuse BatchMatMul with Mul
-  auto* contraction_node_def = contraction_node_view->node();
-  if (!IsAnyBatchMatMul(*contraction_node_def)) return false;
-
-  bool hasValidType = false;
-  hasValidType =
-      (HasDataType(node_def, DT_FLOAT) || HasDataType(node_def, DT_BFLOAT16));
-  if (!hasValidType) return false;
-
-  if (!HaveSameDataType(node_def, contraction_node_def) ||
-      HasControlFaninOrFanout(*contraction_node_view) ||
-      !HasAtMostOneFanoutAtPort0(*contraction_node_view) ||
-      IsInPreserveSet(ctx, contraction_node_def))
-    return false;
-
-  const ContractionWithMul pattern{contraction_node_view->node_index(),
-                                   node_index, const_node_view->node_index()};
-
-  *matched = pattern;
-
-  return true;
-}
-
 // As AddN has multiple inputs, this function tries to find Conv2D + Bias
 // pattern in specific input port.
 bool FindContractionWithBiasInPort(const RemapperContext& ctx,
@@ -1143,18 +1056,6 @@ void CopyMatMulAttributes(const NodeDef& matmul, NodeDef* fused_matmul) {
   (*attr)["transpose_b"] = src_attr.at("transpose_b");
 }
 
-void CopyBatchMatMulAttributes(const NodeDef& batchmatmul,
-                               NodeDef* fused_batch_matmul) {
-  DCHECK(IsAnyBatchMatMul(batchmatmul)) << "Input node must be a BatchMatMul";
-
-  auto* attr = fused_batch_matmul->mutable_attr();
-  auto& src_attr = batchmatmul.attr();
-
-  (*attr)["T"] = src_attr.at("T");
-  (*attr)["adj_x"] = src_attr.at("adj_x");
-  (*attr)["adj_y"] = src_attr.at("adj_y");
-}
-
 void SetFusedOpAttributes(NodeDef* fused,
                           const absl::Span<const absl::string_view> fused_ops,
                           int num_args = 1, float epsilon = 0.0) {
@@ -1547,43 +1448,6 @@ Status AddFusedConv2DNode(RemapperContext* ctx,
 }
 
 #ifdef INTEL_MKL
-Status AddFusedContractionNode(RemapperContext* ctx,
-                               const ContractionWithMul& matched,
-                               std::vector<bool>* invalidated_nodes,
-                               std::vector<bool>* nodes_to_delete) {
-  const GraphDef* graph = ctx->graph_view.graph();
-  const NodeDef& contraction = graph->node(matched.contraction);
-  const NodeDef& mul = graph->node(matched.mul);
-  const NodeDef& scalar = graph->node(matched.scalar);
-  VLOG(2) << "Fuse " << contraction.op() << " with Mul: "
-          << " mul=" << mul.name() << " contraction=" << contraction.name();
-
-  NodeDef fused_op;
-  fused_op.set_name(mul.name());
-  fused_op.set_device(contraction.device());
-  fused_op.add_input(contraction.input(0));  // 0: input
-  fused_op.add_input(contraction.input(1));  // 1: filter
-  fused_op.add_input(scalar.name());         // 2: scale
-  fused_op.set_op(kFusedBatchMatMul);
-
-  CopyBatchMatMulAttributes(contraction, &fused_op);
-  auto* attr = fused_op.mutable_attr();
-  SetAttrValue(absl::Span<const absl::string_view>({"Mul"}),
-               &(*attr)["fused_ops"]);
-  SetAttrValue(1, &(*attr)["num_args"]);
-
-  utils::Mutation* mutation = ctx->graph_view.GetMutationBuilder();
-  Status status;
-  mutation->AddNode(std::move(fused_op), &status);
-  TF_RETURN_IF_ERROR(status);
-  TF_RETURN_IF_ERROR(mutation->Apply());
-
-  (*invalidated_nodes)[matched.mul] = true;
-  (*nodes_to_delete)[matched.contraction] = true;
-
-  return Status::OK();
-}
-
 Status AddFusedContractionNode(RemapperContext* ctx,
                                const ContractionWithBiasAddAndAdd& matched,
                                std::vector<bool>* invalidated_nodes,
@@ -1978,18 +1842,6 @@ bool IsContractionWithAdd(const RemapperContext& ctx, int node_index) {
   return ret;
 }
 
-bool IsBatchMatMulWithMul(const RemapperContext& ctx, int node_index) {
-  const auto* node_view = ctx.graph_view.GetNode(node_index);
-  const auto* node_def = node_view->node();
-
-  if (!IsAnyMul(*node_def)) return false;
-  if (node_view->NumRegularFanins() < 2) return false;
-  const auto& mul_fanin_0 = node_view->GetRegularFanin(0);
-  const auto& mul_fanin_1 = node_view->GetRegularFanin(1);
-
-  return IsAnyBatchMatMul(*(mul_fanin_0.node_view()->node())) ||
-         IsAnyBatchMatMul(*(mul_fanin_1.node_view()->node()));
-}
 #endif
 
 // Check if a node is a candidate to one of the patterns that require inferred
@@ -2071,8 +1923,7 @@ bool RequiresInferredShapes(const RemapperContext& ctx, int node_index) {
 #ifdef INTEL_MKL
   if (!DisableMKL()) {
     return is_batch_norm_candidate() || is_batch_norm_fusion_candidate() ||
-           IsContractionWithAdd(ctx, node_index) ||
-           IsBatchMatMulWithMul(ctx, node_index);
+           IsContractionWithAdd(ctx, node_index);
   }
 #endif
   return is_relu_biasadd_conv2d_candidate() || is_batch_norm_candidate() ||
@@ -2121,7 +1972,6 @@ Status Remapper::Optimize(Cluster* cluster, const GrapplerItem& item,
 
     ContractionWithBiasAddAndAdd contract_with_bias_and_add;
     ContractionWithBiasAndAddActivation contract_with_bias_and_add_activation;
-    ContractionWithMul contract_with_mul;
 
     if (IsMKLEnabled()) {
       const auto* node_view = ctx.graph_view.GetNode(i);
@@ -2157,13 +2007,6 @@ Status Remapper::Optimize(Cluster* cluster, const GrapplerItem& item,
       }
 #endif
 
-      // Remap BatchMatMul+Mul into the _FusedBatchMatMul.
-      if (FindContractionWithMul(ctx, i, &contract_with_mul)) {
-        TF_RETURN_IF_ERROR(AddFusedContractionNode(
-            &ctx, contract_with_mul, &invalidated_nodes, &nodes_to_delete));
-        continue;
-      }
-
       // MatMul + BiasAdd + Gelu fusion
       std::map<string, int> node_label_to_index;
       if (FindMatMulWithBiasAndAGelu(&ctx, i, &node_label_to_index,
@@ -2180,6 +2023,7 @@ Status Remapper::Optimize(Cluster* cluster, const GrapplerItem& item,
             &ctx, node_label_to_index, &invalidated_nodes, false));
         continue;
       };
+
     }  // IsMKLEnabled()
 
     // Remap {Conv2D,DepthwiseConv2D,MatMul}+BiasAdd into the
