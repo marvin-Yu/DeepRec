@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#if GOOGLE_CUDA || TENSORFLOW_USE_ROCM || INTEL_MKL 
+#if GOOGLE_CUDA || TENSORFLOW_USE_ROCM || INTEL_MKL
 
 #include "tensorflow/core/grappler/optimizers/auto_mixed_precision.h"
 
@@ -96,9 +96,7 @@ const std::pair<int, int> kMinGPUArch = {7, 0};
 
 class AutoMixedPrecisionTest : public GrapplerTest {
  protected:
-  void SetMode(AutoMixedPrecisionMode mode) {
-    mode_ = mode;
-  }
+  void SetMode(AutoMixedPrecisionMode mode) { mode_ = mode; }
   void SetUp() override {
     if (mode_ == AutoMixedPrecisionMode::CUDA) {
       int num_gpus = GetNumAvailableGPUs();
@@ -134,7 +132,7 @@ class AutoMixedPrecisionTest : public GrapplerTest {
 #if defined(INTEL_MKL) && defined(ENABLE_ONEDNN_V3)
       is_fp16_enabled_on_cpu = IsAMXDataTypeSupportedByOneDNNOnThisCPU(DT_HALF);
 #endif  // INTEL_MKL && ENABLE_ONEDNN_V3
-      if(!IsMKLEnabled() || !is_fp16_enabled_on_cpu) {
+      if (!IsMKLEnabled() || !is_fp16_enabled_on_cpu) {
         GTEST_SKIP() << "This device doesn't support FP16";
       }
     }
@@ -235,11 +233,10 @@ class AutoMixedPrecisionTest : public GrapplerTest {
   AutoMixedPrecisionMode mode_;
 };
 
-class AutoMixedPrecisionParamTest : public AutoMixedPrecisionTest,
-                                    public ::testing::WithParamInterface<
-                                        AutoMixedPrecisionMode> {
-
-  protected:
+class AutoMixedPrecisionParamTest
+    : public AutoMixedPrecisionTest,
+      public ::testing::WithParamInterface<AutoMixedPrecisionMode> {
+ protected:
   void SetUp() override {
     mode_ = GetParam();
     AutoMixedPrecisionTest::SetMode(mode_);
@@ -373,6 +370,9 @@ TEST_P(AutoMixedPrecisionParamTest, Simple) {
 }
 
 TEST_F(AutoMixedPrecisionTest, BidirectionalClearChain) {
+  if (!IsMKLEnabled() || !IsAMXDataTypeSupportedByOneDNNOnThisCPU(DT_HALF))
+    GTEST_SKIP() << "This test is not required on CPU";
+
   tensorflow::Scope s = tensorflow::Scope::NewRootScope();
   Output input = ops::Const(s.WithOpName("input"), 1.f / 32, {32, 32});
   Output clr1 = ops::Relu(s.WithOpName("clr1"), input);
@@ -1226,9 +1226,9 @@ INSTANTIATE_TEST_SUITE_P(AutoMixedPrecisionTest, AutoMixedPrecisionParamTest,
                            AutoMixedPrecisionMode::CUDA,
 #endif
 #if INTEL_MKL
-                           AutoMixedPrecisionMode::FP16_CPU
+                               AutoMixedPrecisionMode::FP16_CPU
 #endif
-                          }));
+                         }));
 
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 class AutoMixedPrecisionCpuTest : public GrapplerTest {
