@@ -34,15 +34,13 @@ limitations under the License.
 #include "tensorflow/core/framework/types.h"
 #include "tensorflow/core/kernels/matmul_op_impl.h"
 #include "tensorflow/core/kernels/fill_functor.h"
+#include "tensorflow/core/kernels/mkl_batch_matmul_helper.h"
 #include "tensorflow/core/kernels/mkl_matmul_ops_common.h"
-#include "tensorflow/core/kernels/no_op.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/util/matmul_bcast.h"
 #include "tensorflow/core/util/mkl_util.h"
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
-
-#include "tensorflow/core/kernels/mkl_batch_matmul_helper.h"
 
 namespace tensorflow {
 
@@ -56,9 +54,6 @@ class BatchMatMulMkl : public OpKernel {
   explicit BatchMatMulMkl(OpKernelConstruction* context) : OpKernel(context) {
     OP_REQUIRES_OK(context, context->GetAttr("adj_x", &adj_x_));
     OP_REQUIRES_OK(context, context->GetAttr("adj_y", &adj_y_));
-
-    alpha_ = 1.0f;
-    beta_ = 0.0f;
   }
 
   virtual ~BatchMatMulMkl() {}
@@ -66,14 +61,6 @@ class BatchMatMulMkl : public OpKernel {
   void Compute(OpKernelContext* ctx) override {
     const Tensor& lhs = ctx->input(0);
     const Tensor& rhs = ctx->input(1);
- 
-    if (fuse_mul_) {
-      const Tensor& scale = ctx->input(2);
-      OP_REQUIRES(ctx, scale.NumElements() == 1,
-                  errors::InvalidArgument("scale Tensor must be a scalar"));
-      alpha_ = static_cast<float>(scale.flat<Scalar>()(0));
-      beta_ = 0.0f;
-    }
 
     if (!v2_bcast) {
       // Using V1, so check to make sure lhs and rhs dimensions are correct and
@@ -154,9 +141,6 @@ class BatchMatMulMkl : public OpKernel {
     auto params = bmm.CreateMatMulParams(lhs.shape(), rhs.shape(), out_shape,
                                          adj_x_, adj_y_);
 
-    if (alpha_ != 1.0f)
-      params->post_op_params.push_back({"output_scale", { alpha_ }});
-
     // Create or retrieve matmul primitive from cache.
     MklMatMulPrimitive<Scalar>* matmul_prim =
         MklMatMulPrimitiveFactory<Scalar>::Get(
@@ -168,44 +152,10 @@ class BatchMatMulMkl : public OpKernel {
     matmul_prim->Execute(lhs.flat<Scalar>().data(), rhs.flat<Scalar>().data(),
                          out->flat<Scalar>().data(), cpu_stream);
   }
- protected:
-  void set_fuse_mul(bool fuse_mul) { fuse_mul_ = fuse_mul; }
 
  private:
   bool adj_x_;
   bool adj_y_;
-  bool fuse_mul_ = false;
-  float alpha_;
-  float beta_;
-};
-
-template <typename Device, typename Scalar, bool v2_bcast>
-class FusedBatchMatMulMkl : public BatchMatMulMkl<Device, Scalar, v2_bcast> {
- public:
-  explicit FusedBatchMatMulMkl(OpKernelConstruction* context)
-      : BatchMatMulMkl<Device, Scalar, v2_bcast>(context) {
-    std::vector<string> fused_ops;
-    OP_REQUIRES_OK(context, context->GetAttr("fused_ops", &fused_ops));
-    OP_REQUIRES(context, !fused_ops.empty(),
-                errors::InvalidArgument(
-                    "Fused BatchMatMul must have at least one fused op."));
-
-    int num_args;
-    OP_REQUIRES_OK(context, context->GetAttr("num_args", &num_args));
-
-    if (fused_ops == std::vector<string>{"Mul"}) {
-      this->set_fuse_mul(true);
-      OP_REQUIRES(context, num_args == 1,
-                  errors::InvalidArgument(
-                      "Fused BatchMatmul must have one extra argument: Mul."));
-    } else {
-      OP_REQUIRES(context, false,
-                  errors::Unimplemented("Fusion is not implemented: [",
-                                        absl::StrJoin(fused_ops, ","), "]"));
-    }
-  }
-
-  virtual ~FusedBatchMatMulMkl() {}
 };
 
 #define REGISTER_BATCH_MATMUL_MKL(TYPE)                                       \
@@ -222,34 +172,12 @@ class FusedBatchMatMulMkl : public BatchMatMulMkl<Device, Scalar, v2_bcast> {
                               .Label(mkl_op_registry::kMklNameChangeOpLabel), \
                           BatchMatMulMkl<CPUDevice, TYPE, true>)
 
-#define REGISTER_FUSED_BATCH_MATMUL_MKL(TYPE)                                 \
-  REGISTER_KERNEL_BUILDER(                                                    \
-      Name("_FusedBatchMatMul").Device(DEVICE_CPU).TypeConstraint<TYPE>("T"), \
-      NoOp);                                                                  \
-  REGISTER_KERNEL_BUILDER(Name("_FusedBatchMatMulV2")                         \
-                              .Device(DEVICE_CPU)                             \
-                              .TypeConstraint<TYPE>("T"),                     \
-                          NoOp);                                              \
-  REGISTER_KERNEL_BUILDER(Name("_MklFusedBatchMatMul")                        \
-                              .Device(DEVICE_CPU)                             \
-                              .TypeConstraint<TYPE>("T")                      \
-                              .Label(mkl_op_registry::kMklNameChangeOpLabel), \
-                          FusedBatchMatMulMkl<CPUDevice, TYPE, false>)        \
-  REGISTER_KERNEL_BUILDER(Name("_MklFusedBatchMatMulV2")                      \
-                              .Device(DEVICE_CPU)                             \
-                              .TypeConstraint<TYPE>("T")                      \
-                              .Label(mkl_op_registry::kMklNameChangeOpLabel), \
-                          FusedBatchMatMulMkl<CPUDevice, TYPE, true>)
-
 TF_CALL_float(REGISTER_BATCH_MATMUL_MKL);
 TF_CALL_float(REGISTER_BATCH_MATMUL_MKL_V2);
-TF_CALL_float(REGISTER_FUSED_BATCH_MATMUL_MKL);
 TF_CALL_bfloat16(REGISTER_BATCH_MATMUL_MKL);
 TF_CALL_bfloat16(REGISTER_BATCH_MATMUL_MKL_V2);
-TF_CALL_bfloat16(REGISTER_FUSED_BATCH_MATMUL_MKL);
 TF_CALL_half(REGISTER_BATCH_MATMUL_MKL);
 TF_CALL_half(REGISTER_BATCH_MATMUL_MKL_V2);
-TF_CALL_half(REGISTER_FUSED_BATCH_MATMUL_MKL);
 
 }  // end namespace tensorflow
 #endif

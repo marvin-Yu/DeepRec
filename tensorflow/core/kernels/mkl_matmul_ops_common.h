@@ -621,11 +621,6 @@ struct MklMatMulParams {
   memory::dims a_strides;
   memory::dims b_strides;
   memory::dims c_strides;
-  struct PostOpParam {
-    string name;
-    std::vector<float> param;
-  };
-  std::vector<PostOpParam> post_op_params;
 
   MklMatMulParams(memory::dims a_dims, memory::dims b_dims, memory::dims c_dims,
                   memory::dims a_strides, memory::dims b_strides,
@@ -732,39 +727,11 @@ class MklMatMulPrimitive : public MklPrimitive {
 #ifndef ENABLE_ONEDNN_V3
     context_.desc.reset(
         new matmul::desc(*context_.a_md, *context_.b_md, *context_.c_md));
-#endif  // !ENABLE_ONEDNN_V3
-
-    // Check if there is any fusion as post-ops
-    auto const& post_op_params = params.post_op_params;
-    dnnl::primitive_attr post_ops_attr;
-    if (!post_op_params.empty()) {
-      for (auto const& post_op_param : post_op_params) {
-        if (post_op_param.name == "output_scale") {
-#ifndef ENABLE_ONEDNN_V3
-          DCHECK_EQ(post_op_param.param.size(), 1);
-          std::vector<float> scales;
-          scales.push_back(post_op_param.param[0]);
-          post_ops_attr.set_output_scales(0, scales);
-#endif  // !ENABLE_ONEDNN_V3
-        } else {
-          DCHECK((post_op_param.name == "output_scale"));
-        }
-      }
-#ifndef ENABLE_ONEDNN_V3
-      context_.prim_desc.reset(new matmul::primitive_desc(
-          *context_.desc, post_ops_attr, cpu_engine_));
-    } else {
-      context_.prim_desc.reset(
-          new matmul::primitive_desc(*context_.desc, cpu_engine_));
-    }
+    context_.prim_desc.reset(
+        new matmul::primitive_desc(*context_.desc, cpu_engine_));
 #else
-      context_.prim_desc.reset(new matmul::primitive_desc(
-          cpu_engine_, *context_.a_md, *context_.b_md, *context_.c_md,
-          post_ops_attr));
-    } else {
-      context_.prim_desc.reset(new matmul::primitive_desc(
-          cpu_engine_, *context_.a_md, *context_.b_md, *context_.c_md));
-    }
+    context_.prim_desc.reset(new matmul::primitive_desc(
+        cpu_engine_, *context_.a_md, *context_.b_md, *context_.c_md));
 #endif  // !ENABLE_ONEDNN_V3
 
     // Create memory primitive based on dummy data.
@@ -838,16 +805,6 @@ class MklMatMulPrimitiveFactory : public MklPrimitiveFactory<T> {
     key_creator.AddAsKey(params.c_strides);
     key_creator.AddAsKey(typeid(T).name());
 
-    // Generate keys for post-ops
-    for (auto const& post_op_param : params.post_op_params) {
-      if (post_op_param.name == "output_scale") {
-        DCHECK_EQ(post_op_param.param.size(), 1);
-        key_creator.AddAsKey(post_op_param.name);
-        key_creator.AddAsKey(post_op_param.param[0]);
-      } else {
-        return string("not_a_key");
-      }
-    }
     return key_creator.GetKey();
   }
 
