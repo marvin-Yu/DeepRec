@@ -3756,7 +3756,6 @@ tf_mkl_kernel_library(
         "mkl_batch_matmul_helper.h",
         "mkl_kernel_util.h",
         "mkl_matmul_ops_common.h",
-        "no_op.h"
     ],
     deps = MATH_DEPS + mkl_deps(),
 )
