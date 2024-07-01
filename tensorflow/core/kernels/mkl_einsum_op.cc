@@ -148,6 +148,10 @@ class MklEinsum : public OpKernel {
     OpInputList inputs;
     OP_REQUIRES_OK(ctx, ctx->input_list("inputs", &inputs));
 
+    if (std::is_same<T, float>::value) {
+      (void)SetFPMathMode();
+    }
+
     OperandLabels input_labels(mkl_input_labels_);
     Labels output_labels(mkl_output_labels_);
     std::vector<EinsumHelper::DimensionType> label_types(mkl_label_types_);
