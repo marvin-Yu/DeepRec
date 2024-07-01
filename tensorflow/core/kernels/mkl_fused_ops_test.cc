@@ -1153,6 +1153,12 @@ class MklFusedMatMulOpTest : public OpsTestBase {
             next_op = ops::Tanh(root.WithOpName(last_op), next_op);
           }
 
+          if (std::find(fused_ops.begin(), fused_ops.end(), "Sigmoid") !=
+              fused_ops.end()) {
+            last_op = "with_sigmoid";
+            next_op = ops::Sigmoid(root.WithOpName(last_op), next_op);
+          }
+
           if (std::find(fused_ops.begin(), fused_ops.end(), "Gelu") !=
               fused_ops.end()) {
             last_op = "with_gelu";
@@ -1239,6 +1245,15 @@ TYPED_TEST_P(MklFusedMatMulOpTest, WithBiasAndTanh) {
                           {"BiasAdd", "Tanh"});
 }
 
+TYPED_TEST_P(MklFusedMatMulOpTest, WithBiasAndSigmoid) {
+  const int batch = 3;
+  const int input_channel = 4;
+  const int output_channel = 5;
+
+  this->VerifyFusedMatMul(batch, input_channel, output_channel,
+                          {"BiasAdd", "Sigmoid"});
+}
+
 TYPED_TEST_P(MklFusedMatMulOpTest, WithBiasAndGelu) {
   const int batch = 3;
   const int input_channel = 4;
@@ -1272,6 +1287,7 @@ REGISTER_TYPED_TEST_CASE_P(MklFusedMatMulOpTest,  //
                            WithBiasAndRelu6,      //
                            WithBiasAndElu,        //
                            WithBiasAndTanh,       //
+                           WithBiasAndSigmoid,    //
                            WithBiasAndGelu,       //
                            WithBiasAndGeluErf,    //
                            WithBiasAndAdd);
