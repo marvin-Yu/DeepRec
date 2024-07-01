@@ -775,7 +775,7 @@ class MklMatMulPrimitive : public MklPrimitive {
     context_.b_mem.reset(
         new dnnl::memory(*context_.b_md, cpu_engine_, DummyData));
     context_.c_mem.reset(
-        new dnnl::memory(*context_.b_md, cpu_engine_, DummyData));
+        new dnnl::memory(*context_.c_md, cpu_engine_, DummyData));
 
     // Create matmul primitive.
     matmul_primitive.reset(new dnnl::matmul(*context_.prim_desc));
