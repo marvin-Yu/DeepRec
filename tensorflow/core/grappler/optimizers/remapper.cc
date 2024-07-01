@@ -191,6 +191,7 @@ struct ContractionWithBiasAddAndAdd {
 };
 
 // Contraction node followed by a BiasAdd, Add and Relu.
+// Plus Tanh and Sigmoid for MatMul in oneDNN
 struct ContractionWithBiasAndAddActivation {
   ContractionWithBiasAndAddActivation() = default;
   ContractionWithBiasAndAddActivation(int contraction, int bias_add, int add,
@@ -379,7 +380,7 @@ bool IsDeviceCompatible(const RemapperContext& ctx, Pattern& matched) {
 bool IsSupportedActivation(const NodeDef& node) {
   if (!DisableMKL()) {
     return IsRelu(node) || IsRelu6(node) || IsElu(node) || IsGelu(node) ||
-           IsLeakyRelu(node) || IsTanh(node);
+           IsLeakyRelu(node) || IsTanh(node) || IsSigmoid(node);
   }
   return IsRelu(node) || IsRelu6(node) || IsElu(node) || IsLeakyRelu(node);
 }
@@ -489,8 +490,10 @@ bool FindContractionWithBiasAndActivation(
   // Currently, only conv + bias + leakyrelu is enabled
   if (!IsConv2D(*contraction_node_def) && IsLeakyRelu(*node_def)) return false;
 
-  // Currently, only matmul + bias + tanh is enable
-  if (!IsMatMul(*contraction_node_def) && IsTanh(*node_def)) return false;
+  // Currently, only matmul + bias + (tanh or sigmoid) is enabled
+  if (!IsMatMul(*contraction_node_def) &&
+      (IsTanh(*node_def) || IsSigmoid(*node_def)))
+    return false;
 
   // Check that data type and data format are supported on assigned device.
   const ContractionWithBiasAddAndActivation pattern{base.contraction,
@@ -617,6 +620,10 @@ bool FindConv2DWithBatchNormAndActivation(
   const auto* node_def = node_view->node();
   if (!IsSupportedActivation(*node_def)) return false;
 
+  // TODO(intel-tf): Need to test and enable in kernel op before enabling
+  // this activation
+  if (IsSigmoid(*node_def)) return false;
+
   // And input to the activation node must match Conv2DWithBatchNorm pattern.
   if (node_view->NumRegularFanins() < 1) return false;
   const auto& regular_fanin_0 = node_view->GetRegularFanin(0);
@@ -742,6 +749,10 @@ bool FindContractionWithBiasAndAddActivation(
 
   // Currently, Contraction + Bias + Add + Tanh pattern is not supported
   if (IsTanh(*node_def)) return false;
+
+  // TODO(intel-tf): Need to test and enable in kernel op before enabling
+  // this activation
+  if (IsSigmoid(*node_def)) return false;
 
   // MKL activation op only supports float32, bfloat16 and float16 data types.
   if (!(HasDataType(node_def, DT_FLOAT) || HasDataType(node_def, DT_BFLOAT16) ||
