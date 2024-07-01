@@ -4419,6 +4419,7 @@ tf_cc_test_mkl(
         "//tensorflow/core/kernels:mkl_fused_batch_norm_op",
         "//tensorflow/core/kernels:mkl_identity_op",
         "//tensorflow/core/kernels:mkl_input_conversion_op",
+        "//tensorflow/core/kernels:mkl_layer_norm_op",
         "//tensorflow/core/kernels:mkl_lrn_op",
         "//tensorflow/core/kernels:mkl_matmul_op",
         "//tensorflow/core/kernels:mkl_pooling_ops",
