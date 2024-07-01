@@ -28,6 +28,7 @@ limitations under the License.
 #include "tensorflow/core/kernels/mkl_kernel_util.h"
 #include "tensorflow/core/util/mkl_types.h"
 #include "tensorflow/core/util/mkl_util.h"
+#include "tensorflow/core/util/onednn_env_vars.h"
 
 using dnnl::inner_product_forward;
 using dnnl::primitive_attr;
