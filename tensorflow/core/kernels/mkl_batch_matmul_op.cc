@@ -139,8 +139,9 @@ class BatchMatMulMkl : public OpKernel {
 
     // Compute parameters for DNNL matmul primitive.
     MklBatchMatMulHelper bmm;
-    auto params = bmm.CreateMatMulParams(lhs.shape(), rhs.shape(), out_shape,
-                                         adj_x_, adj_y_);
+    string prefix = "batchmatmul";
+    auto params = bmm.CreateMatMulParams(prefix, lhs.shape(), rhs.shape(),
+                                         out_shape, adj_x_, adj_y_);
     this->ExtendMklMatMulParams(ctx, *params);
 
     // Create or retrieve matmul primitive from cache.

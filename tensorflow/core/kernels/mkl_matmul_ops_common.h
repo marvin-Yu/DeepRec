@@ -596,6 +596,7 @@ using dnnl::matmul;
 namespace {
 
 struct MklMatMulParams {
+  string prefix;
   memory::dims a_dims;
   memory::dims b_dims;
   memory::dims c_dims;
@@ -611,10 +612,11 @@ struct MklMatMulParams {
   };
   std::vector<PostOpParam> post_op_params;
 
-  MklMatMulParams(memory::dims a_dims, memory::dims b_dims, memory::dims c_dims,
-                  memory::dims a_strides, memory::dims b_strides,
-                  memory::dims c_strides)
-      : a_dims(a_dims),
+  MklMatMulParams(string prefix, memory::dims a_dims, memory::dims b_dims,
+                  memory::dims c_dims, memory::dims a_strides,
+                  memory::dims b_strides, memory::dims c_strides)
+      : prefix(prefix),
+        a_dims(a_dims),
         b_dims(b_dims),
         c_dims(c_dims),
         a_strides(a_strides),
@@ -847,9 +849,8 @@ class MklMatMulPrimitiveFactory : public MklPrimitiveFactory<T> {
   }
 
   static string CreateKey(const MklMatMulParams& params) {
-    string prefix = "matmul_";
     FactoryKeyCreator key_creator;
-    key_creator.AddAsKey(prefix);
+    key_creator.AddAsKey(params.prefix);
     key_creator.AddAsKey(params.a_dims);
     key_creator.AddAsKey(params.b_dims);
     key_creator.AddAsKey(params.c_dims);
@@ -909,8 +910,8 @@ void dnnl_gemm(char transa, char transb, int64_t m, int64_t n, int64_t k,
   DCHECK_EQ(alpha, 1.0f);
   DCHECK_EQ(beta, 0.f);
 
-  MklMatMulParams params(a_dims, b_dims, c_dims, a_strides, b_strides,
-                         c_strides);
+  MklMatMulParams params("dnnl_gemm", a_dims, b_dims, c_dims, a_strides,
+                         b_strides, c_strides);
   MklMatMulPrimitive<T, T, T>* matmul_prim =
       MklMatMulPrimitiveFactory<T, T, T, T>::Get(params, 0);
 
