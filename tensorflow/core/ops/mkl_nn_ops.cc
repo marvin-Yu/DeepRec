@@ -1688,8 +1688,7 @@ REGISTER_OP("_MklQuantizedDepthwiseConv2D")
     .Attr("padding_list: list(int) = []")
     .SetShapeFn([](InferenceContext* c) {
       // TODO(bhavanis): Print an error message during the return.
-      TF_RETURN_IF_ERROR(
-          shape_inference::Conv2DShape(c));
+      TF_RETURN_IF_ERROR(shape_inference::Conv2DShape(c));
       ShapeHandle unused, channel;
       TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 0, &unused));
       TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 0, &unused));
@@ -1739,8 +1738,7 @@ REGISTER_OP("_MklQuantizedDepthwiseConv2DWithBias")
     .Attr("dilations: list(int) = [1, 1, 1, 1]")
     .Attr("padding_list: list(int) = []")
     .SetShapeFn([](InferenceContext* c) {
-      TF_RETURN_IF_ERROR(
-          shape_inference::Conv2DShape(c));
+      TF_RETURN_IF_ERROR(shape_inference::Conv2DShape(c));
       ShapeHandle unused, channel;
       TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &unused));
       TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 0, &unused));
