@@ -984,6 +984,7 @@ tf_cuda_library(
     }) + if_mkl([
         "util/mkl_threadpool.h",
         "util/mkl_util.h",
+        "util/onednn_env_vars.h",
     ]),
     visibility = ["//visibility:public"],
     deps = [
@@ -4587,6 +4588,7 @@ tf_cc_test_mkl(
         ":test",
         ":test_main",
         ":testlib",
+        "//tensorflow/core/util:onednn_env_vars",
     ],
 )
 
