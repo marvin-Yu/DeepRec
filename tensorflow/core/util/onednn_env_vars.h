@@ -19,6 +19,8 @@ limitations under the License.
 
 namespace tensorflow {
 
+bool AreWeightsFrozen();
+
 bool UseSystemAlloc();
 
 }  // namespace tensorflow

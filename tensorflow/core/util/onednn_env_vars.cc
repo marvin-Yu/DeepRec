@@ -22,6 +22,16 @@ limitations under the License.
 
 namespace tensorflow {
 
+bool AreWeightsFrozen() {
+  static bool weights_const = false;
+  static absl::once_flag once;
+  absl::call_once(once, [&] {
+    TF_CHECK_OK(ReadBoolFromEnvVar("TF_ONEDNN_ASSUME_FROZEN_WEIGHTS",
+                                   /*default_value*/ false, &weights_const));
+  });
+  return weights_const;
+}
+
 bool UseSystemAlloc() {
   static bool use_sys_alloc = false;
   static absl::once_flag once;
