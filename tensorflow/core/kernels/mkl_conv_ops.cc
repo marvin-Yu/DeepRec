@@ -481,6 +481,11 @@ class MklConvOp : public OpKernel {
       // Input tensors
       const Tensor& src_tensor = MklGetInput(context, kInputIndex_Src);
       const Tensor& filter_tensor = MklGetInput(context, kInputIndex_Filter);
+
+      if (std::is_same<Tinput, float>::value) {
+        (void)SetFPMathMode();
+      }
+
       MklDnnShape src_mkl_shape, filter_mkl_shape;
       GetMklShape(context, kInputIndex_Src, &src_mkl_shape, native_format);
       GetMklShape(context, kInputIndex_Filter, &filter_mkl_shape,
