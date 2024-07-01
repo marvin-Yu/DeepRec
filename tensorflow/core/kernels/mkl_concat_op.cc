@@ -150,10 +150,10 @@ class EigenConcatBaseOp : public OpKernel {
                const OpInputList& input_mins, const OpInputList& input_maxes,
                bool quantized_input) {
     const Tensor* concat_dim_tensor;
-    const char* axis_attribute_name =
-        AxisArgName == NAME_IS_AXIS
-            ? "axis"
-            : AxisArgName == NAME_IS_CONCAT_DIM ? "concat_dim" : "<invalid>";
+    const char* axis_attribute_name = AxisArgName == NAME_IS_AXIS ? "axis"
+                                      : AxisArgName == NAME_IS_CONCAT_DIM
+                                          ? "concat_dim"
+                                          : "<invalid>";
     OP_REQUIRES_OK(c, c->input(axis_attribute_name, &concat_dim_tensor));
     OP_REQUIRES(c, TensorShapeUtils::IsScalar(concat_dim_tensor->shape()),
                 errors::InvalidArgument(
@@ -377,8 +377,7 @@ class MklConcatFwdPrimitive : public MklPrimitive {
 
     context_.concat_fwd.reset(new concat(*context_.fwd_pd));
     std::unordered_map<int, memory> net_args = {
-        { DNNL_ARG_DST,
-          *context_.dst_mem }};
+        {DNNL_ARG_DST, *context_.dst_mem}};
     for (int i = 0; i < concat_fwd_dims.num_inputs; ++i) {
       net_args.insert({DNNL_ARG_MULTIPLE_SRC + i, context_.data_mem[i]});
     }
@@ -540,8 +539,8 @@ class MklConcatOp : public OpKernel {
 
       if (num_of_empty_inputs == i) invoke_eigen = true;
 
-      // All inputs are not in one format (TF or OneDNN). This is mixed input case.
-      // We can potentially optimize this case by converting all TF inputs
+      // All inputs are not in one format (TF or OneDNN). This is mixed input
+      // case. We can potentially optimize this case by converting all TF inputs
       // to OneDNN format. But currently, we fall to Eigen for this case.
       // It may be possible to convert inputs that in TF format to OneDNN
       // format and avoid calling eigen version.
@@ -696,8 +695,8 @@ class MklConcatOp : public OpKernel {
         if (dst_dims.size() == 4) {
           dst_dims_in_nchw = MklDnnDimsInNCHW(
               dst_dims, MklDnnDataFormatToTFDataFormat(orig_tf_format));
-// Set the output format same as the most common format of inputs
-// to avoid layout conversions.
+          // Set the output format same as the most common format of inputs
+          // to avoid layout conversions.
           // DNN 1.0: internal format is always blocked;
           //          format_tag does not have "blocked" field.
           VLOG(1) << "mkl_common_format == MEMORY_FORMAT::blocked";
@@ -741,7 +740,7 @@ class MklConcatOp : public OpKernel {
       if (!inputs.empty()) {
         if (are_all_mkl_inputs) {
           auto concat_pd =
-            CONCAT_PRIM_DESC_USING_SRC(cpu_engine, concat_dim, srcs_pd);
+              CONCAT_PRIM_DESC_USING_SRC(cpu_engine, concat_dim, srcs_pd);
           auto dst_pd = concat_pd.PRIMITIVE_DESC_DST;
 
           MklDnnShape dnn_shape_dst;
@@ -767,8 +766,7 @@ class MklConcatOp : public OpKernel {
           dst.SetUsrMemDataHandle(dst_tensor, fwd_cpu_stream);
           auto concat_op = concat(concat_pd);
           std::unordered_map<int, memory> net_args = {
-              { DNNL_ARG_DST,
-                dst.GetOpMem() }};
+              {DNNL_ARG_DST, dst.GetOpMem()}};
           for (int i = 0; i < inputs.size(); ++i) {
             net_args.insert({DNNL_ARG_MULTIPLE_SRC + i, inputs[i]});
           }

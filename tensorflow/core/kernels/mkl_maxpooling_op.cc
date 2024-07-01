@@ -105,25 +105,22 @@ class MklMaxPoolingOp : public MklPoolingForwardOpBase<T> {
 
       // Get the input memory descriptor
       memory::desc input_md =
-          dnn_shape_input.IsMklTensor()
-              ? dnn_shape_input.GetMklLayout()
-              : is_pool2d ? memory::desc(
-                                TFShapeToMklDnnDimsInNCHW(
-                                    input_tensor_shape, this->data_format_tf_),
-                                MklDnnType<T>(), this->data_format_dnnl_)
-                          : memory::desc(
-                                TFShapeToMklDnnDimsInNCDHW(
-                                    input_tensor_shape, this->data_format_tf_),
-                                MklDnnType<T>(), this->data_format_dnnl_);
+          dnn_shape_input.IsMklTensor() ? dnn_shape_input.GetMklLayout()
+          : is_pool2d
+              ? memory::desc(TFShapeToMklDnnDimsInNCHW(input_tensor_shape,
+                                                       this->data_format_tf_),
+                             MklDnnType<T>(), this->data_format_dnnl_)
+              : memory::desc(TFShapeToMklDnnDimsInNCDHW(input_tensor_shape,
+                                                        this->data_format_tf_),
+                             MklDnnType<T>(), this->data_format_dnnl_);
 
       // Get src/filter/stride/padding information
       memory::dims src_dims =
-          dnn_shape_input.IsMklTensor()
-              ? dnn_shape_input.GetSizesAsMklDnnDims()
-              : is_pool2d ? TFShapeToMklDnnDimsInNCHW(input_tensor.shape(),
-                                                      this->data_format_tf_)
-                          : TFShapeToMklDnnDimsInNCDHW(input_tensor.shape(),
-                                                       this->data_format_tf_);
+          dnn_shape_input.IsMklTensor() ? dnn_shape_input.GetSizesAsMklDnnDims()
+          : is_pool2d ? TFShapeToMklDnnDimsInNCHW(input_tensor.shape(),
+                                                  this->data_format_tf_)
+                      : TFShapeToMklDnnDimsInNCDHW(input_tensor.shape(),
+                                                   this->data_format_tf_);
       memory::dims filter_dims, strides, padding_left, padding_right;
 #ifndef ENABLE_ONEDNN_V3
       this->PoolParamsToDims(&pool_params, &filter_dims, &strides,
@@ -283,18 +280,17 @@ class MklMaxPoolingGradOp : public MklPoolingBackwardOpBase<T> {
       memory::dims orig_input_dims_mkl_order =
           orig_input_mkl_shape.IsMklTensor()
               ? orig_input_mkl_shape.GetSizesAsMklDnnDims()
-              : is_pool2d ? TFShapeToMklDnnDimsInNCHW(orig_input_shape,
-                                                      this->data_format_tf_)
-                          : TFShapeToMklDnnDimsInNCDHW(orig_input_shape,
-                                                       this->data_format_tf_);
+          : is_pool2d ? TFShapeToMklDnnDimsInNCHW(orig_input_shape,
+                                                  this->data_format_tf_)
+                      : TFShapeToMklDnnDimsInNCDHW(orig_input_shape,
+                                                   this->data_format_tf_);
 
       memory::dims diff_dst_dims =
-          grad_mkl_shape.IsMklTensor()
-              ? grad_mkl_shape.GetSizesAsMklDnnDims()
-              : is_pool2d ? TFShapeToMklDnnDimsInNCHW(grad_tensor.shape(),
-                                                      this->data_format_tf_)
-                          : TFShapeToMklDnnDimsInNCDHW(grad_tensor.shape(),
-                                                       this->data_format_tf_);
+          grad_mkl_shape.IsMklTensor() ? grad_mkl_shape.GetSizesAsMklDnnDims()
+          : is_pool2d ? TFShapeToMklDnnDimsInNCHW(grad_tensor.shape(),
+                                                  this->data_format_tf_)
+                      : TFShapeToMklDnnDimsInNCDHW(grad_tensor.shape(),
+                                                   this->data_format_tf_);
 
       memory::dims output_dims_mkl_order;
       this->GetOutputDims(pool_params, &output_dims_mkl_order);

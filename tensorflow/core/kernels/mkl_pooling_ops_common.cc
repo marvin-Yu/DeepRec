@@ -38,7 +38,7 @@ template <typename T>
 void MklPoolingFwdPrimitive<T>::Setup(const MklPoolingParams& fwdParams) {
   DCHECK(fwdParams.alg_kind == ALGORITHM::pooling_max ||
          AVG_POOLING_DCHECK(fwdParams)
-         fwdParams.alg_kind == ALGORITHM::pooling_avg_include_padding ||
+                 fwdParams.alg_kind == ALGORITHM::pooling_avg_include_padding ||
          fwdParams.alg_kind == ALGORITHM::pooling_avg_exclude_padding)
       << "Pooling algorithm kind is not supported";
 
@@ -53,8 +53,8 @@ void MklPoolingFwdPrimitive<T>::Setup(const MklPoolingParams& fwdParams) {
   context_.src_md.reset(new memory::desc(fwdParams.GET_MEMORY_DESC(src_md)));
 
   context_.dst_md.reset(new memory::desc(
-        {fwdParams.dst_dims}, MklDnnType<T>(),
-        fwdParams.native_format ? fwdParams.src_format : MEMORY_FORMAT::any));
+      {fwdParams.dst_dims}, MklDnnType<T>(),
+      fwdParams.native_format ? fwdParams.src_format : MEMORY_FORMAT::any));
 
   // Create a pooling descriptor.
 #ifndef ENABLE_ONEDNN_V3
@@ -89,8 +89,8 @@ void MklPoolingFwdPrimitive<T>::Setup(const MklPoolingParams& fwdParams) {
                                  {DNNL_ARG_WORKSPACE, *context_.ws_mem}});
     context_.fwd.reset(new pooling_forward(*context_.fwd_pd));
   } else {
-    context_.net_args.push_back({{DNNL_ARG_SRC, *context_.src_mem},
-                                 {DNNL_ARG_DST, *context_.dst_mem}});
+    context_.net_args.push_back(
+        {{DNNL_ARG_SRC, *context_.src_mem}, {DNNL_ARG_DST, *context_.dst_mem}});
     context_.fwd.reset(new pooling_forward(*context_.fwd_pd));
   }
 
@@ -148,7 +148,7 @@ template <typename T>
 void MklPoolingBwdPrimitive<T>::Setup(const MklPoolingParams& bwdParams) {
   DCHECK(bwdParams.alg_kind == ALGORITHM::pooling_max ||
          AVG_POOLING_DCHECK(bwdParams)
-         bwdParams.alg_kind == ALGORITHM::pooling_avg_include_padding ||
+                 bwdParams.alg_kind == ALGORITHM::pooling_avg_include_padding ||
          bwdParams.alg_kind == ALGORITHM::pooling_avg_exclude_padding)
       << "Pooling algorithm kind is not supported";
   context_.alg_kind = bwdParams.alg_kind;
@@ -159,8 +159,8 @@ void MklPoolingBwdPrimitive<T>::Setup(const MklPoolingParams& bwdParams) {
   context_.src_md.reset(new memory::desc(bwdParams.GET_MEMORY_DESC(src_md)));
 
   context_.dst_md.reset(new memory::desc(
-        {bwdParams.dst_dims}, MklDnnType<T>(),
-        bwdParams.native_format ? bwdParams.src_format : MEMORY_FORMAT::any));
+      {bwdParams.dst_dims}, MklDnnType<T>(),
+      bwdParams.native_format ? bwdParams.src_format : MEMORY_FORMAT::any));
 
 #ifndef ENABLE_ONEDNN_V3
   // Create a backward primitive. The implementation for backward must comply to
@@ -200,15 +200,13 @@ void MklPoolingBwdPrimitive<T>::Setup(const MklPoolingParams& bwdParams) {
   if (bwdParams.alg_kind == ALGORITHM::pooling_max) {
     context_.ws_mem.reset(
         new memory(context_.fwd_pd.get()->workspace_desc(), cpu_engine_));
-    context_.net_args.push_back(
-        {{DNNL_ARG_DIFF_DST, *context_.diff_dst_mem},
-         {DNNL_ARG_WORKSPACE, *context_.ws_mem},
-         {DNNL_ARG_DIFF_SRC, *context_.diff_src_mem}});
+    context_.net_args.push_back({{DNNL_ARG_DIFF_DST, *context_.diff_dst_mem},
+                                 {DNNL_ARG_WORKSPACE, *context_.ws_mem},
+                                 {DNNL_ARG_DIFF_SRC, *context_.diff_src_mem}});
     context_.bwd.reset(new pooling_backward(*context_.bwd_pd));
   } else {
-    context_.net_args.push_back(
-        {{DNNL_ARG_DIFF_DST, *context_.diff_dst_mem},
-         {DNNL_ARG_DIFF_SRC, *context_.diff_src_mem}});
+    context_.net_args.push_back({{DNNL_ARG_DIFF_DST, *context_.diff_dst_mem},
+                                 {DNNL_ARG_DIFF_SRC, *context_.diff_src_mem}});
     context_.bwd.reset(new pooling_backward(*context_.bwd_pd));
   }
   context_.bwd_primitives.push_back(*context_.bwd);

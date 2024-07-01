@@ -90,10 +90,12 @@ struct MklBatchNormFwdParams {
         training(training),
         activation_mode(activation_mode),
 #ifndef ENABLE_ONEDNN_V3
-        src_md(src_md) {}
+        src_md(src_md) {
+  }
 #else
         src_md(src_md),
-        dst_md(dst_md) {}
+        dst_md(dst_md) {
+  }
 #endif  // !ENABLE_ONEDNN_V3
 };
 
@@ -157,8 +159,8 @@ class MklFusedBatchNormFwdPrimitive : public MklPrimitive {
 #else
       context_.scale_mem->set_data_handle(
           static_cast<void*>(const_cast<U*>(scale_data)));
-      context_.shift_mem->set_data_handle(
-          static_cast<void*>(const_cast<U*>(shift_data)));
+    context_.shift_mem->set_data_handle(
+        static_cast<void*>(const_cast<U*>(shift_data)));
 #endif  // !ENABLE_ONEDNN_V3
 
     if ((context_.pkind == prop_kind::forward_training) ||
@@ -181,7 +183,7 @@ class MklFusedBatchNormFwdPrimitive : public MklPrimitive {
       context_.scale_shift_mem->set_data_handle(DummyData);
 #else
       context_.scale_mem->set_data_handle(DummyData);
-      context_.shift_mem->set_data_handle(DummyData);
+    context_.shift_mem->set_data_handle(DummyData);
 #endif  // !ENABLE_ONEDNN_V3
 
     if ((context_.pkind == prop_kind::forward_training) ||
@@ -245,14 +247,15 @@ class MklFusedBatchNormFwdPrimitive : public MklPrimitive {
           mean_mem(nullptr),
           variance_mem(nullptr),
           bn_fwd(nullptr),
-          ws_mem(nullptr) {}
+          ws_mem(nullptr) {
+    }
   };
 
   void Setup(const MklBatchNormFwdParams& fwdParams) {
     context_.flags = GET_SCALE_AND_SHIFT_FLAGS |
                      (fwdParams.training ? false : GET_FLAG(use_global_stats));
-    context_.pkind = fwdParams.training ? prop_kind::forward_training
-                                        : FORWARD_INFERENCE;
+    context_.pkind =
+        fwdParams.training ? prop_kind::forward_training : FORWARD_INFERENCE;
 
     if (fwdParams.activation_mode == FusedBNActivationMode::kRelu) {
       context_.flags |= GET_FLAG(fuse_norm_relu);
@@ -313,15 +316,12 @@ class MklFusedBatchNormFwdPrimitive : public MklPrimitive {
     // TODO(intel-tf): Merge all the #ifdefs and simplify code
     if (!fwdParams.training && !(IS_SET(use_global_stats))) {
       if (IS_SCALE_AND_SHIFT_FLAG_SET) {
-        context_.net_args.push_back(
-            {{DNNL_ARG_SRC, *context_.src_mem},
-             SCALE_SHIFT_NET_ARGS,
-             { DNNL_ARG_DST,
-               *context_.dst_mem }});
+        context_.net_args.push_back({{DNNL_ARG_SRC, *context_.src_mem},
+                                     SCALE_SHIFT_NET_ARGS,
+                                     {DNNL_ARG_DST, *context_.dst_mem}});
       } else {
         context_.net_args.push_back({{DNNL_ARG_SRC, *context_.src_mem},
-                                     { DNNL_ARG_DST,
-                                       *context_.dst_mem }});
+                                     {DNNL_ARG_DST, *context_.dst_mem}});
       }
       context_.bn_fwd.reset(new batch_normalization_forward(*context_.fwd_pd));
     } else if (IS_SET(use_global_stats)) {
@@ -333,16 +333,14 @@ class MklFusedBatchNormFwdPrimitive : public MklPrimitive {
                {DNNL_ARG_VARIANCE, *context_.variance_mem},
                SCALE_SHIFT_NET_ARGS,
                {DNNL_ARG_DST, *context_.dst_mem},
-               { DNNL_ARG_WORKSPACE,
-                 *context_.ws_mem }});
+               {DNNL_ARG_WORKSPACE, *context_.ws_mem}});
         } else {
           context_.net_args.push_back(
               {{DNNL_ARG_SRC, *context_.src_mem},
                {DNNL_ARG_MEAN, *context_.mean_mem},
                {DNNL_ARG_VARIANCE, *context_.variance_mem},
                SCALE_SHIFT_NET_ARGS,
-               { DNNL_ARG_DST,
-                 *context_.dst_mem }});
+               {DNNL_ARG_DST, *context_.dst_mem}});
         }
       } else {
         if (IS_SET(fuse_norm_relu)) {
@@ -351,15 +349,13 @@ class MklFusedBatchNormFwdPrimitive : public MklPrimitive {
                {DNNL_ARG_MEAN, *context_.mean_mem},
                {DNNL_ARG_VARIANCE, *context_.variance_mem},
                {DNNL_ARG_DST, *context_.dst_mem},
-               { DNNL_ARG_WORKSPACE,
-                 *context_.ws_mem }});
+               {DNNL_ARG_WORKSPACE, *context_.ws_mem}});
         } else {
           context_.net_args.push_back(
               {{DNNL_ARG_SRC, *context_.src_mem},
                {DNNL_ARG_MEAN, *context_.mean_mem},
                {DNNL_ARG_VARIANCE, *context_.variance_mem},
-               { DNNL_ARG_DST,
-                 *context_.dst_mem }});
+               {DNNL_ARG_DST, *context_.dst_mem}});
         }
       }
       context_.bn_fwd.reset(new batch_normalization_forward(*context_.fwd_pd));
@@ -372,16 +368,14 @@ class MklFusedBatchNormFwdPrimitive : public MklPrimitive {
                {DNNL_ARG_DST, *context_.dst_mem},
                {DNNL_ARG_MEAN, *context_.mean_mem},
                {DNNL_ARG_VARIANCE, *context_.variance_mem},
-               { DNNL_ARG_WORKSPACE,
-                 *context_.ws_mem }});
+               {DNNL_ARG_WORKSPACE, *context_.ws_mem}});
         } else {
           context_.net_args.push_back(
               {{DNNL_ARG_SRC, *context_.src_mem},
                SCALE_SHIFT_NET_ARGS,
                {DNNL_ARG_DST, *context_.dst_mem},
                {DNNL_ARG_MEAN, *context_.mean_mem},
-               { DNNL_ARG_VARIANCE,
-                 *context_.variance_mem }});
+               {DNNL_ARG_VARIANCE, *context_.variance_mem}});
         }
       } else {
         if (IS_SET(fuse_norm_relu)) {
@@ -390,14 +384,13 @@ class MklFusedBatchNormFwdPrimitive : public MklPrimitive {
                {DNNL_ARG_DST, *context_.dst_mem},
                {DNNL_ARG_MEAN, *context_.mean_mem},
                {DNNL_ARG_VARIANCE, *context_.variance_mem},
-               { DNNL_ARG_WORKSPACE,
-                 *context_.ws_mem }});
+               {DNNL_ARG_WORKSPACE, *context_.ws_mem}});
         } else {
-          context_.net_args.push_back({{DNNL_ARG_SRC, *context_.src_mem},
-                                       {DNNL_ARG_DST, *context_.dst_mem},
-                                       {DNNL_ARG_MEAN, *context_.mean_mem},
-                                       { DNNL_ARG_VARIANCE,
-                                         *context_.variance_mem }});
+          context_.net_args.push_back(
+              {{DNNL_ARG_SRC, *context_.src_mem},
+               {DNNL_ARG_DST, *context_.dst_mem},
+               {DNNL_ARG_MEAN, *context_.mean_mem},
+               {DNNL_ARG_VARIANCE, *context_.variance_mem}});
         }
       }
       context_.bn_fwd.reset(new batch_normalization_forward(*context_.fwd_pd));
@@ -648,7 +641,8 @@ class MklFusedBatchNormBwdPrimitive : public MklPrimitive {
           diff_scale_mem(nullptr),
           diff_shift_mem(nullptr),
 #endif  // !ENABLE_ONEDNN_V3
-          diff_src_mem(nullptr) {}
+          diff_src_mem(nullptr) {
+    }
   };
 
   inline int64 GetBatchNormFlags(const MklBatchNormBwdParams& bwdParams) const {
