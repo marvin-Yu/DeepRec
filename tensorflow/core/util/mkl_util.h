@@ -201,8 +201,8 @@ inline void execute_primitives(
 //  1) FORMAT_BLOCKED: as described above, this is needed for element-wise
 //     operators such as ReLU.
 //  2) FORMAT_INVALID: for error-checking (ex. unsupported format)
-//  3) FORMAT_X, FORMAT_NC, FORMAT_TNC: to distinguish between OneDNN tensors based
-//     on their dimensions in operators such as Softmax, i.e.:
+//  3) FORMAT_X, FORMAT_NC, FORMAT_TNC: to distinguish between OneDNN tensors
+//  based on their dimensions in operators such as Softmax, i.e.:
 //        FORMAT_X   - 1D tensor
 //        FORMAT_NC  - 2D tensor
 //        FORMAT_TNC - 3D tensor
@@ -273,7 +273,7 @@ inline bool array_cmp(const T* a1, const T* a2, size_t size) {
 }
 
 inline dnnl::stream* CreateStream(MklDnnThreadPool* eigen_tp,
-                                    const engine& engine) {
+                                  const engine& engine) {
 #if defined(ENABLE_DNNL_THREADPOOL) && !defined(ENABLE_ONEDNN_V3)
   if (eigen_tp != nullptr) {
     stream* tp_stream =
@@ -568,25 +568,25 @@ class MklDnnShape {
     return data_.sizes_[TfDimIdx(index)];
   }
 
-  /// Query TF-OneDNN dimension ordering map and check if Tensorflow dimension 'd'
-  /// corresponds to OneDNN's Channel dimension.
+  /// Query TF-OneDNN dimension ordering map and check if Tensorflow dimension
+  // 'd' corresponds to OneDNN's Channel dimension.
   inline bool IsMklChannelDim(int d) const {
     return TfDimIdx(d) == MklDnnDims::Dim_C;
   }
 
-  /// Query TF-OneDNN dimension ordering map and check if Tensorflow dimension 'd'
-  /// corresponds to OneDNN's Batch dimension.
+  /// Query TF-OneDNN dimension ordering map and check if Tensorflow dimension
+  // 'd' corresponds to OneDNN's Batch dimension.
   inline bool IsMklBatchDim(int d) const {
     return TfDimIdx(d) == MklDnnDims::Dim_N;
   }
 
-  /// Query TF-OneDNN dimension ordering map and check if Tensorflow dimension 'd'
-  /// corresponds to OneDNN's Width dimension.
+  /// Query TF-OneDNN dimension ordering map and check if Tensorflow dimension
+  // 'd' corresponds to OneDNN's Width dimension.
   inline bool IsMklWidthDim(int d) const {
     return TfDimIdx(d) == MklDnnDims::Dim_W;
   }
-  /// Query TF-OneDNN dimension ordering map and check if Tensorflow dimension 'd'
-  /// corresponds to OneDNN's Height dimension.
+  /// Query TF-OneDNN dimension ordering map and check if Tensorflow dimension
+  /// 'd' corresponds to OneDNN's Height dimension.
   inline bool IsMklHeightDim(int d) const {
     return TfDimIdx(d) == MklDnnDims::Dim_H;
   }
@@ -1552,8 +1552,8 @@ class MklDnnData {
       std::vector<primitive> net;
       net.push_back(*(prim->GetPrimitive()));
       std::vector<MemoryArgsMap> net_args;
-      net_args.push_back({{DNNL_ARG_FROM, *user_memory_},
-                          {DNNL_ARG_TO, *reorder_memory_}});
+      net_args.push_back(
+          {{DNNL_ARG_FROM, *user_memory_}, {DNNL_ARG_TO, *reorder_memory_}});
       execute_primitives(net, cpu_stream, net_args);
       return true;
     }
@@ -1619,8 +1619,8 @@ class MklDnnData {
       std::vector<primitive> net;
       net.push_back(*(prim->GetPrimitive()));
       std::vector<MemoryArgsMap> net_args;
-      net_args.push_back({{DNNL_ARG_FROM, *user_memory_},
-                          {DNNL_ARG_TO, *reorder_memory_}});
+      net_args.push_back(
+          {{DNNL_ARG_FROM, *user_memory_}, {DNNL_ARG_TO, *reorder_memory_}});
       execute_primitives(net, cpu_stream, net_args);
       return true;
     }
