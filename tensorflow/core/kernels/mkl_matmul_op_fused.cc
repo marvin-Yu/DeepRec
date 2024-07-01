@@ -291,6 +291,8 @@ class MklFusedMatMulOp : public MklDnnMatMulOpBase<T, T> {
         params.post_op_params.push_back({"gelu_erf", {1.0, 0.0, 0.0}});
       } else if (post_op == "Add") {
         params.post_op_params.push_back({"sum", {1.0}});
+      } else if (post_op == "Sigmoid") {
+        params.post_op_params.push_back({"logistic", {1.0, 0.0, 0.0}});
       } else {
         OP_REQUIRES_OK(
             ctx, errors::InvalidArgument(

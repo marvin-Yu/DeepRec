@@ -274,6 +274,13 @@ class MklDnnMatMulFwdPrimitive : public MklPrimitive {
           float op_beta = post_op_param.param[2];
           post_ops.APPEND_ELTWISE(op_scale, ALGORITHM::eltwise_tanh, op_alpha,
                                   op_beta);
+        } else if (post_op_param.name == "logistic") {
+          DCHECK_EQ(post_op_param.param.size(), 3);
+          float op_scale = post_op_param.param[0];
+          float op_alpha = post_op_param.param[1];
+          float op_beta = post_op_param.param[2];
+          post_ops.APPEND_ELTWISE(op_scale, ALGORITHM::eltwise_logistic,
+                                  op_alpha, op_beta);
         } else if (post_op_param.name == "output_scale") {
 #ifndef ENABLE_ONEDNN_V3
           DCHECK_EQ(post_op_param.param.size(), 1);
@@ -292,6 +299,7 @@ class MklDnnMatMulFwdPrimitive : public MklPrimitive {
               (post_op_param.name == "elu") || (post_op_param.name == "gelu") ||
               (post_op_param.name == "gelu_erf") ||
               (post_op_param.name == "sum") || (post_op_param.name == "tanh") ||
+              (post_op_param.name == "logistic") ||
               (post_op_param.name == "output_scale"));
         }
       }
@@ -405,7 +413,7 @@ class MklDnnMatMulFwdPrimitiveFactory : public MklPrimitiveFactory<T> {
       if (post_op_param.name == "relu" || post_op_param.name == "relu6" ||
           post_op_param.name == "elu" || post_op_param.name == "gelu" ||
           post_op_param.name == "gelu_erf" || post_op_param.name == "tanh" ||
-          post_op_param.name == "leakyrelu") {
+          post_op_param.name == "logistic") {
         DCHECK_EQ(post_op_param.param.size(), 3);
         key_creator.AddAsKey(post_op_param.name);
         key_creator.AddAsKey(post_op_param.param[0]);
