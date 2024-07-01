@@ -94,12 +94,11 @@ class MklAvgPoolingOp : public MklPoolingForwardOpBase<T> {
 
       // Get the input memory descriptor.
       memory::dims src_dims =
-          dnn_shape_input.IsMklTensor()
-              ? dnn_shape_input.GetSizesAsMklDnnDims()
-              : is_pool2d ? TFShapeToMklDnnDimsInNCHW(input_tensor.shape(),
-                                                      this->data_format_tf_)
-                          : TFShapeToMklDnnDimsInNCDHW(input_tensor.shape(),
-                                                       this->data_format_tf_);
+          dnn_shape_input.IsMklTensor() ? dnn_shape_input.GetSizesAsMklDnnDims()
+          : is_pool2d ? TFShapeToMklDnnDimsInNCHW(input_tensor.shape(),
+                                                  this->data_format_tf_)
+                      : TFShapeToMklDnnDimsInNCDHW(input_tensor.shape(),
+                                                   this->data_format_tf_);
       memory::desc input_md = dnn_shape_input.IsMklTensor()
                                   ? dnn_shape_input.GetMklLayout()
                                   : memory::desc(src_dims, MklDnnType<T>(),
@@ -223,24 +222,23 @@ class MklAvgPoolingGradOp : public MklPoolingBackwardOpBase<T> {
       memory::dims orig_input_dims_mkl_order =
           orig_input_mkl_shape.IsMklTensor()
               ? orig_input_mkl_shape.GetSizesAsMklDnnDims()
-              : is_pool2d ? TFShapeToMklDnnDimsInNCHW(orig_input_shape,
-                                                      this->data_format_tf_)
-                          : TFShapeToMklDnnDimsInNCDHW(orig_input_shape,
-                                                       this->data_format_tf_);
+          : is_pool2d ? TFShapeToMklDnnDimsInNCHW(orig_input_shape,
+                                                  this->data_format_tf_)
+                      : TFShapeToMklDnnDimsInNCDHW(orig_input_shape,
+                                                   this->data_format_tf_);
 
       memory::dims diff_dst_dims =
-          grad_mkl_shape.IsMklTensor()
-              ? grad_mkl_shape.GetSizesAsMklDnnDims()
-              : is_pool2d ? TFShapeToMklDnnDimsInNCHW(grad_tensor.shape(),
-                                                      this->data_format_tf_)
-                          : TFShapeToMklDnnDimsInNCDHW(grad_tensor.shape(),
-                                                       this->data_format_tf_);
+          grad_mkl_shape.IsMklTensor() ? grad_mkl_shape.GetSizesAsMklDnnDims()
+          : is_pool2d ? TFShapeToMklDnnDimsInNCHW(grad_tensor.shape(),
+                                                  this->data_format_tf_)
+                      : TFShapeToMklDnnDimsInNCDHW(grad_tensor.shape(),
+                                                   this->data_format_tf_);
 
-      OP_REQUIRES(
-          context, orig_input_dims_mkl_order[0] == diff_dst_dims[0],
-          errors::InvalidArgument("Expected first dimension of orig_input "
-            "and diff_dst to match, got ", orig_input_dims_mkl_order[0],
-            " and ", diff_dst_dims[0]));
+      OP_REQUIRES(context, orig_input_dims_mkl_order[0] == diff_dst_dims[0],
+                  errors::InvalidArgument(
+                      "Expected first dimension of orig_input "
+                      "and diff_dst to match, got ",
+                      orig_input_dims_mkl_order[0], " and ", diff_dst_dims[0]));
 
       memory::dims output_dims_mkl_order;
       this->GetOutputDims(pool_params, &output_dims_mkl_order);

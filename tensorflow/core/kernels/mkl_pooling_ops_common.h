@@ -83,7 +83,8 @@ struct MklPoolingParams {
         prop_kind(prop_kind),
         src_format(src_format),
         src_md(src_md),
-        native_format(native_format) {}
+        native_format(native_format) {
+  }
 };
 
 template <typename T>
@@ -165,7 +166,8 @@ class MklPoolingFwdPrimitive : public MklPrimitive {
           fwd_pd(nullptr),
           src_md(nullptr),
           dst_md(nullptr),
-          fwd(nullptr) {}
+          fwd(nullptr) {
+    }
   };
 
   struct PoolingFwdContext context_;
@@ -453,7 +455,8 @@ struct MklPoolParameters {
         pad_top(0),
         pad_bottom(0),
         pad_depth(0),
-        data_format(TensorFormat::FORMAT_NCHW) {}
+        data_format(TensorFormat::FORMAT_NCHW) {
+  }
 
   // Updates context->status if there is an invalid input.
   void Init(OpKernelContext* context, const std::vector<int32>& ksize,

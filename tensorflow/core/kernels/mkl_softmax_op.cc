@@ -111,7 +111,8 @@ class MklSoftmaxPrimitive : public MklPrimitive {
 #endif  // !ENABLE_ONEDNN_V3
           src_md(nullptr),
           fwd_pd(nullptr),
-          softmax_fwd(nullptr) {}
+          softmax_fwd(nullptr) {
+    }
   };
 
   // Softmax forward primitive setup
@@ -142,9 +143,8 @@ class MklSoftmaxPrimitive : public MklPrimitive {
 
     // Create softmax primitive and add it to net
     context_.softmax_fwd.reset(new dnnl::softmax_forward(*context_.fwd_pd));
-    context_.fwd_net_args.push_back({{DNNL_ARG_SRC, *context_.src_mem},
-                                     { DNNL_ARG_DST,
-                                       *context_.dst_mem }});
+    context_.fwd_net_args.push_back(
+        {{DNNL_ARG_SRC, *context_.src_mem}, {DNNL_ARG_DST, *context_.dst_mem}});
     context_.fwd_primitives.push_back(*context_.softmax_fwd);
   }
 
@@ -233,15 +233,15 @@ class MklSoftmaxOp : public OpKernel {
         axis = input_dims - 1;
       }
       MKL_TENSOR_FORMAT layout_type;
-      // In OneDNN, data format passed to OneDNN softmax op depends on dimension of
-      // the input tensor. Here "x" data format in OneDNN is used for 1 dim tensor,
-      // "nc" for 2 dim tensor, "tnc" for 3 dim tensor, "nchw" for 4 dim tensor,
-      // and "ncdhw" for 5 dim tensor. Each of the symbols has the following
-      // meaning: n = batch, c = channels, t = sequence length, h = height, w =
-      // width, d = depth. When src tensor is OneDNN, layout_type here is only used
-      // for setting TF layout type of output tensor. When input is TF Tensor,
-      // layout here is no special sense. We use axis to define on which
-      // dimension to do softmax.
+      // In OneDNN, data format passed to OneDNN softmax op depends on dimension
+      // of the input tensor. Here "x" data format in OneDNN is used for 1 dim
+      // tensor, "nc" for 2 dim tensor, "tnc" for 3 dim tensor, "nchw" for 4 dim
+      // tensor, and "ncdhw" for 5 dim tensor. Each of the symbols has the
+      // following meaning: n = batch, c = channels, t = sequence length, h =
+      // height, w = width, d = depth. When src tensor is OneDNN, layout_type
+      // here is only used for setting TF layout type of output tensor. When
+      // input is TF Tensor, layout here is no special sense. We use axis to
+      // define on which dimension to do softmax.
       switch (input_dims) {
         case 1:
           layout_type = MKL_TENSOR_FORMAT_X;

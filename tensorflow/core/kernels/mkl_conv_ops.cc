@@ -192,8 +192,7 @@ class MklConvFwdPrimitive : public MklPrimitive {
     std::vector<std::unordered_map<int, memory>> fwd_primitives_args;
 
     ConvFwdContext()
-        :
-          src_mem(nullptr),
+        : src_mem(nullptr),
           filter_mem(nullptr),
           bias_mem(nullptr),
           dst_mem(nullptr),
@@ -201,8 +200,7 @@ class MklConvFwdPrimitive : public MklPrimitive {
           filter_md(nullptr),
           bias_md(nullptr),
           fwd_pd(nullptr),
-          conv_fwd(nullptr) {
-    }
+          conv_fwd(nullptr) {}
   };
 
   void Setup(const MklConvFwdParams& convFwdDims) {
@@ -296,15 +294,13 @@ class MklConvFwdPrimitive : public MklPrimitive {
           {{DNNL_ARG_SRC, *context_.src_mem},
            {DNNL_ARG_WEIGHTS, *context_.filter_mem},
            {DNNL_ARG_BIAS, *context_.bias_mem},
-           { DNNL_ARG_DST,
-             *context_.dst_mem }});
+           {DNNL_ARG_DST, *context_.dst_mem}});
     } else {
       context_.conv_fwd.reset(new convolution_forward(*context_.fwd_pd));
       context_.fwd_primitives_args.push_back(
           {{DNNL_ARG_SRC, *context_.src_mem},
            {DNNL_ARG_WEIGHTS, *context_.filter_mem},
-           { DNNL_ARG_DST,
-             *context_.dst_mem }});
+           {DNNL_ARG_DST, *context_.dst_mem}});
     }
     context_.fwd_primitives.push_back(*context_.conv_fwd);
   }
@@ -464,15 +460,17 @@ class MklConvOp : public OpKernel {
       OP_REQUIRES(context, dilations_.size() == 5,
                   errors::InvalidArgument("Dilation rates field must "
                                           "specify 5 dimensions"));
-      OP_REQUIRES(context, (GetTensorDim(dilations_, data_format_, 'N') == 1 &&
-                            GetTensorDim(dilations_, data_format_, 'C') == 1),
+      OP_REQUIRES(context,
+                  (GetTensorDim(dilations_, data_format_, 'N') == 1 &&
+                   GetTensorDim(dilations_, data_format_, 'C') == 1),
                   errors::InvalidArgument(
                       "Current implementation does not yet support "
                       "dilations rates in the batch and depth dimensions."));
       OP_REQUIRES(
-          context, (GetTensorDim(dilations_, data_format_, '0') > 0 &&
-                    GetTensorDim(dilations_, data_format_, '1') > 0 &&
-                    GetTensorDim(dilations_, data_format_, '2') > 0),
+          context,
+          (GetTensorDim(dilations_, data_format_, '0') > 0 &&
+           GetTensorDim(dilations_, data_format_, '1') > 0 &&
+           GetTensorDim(dilations_, data_format_, '2') > 0),
           errors::InvalidArgument("Dilated rates should be larger than 0."));
     }
   }
@@ -845,8 +843,9 @@ class MklConvOp : public OpKernel {
     auto dst_md = conv_prim_desc.dst_desc();
 
     if (!std::is_same<Ttemp_output, Toutput>::value) {
-      dst_md = memory::desc(output_dims_mkl_order, MklDnnType<Toutput>(),
-                            MklTensorFormatToMklDnnDataFormat(output_tf_format));
+      dst_md =
+          memory::desc(output_dims_mkl_order, MklDnnType<Toutput>(),
+                       MklTensorFormatToMklDnnDataFormat(output_tf_format));
     }
 
     // Allocate shape of OneDNN tensor
@@ -1069,15 +1068,13 @@ class MklConvOp : public OpKernel {
       net_args.push_back({{DNNL_ARG_SRC, src->GetOpMem()},
                           {DNNL_ARG_WEIGHTS, filter->GetOpMem()},
                           {DNNL_ARG_BIAS, bias->GetOpMem()},
-                          { DNNL_ARG_DST,
-                            output->GetOpMem() }});
+                          {DNNL_ARG_DST, output->GetOpMem()}});
     } else {
       DCHECK(!fuse_biasadd_);
       net.push_back(convolution_forward(conv_prim_desc));
       net_args.push_back({{DNNL_ARG_SRC, src->GetOpMem()},
                           {DNNL_ARG_WEIGHTS, filter->GetOpMem()},
-                          { DNNL_ARG_DST,
-                            output->GetOpMem() }});
+                          {DNNL_ARG_DST, output->GetOpMem()}});
     }
     ExecutePrimitive(net, &net_args, cpu_engine_);
   }
@@ -2225,7 +2222,8 @@ REGISTER_KERNEL_BUILDER(
     MklQuantizedConv2DOp<CPUDevice, qint8, float, qint8, qint8, true, false>);
 
 // Register NoOp kernel for QuantizedConv2DAndRelu to get a python interface.
-// This kernel will be replaced by an OneDNN kernel during graph-optimization pass.
+// This kernel will be replaced by an OneDNN kernel during graph-optimization
+// pass.
 REGISTER_KERNEL_BUILDER(Name("QuantizedConv2DAndRelu")
                             .Device(DEVICE_CPU)
                             .TypeConstraint<quint8>("Tinput")
@@ -2261,7 +2259,8 @@ REGISTER_KERNEL_BUILDER(Name("_MklQuantizedConv2DAndReluAndRequantize")
 
 // Register NoOp kernel for QuantizedConv2DWithBiasAndRelu to get a python
 // interface.
-// This kernel will be replaced by an OneDNN kernel during graph-optimization pass.
+// This kernel will be replaced by an OneDNN kernel during graph-optimization
+// pass.
 REGISTER_KERNEL_BUILDER(Name("QuantizedConv2DWithBiasAndRelu")
                             .Device(DEVICE_CPU)
                             .TypeConstraint<quint8>("Tinput")
@@ -2278,7 +2277,8 @@ REGISTER_KERNEL_BUILDER(Name("QuantizedConv2DWithBiasAndRelu")
 
 // Register NoOp kernel for QuantizedConv2DWithBiasAndReluAndRequantize
 // to get a python interface.
-// This kernel will be replaced by an OneDNN kernel during graph-optimization pass.
+// This kernel will be replaced by an OneDNN kernel during graph-optimization
+// pass.
 REGISTER_KERNEL_BUILDER(Name("QuantizedConv2DWithBiasAndReluAndRequantize")
                             .Device(DEVICE_CPU)
                             .TypeConstraint<quint8>("Tinput")
@@ -2394,8 +2394,8 @@ REGISTER_KERNEL_BUILDER(Name("_MklQuantizedConv2DWithBiasAndReluAndRequantize")
                             .TypeConstraint<float>("Tbias")
                             .TypeConstraint<qint8>("out_type")
                             .Label(mkl_op_registry::kMklQuantizedOpLabel),
-                        MklQuantizedConv2DReluOp<CPUDevice, qint8, float,
-                                                 qint8, qint8, true, false>);
+                        MklQuantizedConv2DReluOp<CPUDevice, qint8, float, qint8,
+                                                 qint8, true, false>);
 
 REGISTER_KERNEL_BUILDER(Name("_MklQuantizedConv2DWithBiasAndReluAndRequantize")
                             .Device(DEVICE_CPU)
@@ -2409,7 +2409,8 @@ REGISTER_KERNEL_BUILDER(Name("_MklQuantizedConv2DWithBiasAndReluAndRequantize")
 
 // Register NoOp kernel for QuantizedConv2DWithBiasSumAndRelu to get a python
 // interface.
-// This kernel will be replaced by an OneDNN kernel during graph-optimization pass.
+// This kernel will be replaced by an OneDNN kernel during graph-optimization
+// pass.
 REGISTER_KERNEL_BUILDER(Name("QuantizedConv2DWithBiasSumAndRelu")
                             .Device(DEVICE_CPU)
                             .TypeConstraint<quint8>("Tinput")
@@ -2434,7 +2435,8 @@ REGISTER_KERNEL_BUILDER(
 
 // Register NoOp kernel for QuantizedConv2DWithBiasReluAndSum to get a python
 // interface.
-// This kernel will be replaced by an OneDNN kernel during graph-optimization pass.
+// This kernel will be replaced by an OneDNN kernel during graph-optimization
+// pass.
 REGISTER_KERNEL_BUILDER(Name("QuantizedConv2DWithBiasReluAndSum")
                             .Device(DEVICE_CPU)
                             .TypeConstraint<quint8>("Tinput")
