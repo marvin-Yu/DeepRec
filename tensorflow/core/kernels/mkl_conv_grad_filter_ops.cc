@@ -85,8 +85,7 @@ struct MklConvBwdFilterParams {
         native_format(native_format),
         dilations(dilations),
         padding_left(padding_left),
-        padding_right(padding_right) {
-  }
+        padding_right(padding_right) {}
 };
 
 template <typename T>
@@ -202,8 +201,7 @@ class MklConvBwdFilterPrimitive : public MklPrimitive {
     std::vector<MemoryArgsMap> bwd_filter_primitives_args;
 
     ConvBwdFilterContext()
-        :
-          src_mem(nullptr),
+        : src_mem(nullptr),
           diff_filter_mem(nullptr),
           diff_bias_mem(nullptr),
           diff_dst_mem(nullptr),
@@ -316,16 +314,14 @@ class MklConvBwdFilterPrimitive : public MklPrimitive {
           {{DNNL_ARG_SRC, *context_.src_mem},
            {DNNL_ARG_DIFF_WEIGHTS, *context_.diff_filter_mem},
            {DNNL_ARG_DIFF_BIAS, *context_.diff_bias_mem},
-           { DNNL_ARG_DIFF_DST,
-             *context_.diff_dst_mem }});
+           {DNNL_ARG_DIFF_DST, *context_.diff_dst_mem}});
     } else {
       context_.conv_bwd_filter.reset(
           new convolution_backward_weights(*context_.bwd_filter_pd));
       context_.bwd_filter_primitives_args.push_back(
           {{DNNL_ARG_SRC, *context_.src_mem},
            {DNNL_ARG_DIFF_WEIGHTS, *context_.diff_filter_mem},
-           { DNNL_ARG_DIFF_DST,
-             *context_.diff_dst_mem }});
+           {DNNL_ARG_DIFF_DST, *context_.diff_dst_mem}});
     }
     context_.bwd_filter_primitives.push_back(*context_.conv_bwd_filter);
   }

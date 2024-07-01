@@ -13,9 +13,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-// See docs in ../ops/nn_ops.cc. This opkernel uses OneDNN library, create OneDNN
-// layout and primitives, use OneDNN primitives to compute convolution backward
-// input
+// See docs in ../ops/nn_ops.cc. This opkernel uses OneDNN library, create
+// OneDNN layout and primitives, use OneDNN primitives to compute convolution
+// backward input
 
 #ifdef INTEL_MKL
 
@@ -86,8 +86,7 @@ struct MklConvBwdInputParams {
         native_format(native_format),
         dilations(dilations),
         padding_left(padding_left),
-        padding_right(padding_right) {
-  }
+        padding_right(padding_right) {}
 };
 
 template <typename T>
@@ -178,8 +177,7 @@ class MklConvBwdInputPrimitive : public MklPrimitive {
     std::vector<std::unordered_map<int, memory>> bwd_input_primitives_args;
 
     ConvBwdInputContext()
-        :
-          diff_src_mem(nullptr),
+        : diff_src_mem(nullptr),
           filter_mem(nullptr),
           diff_dst_mem(nullptr),
           bwd_input_pd(nullptr),
@@ -256,14 +254,13 @@ class MklConvBwdInputPrimitive : public MklPrimitive {
         context_.bwd_input_pd.get()->PRIMITIVE_DESC_DIFF_DST, cpu_engine_,
         DummyData));
 
-// Create conv bwd input primitive and add it to the net
+    // Create conv bwd input primitive and add it to the net
     context_.conv_bwd_input.reset(
         new convolution_backward_data(*context_.bwd_input_pd));
     context_.bwd_input_primitives_args.push_back(
         {{DNNL_ARG_DIFF_DST, *context_.diff_dst_mem},
          {DNNL_ARG_WEIGHTS, *context_.filter_mem},
-         { DNNL_ARG_DIFF_SRC,
-           *context_.diff_src_mem }});
+         {DNNL_ARG_DIFF_SRC, *context_.diff_src_mem}});
     context_.bwd_input_primitives.push_back(*context_.conv_bwd_input);
   }
 
