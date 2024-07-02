@@ -1030,14 +1030,16 @@ bool FindFusedBatchNormEx(const RemapperContext& ctx, int node_index,
 
 bool FindFusedBatchMatMul(RemapperContext* ctx, int node_index,
                           std::map<string, int>* matched_nodes_map,
-                          std::set<int>* remove_node_indices) {
+                          std::set<int>* remove_node_indices,
+                          std::vector<string>* input_node_names) {
   if (!IsMKLEnabled()) return false;
 
   using utils::MatchingDirection;
   using utils::NodeStatus;
+  int pattern = 0;
   // clang-format off
   utils::OpTypePattern fusion_pattern1 =
-    {"AddV2", "output", NodeStatus::kReplace,
+    {"Add|AddV2", "output", NodeStatus::kReplace,
       {
         {"Mul", "mul", NodeStatus::kRemove,
           {
@@ -1050,15 +1052,20 @@ bool FindFusedBatchMatMul(RemapperContext* ctx, int node_index,
     };
 
   utils::OpTypePattern fusion_pattern2 =
-    {"AddV2", "output", NodeStatus::kReplace,
+    {"Add|AddV2", "output", NodeStatus::kReplace,
       {
-        {"*", "addend", NodeStatus::kRemain},
-        {"Mul", "mul", NodeStatus::kRemove,
+        {"BatchMatMulV2", "batch_matmul", NodeStatus::kRemove,
           {
-            {"BatchMatMulV2", "batch_matmul", NodeStatus::kRemove},
-            {"*", "multiplicand", NodeStatus::kRemain}
+            {"Mul", "mul", NodeStatus::kRemove,
+              {
+                {"*", "mul_input0", NodeStatus::kRemain},
+                {"Const|Cast", "multiplicand", NodeStatus::kRemain}
+              }
+            },
+            {"*", "bmm_input1", NodeStatus::kRemain}
           }
-        }
+        },
+        {"*", "addend", NodeStatus::kRemain}
       }
     };
   // clang-format on
@@ -1072,6 +1079,7 @@ bool FindFusedBatchMatMul(RemapperContext* ctx, int node_index,
       graph_matcher.GetMatchedNodes(fusion_pattern1, ctx->nodes_to_preserve,
                                     ctx->graph_view.GetNode(node_index),
                                     matched_nodes_map, remove_node_indices);
+  if (found_op_type_match) pattern = 1;
 
   if (!found_op_type_match) {
     matched_nodes_map->clear();
@@ -1080,6 +1088,7 @@ bool FindFusedBatchMatMul(RemapperContext* ctx, int node_index,
         graph_matcher.GetMatchedNodes(fusion_pattern2, ctx->nodes_to_preserve,
                                       ctx->graph_view.GetNode(node_index),
                                       matched_nodes_map, remove_node_indices);
+    if (found_op_type_match) pattern = 2;
   }
 
   // OneDNN is not optimized for all shapes with regard to binary-post ops
@@ -1115,10 +1124,27 @@ bool FindFusedBatchMatMul(RemapperContext* ctx, int node_index,
   auto addend_props =
       ctx->graph_properties.GetOutputProperties(addend_node_def->name());
   auto addend_shape = addend_props[0].shape();
-  if (!(Rank(addend_shape) == 4 && addend_shape.dim(1).size() == 1))
+  if (!(Rank(addend_shape) == 4 && addend_shape.dim(1).size() == 1)) {
     return false;
+  }
+  input_node_names->clear();
+  input_node_names->resize(4);
+  if (pattern == 1) {
+    input_node_names->at(0) = batch_matmul_node_def->input(0);
+    input_node_names->at(1) = batch_matmul_node_def->input(1);
+    input_node_names->at(2) = multiplicand_node_def->name();
+    input_node_names->at(3) = addend_node_def->name();
+  } else if (pattern == 2) {
+    auto* mul_input0_node_def =
+        ctx->graph_view.GetNode(matched_nodes_map->at("mul_input0"))->node();
+    input_node_names->at(0) = mul_input0_node_def->name();
+    input_node_names->at(1) = batch_matmul_node_def->input(1);
+    input_node_names->at(2) = multiplicand_node_def->name();
+    input_node_names->at(3) = addend_node_def->name();
+  }
   return found_op_type_match;
 }
+
 void CopyConv2DAttributes(const NodeDef& conv2d, NodeDef* fused_conv2d,
                           const NodeDef* activation = nullptr) {
   DCHECK(IsConv2D(conv2d)) << "Input node must be a Conv2D";
@@ -2157,25 +2183,19 @@ bool IsConv2DOrMatMul(const NodeDef& node) {
 Status AddFusedBatchMatMul(RemapperContext* ctx,
                            const std::map<string, int>& matched_nodes_map,
                            const std::set<int>& remove_node_indices,
+                           const std::vector<string>& input_node_names,
                            std::vector<bool>* invalidated_nodes,
                            std::vector<bool>* nodes_to_delete) {
   auto* output_node =
       ctx->graph_view.GetNode(matched_nodes_map.at("output"))->node();
   auto* batch_matmul_node =
       ctx->graph_view.GetNode(matched_nodes_map.at("batch_matmul"))->node();
-  auto* multiplicand_node =
-      ctx->graph_view.GetNode(matched_nodes_map.at("multiplicand"))->node();
-  auto* addend_node =
-      ctx->graph_view.GetNode(matched_nodes_map.at("addend"))->node();
 
   NodeDef fused_node;
   fused_node.set_name(output_node->name());
   fused_node.set_op("_MklFusedBatchMatMulV2");
   fused_node.set_device(batch_matmul_node->device());
-  fused_node.add_input(batch_matmul_node->input(0));
-  fused_node.add_input(batch_matmul_node->input(1));
-  fused_node.add_input(multiplicand_node->name());
-  fused_node.add_input(addend_node->name());
+  for (const auto& name : input_node_names) fused_node.add_input(name);
 
   CopyBatchMatMulAttributes(*batch_matmul_node, &fused_node);
   SetFusedOpAttributes(&fused_node, {"Mul", "Add"}, /*num_args=*/2);
@@ -2428,11 +2448,12 @@ Status Remapper::Optimize(Cluster* cluster, const GrapplerItem& item,
       // Remap BatchMatMul+Mul+AddV2 into the _FusedBatchMatMul.
       std::map<string, int> matched_nodes_map;
       std::set<int> remove_node_indices;
+      std::vector<string> input_node_names;
       if (FindFusedBatchMatMul(&ctx, i, &matched_nodes_map,
-                               &remove_node_indices)) {
-        TF_RETURN_IF_ERROR(
-            AddFusedBatchMatMul(&ctx, matched_nodes_map, remove_node_indices,
-                                &invalidated_nodes, &nodes_to_delete));
+                               &remove_node_indices, &input_node_names)) {
+        TF_RETURN_IF_ERROR(AddFusedBatchMatMul(
+            &ctx, matched_nodes_map, remove_node_indices, input_node_names,
+            &invalidated_nodes, &nodes_to_delete));
         continue;
       };
 
