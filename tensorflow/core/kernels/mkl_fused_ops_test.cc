@@ -13,6 +13,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 #ifdef INTEL_MKL
+
+#include <random>
+
 #include "tensorflow/cc/ops/const_op.h"
 #include "tensorflow/cc/ops/image_ops.h"
 #include "tensorflow/cc/ops/nn_ops.h"
@@ -33,6 +36,13 @@ limitations under the License.
 #include "tensorflow/core/public/session.h"
 
 namespace tensorflow {
+
+#ifdef ENABLE_ONEDNN_V3
+#define CPU_CHECK_FOR_FP16 \
+  tensorflow::port::TestCPUFeature(tensorflow::port::CPUFeature::AVX512_FP16)
+#else
+#define CPU_CHECK_FOR_FP16 false
+#endif  // ENABLE_ONEDNN_V3
 
 // Helper class for converting OneDNN tensors to TF tensors and comparing to
 // expected values
@@ -104,6 +114,16 @@ class CommonTestUtilities : public OpsTestBase {
   }
   void TestBody() {}
 
+  static Tensor GenerateRandomTensor(const TensorShape& shape) {
+    Tensor tensor(DataTypeToEnum<T>::v(), shape);
+    std::mt19937 gen(0x12345);
+    std::uniform_real_distribution<float> dist(-1.0, 1.0);
+    for (auto i = 0; i < tensor.NumElements(); ++i) {
+      tensor.flat<T>()(i) = static_cast<T>(dist(gen));
+    }
+    return tensor;
+  }
+
   static void VerifyBiasAddTensorsClose(int depth, int image_width,
                                         int image_height, int image_batch_count,
                                         int filter_size, int filter_count,
@@ -111,15 +131,14 @@ class CommonTestUtilities : public OpsTestBase {
                                         const BiasAddGraphRunner& run_fused) {
     DataType dtype = DataTypeToEnum<T>::v();
 
-    Tensor image(dtype, {image_batch_count, image_height, image_width, depth});
-    image.flat<T>() = image.flat<T>().template setRandom<random_gen_>();
+    Tensor image = CommonTestUtilities<T>::GenerateRandomTensor(
+        {image_batch_count, image_height, image_width, depth});
 
-    Tensor filter(dtype, {filter_size, filter_size, depth, filter_count});
-    filter.flat<T>() = filter.flat<T>().template setRandom<random_gen_>();
+    Tensor filter = CommonTestUtilities<T>::GenerateRandomTensor(
+        {filter_size, filter_size, depth, filter_count});
 
     const int bias_size = filter_count;
-    Tensor bias(dtype, {bias_size});
-    bias.flat<T>() = bias.flat<T>().template setRandom<random_gen_>();
+    Tensor bias = CommonTestUtilities<T>::GenerateRandomTensor({bias_size});
 
     Tensor conv_2d;
     Tensor fused_conv_2d;
@@ -142,14 +161,13 @@ class CommonTestUtilities : public OpsTestBase {
                                       const FusedGraphRunner& run_fused) {
     DataType dtype = DataTypeToEnum<T>::v();
 
-    Tensor image(dtype, {image_batch_count, image_height, image_width, depth});
-    image.flat<T>() = image.flat<T>().template setRandom<random_gen_>();
+    Tensor image = CommonTestUtilities<T>::GenerateRandomTensor(
+        {image_batch_count, image_height, image_width, depth});
 
-    Tensor filter(dtype, {filter_size, filter_size, depth, filter_count});
-    filter.flat<T>() = filter.flat<T>().template setRandom<random_gen_>();
+    Tensor filter = CommonTestUtilities<T>::GenerateRandomTensor(
+        {filter_size, filter_size, depth, filter_count});
 
-    Tensor bias(dtype, {bias_size});
-    bias.flat<T>() = bias.flat<T>().template setRandom<random_gen_>();
+    Tensor bias = CommonTestUtilities<T>::GenerateRandomTensor({bias_size});
 
     Tensor conv_2d;
     Tensor fused_conv_2d;
@@ -169,14 +187,12 @@ class CommonTestUtilities : public OpsTestBase {
                                      const FusedGraphRunner& run_fused) {
     DataType dtype = DataTypeToEnum<T>::v();
 
-    Tensor input(dtype, {batch, depth});
-    input.flat<T>() = input.flat<T>().template setRandom<random_gen_>();
+    Tensor input = CommonTestUtilities<T>::GenerateRandomTensor({batch, depth});
 
-    Tensor weight(dtype, {depth, weight_count});
-    weight.flat<T>() = weight.flat<T>().template setRandom<random_gen_>();
+    Tensor weight =
+        CommonTestUtilities<T>::GenerateRandomTensor({depth, weight_count});
 
-    Tensor bias(dtype, {weight_count});
-    bias.flat<T>() = bias.flat<T>().template setRandom<random_gen_>();
+    Tensor bias = CommonTestUtilities<T>::GenerateRandomTensor({weight_count});
 
     Tensor output;
     Tensor fused_output;
@@ -191,6 +207,7 @@ class CommonTestUtilities : public OpsTestBase {
   }
 
  private:
+  // Eigen's NormalRandomGenerator supports only float
   using random_gen_ = Eigen::internal::NormalRandomGenerator<T>;
 };
 
@@ -329,6 +346,14 @@ class MklFusedConv2DOpTest : public OpsTestBase {
                          int depth = kDepth, int image_width = kImageWidth,
                          int image_height = kImageHeight,
                          int image_batch_count = kImageBatchCount) {
+    DataType dtype = DataTypeToEnum<T>::v();
+    // Float16 support with oneDNN is restricted to the following conditions:
+    // 1. oneDNN v3.0 or newer
+    // 2. Hardware support for AVX512_FP16.
+    // Float16 tests will be skipped on CPU if the above conditions are not met.
+    if (dtype == DT_HALF && !CPU_CHECK_FOR_FP16)
+      GTEST_SKIP() << "Skipping test since fp16 is not supported on this CPU.";
+
     const FusedGraphRunner run_default =
         [this](const Tensor& input_data, const Tensor& filter_data,
                const Tensor& bias_data, const std::vector<string>& fused_ops,
@@ -503,7 +528,7 @@ REGISTER_TYPED_TEST_CASE_P(
     OneByOneConvolutionAndAddElu, SpatialConvolutionAndAddElu,
     OneByOneConvolutionAndAddLeakyRelu, SpatialConvolutionAndAddLeakyRelu);
 
-using MklFusedBiasAddDataTypes = ::testing::Types<float>;
+using MklFusedBiasAddDataTypes = ::testing::Types<float, bfloat16>;
 INSTANTIATE_TYPED_TEST_CASE_P(Test, MklFusedConv2DWithBiasOpTest,
                               MklFusedBiasAddDataTypes);
 
@@ -698,6 +723,14 @@ class MklFusedDepthwiseConv2DOpTest : public OpsTestBase {
                                   int image_width = kImageWidth,
                                   int image_height = kImageHeight,
                                   int image_batch_count = kImageBatchCount) {
+    DataType dtype = DataTypeToEnum<T>::v();
+    // Float16 support with oneDNN is restricted to the following conditions:
+    // 1. oneDNN v3.0 or newer
+    // 2. Hardware support for AVX512_FP16.
+    // Float16 tests will be skipped on CPU if the above conditions are not met.
+    if (dtype == DT_HALF && !CPU_CHECK_FOR_FP16)
+      GTEST_SKIP() << "Skipping test since fp16 is not supported on this CPU.";
+
     const FusedGraphRunner run_default =
         [this](const Tensor& input_data, const Tensor& filter_data,
                const Tensor& bias_data, const std::vector<string>& fused_ops,
@@ -804,7 +837,11 @@ REGISTER_TYPED_TEST_SUITE_P(
     OneByOneConvolutionAndRelu6, SpatialConvolutionAndRelu6,
     OneByOneConvolutionAndElu, SpatialConvolutionAndElu);
 
-using MklFusedBiasAddDataTypes = ::testing::Types<float>;
+#ifdef ENABLE_ONEDNN_V3
+using FusedDWConvDataTypes = ::testing::Types<float, bfloat16, Eigen::half>;
+#else
+using FusedDWConvDataTypes = ::testing::Types<float>;
+#endif  // ENABLE_ONEDNN_V3
 INSTANTIATE_TYPED_TEST_SUITE_P(Test, MklFusedDepthwiseConv2DWithBiasOpTest,
                                MklFusedBiasAddDataTypes);
 
@@ -1271,6 +1308,9 @@ REGISTER_TYPED_TEST_CASE_P(MklFusedMatMulOpTest,  //
                            WithBiasAndGeluErf,    //
                            WithBiasAndAdd);
 
+#ifdef ENABLE_ONEDNN_V3
+using MklFusedMatMulDataTypes = ::testing::Types<float, bfloat16, Eigen::half>;
+#else
 using MklFusedMatMulDataTypes = ::testing::Types<float>;
 INSTANTIATE_TYPED_TEST_CASE_P(Test, MklFusedMatMulOpTest,
                               MklFusedMatMulDataTypes);
