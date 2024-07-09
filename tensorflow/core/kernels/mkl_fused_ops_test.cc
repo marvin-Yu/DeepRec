@@ -1275,7 +1275,7 @@ using MklFusedMatMulDataTypes = ::testing::Types<float>;
 INSTANTIATE_TYPED_TEST_CASE_P(Test, MklFusedMatMulOpTest,
                               MklFusedMatMulDataTypes);
 
-// Test the performance of MklFusedMatMul weight cache.
+// Test the functionality of MklFusedMatMul weight cache.
 // For the first time B matrix will be reordered and cached which will be
 // used for subsequent runs
 class MklFusedMatMulCacheTest : public OpsTestBase {};
@@ -1336,10 +1336,7 @@ TEST_F(MklFusedMatMulCacheTest, WeightCached) {
     AddInputFromArray<uint8>(dummy_shape, dummy_tensor);
   }
 
-  int64 start_time = Env::Default()->NowMicros();
   TF_ASSERT_OK(RunOpKernel());
-  int64 end_time = Env::Default()->NowMicros();
-  int64 total_duration_unopt = end_time - start_time;
 
   // Final result after Bias addition:
   // | 75 | 82 | 89 | 96 |
@@ -1355,16 +1352,12 @@ TEST_F(MklFusedMatMulCacheTest, WeightCached) {
     test::ExpectTensorNear<float>(expected, output, 1e-5);
   }
 
+  // TODO(bhavanis): For now, we rely on internal performance tests to
+  // determine if filter data is being cached and reused.
+  // However, we still need to add a check here to determine if this is
+  // still the case by inspecting the contents of the persistent tensor.
   // Test for the second time to use the cached weight
-  start_time = Env::Default()->NowMicros();
   TF_ASSERT_OK(RunOpKernel());
-  end_time = Env::Default()->NowMicros();
-  int64 total_duration_opt = end_time - start_time;
-  LOG(INFO) << " Time taken by first call : " << total_duration_unopt
-            << ", Time taken after Caching : " << total_duration_opt;
-
-  // Cached call should be at least 20% faster.
-  EXPECT_LT(total_duration_opt, total_duration_unopt * 0.8);
 
   // Compare the result with expected result
   CommonTestUtilities<float> test_util_new;
