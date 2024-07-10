@@ -696,10 +696,12 @@ class MklFusedBatchMatMul : public MklRemapperTest {
     test::ExpectClose(tensors_expected[0], tensors[0], atol, rtol);
   }
 
-  template <typename T>
+  template <DataType DTYPE>
   void VerifyPreceedingScalarMul(bool adjx, bool adjy) {
+    if (!IsDataTypeSupportedByOneDNNOnThisCPU(DTYPE))
+      GTEST_SKIP() << "Intel oneDNN with " << DataType_Name(DTYPE)
+                   << " is not supported, skipping MklFusedBatchMatMul test.";
     using ::tensorflow::ops::Placeholder;
-    using normal_generator = Eigen::internal::NormalRandomGenerator<T>;
 
     int b0 = 2;
     int b1 = 2;
@@ -719,16 +721,15 @@ class MklFusedBatchMatMul : public MklRemapperTest {
     auto weight_placeholder_shape = ops::Placeholder::Shape(weight_shape);
     auto add_placeholder_shape = ops::Placeholder::Shape(add_shape);
 
-    const DataType dtype = DataTypeToEnum<T>::v();
     auto input =
-        Placeholder(s.WithOpName("input"), dtype, input_placeholder_shape);
+        Placeholder(s.WithOpName("input"), DTYPE, input_placeholder_shape);
     auto weight =
-        Placeholder(s.WithOpName("weight"), dtype, weight_placeholder_shape);
+        Placeholder(s.WithOpName("weight"), DTYPE, weight_placeholder_shape);
     auto addend =
-        Placeholder(s.WithOpName("addend"), dtype, add_placeholder_shape);
+        Placeholder(s.WithOpName("addend"), DTYPE, add_placeholder_shape);
 
     auto scale_const = ops::Const(s.WithOpName("scale_const"), {0.1f});
-    auto scale = ops::Cast(s.WithOpName("scale"), scale_const, dtype);
+    auto scale = ops::Cast(s.WithOpName("scale"), scale_const, DTYPE);
     auto mul = ops::Multiply(s.WithOpName("mul"), input, scale);
     auto batchmatmul =
         ops::BatchMatMulV2(s.WithOpName("batchmatmul"), mul, weight,
@@ -736,18 +737,15 @@ class MklFusedBatchMatMul : public MklRemapperTest {
     auto add = ops::Add(s.WithOpName("add"), batchmatmul, addend);
     auto fetch = ops::Identity(s.WithOpName("fetch"), add);
 
-    Tensor input_t = Tensor(dtype, input_shape);
-    Tensor weight_t = Tensor(dtype, weight_shape);
-    Tensor add_t = Tensor(dtype, add_shape);
-    input_t.flat<T>() =
-        input_t.flat<T>().template setRandom<normal_generator>();
-    weight_t.flat<T>() =
-        weight_t.flat<T>().template setRandom<normal_generator>();
-    add_t.flat<T>() = add_t.flat<T>().template setRandom<normal_generator>();
+    Tensor input_tensor = GenerateTensorWithSetRandom<DTYPE>(input_shape);
+    Tensor weight_tensor = GenerateTensorWithSetRandom<DTYPE>(weight_shape);
+    Tensor add_tensor = GenerateTensorWithSetRandom<DTYPE>(add_shape);
 
     GrapplerItem item;
     item.fetch = {"fetch"};
-    item.feed = {{"input", input_t}, {"weight", weight_t}, {"addend", add_t}};
+    item.feed = {{"input", input_tensor},
+                 {"weight", weight_tensor},
+                 {"addend", add_tensor}};
     TF_CHECK_OK(s.ToGraphDef(&item.graph));
 
     // Place all nodes on CPU.
@@ -780,7 +778,7 @@ class MklFusedBatchMatMul : public MklRemapperTest {
     auto tensors_expected = EvaluateNodes(item.graph, item.fetch, item.feed);
     auto tensors = EvaluateNodes(output, item.fetch, item.feed);
     float atol = 1e-6, rtol = 1e-6;
-    if (dtype == DT_BFLOAT16 || dtype == DT_HALF) {
+    if (DTYPE == DT_BFLOAT16 || DTYPE == DT_HALF) {
       atol = 1e-2;
       rtol = 1e-2;
     }
@@ -800,9 +798,9 @@ TEST_F(MklFusedBatchMatMul, MulAndAdd) {
 TEST_F(MklFusedBatchMatMul, MulAndAdd2) {
   for (const auto adjx : {false, true})
     for (const auto adjy : {false, true}) {
-      this->VerifyPreceedingScalarMul<float>(adjx, adjy);
-      this->VerifyPreceedingScalarMul<bfloat16>(adjx, adjy);
-      this->VerifyPreceedingScalarMul<Eigen::half>(adjx, adjy);
+      this->VerifyPreceedingScalarMul<DT_FLOAT>(adjx, adjy);
+      this->VerifyPreceedingScalarMul<DT_BFLOAT16>(adjx, adjy);
+      this->VerifyPreceedingScalarMul<DT_HALF>(adjx, adjy);
     }
 }
 
