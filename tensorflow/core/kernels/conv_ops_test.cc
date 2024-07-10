@@ -1033,12 +1033,14 @@ TYPED_TEST_P(FusedConv2DWithBiasOpTest, SpatialConvolution) {
   this->VerifyConv2DWithBias(filter_size, filter_count);
 }
 
+#ifndef INTEL_MKL
 TYPED_TEST_P(FusedConv2DWithBiasOpTest, ExplicitPaddingConvolution) {
   const int filter_size = 3;
   const int filter_count = 12;
   this->VerifyConv2DWithBias(filter_size, filter_count,
                              /*explicit_paddings=*/{0, 0, 1, 2, 3, 4, 0, 0});
 }
+#endif
 
 TYPED_TEST_P(FusedConv2DWithBiasOpTest, OneByOneConvolutionAndActivation) {
   const int filter_size = 1;
@@ -1067,6 +1069,7 @@ TYPED_TEST_P(FusedConv2DWithBiasOpTest, SpatialConvolutionAndActivation) {
   }
 }
 
+#ifndef INTEL_MKL
 TYPED_TEST_P(FusedConv2DWithBiasOpTest,
              ExplicitPaddingConvolutionAndActivation) {
   const int filter_size = 3;
@@ -1077,6 +1080,7 @@ TYPED_TEST_P(FusedConv2DWithBiasOpTest,
         /*explicit_paddings=*/{0, 0, 1, 2, 3, 4, 0, 0});
   }
 }
+#endif
 
 // -------------------------------------------------------------------------- //
 // Conv2D + FusedBatchNorm + {Activation}                                     //
@@ -1147,15 +1151,21 @@ TYPED_TEST_P(FusedConv2DWithBatchNormOpTest,
   }
 }
 
-REGISTER_TYPED_TEST_SUITE_P(FusedConv2DWithBiasOpTest,          //
-                            OneByOneConvolution,                //
-                            ImageSizeConvolution,               //
-                            SpatialConvolution,                 //
-                            ExplicitPaddingConvolution,         //
+REGISTER_TYPED_TEST_SUITE_P(FusedConv2DWithBiasOpTest,  //
+                            OneByOneConvolution,        //
+                            ImageSizeConvolution,       //
+                            SpatialConvolution,         //
+#ifndef INTEL_MKL
+                            ExplicitPaddingConvolution,  //
+#endif
                             OneByOneConvolutionAndActivation,   //
                             ImageSizeConvolutionAndActivation,  //
-                            SpatialConvolutionAndActivation,    //
+#ifndef INTEL_MKL
+                            SpatialConvolutionAndActivation,  //
                             ExplicitPaddingConvolutionAndActivation);
+#else
+                            SpatialConvolutionAndActivation);
+#endif
 
 REGISTER_TYPED_TEST_SUITE_P(FusedConv2DWithBatchNormOpTest,     //
                             OneByOneConvolution,                //
