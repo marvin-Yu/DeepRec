@@ -349,6 +349,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":graph_view",
+        "@com_google_absl//absl/container:flat_hash_set",
     ],
 )
 
@@ -362,6 +363,7 @@ tf_cc_test(
         "//tensorflow/core:test",
         "//tensorflow/core:test_main",
         "//tensorflow/core:testlib",
+        "@com_google_absl//absl/strings",
     ],
 )
 
