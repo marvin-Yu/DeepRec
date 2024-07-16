@@ -125,7 +125,7 @@ Status ApplyRewrites(OpKernelContext* ctx,
   tensorflow::ConfigProto config;
   *config.mutable_graph_options()->mutable_rewrite_options() = config_factory();
   TF_RETURN_IF_ERROR(tensorflow::grappler::RunMetaOptimizer(
-      *grappler_item, config, ctx->device(), &cluster, graph_def));
+      std::move(*grappler_item), config, ctx->device(), &cluster, graph_def));
 
   // Remove fake sinks after optimizations are done.
   //
@@ -513,7 +513,6 @@ uint64 HashSubgraph(const GraphDef& g, const NodeDef* node) {
   absl::flat_hash_map<std::string, uint64> cache;
   return HashSubgraphImpl(grappler::GraphView(&g), node, &visited, &cache);
 }
-
 
 VariantTensorDataReader::VariantTensorDataReader(
     const tensorflow::VariantTensorData* data)
