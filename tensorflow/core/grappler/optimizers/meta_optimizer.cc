@@ -491,7 +491,7 @@ Status MetaOptimizer::OptimizeGraph(Cluster* cluster, GrapplerItem&& item,
   // optimizations from taking place since we don't have shape inference for
   // functions, and we can't optimize across function boundaries.
   if (fusion_optimizer != nullptr) {
-    TF_RETURN_IF_ERROR(RunOptimizer(fusion_optimizer, cluster, &optimized_item,
+    TF_RETURN_IF_ERROR(RunOptimizer(fusion_optimizer, cluster, &item,
                                     optimized_graph, &optimization_result));
     GRAPPLER_RETURN_IF_DEADLINE_EXCEEDED();
   }
