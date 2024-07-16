@@ -202,6 +202,9 @@ Status MetaOptimizer::InitializeOptimizers(
   if (cfg_.shape_optimization() != RewriterConfig::OFF) {
     optimizers->push_back(MakeUnique<ShapeOptimizer>());
   }
+  if (cfg_.layout_optimizer() != RewriterConfig::OFF) {
+    optimizers->push_back(MakeUnique<GenericLayoutOptimizer>());
+  }
   if (AutoMixedPrecisionEnabled(cfg_.auto_mixed_precision())) {
     optimizers->push_back(
         MakeUnique<AutoMixedPrecision>(AutoMixedPrecisionMode::FP16_CPU));
@@ -215,9 +218,8 @@ Status MetaOptimizer::InitializeOptimizers(
   }
   if (AutoMixedPrecisionEnabled(cfg_.auto_mixed_precision_mkl()) &&
       IsMKLEnabled()) {
-    LOG(WARNING)
-        << "NOTE: auto_mixed_precision_mkl is deprecated."
-           " Please use auto_mixed_precision_onednn_bfloat16 instead";
+    LOG(WARNING) << "NOTE: auto_mixed_precision_mkl is deprecated."
+                    " Please use auto_mixed_precision_onednn_bfloat16 instead";
     optimizers->push_back(
         MakeUnique<AutoMixedPrecision>(AutoMixedPrecisionMode::BF16));
   }
@@ -239,9 +241,6 @@ Status MetaOptimizer::InitializeOptimizers(
   if (cfg_.dependency_optimization() != RewriterConfig::OFF) {
     optimizers->push_back(
         MakeUnique<DependencyOptimizer>(cfg_.dependency_optimization()));
-  }
-  if (cfg_.layout_optimizer() != RewriterConfig::OFF) {
-    optimizers->push_back(MakeUnique<GenericLayoutOptimizer>());
   }
   if (cfg_.memory_optimization() != RewriterConfig::NO_MEM_OPT) {
     if (cfg_.memory_optimizer_target_node_name_scope().empty()) {
