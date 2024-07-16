@@ -2240,10 +2240,10 @@ class FoldTransposeIntoMatMul : public ArithmeticOptimizerStage {
     }
 
     const std::set<string> foldable_transpose_ops =
-        !is_complex ? std::set<string>{"ConjugateTranspose", "Transpose"}
-                    : (IsAnyBatchMatMul(*node)
-                           ? std::set<string>{"ConjugateTranspose"}
-                           : std::set<string>{"Transpose"});
+        !is_complex
+            ? std::set<string>{"ConjugateTranspose", "Transpose"}
+            : (IsAnyBatchMatMul(*node) ? std::set<string>{"ConjugateTranspose"}
+                                       : std::set<string>{"Transpose"});
 
     const bool a_is_foldable = foldable_transpose_ops.count(a->op()) > 0 &&
                                IsInnerMatrixTransposeNode(*a, ctx().node_map);
