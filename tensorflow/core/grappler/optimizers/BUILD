@@ -343,7 +343,6 @@ cc_library(
         "//tensorflow/core/grappler/utils:canonicalizer",
         "//tensorflow/core/grappler/utils:topological_sort",
         "//tensorflow/core/grappler/utils:traversal",
-        "//tensorflow/core/platform:hash",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
     ],
