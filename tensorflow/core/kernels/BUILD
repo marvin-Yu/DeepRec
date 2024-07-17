@@ -116,6 +116,40 @@ config_setting(
 )
 
 # Public support libraries ----------------------------------------------------
+MKL_SHORT_DEPS = [
+    "//tensorflow/core:core_cpu",
+    "//tensorflow/core:framework",
+    "//tensorflow/core:lib",
+    "//tensorflow/core:lib_internal",
+    "//tensorflow/core/kernels:ops_util",
+] + mkl_deps()
+
+MKL_DEPS = MKL_SHORT_DEPS + [
+    "//third_party/eigen3",
+    "//tensorflow/core:array_grad",
+    "//tensorflow/core:math_grad",
+    "//tensorflow/core:nn_grad",
+    "//tensorflow/core:protos_all_cc",
+    "//tensorflow/core/kernels:concat_lib",
+    "//tensorflow/core/kernels:conv_2d",
+    "//tensorflow/core/kernels:fill_functor",
+    "//tensorflow/core/kernels:gather_functor",
+    "//tensorflow/core/kernels:transpose_functor",
+]
+
+MKL_TEST_DEPS = [
+    "//tensorflow/cc:cc_ops",
+    "//tensorflow/core:core_cpu",
+    "//tensorflow/core:framework",
+    "//tensorflow/core:framework_internal",
+    "//tensorflow/core:lib",
+    "//tensorflow/core:protos_all_cc",
+    "//tensorflow/core:test",
+    "//tensorflow/core:test_main",
+    "//tensorflow/core:testlib",
+    "//tensorflow/core/kernels:ops_testutil",
+    "//tensorflow/core/kernels:ops_util",
+] + mkl_deps()
 
 cc_library(
     name = "assign_op",
@@ -7675,6 +7709,21 @@ tf_cc_test_mkl(
     ],
 )
 
+tf_cc_test_mkl(
+    name = "mkl_swish_op_test",
+    size = "small",
+    srcs = ["mkl_swish_op_test.cc"],
+    linkstatic = 1,  # Fixes dyld error on MacOS.
+    deps = [
+        ":mkl_eltwise_activation_base_op",
+        ":mkl_swish_op",
+        "//tensorflow/cc:math_ops",
+        "//tensorflow/core:direct_session",
+        "//tensorflow/core/kernels:cwise_op",
+        "@com_google_absl//absl/strings",
+    ] + MKL_TEST_DEPS,
+)
+
 tf_mkl_kernel_library(
     name = "mkl_tfconv_op",
     prefix = "mkl_tfconv",
@@ -7762,6 +7811,19 @@ tf_mkl_kernel_library(
         "//tensorflow/core:lib_internal",
         "//third_party/eigen3",
     ] + mkl_deps(),
+)
+
+tf_mkl_kernel_library(
+    name = "mkl_eltwise_activation_base_op",
+    prefix = "mkl_eltwise_activation_base",
+    deps = MKL_DEPS,
+)
+
+tf_mkl_kernel_library(
+    name = "mkl_swish_op",
+    hdrs = ["mkl_eltwise_activation_base_op.h"],
+    prefix = "mkl_swish",
+    deps = MKL_DEPS,
 )
 
 tf_mkl_kernel_library(
