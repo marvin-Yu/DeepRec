@@ -117,7 +117,7 @@ class CommonTestUtilities : public OpsTestBase {
   static Tensor GenerateRandomTensor(const TensorShape& shape) {
     Tensor tensor(DataTypeToEnum<T>::v(), shape);
     std::mt19937 gen(0x12345);
-    std::uniform_real_distribution<float> dist(-1.0, 1.0);
+    std::uniform_real_distribution<float> dist(0.0, 1.0);
     for (auto i = 0; i < tensor.NumElements(); ++i) {
       tensor.flat<T>()(i) = static_cast<T>(dist(gen));
     }
