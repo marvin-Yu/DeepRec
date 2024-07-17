@@ -61,6 +61,9 @@ namespace grappler {
 //   (1) FusedBatchNorm + <Activation>
 //   (2) FusedBatchNorm + SideInput + <Activation>
 //
+// Sigmoid + Mul -> _MklSwish  // This fusion only works on Intel CPU.
+//
+//
 // In all cases, the supported activation functions are Relu, Relu6, and Elu.
 //
 // Both Conv2D and MatMul implemented as Tensor contraction (on CPU), so all the
@@ -1642,6 +1645,63 @@ Status AddFusedMatMulWithBiasAndGelu(RemapperContext* ctx,
   return Status::OK();
 }
 
+bool FindSigmoidAndMul(RemapperContext* ctx, int node_index,
+                       std::map<string, int>* matched_nodes_map,
+                       std::set<int>* remove_node_indices) {
+  // Gelu fusion is enabled only with oneDNN library.
+  if (!IsMKLEnabled()) return false;
+
+  using utils::MatchingDirection;
+  using utils::NodeStatus;
+  // clang-format off
+  // Convert Sigmoid+Mul to Swish
+  // Mul(x, Sigmoid(x)) --> _MklSwish(x)
+
+  utils::OpTypePattern sigmoidmul_pattern{
+    "Mul", "mul_to_swish", NodeStatus::kReplace,
+    {
+      { "Sigmoid", "sigmoid", NodeStatus::kRemove,
+        {
+          { "*", "input", NodeStatus::kRemain}
+        }
+      },
+      { "*", "input", NodeStatus::kRemain}
+    }
+  };
+  // clang-format on
+  // check for data types
+  auto* mul_node_def = ctx->graph_view.GetNode(node_index)->node();
+  if (!(HasDataType(mul_node_def, DT_FLOAT) ||
+        HasDataType(mul_node_def, DT_HALF) ||
+        HasDataType(mul_node_def, DT_BFLOAT16)))
+    return false;
+
+  if (!NodeIsOnCpu(mul_node_def)) return false;
+
+  bool found_op_type_match = false;
+  utils::SubGraphMatcher<MatchingDirection::kFollowInputs> graph_matcher(
+      &(ctx->graph_view));
+  matched_nodes_map->clear();
+  remove_node_indices->clear();
+  found_op_type_match = graph_matcher.GetMatchedNodes(
+      sigmoidmul_pattern, {}, ctx->graph_view.GetNode(node_index),
+      matched_nodes_map, remove_node_indices);
+
+  if (found_op_type_match) {
+    NodeDef* matched_sigmoid_node =
+        ctx->graph_view.GetNode(matched_nodes_map->at("sigmoid"))->node();
+    auto in_tensor_sigmoid = matched_sigmoid_node->input(0);
+    if ((mul_node_def->input(0) != in_tensor_sigmoid) &&
+        (mul_node_def->input(1) != in_tensor_sigmoid)) {
+      // If the input tensor of Sigmoid doesn't match with either of input
+      // tensors of mul return false
+      found_op_type_match = false;
+    }
+  }
+
+  return found_op_type_match;
+}
+
 // Find a group of ops that make up an instance/layer normalization pattern
 // for fusion
 bool IsCommonNormPattern(RemapperContext* ctx, int node_index,
@@ -2127,6 +2187,38 @@ Status AddMklLayerNorm(RemapperContext* ctx,
 
   for (const auto& node_idx : remove_node_indices) {
     (*nodes_to_delete)[node_idx] = true;
+  }
+  return Status::OK();
+}
+
+Status ReplaceSigmoidMulWithSwish(
+    RemapperContext* ctx, const std::map<string, int>& matched_nodes_map,
+    const std::set<int>& remove_node_indices,
+    std::vector<bool>* invalidated_nodes, std::vector<bool>* nodes_to_delete) {
+  const NodeDef* mul =
+      ctx->graph_view.GetNode(matched_nodes_map.at("mul_to_swish"))->node();
+  const NodeDef* sigmoid =
+      ctx->graph_view.GetNode(matched_nodes_map.at("sigmoid"))->node();
+
+  NodeDef fused_op;
+  fused_op.set_name(mul->name());
+  fused_op.set_op("_MklSwish");
+  fused_op.set_device(mul->device());
+  fused_op.add_input(sigmoid->input(0));
+
+  auto* attr = fused_op.mutable_attr();
+  (*attr)["T"] = mul->attr().at("T");
+
+  utils::Mutation* mutation = ctx->graph_view.GetMutationBuilder();
+  Status status;
+  mutation->AddNode(std::move(fused_op), &status);
+  TF_RETURN_IF_ERROR(status);
+  TF_RETURN_IF_ERROR(mutation->Apply());
+
+  (*invalidated_nodes)[matched_nodes_map.at("mul_to_swish")] = true;
+
+  for (const auto& node_index : remove_node_indices) {
+    (*nodes_to_delete)[node_index] = true;
   }
   return Status::OK();
 }
@@ -3151,6 +3243,16 @@ Status Remapper::Optimize(Cluster* cluster, const GrapplerItem& item,
         continue;
       };
 
+      // Remap Mul(x, Sigmoid(x)) pattern, fuse them into the Swish(x).
+      std::map<string, int> sigmoidmul_matched_nodes_map;
+      std::set<int> sigmoidmul_remove_node_indices;
+      if (FindSigmoidAndMul(&ctx, i, &sigmoidmul_matched_nodes_map,
+                            &sigmoidmul_remove_node_indices)) {
+        TF_RETURN_IF_ERROR(ReplaceSigmoidMulWithSwish(
+            &ctx, sigmoidmul_matched_nodes_map, sigmoidmul_remove_node_indices,
+            &invalidated_nodes, &nodes_to_delete));
+        continue;
+      }
     }  // IsMKLEnabled()
 
     // Remap {Conv2D,DepthwiseConv2D,MatMul}+BiasAdd into the
