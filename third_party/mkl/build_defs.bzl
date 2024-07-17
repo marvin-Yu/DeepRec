@@ -112,7 +112,6 @@ def mkl_deps():
     """
     return select({
         "@org_tensorflow//third_party/mkl:build_with_mkl": ["@onednn//:mkl_dnn"],
-        "@org_tensorflow//third_party/mkl:build_with_mkl_gemm_only": ["//third_party/mkl:intel_binary_blob"],
         "//conditions:default": [],
     })
 
