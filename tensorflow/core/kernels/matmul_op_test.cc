@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include "absl/algorithm/container.h"
+#include "tensorflow/cc/ops/nn_ops_internal.h"
 #include "tensorflow/cc/ops/standard_ops.h"
 #include "tensorflow/core/common_runtime/kernel_benchmark_testlib.h"
 #include "tensorflow/core/framework/tensor.h"
@@ -135,6 +136,8 @@ class FusedMatMulOpTest : public OpsTestBase {
       ops::Relu6(root.WithOpName("with_activation"), with_bias);
     } else if (activation_type == "Elu") {
       ops::Elu(root.WithOpName("with_activation"), with_bias);
+    } else if (activation_type == "LeakyRelu") {
+      ops::internal::LeakyRelu(root.WithOpName("with_activation"), with_bias);
     } else {
       ops::Identity(root.WithOpName("with_activation"), with_bias);
     }
@@ -289,7 +292,7 @@ TYPED_TEST_P(FusedMatMulWithBiasOpTest, MatMul1x256x1) {
 }
 
 TYPED_TEST_P(FusedMatMulWithBiasOpTest, MatMul256x256x256WithActivation) {
-  for (const string& activation : {"Relu", "Relu6", "Elu"}) {
+  for (const string& activation : {"Relu", "Relu6", "Elu", "LeakyRelu"}) {
     this->VerifyConv2DWithBiasAndActivation(256, 256, 256, false, false,
                                             activation);
     this->VerifyConv2DWithBiasAndActivation(256, 256, 256, true, false,
@@ -302,21 +305,21 @@ TYPED_TEST_P(FusedMatMulWithBiasOpTest, MatMul256x256x256WithActivation) {
 }
 
 TYPED_TEST_P(FusedMatMulWithBiasOpTest, MatMul1x256x256WithActivation) {
-  for (const string& activation : {"Relu", "Relu6", "Elu"}) {
+  for (const string& activation : {"Relu", "Relu6", "Elu", "LeakyRelu"}) {
     this->VerifyConv2DWithBiasAndActivation(1, 256, 256, false, false,
                                             activation);
   }
 }
 
 TYPED_TEST_P(FusedMatMulWithBiasOpTest, MatMul256x256x1WithActivation) {
-  for (const string& activation : {"Relu", "Relu6", "Elu"}) {
+  for (const string& activation : {"Relu", "Relu6", "Elu", "LeakyRelu"}) {
     this->VerifyConv2DWithBiasAndActivation(256, 256, 1, false, false,
                                             activation);
   }
 }
 
 TYPED_TEST_P(FusedMatMulWithBiasOpTest, MatMul1x256x1WithActivation) {
-  for (const string& activation : {"Relu", "Relu6", "Elu"}) {
+  for (const string& activation : {"Relu", "Relu6", "Elu", "LeakyRelu"}) {
     this->VerifyConv2DWithBiasAndActivation(1, 256, 1, false, false,
                                             activation);
   }

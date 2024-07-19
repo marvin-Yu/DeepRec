@@ -1184,6 +1184,13 @@ class MklFusedMatMulOpTest : public OpsTestBase {
             next_op = ops::Tanh(root.WithOpName(last_op), next_op);
           }
 
+          if (std::find(fused_ops.begin(), fused_ops.end(), "LeakyRelu") !=
+              fused_ops.end()) {
+            last_op = "with_leakyrelu";
+            next_op =
+                ops::internal::LeakyRelu(root.WithOpName(last_op), next_op);
+          }
+
           if (std::find(fused_ops.begin(), fused_ops.end(), "Sigmoid") !=
               fused_ops.end()) {
             last_op = "with_sigmoid";
@@ -1334,6 +1341,7 @@ REGISTER_TYPED_TEST_CASE_P(MklFusedMatMulOpTest,  //
                            WithBiasAndRelu6,      //
                            WithBiasAndElu,        //
                            WithBiasAndTanh,       //
+                           WithBiasAndLeakyRelu,  //
                            WithBiasAndSigmoid,    //
                            WithBiasAndGelu,       //
                            WithBiasAndGeluErf,    //

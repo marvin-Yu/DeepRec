@@ -53,6 +53,9 @@ class MklFusedMatMulOp : public MklDnnMatMulOpBase<T, T> {
     OP_REQUIRES(
         ctx, transpose_a_ == false,
         errors::InvalidArgument("In[0] of MklMatMul can't be transposed."));
+    if (fused_ops_.size() == 2 && fused_ops_[1] == "LeakyRelu") {
+      OP_REQUIRES_OK(ctx, ctx->GetAttr("leakyrelu_alpha", &leakyrelu_alpha));
+    }
   }
 
   void Compute(OpKernelContext* ctx) override {
@@ -299,6 +302,9 @@ class MklFusedMatMulOp : public MklDnnMatMulOpBase<T, T> {
         params.post_op_params.push_back({"gelu_erf", {1.0, 0.0, 0.0}});
       } else if (post_op == "Add") {
         params.post_op_params.push_back({"sum", {1.0}});
+      } else if (post_op == "LeakyRelu") {
+        params.post_op_params.push_back(
+            {"leakyrelu", {1.0, leakyrelu_alpha, 0.0}});
       } else if (post_op == "Sigmoid") {
         params.post_op_params.push_back({"logistic", {1.0, 0.0, 0.0}});
       } else {
@@ -314,6 +320,7 @@ class MklFusedMatMulOp : public MklDnnMatMulOpBase<T, T> {
   bool transpose_a_;
   bool transpose_b_;
   std::vector<string> fused_ops_;
+  float leakyrelu_alpha = 0.2;
   const int kInputIndex_Add = 3;
   const int kOutputIndex_Dst = 0;
 };

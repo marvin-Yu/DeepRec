@@ -303,18 +303,22 @@ REGISTER_OP("_MklFusedMatMul")
     .Input("a: T")
     .Input("b: T")
     .Input("args: num_args * T")
+    .Input("mkl_a: uint8")
+    .Input("mkl_b: uint8")
+    .Input("mkl_args: num_args * uint8")
     .Output("product: T")
+    .Output("mkl_product: uint8")
     .Attr("is_filter_const: bool = false")
     .Attr("transpose_a: bool = false")
     .Attr("transpose_b: bool = false")
     .Attr("T: {bfloat16, float, half}")
     .Attr("num_args: int >= 0")
     .Attr("fused_ops: list(string) = []")
-    // Attributes for the FusedBatchNorm ----------- //
+    // Attributes for the FusedBatchNorm ------------------------------------ //
     .Attr("epsilon: float = 0.0001")
     // Attributes for the LeakyRelu ----------------------------------------- //
     .Attr("leakyrelu_alpha: float = 0.2")
-    // --------------------------------------------- //
+    // ---------------------------------------------------------------------- //
     .SetShapeFn(shape_inference::MatMulShape)
     .Doc(R"doc(
 MKL version of FusedMatMul operator. Uses MKL-DNN APIs to implement MatMul
@@ -335,9 +339,11 @@ REGISTER_OP("_MklNativeFusedMatMul")
     .Attr("T: {bfloat16, float, half}")
     .Attr("num_args: int >= 0")
     .Attr("fused_ops: list(string) = []")
-    // Attributes for the FusedBatchNorm ----------- //
+    // Attributes for the FusedBatchNorm ------------------------------------ //
     .Attr("epsilon: float = 0.0001")
-    // --------------------------------------------- //
+    // Attributes for the LeakyRelu ----------------------------------------- //
+    .Attr("leakyrelu_alpha: float = 0.2")
+    // ---------------------------------------------------------------------- //
     .SetShapeFn(shape_inference::MatMulShape)
     .Doc(R"doc(
 oneDNN version of FusedMatMul operator that does not depend

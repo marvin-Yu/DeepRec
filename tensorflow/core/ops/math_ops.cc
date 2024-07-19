@@ -69,8 +69,8 @@ REGISTER_OP("AddN")
           } else if (shapes_and_types && shapes_and_types_i) {
             if (shapes_and_types_i->size() != shapes_and_types->size()) {
               return errors::InvalidArgument(
-                  "shapes_and_types[", i,
-                  "].size() == ", shapes_and_types_i->size(),
+                  "shapes_and_types[", i, "].size() == ",
+                  shapes_and_types_i->size(),
                   " != shapes_and_types[0].size() == ",
                   shapes_and_types->size());
             }
@@ -455,7 +455,7 @@ REGISTER_OP("BatchTopKOnRT")
       TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 1, &values_in));
       TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 1, &row_splits_in));
       TF_RETURN_IF_ERROR(c->WithRankAtMost(c->input(2), 1, &k));
-      if (c->Rank(k) == 1 && 
+      if (c->Rank(k) == 1 &&
           c->Value(c->Dim(k, 0)) != c->Value(c->Dim(row_splits_in, 0)) - 1) {
         return errors::InvalidArgument("length of k != number of groups: ",
                                        c->Value(c->Dim(k, 0)), " != ", c->Value(c->Dim(row_splits_in, 0)), " - 1");
@@ -1579,7 +1579,7 @@ REGISTER_OP("_FusedMatMul")
     .Attr("fused_ops: list(string) = []")
     // Attributes for the FusedBatchNorm ----------- //
     .Attr("epsilon: float = 0.0001")
-    // Attributes for the LeakyRelu ----------------------------------------- //
+    // Attributes for the LeakyRelu ---------------- //
     .Attr("leakyrelu_alpha: float = 0.2")
     // --------------------------------------------- //
     .SetShapeFn(shape_inference::MatMulShape)
@@ -2030,12 +2030,12 @@ Status RangeSize(const Tensor* start_t, const Tensor* limit_t,
   T limit = limit_t->scalar<T>()();
   T delta = delta_t->scalar<T>()();
   if (start > limit && delta > 0) {
-    return errors::InvalidArgument(
-        "Requires start <= limit when delta > 0: ", start, "/", limit);
+    return errors::InvalidArgument("Requires start <= limit when delta > 0: ",
+                                   start, "/", limit);
   }
   if (start < limit && delta < 0) {
-    return errors::InvalidArgument(
-        "Requires start >= limit when delta < 0: ", start, "/", limit);
+    return errors::InvalidArgument("Requires start >= limit when delta < 0: ",
+                                   start, "/", limit);
   }
   if (delta == 0) {
     return errors::InvalidArgument("Requires delta != 0");
