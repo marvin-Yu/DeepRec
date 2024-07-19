@@ -296,10 +296,10 @@ class MklFusedMatMulOp : public MklDnnMatMulOpBase<T, T> {
         params.post_op_params.push_back({"elu", {1.0, 1.0, 0.0}});
       } else if (post_op == "Tanh") {
         params.post_op_params.push_back({"tanh", {1.0, 0.0, 0.0}});
-      } else if (post_op == "Gelu") {
-        params.post_op_params.push_back({"gelu", {1.0, 0.0, 0.0}});
-      } else if (post_op == "Gelu_erf") {
-        params.post_op_params.push_back({"gelu_erf", {1.0, 0.0, 0.0}});
+      } else if (post_op == "GeluApproximate") {
+        params.post_op_params.push_back({"gelu_approximate", {1.0, 0.0, 0.0}});
+      } else if (post_op == "GeluExact") {
+        params.post_op_params.push_back({"gelu_exact", {1.0, 0.0, 0.0}});
       } else if (post_op == "Add") {
         params.post_op_params.push_back({"sum", {1.0}});
       } else if (post_op == "LeakyRelu") {

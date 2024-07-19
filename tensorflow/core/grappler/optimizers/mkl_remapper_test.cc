@@ -450,7 +450,7 @@ TEST_F(MklRemapperTest, FuseBatchNormWithRelu) {
 TEST_F(MklRemapperTest, FuseMatMulWithBiasAndGelu) {
   using ::tensorflow::ops::Placeholder;
 
-  for (const string& activation : {"Gelu_tanh", "Gelu_erf"}) {
+  for (const string& activation : {"GeluApproximate", "GeluExact"}) {
     tensorflow::Scope s = tensorflow::Scope::NewRootScope();
 
     auto lhs_shape = ops::Placeholder::Shape({8, 32});
@@ -469,8 +469,9 @@ TEST_F(MklRemapperTest, FuseMatMulWithBiasAndGelu) {
       auto fetch = s.WithOpName("fetch");
 
       return ops::Identity(
-          fetch, ops::Gelu(activate, bias_add,
-                           ops::Gelu::Approximate(activation == "Gelu_tanh")));
+          fetch,
+          ops::Gelu(activate, bias_add,
+                    ops::Gelu::Approximate(activation == "GeluApproximate")));
     }();
     auto lhs_t = GenerateRandomTensor<DT_FLOAT>({8, 32});
     auto rhs_t = GenerateRandomTensor<DT_FLOAT>({32, 64});
@@ -504,10 +505,10 @@ TEST_F(MklRemapperTest, FuseMatMulWithBiasAndGelu) {
         const auto fused_ops = node.attr().at("fused_ops").list().s();
         ASSERT_EQ(fused_ops.size(), 2);
         EXPECT_EQ(fused_ops[0], "BiasAdd");
-        if (activation == "Gelu_tanh") {
-          EXPECT_EQ(fused_ops[1], "Gelu");
+        if (activation == "GeluApproximate") {
+          EXPECT_EQ(fused_ops[1], "GeluApproximate");
         } else {
-          EXPECT_EQ(fused_ops[1], "Gelu_erf");
+          EXPECT_EQ(fused_ops[1], "GeluExact");
         }
         found++;
       }

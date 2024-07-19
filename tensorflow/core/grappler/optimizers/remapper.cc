@@ -1565,7 +1565,6 @@ bool FindMatMulWithBiasAndAGelu(RemapperContext* ctx, int node_index,
   return found_match;
 }
 
-// WIP: Not yet implemented.
 Status AddFusedMatMulWithBiasAndGelu(RemapperContext* ctx,
                                      std::map<string, int>& node_label_to_index,
                                      std::vector<bool>* invalidated_nodes,
@@ -1578,7 +1577,7 @@ Status AddFusedMatMulWithBiasAndGelu(RemapperContext* ctx,
       ctx->graph_view.GetNode(node_label_to_index["my_bias_add"])->node();
 
   NodeDef fused_node;
-  string gelu_kind = approximate ? "Gelu" : "Gelu_erf";
+  string gelu_kind = approximate ? "GeluApproximate" : "GeluExact";
   // Fused node should have the name of terminal node of the fusion.
   fused_node.set_name(old_gelu_node->name());
   fused_node.set_op("_FusedMatMul");
@@ -2259,8 +2258,12 @@ Status AddFusedContractionNode(
 
   // Set different algorithm for Gelu according to approximate.
   string new_op = activation.op();
-  if (new_op == "Gelu" && !(activation.attr().at("approximate").b())) {
-    new_op += "_erf";
+  if (new_op == "Gelu") {
+    if (!(activation.attr().at("approximate").b())) {
+      new_op += "Exact";
+    } else {
+      new_op += "Approximate";
+    }
   }
   SetFusedOpAttributes(&fused_op, {"BiasAdd", new_op});
 
@@ -3122,20 +3125,22 @@ Status Remapper::Optimize(Cluster* cluster, const GrapplerItem& item,
       }
 #endif
 
-      // MatMul + BiasAdd + Gelu fusion
+      // MatMul + BiasAdd + GeluApproximate fusion
       std::map<string, int> node_label_to_index;
       if (FindMatMulWithBiasAndAGelu(&ctx, i, &node_label_to_index,
                                      &nodes_to_delete, true)) {
         TF_RETURN_IF_ERROR(AddFusedMatMulWithBiasAndGelu(
-            &ctx, node_label_to_index, &invalidated_nodes, true));
+            &ctx, node_label_to_index, &invalidated_nodes,
+            /* approximate = */ true));
         continue;
       };
 
-      // MatMul + BiasAdd + Gelu_erf fusion
+      // MatMul + BiasAdd + GeluExact fusion
       if (FindMatMulWithBiasAndAGelu(&ctx, i, &node_label_to_index,
                                      &nodes_to_delete, false)) {
         TF_RETURN_IF_ERROR(AddFusedMatMulWithBiasAndGelu(
-            &ctx, node_label_to_index, &invalidated_nodes, false));
+            &ctx, node_label_to_index, &invalidated_nodes,
+            /* approximate = */ false));
         continue;
       };
 

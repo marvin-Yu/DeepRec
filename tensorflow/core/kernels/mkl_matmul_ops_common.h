@@ -234,14 +234,14 @@ class MklDnnMatMulFwdPrimitive : public MklPrimitive {
           float op_beta = post_op_param.param[2];
           post_ops.APPEND_ELTWISE(op_scale, ALGORITHM::eltwise_elu, op_alpha,
                                   op_beta);
-        } else if (post_op_param.name == "gelu") {
+        } else if (post_op_param.name == "gelu_approximate") {
           DCHECK_EQ(post_op_param.param.size(), 3);
           float op_scale = post_op_param.param[0];
           float op_alpha = post_op_param.param[1];
           float op_beta = post_op_param.param[2];
           post_ops.APPEND_ELTWISE(op_scale, ALGORITHM::eltwise_gelu_tanh,
                                   op_alpha, op_beta);
-        } else if (post_op_param.name == "gelu_erf") {
+        } else if (post_op_param.name == "gelu_exact") {
           DCHECK_EQ(post_op_param.param.size(), 3);
           float op_scale = post_op_param.param[0];
           float op_alpha = post_op_param.param[1];
@@ -274,15 +274,16 @@ class MklDnnMatMulFwdPrimitive : public MklPrimitive {
           float op_scale = post_op_param.param[0];
           post_ops.append_sum(op_scale);
         } else {
-          DCHECK(
-              (post_op_param.name == "relu") ||
-              (post_op_param.name == "relu6") ||
-              (post_op_param.name == "elu") || (post_op_param.name == "gelu") ||
-              (post_op_param.name == "gelu_erf") ||
-              (post_op_param.name == "sum") || (post_op_param.name == "tanh") ||
-              (post_op_param.name == "leakyrelu") ||
-              (post_op_param.name == "logistic") ||
-              (post_op_param.name == "output_scale"));
+          DCHECK((post_op_param.name == "relu") ||
+                 (post_op_param.name == "relu6") ||
+                 (post_op_param.name == "elu") ||
+                 (post_op_param.name == "gelu_approximate") ||
+                 (post_op_param.name == "gelu_exact") ||
+                 (post_op_param.name == "sum") ||
+                 (post_op_param.name == "tanh") ||
+                 (post_op_param.name == "leakyrelu") ||
+                 (post_op_param.name == "logistic") ||
+                 (post_op_param.name == "output_scale"));
         }
       }
       post_ops_attr.set_post_ops(post_ops);
@@ -388,8 +389,9 @@ class MklDnnMatMulFwdPrimitiveFactory : public MklPrimitiveFactory<T> {
     // Generate keys for post-ops
     for (auto const& post_op_param : dnnl_matmul_fwd_dims.post_op_params) {
       if (post_op_param.name == "relu" || post_op_param.name == "relu6" ||
-          post_op_param.name == "elu" || post_op_param.name == "gelu" ||
-          post_op_param.name == "gelu_erf" || post_op_param.name == "tanh" ||
+          post_op_param.name == "elu" ||
+          post_op_param.name == "gelu_approximate" ||
+          post_op_param.name == "gelu_exact" || post_op_param.name == "tanh" ||
           post_op_param.name == "leakyrelu" ||
           post_op_param.name == "logistic") {
         DCHECK_EQ(post_op_param.param.size(), 3);
