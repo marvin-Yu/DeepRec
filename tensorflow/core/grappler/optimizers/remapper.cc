@@ -1436,6 +1436,12 @@ void CopyBatchMatMulAttributes(const NodeDef& batchmatmul,
   (*attr)["T"] = src_attr.at("T");
   (*attr)["adj_x"] = src_attr.at("adj_x");
   (*attr)["adj_y"] = src_attr.at("adj_y");
+
+  // Using the default value for leakyrelu's alpha since it is not used in the
+  // batchmatmul kernel. It was originally added (in PR #58865) to align with
+  // other fused contraction ops such as convolution and matmul.
+  float leakyrelu_alpha = 0.2f;
+  SetAttrValue(leakyrelu_alpha, &(*attr)["leakyrelu_alpha"]);
 }
 
 void SetFusedOpAttributes(NodeDef* fused,
