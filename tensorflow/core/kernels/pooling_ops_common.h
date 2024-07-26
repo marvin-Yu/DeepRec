@@ -614,6 +614,10 @@ void SpatialAvgPool(OpKernelContext* context, Tensor* output,
         params.tensor_in_batch, work_unit_cost, shard);
 }
 
+Status CheckPaddingSize(int64_t window_rows, int64_t window_cols,
+                        int64_t pad_top, int64_t pad_bottom, int64_t pad_left,
+                        int64_t pad_right);
+
 }  // namespace tensorflow
 
 #endif  // TENSORFLOW_CORE_KERNELS_POOLING_OPS_COMMON_H_

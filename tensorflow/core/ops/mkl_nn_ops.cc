@@ -483,14 +483,14 @@ REGISTER_OP("_MklNativeMaxPool")
     .Attr("T: {float, half, bfloat16} = DT_FLOAT")
     .Attr("ksize: list(int) >= 4")
     .Attr("strides: list(int) >= 4")
-    .Attr(GetPaddingAttrString())
-    .Attr(GetConvnetDataFormatAttrString())
+    .Attr(GetPaddingAttrStringWithExplicit())
     .Attr(GetExplicitPaddingsAttrString())
+    .Attr(GetConvnetDataFormatAttrString())
     .Attr("workspace_enabled: bool = false")
     .Input("input: T")
     .Output("output: T")
     .Output("workspace: uint8")
-    .SetShapeFn(shape_inference::MaxPoolShape)
+    .SetShapeFn(shape_inference::MaxPoolShapeWithExplicitPadding)
     .Doc(R"doc(
 oneDNN version of MaxPool operator that does not depend
 on layout propagation. Uses oneDNN APIs to perform max pooling

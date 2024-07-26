@@ -254,6 +254,7 @@ template class MklPoolingBwdPrimitive<Eigen::half>;
 void MklPoolParameters::Init(OpKernelContext* context,
                              const std::vector<int32>& ksize,
                              const std::vector<int32>& stride, Padding padding,
+                             std::vector<int64_t>& explicit_paddings,
                              TensorFormat data_format,
                              const TensorShape& tensor_in_shape) {
   // For max pooling, tensor_in should have 4 or 5 dimensions.
@@ -274,13 +275,14 @@ void MklPoolParameters::Init(OpKernelContext* context,
   }
   tensor_in_batch = GetTensorDim(tensor_in_shape, data_format, 'N');
 
-  Init(context, ksize, stride, padding, data_format);
+  Init(context, ksize, stride, padding, explicit_paddings, data_format);
 }
 
 // Initialization for OneDNN format.
 void MklPoolParameters::Init(OpKernelContext* context,
                              const std::vector<int32>& ksize,
                              const std::vector<int32>& stride, Padding padding,
+                             std::vector<int64_t>& explicit_paddings,
                              TensorFormat data_format,
                              const MklDnnShape* mklInputShape) {
   // Get the input sizes.
@@ -299,13 +301,14 @@ void MklPoolParameters::Init(OpKernelContext* context,
     tensor_in_batch = mklInputShape->GetDimension3D('N');
   }
 
-  Init(context, ksize, stride, padding, data_format);
+  Init(context, ksize, stride, padding, explicit_paddings, data_format);
 }
 
 // Common Initialization for TensorFlow and OneDNN formats.
 void MklPoolParameters::Init(OpKernelContext* context,
                              const std::vector<int32>& ksize,
                              const std::vector<int32>& stride, Padding padding,
+                             std::vector<int64_t>& explicit_paddings,
                              TensorFormat data_format) {
   // Get the data format.
   this->data_format = data_format;
@@ -367,6 +370,17 @@ void MklPoolParameters::Init(OpKernelContext* context,
                 errors::Unimplemented(
                     "AvgPooling3D supports exactly one of pooling across depth "
                     "or pooling across depth/width/height."));
+  }
+
+  if (padding == Padding::EXPLICIT) {
+    OP_REQUIRES_OK(context, CheckValidPadding(padding, explicit_paddings,
+                                              /*num_dims=*/4, data_format));
+    GetExplicitPaddingForDim(explicit_paddings, data_format, 'H', &pad_top,
+                             &pad_bottom);
+    GetExplicitPaddingForDim(explicit_paddings, data_format, 'W', &pad_left,
+                             &pad_right);
+    OP_REQUIRES_OK(context, CheckPaddingSize(window_rows, window_cols, pad_top,
+                                             pad_bottom, pad_left, pad_right));
   }
 
   if (depth_window == 1) {  // We are pooling in the D (Pool3D only), H and W.
