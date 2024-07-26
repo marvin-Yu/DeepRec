@@ -7972,6 +7972,7 @@ tf_mkl_kernel_library(
     deps = [
         ":bounds_check",
         ":ops_util",
+        ":pooling_ops_hdrs",
         "//tensorflow/core:core_cpu",
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",

@@ -282,6 +282,9 @@ Status FusedBatchNormExShape(shape_inference::InferenceContext* c);
 // Shape function for FusedBatchNormGrad and FusedBatchNormGradV2 operations.
 Status FusedBatchNormGradShape(shape_inference::InferenceContext* c);
 
+// Shape function for MaxPool-like operations that support explicit padding.
+Status MaxPoolShapeWithExplicitPadding(shape_inference::InferenceContext* c);
+
 // Shape function for MaxPool-like operations.
 Status MaxPoolShape(shape_inference::InferenceContext* c);
 

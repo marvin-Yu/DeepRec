@@ -461,18 +461,18 @@ struct MklPoolParameters {
   // Updates context->status if there is an invalid input.
   void Init(OpKernelContext* context, const std::vector<int32>& ksize,
             const std::vector<int32>& stride, Padding padding,
-            std::vector<int64_t>& explicit_paddings, TensorFormat data_format,
+            std::vector<int64>& explicit_paddings, TensorFormat data_format,
             const TensorShape& tensor_in_shape);
   void Init(OpKernelContext* context, const std::vector<int32>& ksize,
             const std::vector<int32>& stride, Padding padding,
-            std::vector<int64_t>& explicit_paddings, TensorFormat data_format,
+            std::vector<int64>& explicit_paddings, TensorFormat data_format,
             const MklDnnShape* mkl_in_shape);
 
  private:
   // Common initialization for TensorFlow and MKL formats
   void Init(OpKernelContext* context, const std::vector<int32>& ksize,
             const std::vector<int32>& stride, Padding padding,
-            std::vector<int64_t>& explicit_paddings, TensorFormat data_format);
+            std::vector<int64>& explicit_paddings, TensorFormat data_format);
 };
 
 template <class T>
@@ -657,7 +657,7 @@ class MklPoolingOpBase : public OpKernel {
   std::vector<int32> ksize_;
   std::vector<int32> stride_;
   Padding padding_;
-  std::vector<int64_t> explicit_paddings_;
+  std::vector<int64> explicit_paddings_;
   TensorFormat data_format_tf_;
   // Either memory::format (OneDNN v-0.x) or MklTensorFormat (OneDNN v-1.x)
   MKL_TENSOR_FORMAT tensor_format_dnnl_;

@@ -23,6 +23,8 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/device.h"
 #include "tensorflow/core/framework/bounds_check.h"
 #include "tensorflow/core/framework/common_shape_fns.h"
+#include "tensorflow/core/kernels/pooling_ops_common.h"
+
 namespace tensorflow {
 #ifndef ENABLE_ONEDNN_V3
 #define AVG_POOLING_DCHECK(params) \
@@ -254,7 +256,7 @@ template class MklPoolingBwdPrimitive<Eigen::half>;
 void MklPoolParameters::Init(OpKernelContext* context,
                              const std::vector<int32>& ksize,
                              const std::vector<int32>& stride, Padding padding,
-                             std::vector<int64_t>& explicit_paddings,
+                             std::vector<int64>& explicit_paddings,
                              TensorFormat data_format,
                              const TensorShape& tensor_in_shape) {
   // For max pooling, tensor_in should have 4 or 5 dimensions.
@@ -282,7 +284,7 @@ void MklPoolParameters::Init(OpKernelContext* context,
 void MklPoolParameters::Init(OpKernelContext* context,
                              const std::vector<int32>& ksize,
                              const std::vector<int32>& stride, Padding padding,
-                             std::vector<int64_t>& explicit_paddings,
+                             std::vector<int64>& explicit_paddings,
                              TensorFormat data_format,
                              const MklDnnShape* mklInputShape) {
   // Get the input sizes.
@@ -308,7 +310,7 @@ void MklPoolParameters::Init(OpKernelContext* context,
 void MklPoolParameters::Init(OpKernelContext* context,
                              const std::vector<int32>& ksize,
                              const std::vector<int32>& stride, Padding padding,
-                             std::vector<int64_t>& explicit_paddings,
+                             std::vector<int64>& explicit_paddings,
                              TensorFormat data_format) {
   // Get the data format.
   this->data_format = data_format;
