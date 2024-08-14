@@ -639,8 +639,12 @@ class MklMatMulPrimitive : public MklPrimitive {
 
   ~MklMatMulPrimitive() {}
 
+  dnnl::memory::desc GetScratchPadDesc() {
+    return context_.prim_desc->scratchpad_desc();
+  }
+
   void Execute(const std::shared_ptr<stream>& stream, const Tlhs* a_data,
-               const Trhs* b_data, const Toutput* c_data,
+               const Trhs* b_data, const Toutput* c_data, void* sp_data,
                void* mul_data = nullptr, void* add_data = nullptr) {
 #if defined(ENABLE_DNNL_THREADPOOL) && !defined(ENABLE_ONEDNN_V3)
     context_.a_mem->set_data_handle(
@@ -649,6 +653,8 @@ class MklMatMulPrimitive : public MklPrimitive {
         static_cast<void*>(const_cast<Trhs*>(b_data)), *stream);
     context_.c_mem->set_data_handle(
         static_cast<void*>(const_cast<Toutput*>(c_data)), *stream);
+    context_.sp_mem->set_data_handle(sp_data, *stream);
+
     if (mul_data != nullptr)
       context_.mul_mem->set_data_handle(mul_data, *stream);
     if (add_data != nullptr)
@@ -660,6 +666,7 @@ class MklMatMulPrimitive : public MklPrimitive {
         static_cast<void*>(const_cast<Trhs*>(b_data)));
     context_.c_mem->set_data_handle(
         static_cast<void*>(const_cast<Toutput*>(c_data)));
+    context_.sp_mem->set_data_handle(sp_data);
     if (mul_data != nullptr) context_.mul_mem->set_data_handle(mul_data);
     if (add_data != nullptr) context_.add_mem->set_data_handle(add_data);
 #endif  // ENABLE_DNNL_THREADPOOL && !ENABLE_ONEDNN_V3
@@ -669,6 +676,7 @@ class MklMatMulPrimitive : public MklPrimitive {
     context_.a_mem->set_data_handle(DummyData);
     context_.b_mem->set_data_handle(DummyData);
     context_.c_mem->set_data_handle(DummyData);
+    context_.sp_mem->set_data_handle(DummyData);
     if (mul_data != nullptr) context_.mul_mem->set_data_handle(DummyData);
     if (add_data != nullptr) context_.add_mem->set_data_handle(DummyData);
   }
@@ -682,6 +690,7 @@ class MklMatMulPrimitive : public MklPrimitive {
     std::shared_ptr<dnnl::memory> c_mem;
     std::shared_ptr<dnnl::memory> mul_mem;
     std::shared_ptr<dnnl::memory> add_mem;
+    std::shared_ptr<dnnl::memory> sp_mem;
 
     // Descriptor and primitive-descriptor for MatMul.
 #ifndef ENABLE_ONEDNN_V3
@@ -706,6 +715,7 @@ class MklMatMulPrimitive : public MklPrimitive {
           c_mem(nullptr),
           mul_mem(nullptr),
           add_mem(nullptr),
+          sp_mem(nullptr),
 #ifndef ENABLE_ONEDNN_V3
           desc(nullptr),
 #endif  // !ENABLE_ONEDNN_V3
@@ -767,6 +777,7 @@ class MklMatMulPrimitive : public MklPrimitive {
       }
       post_ops_attr.set_post_ops(post_ops);
     }
+    post_ops_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 #ifndef ENABLE_ONEDNN_V3
     context_.prim_desc.reset(
         new matmul::primitive_desc(*context_.desc, post_ops_attr, cpu_engine_));
@@ -783,11 +794,15 @@ class MklMatMulPrimitive : public MklPrimitive {
         new dnnl::memory(*context_.b_md, cpu_engine_, DummyData));
     context_.c_mem.reset(
         new dnnl::memory(*context_.c_md, cpu_engine_, DummyData));
+    auto scratchpad_md = context_.prim_desc->scratchpad_desc();
+    context_.sp_mem.reset(
+        new dnnl::memory(scratchpad_md, cpu_engine_, DummyData));
 
     // Create matmul primitive.
     matmul_primitive.reset(new dnnl::matmul(*context_.prim_desc));
     context_.net_args.push_back({{DNNL_ARG_SRC, *context_.a_mem},
                                  {DNNL_ARG_WEIGHTS, *context_.b_mem},
+                                 {DNNL_ARG_SCRATCHPAD, *context_.sp_mem},
                                  {DNNL_ARG_DST, *context_.c_mem}});
 
     if (!post_op_params.empty()) {
@@ -919,11 +934,13 @@ void dnnl_gemm(char transa, char transb, int64_t m, int64_t n, int64_t k,
   MklMatMulPrimitive<T, T, T>* matmul_prim =
       MklMatMulPrimitiveFactory<T, T, T, T>::Get(params, 0);
 
+  UserScratchPad<unsigned char> scratch_pad;
+  scratch_pad.AllocateSPTensor(matmul_prim, ctx);
   // Execute matmul primitive.
   std::shared_ptr<stream> cpu_stream;
   MklDnnThreadPool eigen_tp(ctx);
   cpu_stream.reset(CreateStream(&eigen_tp, matmul_prim->GetEngine()));
-  matmul_prim->Execute(cpu_stream, a, b, c);
+  matmul_prim->Execute(cpu_stream, a, b, c, scratch_pad.Get());
 }
 
 }  // anonymous namespace
