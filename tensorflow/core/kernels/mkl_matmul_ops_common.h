@@ -108,13 +108,18 @@ class MklDnnMatMulFwdPrimitive : public MklPrimitive {
 
   ~MklDnnMatMulFwdPrimitive() {}
 
+  dnnl::memory::desc GetScratchPadDesc() {
+    return context_.fwd_pd->scratchpad_desc();
+  }
+
   // Inner-product forward execute with bias:
   //  - src_data: input data buffer of src
   //  - weight_data: input data buffer of weight
   //  - bias_data: input data buffer of bias
   //  - dst_data: output data buffer of dst
+  //  - sp_data: scratchpad data
   void Execute(const Tinput* src_data, const Tweight* weight_data,
-               const void* bias_data, Toutput* dst_data,
+               const void* bias_data, Toutput* dst_data, void* sp_data,
                const MklDnnMatMulFwdParams& matmul_fwd_params,
                std::shared_ptr<stream> fwd_stream) {
     context_.src_mem->set_data_handle(
@@ -123,6 +128,7 @@ class MklDnnMatMulFwdPrimitive : public MklPrimitive {
         static_cast<void*>(const_cast<Tweight*>(weight_data)) FWD_STREAM);
     context_.bias_mem->set_data_handle(const_cast<void*>(bias_data) FWD_STREAM);
     context_.dst_mem->set_data_handle(static_cast<void*>(dst_data) FWD_STREAM);
+    context_.sp_mem->set_data_handle(sp_data FWD_STREAM);
 
     execute_primitives(context_.fwd_primitives, fwd_stream, context_.net_args);
 
@@ -146,6 +152,7 @@ class MklDnnMatMulFwdPrimitive : public MklPrimitive {
     std::shared_ptr<dnnl::memory> weight_mem;
     std::shared_ptr<dnnl::memory> bias_mem;
     std::shared_ptr<dnnl::memory> dst_mem;
+    std::shared_ptr<dnnl::memory> sp_mem;
 
     // Descriptor and primitive-descriptor for forward inner-product.
 #ifndef ENABLE_ONEDNN_V3
@@ -169,6 +176,7 @@ class MklDnnMatMulFwdPrimitive : public MklPrimitive {
           weight_mem(nullptr),
           bias_mem(nullptr),
           dst_mem(nullptr),
+          sp_mem(nullptr),
 #ifndef ENABLE_ONEDNN_V3
           fwd_desc(nullptr),
 #endif  // !ENABLE_ONEDNN_V3
@@ -211,6 +219,7 @@ class MklDnnMatMulFwdPrimitive : public MklPrimitive {
     // Check if there is any fusion as post-ops
     auto const& post_op_params = matmul_fwd_params.post_op_params;
     dnnl::primitive_attr post_ops_attr;
+    post_ops_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
     dnnl::post_ops post_ops;
     if (!post_op_params.empty()) {
       for (auto const& post_op_param : post_op_params) {
@@ -316,6 +325,9 @@ class MklDnnMatMulFwdPrimitive : public MklPrimitive {
         context_.fwd_pd.get()->PRIMITIVE_DESC_DST, cpu_engine_, DummyData));
     context_.bias_mem.reset(
         new memory(context_.fwd_pd.get()->bias_desc(), cpu_engine_, DummyData));
+    auto scratchpad_md = context_.fwd_pd->scratchpad_desc();
+    context_.sp_mem.reset(
+        new dnnl::memory(scratchpad_md, cpu_engine_, DummyData));
 
     // Create inner-product primitive.
     context_.matmul_fwd.reset(new inner_product_forward(*context_.fwd_pd));
@@ -323,6 +335,7 @@ class MklDnnMatMulFwdPrimitive : public MklPrimitive {
         {DNNL_ARG_SRC, *context_.src_mem},
         {DNNL_ARG_WEIGHTS, *context_.weight_mem},
         {DNNL_ARG_BIAS, *context_.bias_mem},
+        {DNNL_ARG_SCRATCHPAD, *context_.sp_mem},
         {DNNL_ARG_DST, *context_.dst_mem}};
 
     context_.net_args.push_back(net_args);
