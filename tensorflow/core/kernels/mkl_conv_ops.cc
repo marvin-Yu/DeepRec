@@ -108,6 +108,10 @@ class MklConvFwdPrimitive : public MklPrimitive {
   }
   ~MklConvFwdPrimitive() {}
 
+  dnnl::memory::desc GetScratchPadDesc() {
+    return context_.fwd_pd->scratchpad_desc();
+  }
+
   // Convolution forward execute with bias
   //   src_data:    input data buffer of src
   //   filter_data: input data buffer of filter (weights)
@@ -115,7 +119,7 @@ class MklConvFwdPrimitive : public MklPrimitive {
   //   dst_data:    output data buffer of dst
   void Execute(const Tinput* src_data, const Tfilter* filter_data,
                const Tbias* bias_data, const Toutput* dst_data,
-               std::shared_ptr<stream> fwd_stream) {
+               std::shared_ptr<stream> fwd_stream, void* sp_data = nullptr) {
     // TODO: Create a common function and avoid the duplicate code
 #if defined(ENABLE_DNNL_THREADPOOL) && !defined(ENABLE_ONEDNN_V3)
     context_.src_mem->set_data_handle(
@@ -128,6 +132,10 @@ class MklConvFwdPrimitive : public MklPrimitive {
     }
     context_.dst_mem->set_data_handle(
         static_cast<void*>(const_cast<Toutput*>(dst_data)), *fwd_stream);
+    if (sp_data) {
+      context_.sp_mem->set_data_handle(static_cast<void*>(sp_data),
+                                       *fwd_stream);
+    }
 #else
     context_.src_mem->set_data_handle(
         static_cast<void*>(const_cast<Tinput*>(src_data)));
@@ -139,7 +147,11 @@ class MklConvFwdPrimitive : public MklPrimitive {
     }
     context_.dst_mem->set_data_handle(
         static_cast<void*>(const_cast<Toutput*>(dst_data)));
+    if (sp_data) {
+      context_.sp_mem->set_data_handle(static_cast<void*>(sp_data));
+    }
 #endif  // ENABLE_DNNL_THREADPOOL && !ENABLE_ONEDNN_V3
+
     DCHECK_EQ(context_.fwd_primitives.size(),
               context_.fwd_primitives_args.size());
     for (size_t i = 0; i < context_.fwd_primitives.size(); ++i) {
@@ -154,6 +166,9 @@ class MklConvFwdPrimitive : public MklPrimitive {
       context_.bias_mem->set_data_handle(DummyData);
     }
     context_.dst_mem->set_data_handle(DummyData);
+    if (sp_data) {
+      context_.sp_mem->set_data_handle(DummyData);
+    }
   }
 
   // Convolution forward execute without bias
@@ -161,8 +176,9 @@ class MklConvFwdPrimitive : public MklPrimitive {
   //   filter_data: input data buffer of filter (weights)
   //   dst_data:    output data buffer of dst
   void Execute(const Tinput* src_data, const Tfilter* filter_data,
-               const Toutput* dst_data, std::shared_ptr<stream> fwd_stream) {
-    Execute(src_data, filter_data, nullptr, dst_data, fwd_stream);
+               const Toutput* dst_data, std::shared_ptr<stream> fwd_stream,
+               void* sp_data) {
+    Execute(src_data, filter_data, nullptr, dst_data, fwd_stream, sp_data);
   }
 
   std::shared_ptr<ConvFwdPd> GetPrimitiveDesc() const {
@@ -177,6 +193,7 @@ class MklConvFwdPrimitive : public MklPrimitive {
     std::shared_ptr<dnnl::memory> filter_mem;
     std::shared_ptr<dnnl::memory> bias_mem;
     std::shared_ptr<dnnl::memory> dst_mem;
+    std::shared_ptr<dnnl::memory> sp_mem;
 
     // Memory desc
     std::shared_ptr<dnnl::memory::desc> src_md;
@@ -196,6 +213,7 @@ class MklConvFwdPrimitive : public MklPrimitive {
           filter_mem(nullptr),
           bias_mem(nullptr),
           dst_mem(nullptr),
+          sp_mem(nullptr),
           src_md(nullptr),
           filter_md(nullptr),
           bias_md(nullptr),
@@ -232,6 +250,7 @@ class MklConvFwdPrimitive : public MklPrimitive {
     auto const& post_op_params = convFwdDims.post_op_params;
     dnnl::primitive_attr post_ops_attr;
     dnnl::post_ops post_ops;
+    post_ops_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
     if (!post_op_params.empty()) {
       for (auto const& post_op_param : post_op_params) {
         if (post_op_param.name == "activation") {
@@ -283,6 +302,9 @@ class MklConvFwdPrimitive : public MklPrimitive {
         context_.fwd_pd.get()->PRIMITIVE_DESC_WEIGHTS, cpu_engine_, DummyData));
     context_.dst_mem.reset(new MEMORY_CONSTRUCTOR(
         context_.fwd_pd.get()->PRIMITIVE_DESC_DST, cpu_engine_, DummyData));
+    auto scratchpad_md = context_.fwd_pd->scratchpad_desc();
+    context_.sp_mem.reset(
+        new dnnl::memory(scratchpad_md, cpu_engine_, DummyData));
 
     // Create convolution primitive and add it to net
     if (!convFwdDims.bias_dims.empty()) {
@@ -294,12 +316,14 @@ class MklConvFwdPrimitive : public MklPrimitive {
           {{DNNL_ARG_SRC, *context_.src_mem},
            {DNNL_ARG_WEIGHTS, *context_.filter_mem},
            {DNNL_ARG_BIAS, *context_.bias_mem},
+           {DNNL_ARG_SCRATCHPAD, *context_.sp_mem},
            {DNNL_ARG_DST, *context_.dst_mem}});
     } else {
       context_.conv_fwd.reset(new convolution_forward(*context_.fwd_pd));
       context_.fwd_primitives_args.push_back(
           {{DNNL_ARG_SRC, *context_.src_mem},
            {DNNL_ARG_WEIGHTS, *context_.filter_mem},
+           {DNNL_ARG_SCRATCHPAD, *context_.sp_mem},
            {DNNL_ARG_DST, *context_.dst_mem}});
     }
     context_.fwd_primitives.push_back(*context_.conv_fwd);
@@ -716,6 +740,9 @@ class MklConvOp : public OpKernel {
             const_cast<Tfilter*>(filter_tensor.flat<Tfilter>().data()));
       }
 
+      UserScratchPad<unsigned char> scratch_pad;
+      scratch_pad.AllocateSPTensor(conv_fwd, context);
+
       // Execute convolution
       std::shared_ptr<stream> fwd_cpu_stream;
       fwd_cpu_stream.reset(CreateStream(&eigen_tp, conv_fwd->GetEngine()));
@@ -724,9 +751,10 @@ class MklConvOp : public OpKernel {
         Tbias* bias_data =
             this->GetBiasHandle(context, conv_fwd_pd, bias_tensor);
         conv_fwd->Execute(src_data, filter_data, bias_data, dst_data,
-                          fwd_cpu_stream);
+                          fwd_cpu_stream, scratch_pad.Get());
       } else {
-        conv_fwd->Execute(src_data, filter_data, dst_data, fwd_cpu_stream);
+        conv_fwd->Execute(src_data, filter_data, dst_data, fwd_cpu_stream,
+                          scratch_pad.Get());
       }
 
       // Delete primitive since it is not cached.
