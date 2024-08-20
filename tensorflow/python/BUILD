@@ -6844,6 +6844,32 @@ cuda_py_test(
     xla_enable_strict_auto_jit = False,
 )
 
+cuda_py_test(
+    name = "remapper_test",
+    size = "medium",
+    srcs = [
+        "grappler/remapper_test.py",
+    ],
+    additional_deps = [
+        ":client_testlib",
+        ":framework_for_generated_wrappers",
+        ":array_ops",
+        ":constant_op",
+        ":dtypes",
+        ":math_ops",
+        ":nn",
+        ":ops",
+        ":random_ops",
+        ":control_flow_ops",
+        ":training",
+        "//third_party/py/numpy",
+        "//tensorflow/core:protos_all_py",
+    ],
+    tags = ["grappler"],
+    # This test analyzes the graph, but XLA changes the names of nodes.
+    xla_enable_strict_auto_jit = False,
+)
+
 tf_gen_op_wrapper_private_py(
     name = "nccl_ops_gen",
     visibility = ["//tensorflow:internal"],

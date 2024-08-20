@@ -793,7 +793,199 @@ bool FindContractionWithBiasAndAddActivation(
 
   return true;
 }
-#endif
+
+inline bool VerifyConstants(RemapperContext* ctx,
+                            std::map<string, int>* nodes_map,
+                            std::map<string, float>* values_map) {
+  using utils::MutableNodeView;
+  for (auto it = values_map->begin(); it != values_map->end(); ++it) {
+    int node_idx = nodes_map->at(it->first);
+    MutableNodeView* node_view = ctx->graph_view.GetNode(node_idx);
+    NodeDef* node_def = node_view->node();
+    Tensor const_tensor;
+    if (node_def != nullptr && node_def->op() == "Const" &&
+        const_tensor.FromProto(node_def->attr().at("value").tensor())) {
+      if (const_tensor.NumElements() == 1) {
+        DataType dtype = const_tensor.dtype();
+        if (!(dtype == DT_FLOAT || dtype == DT_BFLOAT16)) return false;
+        auto const_value = (dtype == DT_FLOAT)
+                               ? const_tensor.flat<float>()(0)
+                               : const_tensor.flat<bfloat16>()(0);
+        if (std::abs(const_value - it->second) > 1e-2) return false;
+      } else {
+        return false;
+      }
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Gelu in python api generates a number of nodes in the graph. Depending on the
+// parmeter `approximate={True/False}` different types of ops are generated. We
+// distinguish them as `GeluExact` that uses Erf and `GeluApproximate` that
+// uses Tanh.
+bool FindMatMulBiasAddAndGelu(RemapperContext* ctx, int node_index,
+                              std::map<string, int>* matched_nodes_map,
+                              std::set<int>* remove_node_indices,
+                              bool* is_gelu_approximate) {
+  // Gelu fusion is enabled only with oneDNN library.
+  if (!IsMKLEnabled()) return false;
+
+  using utils::MatchingDirection;
+  using utils::NodeStatus;
+  // clang-format off
+  utils::OpTypePattern gelu_exact_pattern =
+    {"Mul", "output", NodeStatus::kReplace,
+      {
+        {"Mul", "erf_plus_one_times_one_half", NodeStatus::kRemove,
+          {
+            {"AddV2", "erf_plus_one", NodeStatus::kRemove,
+              {
+                {"Erf", "erf", NodeStatus::kRemove,
+                  {
+                    {"Mul", "bias_add_times_square_root_one_half", NodeStatus::kRemove,
+                      {
+                        {"BiasAdd", "bias_add", NodeStatus::kRemove},
+                        {"Const", "square_root_one_half", NodeStatus::kRemain}
+                      }
+                    }
+                  }
+                },
+                {"Const", "one", NodeStatus::kRemain}
+              }
+            },
+            {"Const", "one_half", NodeStatus::kRemain}
+          }
+        },
+        {"BiasAdd", "bias_add", NodeStatus::kRemove,
+          {
+            {"MatMul", "matmul", NodeStatus::kRemove},
+            {"*", "bias", NodeStatus::kRemain}
+          }
+        }
+      }
+    };
+
+  // Gelu approximate uses Pow(x, 3) which is optimized by arithmetic optimizer
+  // as Mul(x, Square(x)) with an arifact of control dependency. So we try to
+  // match pattern at second pass of remapper which reccieves _FusedMatMul
+  // (MatMul + BiasAdd) with control dependency removed.
+  utils::OpTypePattern gelu_approximate_pattern =
+    {"Mul", "output", NodeStatus::kReplace,
+      {
+        {"Mul", "tanh_plus_one_times_one_half", NodeStatus::kRemove,
+          {
+            {"AddV2", "tanh_plus_one", NodeStatus::kRemove,
+              {
+                {"Tanh", "tanh", NodeStatus::kRemove,
+                  {
+                    {"Mul", "matmul_plus_mul_times_square_root_two_over_pi", NodeStatus::kRemove,
+                      {
+                        {"AddV2", "matmul_plus_mul", NodeStatus::kRemove,
+                          {
+                            {"_FusedMatMul", "matmul", NodeStatus::kRemove},
+                            {"Mul", "mul", NodeStatus::kRemove,
+                              {
+                                {"Mul", "empirical_const_times_matmul", NodeStatus::kRemove,
+                                  {
+                                    {"Const", "empirical_const", NodeStatus::kRemain},
+                                    {"_FusedMatMul", "matmul", NodeStatus::kRemove}
+                                  }
+                                },
+                                {"Square", "square", NodeStatus::kRemove,
+                                  {
+                                    {"_FusedMatMul", "matmul", NodeStatus::kRemove}
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {"Const", "square_root_two_over_pi", NodeStatus::kRemain}
+                      }
+                    }
+                  }
+                },
+                {"Const", "one", NodeStatus::kRemain}
+              }
+            },
+            {"Const", "one_half", NodeStatus::kRemain}
+          }
+        },
+        {"_FusedMatMul", "matmul", NodeStatus::kRemove}
+      }
+    };
+  // clang-format on
+  bool found_gelu_exact = false;
+  bool found_gelu_approximate = false;
+  utils::SubGraphMatcher<MatchingDirection::kFollowInputs> graph_matcher(
+      &(ctx->graph_view));
+  // Find GeluExact
+  matched_nodes_map->clear();
+  remove_node_indices->clear();
+  found_gelu_exact =
+      graph_matcher.GetMatchedNodes(gelu_exact_pattern, ctx->nodes_to_preserve,
+                                    ctx->graph_view.GetNode(node_index),
+                                    matched_nodes_map, remove_node_indices);
+  // Find GeluApproximate
+  if (!found_gelu_exact) {
+    matched_nodes_map->clear();
+    remove_node_indices->clear();
+    found_gelu_approximate = graph_matcher.GetMatchedNodes(
+        gelu_approximate_pattern, ctx->nodes_to_preserve,
+        ctx->graph_view.GetNode(node_index), matched_nodes_map,
+        remove_node_indices);
+  }
+
+  // Pattern matcher does subgraph matching based on op types only. The matcher
+  // also does a sanity check on nodes tagged as `kRemove`, i.e., they do not
+  // have any consumer outside the matched nodes. In order to replace the
+  // subgraph, we need additional checks, for example, if the key ops have been
+  // placed on CPU, desired data type, const has desired value etc. For the
+  // following fusion: MatMul + BiasAdd + Gelu (disintegrated into smaller
+  // ops), we check if (i) MatMul op is CpuCompatible, (ii) const nodes have
+  // desired values.
+  if (found_gelu_exact) {
+    // Check if the MatMul to be fused is CPU compatible
+    NodeDef* matmul_node =
+        ctx->graph_view.GetNode(matched_nodes_map->at("matmul"))->node();
+    if (!IsCpuCompatibleMatMul(matmul_node)) {
+      matched_nodes_map->clear();
+      remove_node_indices->clear();
+      return false;
+    }
+    // Check if the matched constants have desired values.
+    if (found_gelu_exact) {
+      std::map<string, float> values_map = {
+          {"square_root_one_half", 0.707106}, {"one", 1.0}, {"one_half", 0.5}};
+      if (!VerifyConstants(ctx, matched_nodes_map, &values_map)) return false;
+    }
+  } else if (found_gelu_approximate) {
+    // Check if _FusedMatMul contains only BiasAdd
+    NodeDef* matmul_node =
+        ctx->graph_view.GetNode(matched_nodes_map->at("matmul"))->node();
+    auto fused_ops = matmul_node->attr().at("fused_ops").list().s();
+    if (fused_ops.size() == 1) {
+      if (fused_ops.at(0) != "BiasAdd") return false;
+    } else {
+      return false;
+    }
+    // Check if the matched constants have desired values.
+    std::map<string, float> values_map = {{"square_root_two_over_pi", 0.797884},
+                                          {"one", 1.0},
+                                          {"one_half", 0.5},
+                                          {"empirical_const", 0.044715}};
+    if (!VerifyConstants(ctx, matched_nodes_map, &values_map)) return false;
+  } else {
+    return false;
+  }
+  *is_gelu_approximate = found_gelu_approximate ? true : false;
+  return (found_gelu_exact || found_gelu_approximate);
+}
+
+#endif  // INTEL_MKL
 
 bool FindFusedBatchNorm(const RemapperContext& ctx, int node_index,
                         FusedBatchNorm* matched) {
@@ -1451,157 +1643,6 @@ void SetFusedOpAttributes(NodeDef* fused,
   SetAttrValue(fused_ops, &(*attr)["fused_ops"]);
   SetAttrValue(num_args, &(*attr)["num_args"]);
   SetAttrValue(epsilon, &(*attr)["epsilon"]);  // required only for BatchNorm
-}
-
-bool FindMatMulWithBiasAndAGelu(RemapperContext* ctx, int node_index,
-                                std::map<string, int>* node_label_to_index,
-                                std::vector<bool>* nodes_to_delete,
-                                bool approximate) {
-  using namespace grappler::utils;
-  auto GetGeluPattern = [](bool approximate) -> OpTypePattern {
-    // clang-format off
-    if (approximate) {
-      return
-      {"Mul", "my_gelu", NodeStatus::kReplace,
-        {
-          {"BiasAdd", "my_bias_add", NodeStatus::kRemove,
-            {
-              {"MatMul", "my_matmul", NodeStatus::kRemove},
-              {"*", "my_bias", NodeStatus::kRemain}
-            }
-          },
-          {"Mul", "mul_2", NodeStatus::kRemove,
-            {
-              {"Const", "mul_2_x", NodeStatus::kRemain},
-              {"AddV2", "add_1", NodeStatus::kRemove,
-                {
-                  {"Const", "add_1_x", NodeStatus::kRemain},
-                  {"Tanh", "tanh", NodeStatus::kRemove,
-                    {
-                      {"Mul", "mul_1", NodeStatus::kRemove,
-                        {
-                          {"Const", "mul_1_x", NodeStatus::kRemain},
-                          {"AddV2", "add", NodeStatus::kRemove,
-                            {
-                              {"BiasAdd", "my_bias_add", NodeStatus::kRemove},
-                              {"Mul", "mul", NodeStatus::kRemove,
-                                {
-                                  {"Const", "mul_x", NodeStatus::kRemain},
-                                  {"Pow", "pow", NodeStatus::kRemove,
-                                    {
-                                      {"BiasAdd", "my_bias_add", NodeStatus::kRemove},
-                                      {"Const", "pow_y", NodeStatus::kRemain}
-                                    }
-                                  },
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      };
-    } else {
-      return
-      {"Mul", "my_gelu", NodeStatus::kReplace,
-        {
-          {"Mul", "my_one_half_times_erf_plus_one", NodeStatus::kRemove,
-            {
-              {"Const", "my_one_half", NodeStatus::kRemain},
-              {"BiasAdd", "my_bias_add", NodeStatus::kRemove,
-                {
-                  {"MatMul", "my_matmul", NodeStatus::kRemove},
-                  {"*", "my_bias", NodeStatus::kRemain}
-                }
-              }
-            }
-          },
-          {"AddV2", "my_erf_plus_one", NodeStatus::kRemove,
-            {
-              {"Const", "my_one", NodeStatus::kRemain},
-              {"Erf", "my_erf", NodeStatus::kRemove,
-                {
-                  {"Mul", "my_bias_add_times_const", NodeStatus::kRemove,
-                    {
-                      {"BiasAdd", "my_bias_add", NodeStatus::kRemove},
-                      {"Const", "my_one_over_square_root_two", NodeStatus::kRemain}
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      };
-    }
-    // clang-format on
-  };
-  OpTypePattern pattern_syntax = GetGeluPattern(approximate);
-
-  SubGraphMatcher<MatchingDirection::kFollowInputs> graph_matcher(
-      &(ctx->graph_view));
-  std::set<int> remove_node_indices;
-  bool found_match =
-      graph_matcher.GetMatchedNodes(pattern_syntax, ctx->nodes_to_preserve,
-                                    ctx->graph_view.GetNode(node_index),
-                                    node_label_to_index, &remove_node_indices);
-
-  // Add additional condition here
-  if (found_match) {
-    // 1. Check if the MatMul to be fused is CPU compatible
-    NodeDef* matmul_node =
-        ctx->graph_view.GetNode(node_label_to_index->at("my_matmul"))->node();
-    if (!IsCpuCompatibleMatMul(matmul_node)) {
-      node_label_to_index->clear();
-      return false;
-    }
-
-    // All conditions are satisfied now. Also the remove_candidate_indices
-    // are safe this moment.
-    for (const auto& safe_node_idx : remove_node_indices) {
-      (*nodes_to_delete)[safe_node_idx] = true;
-    }
-  }
-  return found_match;
-}
-
-Status AddFusedMatMulWithBiasAndGelu(RemapperContext* ctx,
-                                     std::map<string, int>& node_label_to_index,
-                                     std::vector<bool>* invalidated_nodes,
-                                     bool approximate) {
-  auto* old_gelu_node =
-      ctx->graph_view.GetNode(node_label_to_index["my_gelu"])->node();
-  auto* old_matmul_node =
-      ctx->graph_view.GetNode(node_label_to_index["my_matmul"])->node();
-  auto* old_bias_add_node =
-      ctx->graph_view.GetNode(node_label_to_index["my_bias_add"])->node();
-
-  NodeDef fused_node;
-  string gelu_kind = approximate ? "GeluApproximate" : "GeluExact";
-  // Fused node should have the name of terminal node of the fusion.
-  fused_node.set_name(old_gelu_node->name());
-  fused_node.set_op("_FusedMatMul");
-  fused_node.set_device(old_matmul_node->device());
-  fused_node.add_input(old_matmul_node->input(0));
-  fused_node.add_input(old_matmul_node->input(1));
-  fused_node.add_input(old_bias_add_node->input(1));
-  CopyMatMulAttributes(*old_matmul_node, &fused_node);
-  SetFusedOpAttributes(&fused_node, {"BiasAdd", gelu_kind});
-
-  utils::Mutation* mutation = ctx->graph_view.GetMutationBuilder();
-  Status status;
-  mutation->AddNode(std::move(fused_node), &status);
-  TF_RETURN_IF_ERROR(status);
-  TF_RETURN_IF_ERROR(mutation->Apply());
-  (*invalidated_nodes)[node_label_to_index["gelu"]] = true;
-
-  return Status::OK();
 }
 
 bool FindSigmoidAndMul(RemapperContext* ctx, int node_index,
@@ -2503,7 +2544,51 @@ Status AddFusedContractionNode(
 
   return Status::OK();
 }
-#endif
+
+Status AddFusedMatMulBiasAddAndGelu(RemapperContext* ctx,
+                                    std::map<string, int>* matched_nodes_map,
+                                    std::set<int>* remove_node_indices,
+                                    std::vector<bool>* invalidated_nodes,
+                                    std::vector<bool>* nodes_to_delete,
+                                    bool is_gelu_approximate) {
+  auto* output_node =
+      ctx->graph_view.GetNode(matched_nodes_map->at("output"))->node();
+  auto* matmul_node =
+      ctx->graph_view.GetNode(matched_nodes_map->at("matmul"))->node();
+
+  NodeDef fused_node;
+  // Fused node should have the name of terminal node of the fusion.
+  fused_node.set_name(output_node->name());
+  fused_node.set_op("_FusedMatMul");
+  fused_node.set_device(matmul_node->device());
+  fused_node.add_input(matmul_node->input(0));
+  fused_node.add_input(matmul_node->input(1));
+  if (is_gelu_approximate) {
+    fused_node.add_input(matmul_node->input(2));
+  } else {
+    auto* bias_add_node =
+        ctx->graph_view.GetNode(matched_nodes_map->at("bias_add"))->node();
+    fused_node.add_input(bias_add_node->input(1));
+  }
+  CopyMatMulAttributes(*matmul_node, &fused_node);
+  if (is_gelu_approximate)
+    SetFusedOpAttributes(&fused_node, {"BiasAdd", "GeluApproximate"});
+  else
+    SetFusedOpAttributes(&fused_node, {"BiasAdd", "GeluExact"});
+
+  utils::Mutation* mutation = ctx->graph_view.GetMutationBuilder();
+  Status status;
+  mutation->AddNode(std::move(fused_node), &status);
+  TF_RETURN_IF_ERROR(status);
+  TF_RETURN_IF_ERROR(mutation->Apply());
+  (*invalidated_nodes)[matched_nodes_map->at("output")] = true;
+
+  for (const auto& node_idx : *remove_node_indices) {
+    (*nodes_to_delete)[node_idx] = true;
+  }
+  return Status::OK();
+}
+#endif  // INTEL_MKL
 
 Status AddFusedBatchNormExNode(RemapperContext* ctx,
                                const FusedBatchNormEx& matched,
@@ -3131,28 +3216,22 @@ Status Remapper::Optimize(Cluster* cluster, const GrapplerItem& item,
       }
 #endif
 
-      // MatMul + BiasAdd + GeluApproximate fusion
-      std::map<string, int> node_label_to_index;
-      if (FindMatMulWithBiasAndAGelu(&ctx, i, &node_label_to_index,
-                                     &nodes_to_delete, true)) {
-        TF_RETURN_IF_ERROR(AddFusedMatMulWithBiasAndGelu(
-            &ctx, node_label_to_index, &invalidated_nodes,
-            /* approximate = */ true));
-        continue;
-      };
-
-      // MatMul + BiasAdd + GeluExact fusion
-      if (FindMatMulWithBiasAndAGelu(&ctx, i, &node_label_to_index,
-                                     &nodes_to_delete, false)) {
-        TF_RETURN_IF_ERROR(AddFusedMatMulWithBiasAndGelu(
-            &ctx, node_label_to_index, &invalidated_nodes,
-            /* approximate = */ false));
-        continue;
-      };
-
-      // Remap BatchMatMul+Mul+AddV2 into the _FusedBatchMatMul.
+      // Remap MatMul + BiasAdd + gelu-subgraph
       std::map<string, int> matched_nodes_map;
       std::set<int> remove_node_indices;
+      bool is_gelu_approximate = false;
+      if (FindMatMulBiasAddAndGelu(&ctx, i, &matched_nodes_map,
+                                   &remove_node_indices,
+                                   &is_gelu_approximate)) {
+        TF_RETURN_IF_ERROR(AddFusedMatMulBiasAddAndGelu(
+            &ctx, &matched_nodes_map, &remove_node_indices, &invalidated_nodes,
+            &nodes_to_delete, is_gelu_approximate));
+        continue;
+      }
+
+      // Remap BatchMatMul+Mul+AddV2 into the _FusedBatchMatMul.
+      matched_nodes_map.clear();
+      remove_node_indices.clear();
       std::vector<string> input_node_names;
       if (FindFusedBatchMatMul(&ctx, i, &matched_nodes_map,
                                &remove_node_indices, &input_node_names)) {

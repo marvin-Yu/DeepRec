@@ -121,13 +121,10 @@ class MklFusedMatMulOp : public MklDnnMatMulOpBase<T, T> {
     MEMORY_FORMAT weight_format =
         transpose_b_ ? MEMORY_FORMAT::oi : MEMORY_FORMAT::io;
 
-    // Set weight format for primitive:
-    //   1. const, let OneDNN determine format because it will be cached;
-    //   2. var, keep the original format to avoid reordering.
-    MklDnnMatMulFwdParams matmul_params(
-        src_dims, weight_dims, bias_dims, dst_dims, src_format,
-        (this->is_weight_const_) ? MEMORY_FORMAT::any : weight_format,
-        MEMORY_FORMAT::nc);
+    // Set weight format `any` for primitive as per oneDNN recommendation.
+    MklDnnMatMulFwdParams matmul_params(src_dims, weight_dims, bias_dims,
+                                        dst_dims, src_format,
+                                        MEMORY_FORMAT::any, MEMORY_FORMAT::nc);
 
     // Extend the basic parameters for data types and fusions.
     ExtendMklDnnMatMulFwdParams(ctx, matmul_params);
@@ -301,9 +298,9 @@ class MklFusedMatMulOp : public MklDnnMatMulOpBase<T, T> {
       } else if (post_op == "Tanh") {
         params.post_op_params.push_back({"tanh", {1.0, 0.0, 0.0}});
       } else if (post_op == "GeluApproximate") {
-        params.post_op_params.push_back({"gelu_approximate", {1.0, 0.0, 0.0}});
+        params.post_op_params.push_back({"gelu_approximate", {1.0, 1.0, 0.0}});
       } else if (post_op == "GeluExact") {
-        params.post_op_params.push_back({"gelu_exact", {1.0, 0.0, 0.0}});
+        params.post_op_params.push_back({"gelu_exact", {1.0, 1.0, 0.0}});
       } else if (post_op == "Add") {
         params.post_op_params.push_back({"sum", {1.0}});
       } else if (post_op == "LeakyRelu") {
