@@ -85,14 +85,6 @@ class RemapperTest(test.TestCase, parameterized.TestCase):
     m, n, k = (3, 3, 4)  # Matrix dimensions
     for precision in ('float32', 'bfloat16'):
       for approximate in (False, True):
-        # Gelu exact (approximate=False) is not supported with bfloat16
-        # precision since no support for Erf with bfloat16 data type.
-        # TODO(intel-tf): Enable gelu exact with bfloat16, when Erf op is
-        # supported with bfloat16.
-        if precision == 'bfloat16':
-          if not (approximate and is_bf16_supported):
-            continue
-
         # Create MatMul + BiasAdd + Gelu graph
         ops.reset_default_graph()
         x = _input([m, k])
