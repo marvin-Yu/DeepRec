@@ -50,7 +50,7 @@ _TF_WORKSPACE_ROOT = ''
 _TF_BAZELRC = ''
 _TF_CURRENT_BAZEL_VERSION = None
 _TF_MIN_BAZEL_VERSION = '0.24.1'
-_TF_MAX_BAZEL_VERSION = '0.26.1'
+_TF_MAX_BAZEL_VERSION = '4.1.0'
 
 NCCL_LIB_PATHS = [
     'lib64/', 'lib/powerpc64le-linux-gnu/', 'lib/x86_64-linux-gnu/', ''
@@ -1430,7 +1430,7 @@ def main():
 
   xla_enabled_by_default = is_linux() or is_macos()
   set_build_var(environ_cp, 'TF_ENABLE_XLA', 'XLA JIT', 'with_xla_support',
-                xla_enabled_by_default, 'xla')
+                False, 'xla')
 
   set_action_env_var(
       environ_cp,
@@ -1456,7 +1456,7 @@ def main():
                                 environ_cp.get('LD_LIBRARY_PATH'))
 
   environ_cp['TF_NEED_CUDA'] = str(
-      int(get_var(environ_cp, 'TF_NEED_CUDA', 'CUDA', True)))
+      int(get_var(environ_cp, 'TF_NEED_CUDA', 'CUDA', False)))
   if (environ_cp.get('TF_NEED_CUDA') == '1' and
       'TF_CUDA_CONFIG_REPO' not in environ_cp):
 

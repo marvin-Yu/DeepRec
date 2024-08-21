@@ -277,8 +277,7 @@ cc_library(
 cc_library(
     name = "mkl_eager_op_rewrite",
     srcs = ["mkl_eager_op_rewrite.cc"],
-    copts = tf_copts(),
-    nocopts = "-fno-exceptions",
+    copts = tf_copts() + ["-fexceptions"],
     deps = [
         ":eager_op_rewrite_registry",
         "//tensorflow/core:all_kernels",
