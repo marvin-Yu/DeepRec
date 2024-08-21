@@ -391,6 +391,16 @@ class UnaryOpTest(test.TestCase):
     self._compareBothSparse(x, np.vectorize(math.erf), math_ops.erf, tol=1e-3)
 
   def testBFloat16Basic(self):
+
+    def compute_f32(np_func):
+      """Decorator to compute Numpy function with float32 math."""
+
+      def f(x):
+        y = np_func(x.astype(np.float32))
+        return y.astype(x.dtype)
+
+      return f
+
     bfloat16 = dtypes_lib.bfloat16.as_numpy_dtype
     x = np.arange(-6, 6,
                   2).reshape(1, 3, 2).astype(dtypes_lib.bfloat16.as_numpy_dtype)
@@ -399,6 +409,7 @@ class UnaryOpTest(test.TestCase):
     self._compareCpu(x, np.abs, _ABS)
     self._compareCpu(x, np.exp, math_ops.exp)
     self._compareCpu(z, self._rsqrt, math_ops.rsqrt)
+    self._compareBoth(x, compute_f32(np.vectorize(math.erf)), math_ops.erf)
 
   def testInt8Basic(self):
     x = np.arange(-6, 6, 2).reshape(1, 3, 2).astype(np.int8)
