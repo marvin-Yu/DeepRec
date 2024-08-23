@@ -43,6 +43,13 @@ class MklMatMulOp : public OpKernel {
   explicit MklMatMulOp(OpKernelConstruction* ctx) : OpKernel(ctx) {
     OP_REQUIRES_OK(ctx, ctx->GetAttr("transpose_a", &transpose_a_));
     OP_REQUIRES_OK(ctx, ctx->GetAttr("transpose_b", &transpose_b_));
+    string _onednn_fpmath_mode = "";
+    string _dnnl_fpmath_mode = "";
+    OP_REQUIRES_OK(ctx, ReadStringFromEnvVar("ONEDNN_DEFAULT_FPMATH_MODE",
+                                                "", &_onednn_fpmath_mode));
+    OP_REQUIRES_OK(ctx, ReadStringFromEnvVar("DNNL_DEFAULT_FPMATH_MODE",
+                                                "", &_dnnl_fpmath_mode));
+    FPMATH_MODE = _onednn_fpmath_mode != "" | _dnnl_fpmath_mode != "";
   }
 
   void Compute(OpKernelContext* ctx) override {
@@ -107,6 +114,7 @@ class MklMatMulOp : public OpKernel {
  private:
   bool transpose_a_;
   bool transpose_b_;
+  bool FPMATH_MODE;
   // --------------------------------------------------------------------------
   //
   // @brief Matrix-Matrix Multiplication with FP32 tensors, a, b, c using CBLAS
@@ -164,6 +172,11 @@ class MklMatMulOp : public OpKernel {
     dnnl::threadpool_interop::sgemm(char_transa, char_transb, m, n, k, alpha, a,
                                     lda, b, ldb, beta, c, ldc, &eigen_tp);
 #else
+  if (FPMATH_MODE){
+      dnnl_gemm<float>(char_transa, char_transb, m, n, k,
+                        alpha, a, lda, b, ldb, beta, c, ldc, ctx);
+      return;
+    }
     dnnl_sgemm(char_transa, char_transb, m, n, k, alpha, a, lda, b, ldb, beta,
                c, ldc);
 #endif  // ENABLE_DNNL_THREADPOOL && !ENABLE_ONEDNN_V3
