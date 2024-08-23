@@ -154,32 +154,21 @@ class BatchMatMulMkl : public OpKernel {
         MklMatMulPrimitiveFactory<float, Tlhs, Trhs, Toutput>::Get(
             *params, false /* value for do_not_cache */);
 
+    Trhs* weight_data = const_cast<Trhs*>(rhs.flat<Trhs>().data());
+
     UserScratchPad<unsigned char> scratch_pad;
     scratch_pad.AllocateSPTensor(matmul_prim, ctx);
 
     // Execute matmul primitive.
     std::shared_ptr<stream> cpu_stream;
     cpu_stream.reset(CreateStream(&eigen_tp, matmul_prim->GetEngine()));
-
-    if (fused_ops_.size() > 0) {
-      void* mul_data = nullptr;
-      void* add_data = nullptr;
-      if (fused_ops_.at(0) == "Mul") {
-        const Tensor& mul_tensor = ctx->input(2);
-        mul_data = static_cast<void*>(
-            const_cast<Toutput*>(mul_tensor.flat<Toutput>().data()));
-      }
-      if (fused_ops_.size() > 1 && fused_ops_.at(1) == "Add") {
-        const Tensor& add_tensor = ctx->input(3);
-        add_data = static_cast<void*>(
-            const_cast<Toutput*>(add_tensor.flat<Toutput>().data()));
-      }
-      matmul_prim->Execute(cpu_stream, lhs.flat<Tlhs>().data(),
-                           rhs.flat<Trhs>().data(), out->flat<Toutput>().data(),
-                           scratch_pad.Get(), mul_data, add_data);
+    if (this->fusion_data_.size() > 0) {
+      matmul_prim->Execute(cpu_stream, lhs.flat<Tlhs>().data(), weight_data,
+                           out->flat<Toutput>().data(), *params,
+                           scratch_pad.Get(), this->fusion_data_);
     } else {
-      matmul_prim->Execute(cpu_stream, lhs.flat<Tlhs>().data(),
-                           rhs.flat<Trhs>().data(), out->flat<Toutput>().data(),
+      matmul_prim->Execute(cpu_stream, lhs.flat<Tlhs>().data(), weight_data,
+                           out->flat<Toutput>().data(), *params,
                            scratch_pad.Get());
     }
   }
@@ -187,98 +176,160 @@ class BatchMatMulMkl : public OpKernel {
  protected:
   virtual void ExtendMklMatMulParams(OpKernelContext* ctx,
                                      MklMatMulParams& params) {}
-  std::vector<string> fused_ops_;
+  std::vector<void*> fusion_data_;
 
  private:
   bool adj_x_;
   bool adj_y_;
 };
 
+// OneDNN uses post-ops to implement different kind of fusions. The category of
+// each individual post-op can be inferred from the fused_ops attribute. The
+// following enum is used to identify list of required post-ops.
+namespace {
+
+enum class FusedComputationType {
+  kUndefined,
+  kMul,
+  kAdd,
+  kMulAdd,
+  kDequantize,
+  kMul_Dequantize,
+  kAdd_Dequantize,
+  kMulAdd_Dequantize,
+  kRequantize,
+  kMul_Requantize,
+  kAdd_Requantize,
+  kMulAdd_Requantize,
+};
+
+struct FusedComputationPattern {
+  FusedComputationType fused_computation;
+  std::vector<string> fused_ops;
+};
+
+}  // namespace
+enum class PostOpKind { kNone, kOutputScale, kMul, kAdd, kLinear };
+
+// FusedBatchMatMul has additional inputs, currently forcing all the operands
+// of fusion to have same type `U`.
 template <typename Device, typename Tlhs, typename Trhs, typename Toutput,
-          bool v2_bcast>
+          /*type of additional tensors*/ typename U, bool v2_bcast>
 class FusedBatchMatMulMkl
     : public BatchMatMulMkl<Device, Tlhs, Trhs, Toutput, v2_bcast> {
  public:
   explicit FusedBatchMatMulMkl(OpKernelConstruction* context)
       : BatchMatMulMkl<Device, Tlhs, Trhs, Toutput, v2_bcast>(context) {
-    OP_REQUIRES_OK(context, context->GetAttr("fused_ops", &this->fused_ops_));
-    OP_REQUIRES(context, !this->fused_ops_.empty(),
-                errors::InvalidArgument(
-                    "Fused BatchMatMul must have at least one fused op."));
-
-    int num_args;
-    OP_REQUIRES_OK(context, context->GetAttr("num_args", &num_args));
-
-    if (this->fused_ops_ == std::vector<string>{"Mul"} ||
-        this->fused_ops_ == std::vector<string>{"Mul", "Add"}) {
-      OP_REQUIRES(context, num_args == this->fused_ops_.size(),
-                  errors::InvalidArgument(
-                      "Fused BatchMatmul should have same number of additional "
-                      "inputs as the number of fusions"));
-    } else {
-      OP_REQUIRES(
-          context, false,
-          errors::Unimplemented("Fusion is not implemented: [",
-                                absl::StrJoin(this->fused_ops_, ","), "]"));
-    }
+    InitializeFusion(context);
   }
 
   virtual ~FusedBatchMatMulMkl() {}
 
  protected:
+  struct PostOpInfo {
+    PostOpKind post_op_kind;
+    int input_idx = -1;  // Operand tensor index if needed by a post-op.
+  };
+
+  std::vector<PostOpInfo> post_op_info_list_;
+
+  // This function is called from constructor.
+  void InitializeFusion(OpKernelConstruction* context) {
+    std::vector<string> fused_ops;
+    OP_REQUIRES_OK(context, context->GetAttr("fused_ops", &fused_ops));
+    OP_REQUIRES(context, !fused_ops.empty(),
+                errors::InvalidArgument(
+                    "Fused BatchMatMul must have at least one fused op."));
+
+    using FCT = FusedComputationType;
+    // TODO(intel-tf): Add more patterns when implemented. Refactor for
+    // arbitrary fusion sequence when oneDNN is performant.
+    std::vector<FusedComputationPattern> patterns{
+        {FCT::kMul, {"Mul"}},
+        {FCT::kAdd, {"Add"}},
+        {FCT::kMulAdd, {"Mul", "Add"}},
+    };
+    FusedComputationType fused_computation = FusedComputationType::kUndefined;
+    for (const auto& pattern : patterns) {
+      if (fused_ops == pattern.fused_ops) {
+        fused_computation = pattern.fused_computation;
+        break;
+      }
+    }
+
+    // Configure oneDNN post-ops. Refactor for arbitrary fusion sequence when
+    // oneDNN is performant.
+    switch (fused_computation) {
+      case FCT::kMul:
+        post_op_info_list_ = {{PostOpKind::kMul, 2}};
+        break;
+      case FCT::kAdd:
+        post_op_info_list_ = {{PostOpKind::kAdd, 2}};
+        break;
+      case FCT::kMulAdd:
+        post_op_info_list_ = {{PostOpKind::kMul, 2}, {PostOpKind::kAdd, 3}};
+        break;
+      default:
+        OP_REQUIRES_OK(
+            context, errors::Unimplemented("Fusion is not implemented: [",
+                                           absl::StrJoin(fused_ops, ","), "]"));
+    }
+
+    int num_args = 0;
+    OP_REQUIRES_OK(context, context->GetAttr("num_args", &num_args));
+    this->fusion_data_.resize(num_args);
+  }
+
   virtual void ExtendMklMatMulParams(OpKernelContext* ctx,
                                      MklMatMulParams& params) {
-    if (this->fused_ops_.size() > 0) {
-      const Tensor& scale_tensor = ctx->input(2);
-      OP_REQUIRES(ctx, scale_tensor.NumElements() == 1,
-                  errors::InvalidArgument("Scale tensor must be a scalar"));
-
-      memory::data_type data_type = MklDnnType<Toutput>();
-      memory::format_tag format_tag;
-      switch (params.c_dims.size()) {
-        case 3:
-          format_tag = memory::format_tag::abc;
-          break;
-        case 4:
-          format_tag = memory::format_tag::abcd;
-          break;
+    int idx = 0;
+    for (const auto& post_op_info : this->post_op_info_list_) {
+      switch (post_op_info.post_op_kind) {
+        case PostOpKind::kMul: {
+          const Tensor& multiplicand_tensor =
+              ctx->input(post_op_info.input_idx);
+          // TODO(intel-tf): Relax restriction when oneDNN is performant for
+          // arbitrary shapes.
+          bool is_supported = multiplicand_tensor.NumElements() == 1 &&
+                              params.c_dims.size() == 4;
+          OP_REQUIRES(ctx, is_supported,
+                      errors::Unimplemented(absl::StrCat(
+                          "Unimplemented multiplicand shape for Mul fusion: ",
+                          multiplicand_tensor.shape().DebugString())));
+          auto format_tag = memory::format_tag::abcd;
+          memory::data_type data_type = MklDnnType<U>();
+          memory::dims mul_dims(params.c_dims.size(), 1);
+          params.post_op_params.push_back(
+              {"mul", {}, mul_dims, data_type, format_tag});
+          void* multiplicand_data = static_cast<void*>(
+              const_cast<U*>(multiplicand_tensor.flat<U>().data()));
+          this->fusion_data_[idx++] = multiplicand_data;
+        } break;
+        case PostOpKind::kAdd: {
+          const Tensor& addend_tensor = ctx->input(post_op_info.input_idx);
+          // TODO(intel-tf): Relax restriction when oneDNN is performant for
+          // arbitrary shapes.
+          bool is_supported = params.c_dims.size() == 4 &&
+                              addend_tensor.dims() == params.c_dims.size();
+          OP_REQUIRES(ctx, is_supported,
+                      errors::Unimplemented(
+                          "Unimplemented addend shape for Add fusion: ",
+                          addend_tensor.shape().DebugString()));
+          auto format_tag = memory::format_tag::abcd;
+          memory::data_type data_type = MklDnnType<U>();
+          memory::dims addend_dims = TFShapeToMklDnnDims(addend_tensor.shape());
+          params.post_op_params.push_back(
+              {"add", {}, addend_dims, data_type, format_tag});
+          void* addend_data = static_cast<void*>(
+              const_cast<U*>(addend_tensor.flat<U>().data()));
+          this->fusion_data_[idx++] = addend_data;
+        } break;
         default:
           OP_REQUIRES(ctx, false, errors::Unimplemented("Unimplemented"));
-      }
-      if (this->fused_ops_.at(0) == "Mul") {
-        memory::dims mul_dims(params.c_dims.size(), 1);
-        params.post_op_params.push_back(
-            {"mul", {}, mul_dims, data_type, format_tag});
-      } else {
-        OP_REQUIRES(ctx, false,
-                    errors::InvalidArgument(
-                        "Currently first fusion is supported only for Mul",
-                        ", but it is ", this->fused_ops_.at(0), " op."));
-      }
-      if (this->fused_ops_.size() > 1) {
-        if (this->fused_ops_.at(1) == "Add") {
-          auto add_shape = ctx->input(3).shape();
-          OP_REQUIRES(
-              ctx, add_shape.dims() == 4,
-              errors::InvalidArgument(
-                  "Add fusion expects add shape to have 4 dims, but got ",
-                  add_shape.dims()));
-          memory::dims add_dims = {add_shape.dim_size(0), add_shape.dim_size(1),
-                                   add_shape.dim_size(2),
-                                   add_shape.dim_size(3)};
-          params.post_op_params.push_back(
-              {"add", {}, add_dims, data_type, format_tag});
-        } else {
-          OP_REQUIRES(ctx, false,
-                      errors::InvalidArgument(
-                          "Currently second fusion is supported only for Add",
-                          ", but it is ", this->fused_ops_.at(1), " op."));
-        }
       }
     }
   }
 };
-
 #define REGISTER_BATCH_MATMUL_MKL(TYPE)                                       \
   REGISTER_KERNEL_BUILDER(Name("_MklBatchMatMul")                             \
                               .Device(DEVICE_CPU)                             \
@@ -298,7 +349,7 @@ class FusedBatchMatMulMkl
       Name("_MklFusedBatchMatMulV2")          \
           .Device(DEVICE_CPU)                 \
           .TypeConstraint<TYPE>("T"),         \
-      FusedBatchMatMulMkl<CPUDevice, TYPE, TYPE, TYPE, true>)
+      FusedBatchMatMulMkl<CPUDevice, TYPE, TYPE, TYPE, TYPE, true>)
 
 TF_CALL_float(REGISTER_BATCH_MATMUL_MKL);
 TF_CALL_float(REGISTER_BATCH_MATMUL_MKL_V2);
