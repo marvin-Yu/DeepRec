@@ -122,7 +122,7 @@ struct MklEinsumHelper {
     cpu_stream.reset(CreateStream(&eigen_tp, matmul_prim->GetEngine()));
 
     matmul_prim->Execute(cpu_stream, lhs.flat<T>().data(), rhs.flat<T>().data(),
-                         output->flat<T>().data(), scratch_pad.Get());
+                         output->flat<T>().data(), *params, scratch_pad.Get());
 
     Tensor output_reshaped;
     if (output->dims() != 3) {
