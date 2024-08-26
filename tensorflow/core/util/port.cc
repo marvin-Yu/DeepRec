@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "tensorflow/core/util/port.h"
 
+#include "absl/base/call_once.h"
+#include "tensorflow/core/util/env_var.h"
 
 namespace tensorflow {
 
@@ -59,10 +61,30 @@ bool IsBF16SupportedByOneDNNOnThisCPU() {
   using port::TestCPUFeature;
   result = (TestCPUFeature(CPUFeature::AVX512F) ||
             TestCPUFeature(CPUFeature::AVX_NE_CONVERT));
-  if (result) VLOG(2) << "CPU supports BF16";
-  else  VLOG(2) << "CPU does not support BF16";
+  if (result)
+    VLOG(2) << "CPU supports BF16";
+  else
+    VLOG(2) << "CPU does not support BF16";
 #endif  // INTEL_MKL
   return result;
+}
+
+bool UseCpuAdvancedOps() {
+  static absl::once_flag once;
+  static bool use_adv_cpu_ops = false;
+  absl::call_once(once, [&] {
+    auto status = ReadBoolFromEnvVar("TF_USE_ADVANCED_CPU_OPS", use_adv_cpu_ops,
+                                     &use_adv_cpu_ops);
+    if (!status.ok()) {
+      LOG(WARNING)
+          << "TF_USE_ADVANCED_CPU_OPS is not set to either '0', 'false',"
+          << " '1', or 'true'. Using the default setting: " << use_adv_cpu_ops;
+    }
+    if (use_adv_cpu_ops) {
+      LOG(INFO) << "TF advanced CPU ops are enabled.";
+    }
+  });
+  return use_adv_cpu_ops;
 }
 
 }  // end namespace tensorflow

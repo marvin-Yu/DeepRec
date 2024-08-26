@@ -44,6 +44,9 @@ bool IsMklEnabled();
 // Check if BF16 is supported on CPU when oneDNN is enabled
 bool IsBF16SupportedByOneDNNOnThisCPU();
 
+// Returns true if TF_USE_ADVANCED_CPU_OPS is set to 1
+bool UseCpuAdvancedOps();
+
 }  // end namespace tensorflow
 
 #endif  // TENSORFLOW_CORE_UTIL_PORT_H_
