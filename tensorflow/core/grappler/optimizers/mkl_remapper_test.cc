@@ -24,6 +24,7 @@ limitations under the License.
 #include "tensorflow/core/lib/core/status_test_util.h"
 #include "tensorflow/core/platform/test.h"
 #include "tensorflow/core/util/mkl_util.h"
+#include "tensorflow/core/util/port.h"
 
 namespace tensorflow {
 namespace grappler {
@@ -1313,6 +1314,113 @@ class MklRemapperSwishTest : public GrapplerTest {
 TEST_F(MklRemapperSwishTest, F32) { RunTest<DT_FLOAT>(); }
 TEST_F(MklRemapperSwishTest, BF16) { RunTest<DT_BFLOAT16>(); }
 TEST_F(MklRemapperSwishTest, FP16) { RunTest<DT_HALF>(); }
+
+class FusedMatMulReshapeBiasAddAndGeluTest : public GrapplerTest {
+ public:
+  AttrValue TypeAttrValue(DataType type) {
+    AttrValue attr_value;
+    SetAttrValue(type, &attr_value);
+    return attr_value;
+  }
+
+  template <DataType DTYPE>
+  void RunTest() {
+    if (!UseCpuAdvancedOps()) {
+      GTEST_SKIP() << "Test only applicable if the env var "
+                      "TF_USE_ADVANCED_CPU_OPS is set";
+    }
+    using ::tensorflow::ops::Placeholder;
+    GrapplerItem item;
+    tensorflow::Scope s = tensorflow::Scope::NewRootScope();
+
+    auto lhs_shape = ops::Placeholder::Shape({8, 32});
+    auto rhs_shape = ops::Placeholder::Shape({32, 64});
+    auto bias_shape = ops::Placeholder::Shape({64});
+
+    auto lhs = Placeholder(s.WithOpName("lhs"), DTYPE, lhs_shape);
+    auto rhs = Placeholder(s.WithOpName("rhs"), DTYPE, rhs_shape);
+    auto bias = Placeholder(s.WithOpName("bias"), DTYPE, bias_shape);
+
+    auto matmul = ops::MatMul(s.WithOpName("matmul"), lhs, rhs);
+    auto reshape =
+        ops::Reshape(s.WithOpName("reshape"), matmul,
+                     ops::Const(s.WithOpName("reshape_shape"), {1, 8, 64}));
+    auto bias_add = ops::BiasAdd(s.WithOpName("bias_add"), reshape, bias);
+
+    TF_ASSERT_OK(s.ToGraphDef(&item.graph));
+
+    NodeDef* gelu_def = item.graph.add_node();
+    gelu_def->set_name("gelu");
+    gelu_def->set_op("Gelu");
+    gelu_def->add_input("bias_add");
+    (*gelu_def->mutable_attr())["T"] = TypeAttrValue(DTYPE);
+
+    NodeDef* fetch_def = item.graph.add_node();
+    fetch_def->set_name("fetch");
+    fetch_def->set_op("Identity");
+    fetch_def->add_input("gelu");
+    (*fetch_def->mutable_attr())["T"] = TypeAttrValue(DTYPE);
+
+    auto lhs_t = GenerateTensorWithSetRandom<DTYPE>({8, 32});
+    auto rhs_t = GenerateTensorWithSetRandom<DTYPE>({32, 64});
+    auto bias_t = GenerateTensorWithSetRandom<DTYPE>({64});
+
+    item.fetch = {"fetch"};
+    item.feed = {{"lhs", lhs_t}, {"rhs", rhs_t}, {"bias", bias_t}};
+
+    // Place all nodes on CPU.
+    for (int i = 0; i < item.graph.node_size(); ++i) {
+      item.graph.mutable_node(i)->set_device("/device:CPU:0");
+    }
+
+    Remapper optimizer(RewriterConfig::ON);
+    GraphDef optimized_graph;
+    TF_ASSERT_OK(optimizer.Optimize(nullptr, item, &optimized_graph));
+    int found = 0;
+    for (const NodeDef& node : optimized_graph.node()) {
+      if (node.name() == "gelu") {
+        EXPECT_EQ(node.op(), "Reshape");
+        ASSERT_GE(node.input_size(), 2);
+        EXPECT_EQ(node.input(0), "bias_add");
+        found++;
+      }
+      if (node.name() == "bias_add") {
+        EXPECT_EQ(node.op(), "_FusedMatMul");
+        ASSERT_GE(node.input_size(), 3);
+        EXPECT_EQ(node.input(0), "lhs");
+        EXPECT_EQ(node.input(1), "rhs");
+        EXPECT_EQ(node.input(2), "bias");
+        EXPECT_EQ(node.attr().at("num_args").i(), 1);
+        const auto fused_ops = node.attr().at("fused_ops").list().s();
+        ASSERT_EQ(fused_ops.size(), 2);
+        EXPECT_EQ(fused_ops[0], "BiasAdd");
+        EXPECT_EQ(fused_ops[1], "GeluExact");
+        found++;
+      }
+    }
+    EXPECT_EQ(2, found);
+
+    // Evaluate result without remapper fusion
+    auto tensors_expected = EvaluateNodes(item.graph, item.fetch, item.feed);
+    ASSERT_EQ(tensors_expected.size(), 1);
+    auto tensors_evaluated =
+        EvaluateNodes(optimized_graph, item.fetch, item.feed);
+    ASSERT_EQ(tensors_evaluated.size(), 1);
+    float atol = 1e-6, rtol = 1e-6;
+    if (DTYPE == DT_BFLOAT16 || DTYPE == DT_HALF) {
+      atol = 1e-2;
+      rtol = 1e-2;
+    }
+    test::ExpectClose(tensors_evaluated[0], tensors_expected[0], atol, rtol);
+  }
+};
+
+TEST_F(FusedMatMulReshapeBiasAddAndGeluTest, Float32GeluExact) {
+  RunTest<DT_FLOAT>();
+}
+TEST_F(FusedMatMulReshapeBiasAddAndGeluTest, BFloat16GeluExact) {
+  RunTest<DT_BFLOAT16>();
+}
 
 }  // namespace grappler
 }  // namespace tensorflow
