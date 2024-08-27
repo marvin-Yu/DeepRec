@@ -105,12 +105,14 @@ struct MklEinsumHelper {
     // Compute parameters for DNNL matmul primitive.
     MklBatchMatMulHelper bmm;
     string prefix = "einsum";
-    auto params = bmm.CreateMatMulParams(prefix, lhs.shape(), rhs.shape(),
-                                         out_shape, trans_x, trans_y);
+    memory::dims bias_dims = NONE_DIMS;
+    auto params =
+        bmm.CreateMatMulParams(prefix, lhs.shape(), rhs.shape(), out_shape,
+                               trans_x, trans_y, bias_dims);
 
     // Create or retrieve matmul primitive from cache.
-    MklMatMulPrimitive<T, T, T>* matmul_prim =
-        MklMatMulPrimitiveFactory<T, T, T, T>::Get(
+    MklMatMulPrimitive<T, T, T, T>* matmul_prim =
+        MklMatMulPrimitiveFactory<T, T, T, T, T>::Get(
             *params, false /* value for do_not_cache */);
 
     UserScratchPad<unsigned char> scratch_pad;
@@ -122,7 +124,8 @@ struct MklEinsumHelper {
     cpu_stream.reset(CreateStream(&eigen_tp, matmul_prim->GetEngine()));
 
     matmul_prim->Execute(cpu_stream, lhs.flat<T>().data(), rhs.flat<T>().data(),
-                         output->flat<T>().data(), *params, scratch_pad.Get());
+                         nullptr, output->flat<T>().data(), *params,
+                         scratch_pad.Get());
 
     Tensor output_reshaped;
     if (output->dims() != 3) {
