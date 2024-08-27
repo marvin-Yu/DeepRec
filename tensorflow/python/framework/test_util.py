@@ -291,6 +291,10 @@ def IsMklEnabled():
   return pywrap_tensorflow.IsMklEnabled()
 
 
+def UseCpuAdvancedOps():
+  return pywrap_tensorflow.UseCpuAdvancedOps()
+
+
 def IsBF16SupportedByOneDNNOnThisCPU():
   return pywrap_tensorflow.IsBF16SupportedByOneDNNOnThisCPU()
 

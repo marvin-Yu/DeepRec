@@ -2838,7 +2838,22 @@ def gelu(features, approximate=False, name=None):
   """
   with ops.name_scope(name, "Gelu", [features, approximate]) as name:
     features = ops.convert_to_tensor(features, name="features")
-    return gen_nn_ops.gelu(features, approximate=approximate, name=name)
+    if not features.dtype.is_floating:
+      raise ValueError(
+          "`features.dtype` must be a floating point tensor."
+          f"Received:features.dtype={features.dtype}")
+    from tensorflow.python.framework import test_util
+    if not test_util.UseCpuAdvancedOps():
+      if approximate:
+        coeff = math_ops.cast(0.044715, features.dtype)
+        return 0.5 * features * (
+            1.0 + math_ops.tanh(0.7978845608028654 *
+                                (features + coeff * math_ops.pow(features, 3))))
+      else:
+        return 0.5 * features * (1.0 + math_ops.erf(
+            features / math_ops.cast(1.4142135623730951, features.dtype)))
+    else:
+      return gen_nn_ops._gelu(features, approximate=approximate, name=name)
 
 
 def _flatten_outer_dims(logits):
