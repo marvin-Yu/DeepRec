@@ -3107,11 +3107,11 @@ Status AddFusedMatMulBiasAddAndGelu(RemapperContext* ctx,
       ctx->graph_view.GetNode(matched_nodes_map->at("output"))->node();
   auto* matmul_node =
       ctx->graph_view.GetNode(matched_nodes_map->at("matmul"))->node();
-  auto* bias_add_node =
-      ctx->graph_view.GetNode(matched_nodes_map->at("bias_add"))->node();
 
   NodeDef fused_node;
   if (with_reshape) {
+    auto* bias_add_node =
+        ctx->graph_view.GetNode(matched_nodes_map->at("bias_add"))->node();
     // Since Reshape node will be the last node, the fused node will
     // have the same name as the bias_add node and Reshape node will
     // have the same name as the terminal(Gelu) node.
@@ -3151,6 +3151,8 @@ Status AddFusedMatMulBiasAddAndGelu(RemapperContext* ctx,
   if (with_reshape) {
     auto* reshape_node =
         ctx->graph_view.GetNode(matched_nodes_map->at("reshape"))->node();
+    auto* bias_add_node =
+        ctx->graph_view.GetNode(matched_nodes_map->at("bias_add"))->node();
     NodeDef new_reshape_node;
     new_reshape_node.set_name(output_node->name());
     new_reshape_node.set_op("Reshape");
