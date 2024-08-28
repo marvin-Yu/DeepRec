@@ -363,8 +363,10 @@ class FusedBatchMatMulMkl
           const Tensor& addend_tensor = ctx->input(post_op_info.input_idx);
           // TODO(intel-tf): Relax restriction when oneDNN is performant for
           // arbitrary shapes.
-          bool is_supported = params.c_dims.size() == 4 &&
-                              addend_tensor.dims() == params.c_dims.size();
+          bool is_supported =
+              ((params.c_dims.size() == 4 &&
+                addend_tensor.dims() == params.c_dims.size()) ||
+               (params.c_dims.size() == 4 && addend_tensor.NumElements() == 1));
           memory::format_tag format_tag;
           switch (params.c_dims.size()) {
             case 3:
@@ -377,7 +379,12 @@ class FusedBatchMatMulMkl
               OP_REQUIRES(ctx, false, errors::Unimplemented("Unimplemented"));
           }
           memory::data_type data_type = MklDnnType<U>();
-          memory::dims addend_dims = TFShapeToMklDnnDims(addend_tensor.shape());
+          int rank_addend_tensor = addend_tensor.shape().dims();
+
+          memory::dims addend_dims(params.c_dims.size(), 1);
+          if (addend_tensor.dims() == params.c_dims.size()) {
+            addend_dims = TFShapeToMklDnnDims(addend_tensor.shape());
+          }
           params.post_op_params.push_back(
               {"add", {}, addend_dims, data_type, format_tag});
           void* addend_data = static_cast<void*>(

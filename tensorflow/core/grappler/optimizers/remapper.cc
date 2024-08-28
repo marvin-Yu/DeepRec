@@ -1988,7 +1988,7 @@ bool FindFusedBatchMatMul(RemapperContext* ctx, int node_index,
   // OneDNN is not optimized for all shapes with regard to binary-post ops
   // fusion. Allow limited cases only for now that are optimized, (i)
   // multiplicand is scalar, (ii) BatchMatmulV2 output is 4D tensor, and (iii)
-  // addend is 4D tensor with second dim_size = 1.
+  // addend is 4D tensor with second dim_size = 1 or addend is scalar.
   if (!found_op_type_match) return false;
   if (!ctx->inferred_graph_properties) {
     Status s = ctx->graph_properties.InferStatically(
@@ -2021,7 +2021,8 @@ bool FindFusedBatchMatMul(RemapperContext* ctx, int node_index,
     auto addend_props =
         ctx->graph_properties.GetOutputProperties(addend_node_def->name());
     auto addend_shape = addend_props[0].shape();
-    if (!(Rank(addend_shape) == 4 && addend_shape.dim(1).size() == 1)) {
+    if (!(Rank(addend_shape) == 4 && addend_shape.dim(1).size() == 1) &&
+        (NumCoefficients(addend_shape) != 1)) {
       return false;
     }
     if (pattern == 1) {
