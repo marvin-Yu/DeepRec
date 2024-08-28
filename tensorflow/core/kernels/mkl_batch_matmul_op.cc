@@ -221,6 +221,7 @@ enum class FusedComputationType {
   kMulAdd_Requantize,
   kBiasGelu,
   kBias,
+  kBiasAdd,
 };
 
 struct FusedComputationPattern {
@@ -281,6 +282,7 @@ class FusedBatchMatMulMkl
         {FCT::kBias, {"BiasAdd"}},
         {FCT::kMulAdd, {"Mul", "Add"}},
         {FCT::kBiasGelu, {"BiasAdd", "GeluExact"}},
+        {FCT::kBiasAdd, {"BiasAdd", "Add"}},
     };
     FusedComputationType fused_computation = FusedComputationType::kUndefined;
     for (const auto& pattern : patterns) {
@@ -307,6 +309,9 @@ class FusedBatchMatMulMkl
         break;
       case FCT::kBiasGelu:
         post_op_info_list_ = {{PostOpKind::kBias, 2}, {PostOpKind::kGelu, 3}};
+        break;
+      case FCT::kBiasAdd:
+        post_op_info_list_ = {{PostOpKind::kBias, 2}, {PostOpKind::kAdd, 3}};
         break;
       default:
         OP_REQUIRES_OK(
@@ -360,10 +365,17 @@ class FusedBatchMatMulMkl
           // arbitrary shapes.
           bool is_supported = params.c_dims.size() == 4 &&
                               addend_tensor.dims() == params.c_dims.size();
-          OP_REQUIRES(ctx, is_supported,
-                      errors::Unimplemented(
-                          "Unimplemented addend shape for Add fusion: ",
-                          addend_tensor.shape().DebugString()));
+          memory::format_tag format_tag;
+          switch (params.c_dims.size()) {
+            case 3:
+              format_tag = memory::format_tag::abc;
+              break;
+            case 4:
+              format_tag = memory::format_tag::abcd;
+              break;
+            default:
+              OP_REQUIRES(ctx, false, errors::Unimplemented("Unimplemented"));
+          }
           memory::data_type data_type = MklDnnType<U>();
           memory::dims addend_dims = TFShapeToMklDnnDims(addend_tensor.shape());
           params.post_op_params.push_back(

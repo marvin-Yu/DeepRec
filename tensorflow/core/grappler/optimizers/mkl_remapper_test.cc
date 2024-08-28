@@ -29,6 +29,12 @@ limitations under the License.
 namespace tensorflow {
 namespace grappler {
 
+#ifdef ENABLE_ONEDNN_V3
+#define CPU_CHECK_FOR_FP16 IsAMXDataTypeSupportedByOneDNNOnThisCPU(DT_HALF)
+#else
+#define CPU_CHECK_FOR_FP16 false
+#endif  // ENABLE_ONEDNN_V3
+
 class MklRemapperTest : public GrapplerTest {
  public:
   const string kAddNOp = "AddN";
@@ -1095,6 +1101,103 @@ class MklFusedBatchMatMul : public MklRemapperTest {
     }
     test::ExpectClose(tensors_expected[0], tensors[0], atol, rtol);
   }
+
+  template <DataType DTYPE>
+  void VerifyBiasAddV2Fusion(bool adjx, bool adjy) {
+    if (!IsMKLEnabled() || (DTYPE == DT_HALF && !CPU_CHECK_FOR_FP16)) {
+      GTEST_SKIP() << "Skipping test since oneDNN is not enabled (OR) "
+                   << "fp16 is not supported on this CPU.";
+    }
+    if (DTYPE == DT_BFLOAT16 && !IsBF16SupportedByOneDNNOnThisCPU())
+      GTEST_SKIP() << "Intel oneDNN with bfloat16 is not supported, skipping "
+                      "BatchMatMul + Bias + AddV2 Fusion with bfloat16.";
+    using ::tensorflow::ops::Placeholder;
+
+    int b0 = 2;
+    int b1 = 2;
+    int m = 32;
+    int k = 16;
+    int n = 64;
+
+    tensorflow::Scope s = tensorflow::Scope::NewRootScope();
+
+    auto input_shape =
+        adjx ? TensorShape({b0, b1, k, m}) : TensorShape({b0, b1, m, k});
+    auto weight_shape =
+        adjy ? TensorShape({b0, b1, n, k}) : TensorShape({b0, b1, k, n});
+    auto add_shape = TensorShape({b0, 1, m, n});
+
+    auto input_placeholder_shape = ops::Placeholder::Shape(input_shape);
+    auto weight_placeholder_shape = ops::Placeholder::Shape(weight_shape);
+    auto add_placeholder_shape = ops::Placeholder::Shape(add_shape);
+
+    auto input =
+        Placeholder(s.WithOpName("input"), DTYPE, input_placeholder_shape);
+    auto weight =
+        Placeholder(s.WithOpName("weight"), DTYPE, weight_placeholder_shape);
+    auto addend =
+        Placeholder(s.WithOpName("addend"), DTYPE, add_placeholder_shape);
+
+    typedef typename EnumToDataType<DTYPE>::Type T;
+    T bias_value = static_cast<T>(0.01);
+    auto bias_tensor =
+        GenerateConstantTensor<DTYPE>(TensorShape({64}), bias_value);
+
+    auto bias =
+        ops::Const(s.WithOpName("bias"), Input::Initializer(bias_tensor));
+
+    auto batchmatmul =
+        ops::BatchMatMulV2(s.WithOpName("batchmatmul"), input, weight,
+                           ops::BatchMatMulV2::Attrs().AdjX(adjx).AdjY(adjy));
+    auto bias_add = ops::BiasAdd(s.WithOpName("bias_add"), batchmatmul, bias);
+    auto add = ops::AddV2(s.WithOpName("add"), bias_add, addend);
+    auto fetch = ops::Identity(s.WithOpName("fetch"), add);
+
+    auto input_t = GenerateTensorWithSetRandom<DTYPE>(input_shape);
+    auto weight_t = GenerateTensorWithSetRandom<DTYPE>(weight_shape);
+    auto add_t = GenerateTensorWithSetRandom<DTYPE>(add_shape);
+
+    GrapplerItem item;
+    item.fetch = {"fetch"};
+    item.feed = {{"input", input_t}, {"weight", weight_t}, {"addend", add_t}};
+    TF_CHECK_OK(s.ToGraphDef(&item.graph));
+
+    // Place all nodes on CPU.
+    for (int i = 0; i < item.graph.node_size(); ++i) {
+      item.graph.mutable_node(i)->set_device("/device:CPU:0");
+    }
+
+    Remapper optimizer(RewriterConfig::AGGRESSIVE);
+    GraphDef output;
+    TF_CHECK_OK(optimizer.Optimize(nullptr, item, &output));
+
+    int found = 0;
+    for (const NodeDef& node : output.node()) {
+      if (node.name() == "add") {
+        EXPECT_EQ("_MklFusedBatchMatMulV2", node.op());
+        EXPECT_EQ("input", node.input(0));
+        EXPECT_EQ("weight", node.input(1));
+        EXPECT_EQ("bias", node.input(2));
+        EXPECT_EQ("addend", node.input(3));
+        const auto fused_ops = node.attr().at("fused_ops").list().s();
+        EXPECT_EQ(2, fused_ops.size());
+        EXPECT_EQ("BiasAdd", fused_ops[0]);
+        found++;
+        EXPECT_EQ("Add", fused_ops[1]);
+        found++;
+      }
+    }
+    EXPECT_EQ(2, found);
+
+    auto tensors_expected = EvaluateNodes(item.graph, item.fetch, item.feed);
+    auto tensors = EvaluateNodes(output, item.fetch, item.feed);
+    float atol = 1e-2, rtol = 1e-2;  // tolerances for bfloat16 and float16
+    if (DTYPE == DT_FLOAT) {
+      atol = 1e-6;
+      rtol = 1e-6;
+    }
+    test::ExpectClose(tensors_expected[0], tensors[0], atol, rtol);
+  }
 };
 
 TEST_F(MklFusedBatchMatMul, MulAndAdd) {
@@ -1135,6 +1238,15 @@ TEST_F(MklFusedBatchMatMul, Bias) {
   for (const auto adjx : {false, true})
     for (const auto adjy : {false, true}) {
       this->VerifyBiasAddFusion<float>(adjx, adjy);
+    }
+}
+
+TEST_F(MklFusedBatchMatMul, BiasAndAdd) {
+  for (const auto adjx : {false, true})
+    for (const auto adjy : {false, true}) {
+      this->VerifyBiasAddV2Fusion<DT_FLOAT>(adjx, adjy);
+      this->VerifyBiasAddV2Fusion<DT_BFLOAT16>(adjx, adjy);
+      this->VerifyBiasAddV2Fusion<DT_HALF>(adjx, adjy);
     }
 }
 
@@ -1628,6 +1740,302 @@ TEST_F(FusedMatMulReshapeBiasAddAndGeluTest, Float32GeluExact) {
 TEST_F(FusedMatMulReshapeBiasAddAndGeluTest, BFloat16GeluExact) {
   RunTest<DT_BFLOAT16>();
 }
+
+class FusedBatchMatMulV2BiasAddAndGeluTest : public GrapplerTest {
+ public:
+  AttrValue TypeAttrValue(DataType type) {
+    AttrValue attr_value;
+    SetAttrValue(type, &attr_value);
+    return attr_value;
+  }
+
+  AttrValue BoolAttrValue(bool val) {
+    AttrValue attr_value;
+    SetAttrValue(val, &attr_value);
+    return attr_value;
+  }
+
+  template <DataType DTYPE>
+  void VerifyBiasAddGeluFusion(bool adjx, bool adjy) {
+    if (!UseCpuAdvancedOps()) {
+      GTEST_SKIP() << "Test only applicable if the env var "
+                      "TF_USE_ADVANCED_CPU_OPS is set";
+    }
+    using ::tensorflow::ops::Placeholder;
+    GrapplerItem item;
+
+    int b0 = 2;
+    int b1 = 2;
+    int m = 32;
+    int k = 16;
+    int n = 64;
+
+    tensorflow::Scope s = tensorflow::Scope::NewRootScope();
+
+    auto input_shape =
+        adjx ? TensorShape({b0, b1, k, m}) : TensorShape({b0, b1, m, k});
+    auto weight_shape =
+        adjy ? TensorShape({b0, b1, n, k}) : TensorShape({b0, b1, k, n});
+    auto bias_shape = TensorShape({n});
+
+    auto input_placeholder_shape = ops::Placeholder::Shape(input_shape);
+    auto weight_placeholder_shape = ops::Placeholder::Shape(weight_shape);
+    auto bias_add_placeholder_shape = ops::Placeholder::Shape({n});
+
+    auto input =
+        Placeholder(s.WithOpName("input"), DTYPE, input_placeholder_shape);
+    auto weight =
+        Placeholder(s.WithOpName("weight"), DTYPE, weight_placeholder_shape);
+
+    typedef typename EnumToDataType<DTYPE>::Type T;
+    T bias_value = static_cast<T>(0.01);
+    auto bias_tensor =
+        GenerateConstantTensor<DTYPE>(TensorShape({64}), bias_value);
+    auto bias =
+        ops::Const(s.WithOpName("bias"), Input::Initializer(bias_tensor));
+
+    auto batchmatmul =
+        ops::BatchMatMulV2(s.WithOpName("batchmatmul"), input, weight,
+                           ops::BatchMatMulV2::Attrs().AdjX(adjx).AdjY(adjy));
+    auto bias_add = ops::BiasAdd(s.WithOpName("bias_add"), batchmatmul, bias);
+
+    TF_ASSERT_OK(s.ToGraphDef(&item.graph));
+
+    NodeDef* gelu_def = item.graph.add_node();
+    gelu_def->set_name("gelu");
+    gelu_def->set_op("Gelu");
+    gelu_def->add_input("bias_add");
+    (*gelu_def->mutable_attr())["T"] = TypeAttrValue(DTYPE);
+    (*gelu_def->mutable_attr())["approximate"] = BoolAttrValue(false);
+
+    NodeDef* fetch_def = item.graph.add_node();
+    fetch_def->set_name("fetch");
+    fetch_def->set_op("Identity");
+    fetch_def->add_input("gelu");
+    (*fetch_def->mutable_attr())["T"] = TypeAttrValue(DTYPE);
+
+    auto input_t = GenerateTensorWithSetRandom<DTYPE>(input_shape);
+    auto weight_t = GenerateTensorWithSetRandom<DTYPE>(weight_shape);
+
+    item.fetch = {"fetch"};
+    item.feed = {{"input", input_t}, {"weight", weight_t}};
+
+    // Place all nodes on CPU.
+    for (int i = 0; i < item.graph.node_size(); ++i) {
+      item.graph.mutable_node(i)->set_device("/device:CPU:0");
+    }
+
+    Remapper optimizer(RewriterConfig::ON);
+    GraphDef output;
+    TF_CHECK_OK(optimizer.Optimize(nullptr, item, &output));
+
+    int found = 0;
+    for (const NodeDef& node : output.node()) {
+      if (node.name() == "gelu") {
+        EXPECT_EQ("_MklFusedBatchMatMulV2", node.op());
+        ASSERT_GE(node.input_size(), 3);
+        EXPECT_EQ("input", node.input(0));
+        EXPECT_EQ("weight", node.input(1));
+        EXPECT_EQ("bias", node.input(2));
+        const auto fused_ops = node.attr().at("fused_ops").list().s();
+        EXPECT_EQ(2, fused_ops.size());
+        EXPECT_EQ(fused_ops[0], "BiasAdd");
+        EXPECT_EQ(fused_ops[1], "GeluExact");
+        found++;
+      }
+    }
+    EXPECT_EQ(1, found);
+
+    auto tensors_expected = EvaluateNodes(item.graph, item.fetch, item.feed);
+    auto tensors = EvaluateNodes(output, item.fetch, item.feed);
+    float atol = 2e-6, rtol = 2e-6;
+    if (DTYPE == DT_BFLOAT16 || DTYPE == DT_HALF) {
+      atol = 1e-2;
+      rtol = 1e-2;
+    }
+    test::ExpectClose(tensors_expected[0], tensors[0], atol, rtol);
+  }
+};
+
+TEST_F(FusedBatchMatMulV2BiasAddAndGeluTest, Float32GeluExact) {
+  for (const auto adjx : {false, true})
+    for (const auto adjy : {false, true}) {
+      VerifyBiasAddGeluFusion<DT_FLOAT>(adjx, adjy);
+    }
+}
+TEST_F(FusedBatchMatMulV2BiasAddAndGeluTest, BFloat16GeluExact) {
+  if (!IsBF16SupportedByOneDNNOnThisCPU()) {
+    GTEST_SKIP() << "Intel oneDNN with bfloat16 is not supported, skipping "
+                    "FusedMatMulBiasAddAndGelu with bfloat16.";
+  } else {
+    for (const auto adjx : {false, true})
+      for (const auto adjy : {false, true}) {
+        VerifyBiasAddGeluFusion<DT_BFLOAT16>(adjx, adjy);
+      }
+  }
+}
+TEST_F(FusedBatchMatMulV2BiasAddAndGeluTest, Float16GeluExact) {
+  if (!CPU_CHECK_FOR_FP16) {
+    GTEST_SKIP() << "FP16 is not supported on this CPU.";
+  } else {
+    for (const auto adjx : {false, true})
+      for (const auto adjy : {false, true}) {
+        VerifyBiasAddGeluFusion<DT_HALF>(adjx, adjy);
+      }
+  }
+}
+
+class ReplaceReshapeMatMulReshapeWithBMMV2Test : public GrapplerTest {
+ public:
+  template <DataType DTYPE>
+  void VerifyReplacement(int rank0, int rank1) {
+    if (!IsMKLEnabled() || (DTYPE == DT_HALF && !CPU_CHECK_FOR_FP16)) {
+      GTEST_SKIP() << "Skipping test since oneDNN is not enabled (OR) "
+                   << "fp16 is not supported on this CPU.";
+    }
+    if (DTYPE == DT_BFLOAT16 && !IsBF16SupportedByOneDNNOnThisCPU())
+      GTEST_SKIP() << "Intel oneDNN with bfloat16 is not supported, skipping "
+                      "matmul replacement with batchmatmulv2 for bfloat16.";
+    using ::tensorflow::ops::Placeholder;
+
+    tensorflow::Scope s = tensorflow::Scope::NewRootScope();
+    GrapplerItem item;
+
+    if (rank0 == 3 && rank1 == 3) {
+      auto input_shape = ops::Placeholder::Shape({2, 4, 32});
+      auto rhs_shape = ops::Placeholder::Shape({32, 64});
+      auto input = Placeholder(s.WithOpName("input"), DTYPE, input_shape);
+      auto rhs = Placeholder(s.WithOpName("rhs"), DTYPE, rhs_shape);
+
+      auto input_t = GenerateTensorWithSetRandom<DTYPE>({2, 4, 32});
+      auto rhs_t = GenerateTensorWithSetRandom<DTYPE>({32, 64});
+
+      auto reshape0_shape_val = {8, 32};
+      auto reshape1_shape_val = {2, 4, 64};
+
+      auto reshape0 = ops::Reshape(
+          s.WithOpName("reshape0"), input,
+          ops::Const(s.WithOpName("reshape0_shape"), reshape0_shape_val));
+      auto matmul = ops::MatMul(s.WithOpName("matmul"), reshape0, rhs);
+      auto reshape1 = ops::Reshape(
+          s.WithOpName("reshape1"), matmul,
+          ops::Const(s.WithOpName("reshape1_shape"), reshape1_shape_val));
+
+      item.feed = {{"rhs", rhs_t}, {"input", input_t}};
+      auto fetch = ops::Identity(s.WithOpName("fetch"), reshape1);
+    } else if (rank0 == 3 && rank1 == 4) {
+      auto input_shape = ops::Placeholder::Shape({2, 4, 32});
+      auto rhs_shape = ops::Placeholder::Shape({32, 64});
+      auto input = Placeholder(s.WithOpName("input"), DTYPE, input_shape);
+      auto rhs = Placeholder(s.WithOpName("rhs"), DTYPE, rhs_shape);
+
+      auto input_t = GenerateTensorWithSetRandom<DTYPE>({2, 4, 32});
+      auto rhs_t = GenerateTensorWithSetRandom<DTYPE>({32, 64});
+
+      auto reshape0_shape_val = {8, 32};
+      auto reshape1_shape_val = {2, 2, 2, 64};
+
+      auto reshape0 = ops::Reshape(
+          s.WithOpName("reshape0"), input,
+          ops::Const(s.WithOpName("reshape0_shape"), reshape0_shape_val));
+      auto matmul = ops::MatMul(s.WithOpName("matmul"), reshape0, rhs);
+      auto reshape1 = ops::Reshape(
+          s.WithOpName("reshape1"), matmul,
+          ops::Const(s.WithOpName("reshape1_shape"), reshape1_shape_val));
+
+      item.feed = {{"rhs", rhs_t}, {"input", input_t}};
+      auto fetch = ops::Identity(s.WithOpName("fetch"), reshape1);
+    } else if (rank0 == 4 && rank1 == 3) {
+      auto input_shape = ops::Placeholder::Shape({2, 2, 2, 32});
+      auto rhs_shape = ops::Placeholder::Shape({32, 64});
+      auto input = Placeholder(s.WithOpName("input"), DTYPE, input_shape);
+      auto rhs = Placeholder(s.WithOpName("rhs"), DTYPE, rhs_shape);
+
+      auto input_t = GenerateTensorWithSetRandom<DTYPE>({2, 2, 2, 32});
+      auto rhs_t = GenerateTensorWithSetRandom<DTYPE>({32, 64});
+
+      auto reshape0_shape_val = {8, 32};
+      auto reshape1_shape_val = {2, 4, 64};
+
+      auto reshape0 = ops::Reshape(
+          s.WithOpName("reshape0"), input,
+          ops::Const(s.WithOpName("reshape0_shape"), reshape0_shape_val));
+      auto matmul = ops::MatMul(s.WithOpName("matmul"), reshape0, rhs);
+      auto reshape1 = ops::Reshape(
+          s.WithOpName("reshape1"), matmul,
+          ops::Const(s.WithOpName("reshape1_shape"), reshape1_shape_val));
+      item.feed = {{"rhs", rhs_t}, {"input", input_t}};
+      auto fetch = ops::Identity(s.WithOpName("fetch"), reshape1);
+    } else if (rank0 == 4 && rank1 == 4) {
+      auto input_shape = ops::Placeholder::Shape({2, 2, 2, 32});
+      auto rhs_shape = ops::Placeholder::Shape({32, 64});
+      auto input = Placeholder(s.WithOpName("input"), DTYPE, input_shape);
+      auto rhs = Placeholder(s.WithOpName("rhs"), DTYPE, rhs_shape);
+
+      auto input_t = GenerateTensorWithSetRandom<DTYPE>({2, 2, 2, 32});
+      auto rhs_t = GenerateTensorWithSetRandom<DTYPE>({32, 64});
+
+      auto reshape0_shape_val = {8, 32};
+      auto reshape1_shape_val = {2, 2, 2, 64};
+
+      auto reshape0 = ops::Reshape(
+          s.WithOpName("reshape0"), input,
+          ops::Const(s.WithOpName("reshape0_shape"), reshape0_shape_val));
+      auto matmul = ops::MatMul(s.WithOpName("matmul"), reshape0, rhs);
+      auto reshape1 = ops::Reshape(
+          s.WithOpName("reshape1"), matmul,
+          ops::Const(s.WithOpName("reshape1_shape"), reshape1_shape_val));
+      item.feed = {{"rhs", rhs_t}, {"input", input_t}};
+
+      auto fetch = ops::Identity(s.WithOpName("fetch"), reshape1);
+    }
+
+    item.fetch = {"fetch"};
+    TF_ASSERT_OK(s.ToGraphDef(&item.graph));
+
+    // Place all nodes on CPU.
+    for (int i = 0; i < item.graph.node_size(); ++i) {
+      item.graph.mutable_node(i)->set_device("/device:CPU:0");
+    }
+
+    Remapper optimizer(RewriterConfig::ON);
+    GraphDef optimized_graph;
+    TF_ASSERT_OK(optimizer.Optimize(nullptr, item, &optimized_graph));
+    int found = 0;
+
+    for (const NodeDef& node : optimized_graph.node()) {
+      if (node.name() == "reshape1") {
+        EXPECT_EQ(node.op(), "BatchMatMulV2");
+        ASSERT_GE(node.input_size(), 2);
+        EXPECT_EQ(node.input(0),
+                  AddPrefixToNodeName("ReshapedMatMulInput", "input"));
+        EXPECT_EQ(node.input(1), "rhs");
+        found++;
+      }
+    }
+    EXPECT_EQ(1, found);
+
+    // Evaluate result without remapper fusion
+    auto tensors_expected = EvaluateNodes(item.graph, item.fetch, item.feed);
+    ASSERT_EQ(tensors_expected.size(), 1);
+
+    auto tensors_evaluated =
+        EvaluateNodes(optimized_graph, item.fetch, item.feed);
+    ASSERT_EQ(tensors_evaluated.size(), 1);
+    test::ExpectClose(tensors_evaluated[0], tensors_expected[0], 1e-2);
+  }
+};
+
+TEST_F(ReplaceReshapeMatMulReshapeWithBMMV2Test, RMRtoBMMv2) {
+  for (const auto rank0 : {3, 4}) {
+    for (const auto rank1 : {3, 4}) {
+      VerifyReplacement<DT_BFLOAT16>(rank0, rank1);
+      VerifyReplacement<DT_HALF>(rank0, rank1);
+    }
+  }
+}
+
+#undef CPU_CHECK_FOR_FP16
 
 }  // namespace grappler
 }  // namespace tensorflow

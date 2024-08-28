@@ -888,6 +888,14 @@ inline bool VerifyConstants(RemapperContext* ctx,
   return true;
 }
 
+bool HasDynamicShape(std::vector<OpInfo::TensorProperties>& props) {
+  for (int i = 0; i < Rank(props[0].shape()); ++i) {
+    // Shape values are non-positive in case of dynamic/unknown shapes
+    if (props[0].shape().dim(i).size() < 0) return true;
+  }
+  return false;
+}
+
 bool IsMatchedMatMulBiasAddAndGeluExact(
     RemapperContext& ctx, int node_index,
     std::map<string, int>* matched_nodes_map = nullptr,
@@ -1296,6 +1304,254 @@ bool FindMatMulReshapeBiasAndGelu(RemapperContext* ctx, int node_index,
   return found_op_type_match;
 }
 
+bool FindReshapeMatMulReshape(RemapperContext* ctx, int node_index,
+                              std::map<string, int>* matched_nodes_map,
+                              std::set<int>* remove_node_indices, int* a,
+                              int* b, int* c, int* d, int* m, int* n, int* p,
+                              int* q, int* r, int* s, int* rank_reshape0,
+                              int* rank_reshape1) {
+  // Fusion only available with oneDNN
+  if (!IsMKLEnabled()) return false;
+  // Check for data types
+  // Graph Modification is available for BF16 and FP16
+  // TODO: Enable for FP32
+  auto* curr_node_def = ctx->graph_view.GetNode(node_index)->node();
+  if (!(HasDataType(curr_node_def, DT_BFLOAT16)) &&
+      !(HasDataType(curr_node_def, DT_HALF)))
+    return false;
+
+  using utils::MatchingDirection;
+  using utils::NodeStatus;
+
+  // The following pattern will be searched in the graph with additional
+  // contraints. Here * means any type of op.
+  // clang-format off
+  //       Subgraph for fusion               Fused Graph
+  //       -------------------            ----------------
+  //           Reshape                      BatchMatMulV2
+  //              |
+  //            Matmul
+  //              |
+  //            Reshape
+
+  utils::OpTypePattern reshapematmulreshape_pattern {
+     "Reshape", "output", NodeStatus::kReplace,
+      {
+        {"MatMul", "matmul", NodeStatus::kRemove,
+          {
+            {"Reshape", "reshape", NodeStatus::kRemove},
+            {"*", "matmul_input", NodeStatus::kRemain}
+          }
+        }, // matmul
+        {"*", "shape", NodeStatus::kRemain}
+      }
+    };
+  // clang-format on
+
+  bool found_op_type_match = false;
+  utils::SubGraphMatcher<MatchingDirection::kFollowInputs> graph_matcher(
+      &(ctx->graph_view));
+  found_op_type_match = graph_matcher.GetMatchedNodes(
+      reshapematmulreshape_pattern, {}, ctx->graph_view.GetNode(node_index),
+      matched_nodes_map, remove_node_indices);
+
+  if (found_op_type_match) {
+    // Check if the MatMul to be fused is device compatible.
+    NodeDef* matmul_node =
+        ctx->graph_view.GetNode(matched_nodes_map->at("matmul"))->node();
+    bool cpu_ok = IsCpuCompatibleMatMul(matmul_node);
+    if (!cpu_ok) return false;
+
+    if (!ctx->inferred_graph_properties) {
+      Status s = ctx->graph_properties.InferStatically(
+          /*assume_valid_feeds=*/true,
+          /*aggressive_shape_inference=*/false,
+          /*include_input_tensor_values=*/false,
+          /*include_output_tensor_values=*/true);
+      if (!s.ok()) return false;
+      ctx->inferred_graph_properties = true;
+    }
+
+    // Fetching the Reshape before MatMul and its output properties
+    const auto* reshape0 =
+        ctx->graph_view.GetNode(matched_nodes_map->at("reshape"));
+    auto props_reshape0 =
+        ctx->graph_properties.GetOutputProperties(reshape0->node()->name());
+
+    // Fetching the 1st input to Reshape before MatMul
+    const auto& regular_fanin_0 = reshape0->GetRegularFanin(0);  // input node
+    const auto* regular_node_view_0 = regular_fanin_0.node_view();
+    const auto* input_reshape0 = regular_node_view_0->node();
+    // Fetching the output properties of 1st input to Reshape before MatMul
+    auto props_input0_reshape0 =
+        ctx->graph_properties.GetOutputProperties(input_reshape0->name());
+    // Determine the rank of Reshape before MatMul
+    *rank_reshape0 = Rank(props_input0_reshape0[0].shape());
+
+    // Fetching the Reshape after MatMul
+    const auto* reshape1 =
+        ctx->graph_view.GetNode(matched_nodes_map->at("output"))->node();
+    // Fetching the output properties of Reshape after MatMul
+    auto props_reshape1 =
+        ctx->graph_properties.GetOutputProperties(reshape1->name());
+    // Determining the rank of Reshape after MatMul
+    *rank_reshape1 = Rank(props_reshape1[0].shape());
+
+    // Fetching the 2nd input to MatMul (weights) and its properties
+    const auto* input1_matmul =
+        ctx->graph_view.GetNode(matched_nodes_map->at("matmul_input"))->node();
+    auto props_input1_matmul =
+        ctx->graph_properties.GetOutputProperties(input1_matmul->name());
+
+    // Constraint 1: Limiting the replacement of MM to BMM for 3D and 4D tensors
+    if ((*rank_reshape0 < 3 || *rank_reshape0 > 4) ||
+        (*rank_reshape1 < 3 || *rank_reshape1 > 4)) {
+      return false;
+    }
+
+    if (HasDynamicShape(props_input0_reshape0) ||
+        HasDynamicShape(props_reshape0) || HasDynamicShape(props_reshape1) ||
+        HasDynamicShape(props_input1_matmul)) {
+      return false;
+    }
+
+    // TODO(othakkar): Implement a more cleaner way to retrieve the shapes
+    // in a list, instead of individual variables.
+    // Individual case constraints
+    if (*rank_reshape0 == 3 && *rank_reshape1 == 3) {
+      // Case 1: [a, b, c] x [m, n] => [p, q, r]
+      // Here, [a, b, c] will be reshaped to [p, q, (a*b*c)/(p*q)]
+      // Transformations: [p, q, (a*b*c)/(p*q)] x [m, n] => [p, q, r]
+      // Constraints: (a*b*c)/(p*q) = m, n = r
+      *a = props_input0_reshape0[0].shape().dim(0).size();
+      *b = props_input0_reshape0[0].shape().dim(1).size();
+      *c = props_input0_reshape0[0].shape().dim(2).size();
+      *m = props_input1_matmul[0].shape().dim(0).size();
+      *n = props_input1_matmul[0].shape().dim(1).size();
+      *p = props_reshape1[0].shape().dim(0).size();
+      *q = props_reshape1[0].shape().dim(1).size();
+      *r = props_reshape1[0].shape().dim(2).size();
+      if (((*a) * (*b) * (*c)) / ((*p) * (*q)) != (*m) || (*n) != (*r)) {
+        return false;
+      }
+    } else if (*rank_reshape0 == 3 && *rank_reshape1 == 4) {
+      // Case 2: [a, b, c] x [m, n] => [p, q, r, s]
+      // Here, [a, b, c] will be reshaped to [p, q, (a*b*c)/(p*q*m), m]
+      // and [m, n] will be reshaped into [1, 1, m, n]
+      // Transformations:
+      // [p, q, (a*b*c)/(p*q*m), m] x [1, 1, m, n] => [p, q, r, s]
+      // Constraints: (a*b*c)/(p*q*m) = r, n = s
+      *a = props_input0_reshape0[0].shape().dim(0).size();
+      *b = props_input0_reshape0[0].shape().dim(1).size();
+      *c = props_input0_reshape0[0].shape().dim(2).size();
+      *m = props_input1_matmul[0].shape().dim(0).size();
+      *n = props_input1_matmul[0].shape().dim(1).size();
+      *p = props_reshape1[0].shape().dim(0).size();
+      *q = props_reshape1[0].shape().dim(1).size();
+      *r = props_reshape1[0].shape().dim(2).size();
+      *s = props_reshape1[0].shape().dim(3).size();
+      if (((*a) * (*b) * (*c)) / ((*p) * (*q) * (*m)) != (*r) || (*n) != (*s)) {
+        return false;
+      }
+    } else if (*rank_reshape0 == 4 && *rank_reshape1 == 3) {
+      // Case 3: [a, b, c, d] x [m, n] => [p, q, r]
+      // Here, [a, b, c, d] will be reshaped to [p, q, (a*b*c*d)/(p*q)]
+      // Transformations: [p, q, (a*b*c*d)/(p*q)] x [m, n] => [p, q, r]
+      // Constraints: (a*b*c*d)/(p*q) = m, n = r
+      *a = props_input0_reshape0[0].shape().dim(0).size();
+      *b = props_input0_reshape0[0].shape().dim(1).size();
+      *c = props_input0_reshape0[0].shape().dim(2).size();
+      *d = props_input0_reshape0[0].shape().dim(3).size();
+      *m = props_input1_matmul[0].shape().dim(0).size();
+      *n = props_input1_matmul[0].shape().dim(1).size();
+      *p = props_reshape1[0].shape().dim(0).size();
+      *q = props_reshape1[0].shape().dim(1).size();
+      *r = props_reshape1[0].shape().dim(2).size();
+      if (((*a) * (*b) * (*c) * (*d)) / ((*p) * (*q)) != (*m) || (*n) != (*r)) {
+        return false;
+      }
+    } else if (*rank_reshape0 == 4 && *rank_reshape1 == 4) {
+      // Case 4: [a, b, c, d] x [m, n] => [p, q, r, s]
+      // Here, [a, b, c, d] will be reshaped into [p, q, (a*b*c*d)/(p*q*m), m]
+      // and [m, n] will be reshaped into [1, 1, m, n].
+      // Transformations:
+      // [p, q, (a*b*c*d)/(p*q*m), m] x [1, 1, m, n] => [p, q, r, s]
+      // Constraints: (a*b*c*d)/(p*q*m) = r, n = s
+      *a = props_input0_reshape0[0].shape().dim(0).size();
+      *b = props_input0_reshape0[0].shape().dim(1).size();
+      *c = props_input0_reshape0[0].shape().dim(2).size();
+      *d = props_input0_reshape0[0].shape().dim(3).size();
+      *m = props_input1_matmul[0].shape().dim(0).size();
+      *n = props_input1_matmul[0].shape().dim(1).size();
+      *p = props_reshape1[0].shape().dim(0).size();
+      *q = props_reshape1[0].shape().dim(1).size();
+      *r = props_reshape1[0].shape().dim(2).size();
+      *s = props_reshape1[0].shape().dim(3).size();
+      if (((*a) * (*b) * (*c) * (*d)) / ((*p) * (*q) * (*m)) != (*r) ||
+          (*n) != (*s)) {
+        return false;
+      }
+    }
+  }
+  return found_op_type_match;
+}
+
+bool FindBatchMatMulBiasAddAndGelu(RemapperContext* ctx, int node_index,
+                                   std::map<string, int>* matched_nodes_map,
+                                   std::set<int>* remove_node_indices) {
+  // Fusion only available with oneDNN
+  if (!IsMKLEnabled()) return false;
+
+  using utils::MatchingDirection;
+  using utils::NodeStatus;
+
+  // The following pattern will be searched in the graph with additional
+  // contraints. Here * means any type of op.
+  // clang-format off
+  //       Subgraph for fusion               Fused Graph
+  //       -------------------            ----------------
+  //          BatchMatMulV2             _MklFusedBatchMatMulV2
+  //              |
+  //            Bias
+  //              |
+  //            Gelu
+
+  utils::OpTypePattern  bmmbiasgelu_pattern
+    {"Gelu", "output", NodeStatus::kReplace,
+      {
+        {"BiasAdd", "bias_add", NodeStatus::kRemove,
+          {
+            {"BatchMatMulV2", "matmul", NodeStatus::kRemove},
+            {"Const|Cast|ReadVariableOp", "bias", NodeStatus::kRemain}
+          }
+        }  // BiasAdd: "bias_add"
+      }  // Gelu: "output"
+    };
+  // clang-format on
+
+  bool found_op_type_match = false;
+  utils::SubGraphMatcher<MatchingDirection::kFollowInputs> graph_matcher(
+      &(ctx->graph_view));
+  found_op_type_match = graph_matcher.GetMatchedNodes(
+      bmmbiasgelu_pattern, {}, ctx->graph_view.GetNode(node_index),
+      matched_nodes_map, remove_node_indices);
+  if (found_op_type_match) {
+    // Check if the MatMul to be fused is device compatible.
+    NodeDef* matmul_node =
+        ctx->graph_view.GetNode(matched_nodes_map->at("matmul"))->node();
+    bool cpu_ok = IsMKLEnabled() && IsCpuCompatibleMatMul(matmul_node);
+    if (!cpu_ok) return false;
+
+    // Check for GeluApproximate
+    // Currently fusion available for GeluExact
+    const auto* gelu_node_view =
+        ctx->graph_view.GetNode(matched_nodes_map->at("output"));
+    const auto* gelu_approx_attr = gelu_node_view->GetAttr("approximate");
+    if (gelu_approx_attr != nullptr && gelu_approx_attr->b()) return false;
+  }
+  return found_op_type_match;
+}
+
 #endif  // INTEL_MKL
 
 bool FindFusedBatchNorm(const RemapperContext& ctx, int node_index,
@@ -1555,6 +1811,90 @@ bool FindBatchMatMulBias(RemapperContext* ctx, int node_index,
   input_node_names->at(0) = batch_matmul_node_def->input(0);
   input_node_names->at(1) = batch_matmul_node_def->input(1);
   input_node_names->at(2) = bias_node_def->name();
+  return found_op_type_match;
+}
+
+bool FindBatchMatMulBiasAddV2(RemapperContext* ctx, int node_index,
+                              std::map<string, int>* matched_nodes_map,
+                              std::set<int>* remove_node_indices,
+                              std::vector<string>* input_node_names) {
+  if (!IsMKLEnabled()) return false;
+
+  using utils::MatchingDirection;
+  using utils::NodeStatus;
+
+  // The following pattern will be searched in the graph with additional
+  // contraints. Here * means any type of op.
+  // clang-format off
+  //       Subgraph for fusion             Fused Graph
+  //       -------------------            ----------------
+  //         BatchMatMulV2               _MklFusedBatchMatMulV2
+  //              |
+  //            BiasAdd
+  //              |
+  //            AddV2
+  utils::OpTypePattern bmmbiasadd_pattern {
+     "AddV2", "output", NodeStatus::kReplace,
+      {
+        {"BiasAdd", "biasadd", NodeStatus::kRemove,
+          {
+            {"BatchMatMulV2", "batch_matmul", NodeStatus::kRemove},
+            {"Const|Cast|ReadVariableOp", "bias", NodeStatus::kRemain}
+          }
+        }, // BiasAdd
+        {"*", "addend", NodeStatus::kRemain}
+      } // AddV2
+    };
+  // clang-format on
+
+  utils::SubGraphMatcher<MatchingDirection::kFollowInputs> graph_matcher(
+      &(ctx->graph_view));
+  bool found_op_type_match = false;
+  found_op_type_match =
+      graph_matcher.GetMatchedNodes(bmmbiasadd_pattern, ctx->nodes_to_preserve,
+                                    ctx->graph_view.GetNode(node_index),
+                                    matched_nodes_map, remove_node_indices);
+
+  if (!found_op_type_match) return false;
+  // This fusion is available if BatchMatMul is 3D/4D and bias is 1D.
+  if (!ctx->inferred_graph_properties) {
+    Status s = ctx->graph_properties.InferStatically(
+        /*assume_valid_feeds=*/true,
+        /*aggressive_shape_inference=*/false,
+        /*include_input_tensor_values=*/false,
+        /*include_output_tensor_values=*/true);
+    if (!s.ok()) return false;
+    ctx->inferred_graph_properties = true;
+  }
+  NodeDef* biasadd_node_def =
+      ctx->graph_view.GetNode(matched_nodes_map->at("bias"))->node();
+  auto biasadd_props =
+      ctx->graph_properties.GetOutputProperties(biasadd_node_def->name());
+  if (Rank(biasadd_props[0].shape()) != 1) return false;
+
+  NodeDef* batch_matmul_node_def =
+      ctx->graph_view.GetNode(matched_nodes_map->at("batch_matmul"))->node();
+  if (!IsCpuCompatibleMatMul(batch_matmul_node_def)) return false;
+
+  auto batch_matmul_props =
+      ctx->graph_properties.GetOutputProperties(batch_matmul_node_def->name());
+  if (Rank(batch_matmul_props[0].shape()) != 4 &&
+      Rank(batch_matmul_props[0].shape()) != 3) {
+    return false;
+  }
+
+  NodeDef* bias_node_def =
+      ctx->graph_view.GetNode(matched_nodes_map->at("bias"))->node();
+  NodeDef* addend_node_def =
+      ctx->graph_view.GetNode(matched_nodes_map->at("addend"))->node();
+
+  input_node_names->clear();
+  input_node_names->resize(4);
+
+  input_node_names->at(0) = batch_matmul_node_def->input(0);
+  input_node_names->at(1) = batch_matmul_node_def->input(1);
+  input_node_names->at(2) = bias_node_def->name();
+  input_node_names->at(3) = addend_node_def->name();
   return found_op_type_match;
 }
 
@@ -3096,22 +3436,20 @@ Status AddFusedContractionNode(
   return Status::OK();
 }
 
-Status AddFusedMatMulBiasAddAndGelu(RemapperContext* ctx,
-                                    std::map<string, int>* matched_nodes_map,
-                                    std::set<int>* remove_node_indices,
-                                    std::vector<bool>* invalidated_nodes,
-                                    std::vector<bool>* nodes_to_delete,
-                                    bool with_reshape, bool is_gelu_approximate,
-                                    bool is_batchmatmulv2) {
+Status AddFusedMatMulBiasAddAndGelu(
+    RemapperContext* ctx, const std::map<string, int>& matched_nodes_map,
+    const std::set<int>& remove_node_indices,
+    std::vector<bool>* invalidated_nodes, std::vector<bool>* nodes_to_delete,
+    bool with_reshape, bool is_gelu_approximate, bool is_batchmatmulv2) {
   auto* output_node =
-      ctx->graph_view.GetNode(matched_nodes_map->at("output"))->node();
+      ctx->graph_view.GetNode(matched_nodes_map.at("output"))->node();
   auto* matmul_node =
-      ctx->graph_view.GetNode(matched_nodes_map->at("matmul"))->node();
+      ctx->graph_view.GetNode(matched_nodes_map.at("matmul"))->node();
 
   NodeDef fused_node;
   if (with_reshape) {
     auto* bias_add_node =
-        ctx->graph_view.GetNode(matched_nodes_map->at("bias_add"))->node();
+        ctx->graph_view.GetNode(matched_nodes_map.at("bias_add"))->node();
     // Since Reshape node will be the last node, the fused node will
     // have the same name as the bias_add node and Reshape node will
     // have the same name as the terminal(Gelu) node.
@@ -3127,7 +3465,7 @@ Status AddFusedMatMulBiasAddAndGelu(RemapperContext* ctx,
     fused_node.add_input(matmul_node->input(2));
   } else {
     auto* bias_add_node =
-        ctx->graph_view.GetNode(matched_nodes_map->at("bias_add"))->node();
+        ctx->graph_view.GetNode(matched_nodes_map.at("bias_add"))->node();
     fused_node.add_input(bias_add_node->input(1));
   }
   if (is_batchmatmulv2) {
@@ -3150,9 +3488,9 @@ Status AddFusedMatMulBiasAddAndGelu(RemapperContext* ctx,
 
   if (with_reshape) {
     auto* reshape_node =
-        ctx->graph_view.GetNode(matched_nodes_map->at("reshape"))->node();
+        ctx->graph_view.GetNode(matched_nodes_map.at("reshape"))->node();
     auto* bias_add_node =
-        ctx->graph_view.GetNode(matched_nodes_map->at("bias_add"))->node();
+        ctx->graph_view.GetNode(matched_nodes_map.at("bias_add"))->node();
     NodeDef new_reshape_node;
     new_reshape_node.set_name(output_node->name());
     new_reshape_node.set_op("Reshape");
@@ -3169,11 +3507,292 @@ Status AddFusedMatMulBiasAddAndGelu(RemapperContext* ctx,
     mutation->AddNode(std::move(new_reshape_node), &status);
     TF_RETURN_IF_ERROR(status);
     TF_RETURN_IF_ERROR(mutation->Apply());
-    (*invalidated_nodes)[matched_nodes_map->at("bias_add")] = true;
+    (*invalidated_nodes)[matched_nodes_map.at("bias_add")] = true;
   }
-  (*invalidated_nodes)[matched_nodes_map->at("output")] = true;
+  (*invalidated_nodes)[matched_nodes_map.at("output")] = true;
 
-  for (const auto& node_idx : *remove_node_indices) {
+  for (const auto& node_idx : remove_node_indices) {
+    (*nodes_to_delete)[node_idx] = true;
+  }
+  return Status::OK();
+}
+
+Status AddReshapeToMatMul(RemapperContext* ctx, NodeDef* reshape0,
+                          NodeDef* input_reshape0, NodeDef* matmul,
+                          NodeDef* matmul_input, int a, int b, int c, int d,
+                          int m, int n, int p, int q, int r, int s,
+                          int rank_reshape0, int rank_reshape1) {
+  utils::Mutation* mutation = ctx->graph_view.GetMutationBuilder();
+  Status status;
+
+  if (rank_reshape0 == 3 && rank_reshape1 == 3) {
+    // Case 1: [a, b, c] x [m, n] => [p, q, r]
+    // Here, [a, b, c] will be reshaped to [p, q, (a*b*c)/(p*q)]
+    // Transformations: [p, q, (a*b*c)/(p*q)] x [m, n] => [p, q, r]
+    // Constraints: (a*b*c)/(p*q) = m, n = r
+
+    // Reshape 1st input to MatMul from [a, b, c] -> [p, q, (a*b*c)/(p*q)]
+    NodeDef new_input_shape;
+    const string new_input_shape_name =
+        AddPrefixToNodeName("Shape", input_reshape0->name());
+    new_input_shape.set_name(new_input_shape_name);
+    new_input_shape.set_op("Const");
+    new_input_shape.set_device(input_reshape0->device());
+    *new_input_shape.add_input() = AsControlDependency(input_reshape0->name());
+    (*new_input_shape.mutable_attr())["dtype"].set_type(DT_INT32);
+    Tensor t0(DT_INT32, {3});
+    t0.flat<int32>()(0) = p;
+    t0.flat<int32>()(1) = q;
+    t0.flat<int32>()(2) = (a * b * c) / (p * q);
+    t0.AsProtoTensorContent(
+        (*new_input_shape.mutable_attr())["value"].mutable_tensor());
+    mutation->AddNode(std::move(new_input_shape), &status);
+    TF_RETURN_IF_ERROR(status);
+
+    NodeDef reshaped_matmul_input_0;
+    reshaped_matmul_input_0.set_name(
+        AddPrefixToNodeName("ReshapedMatMulInput", input_reshape0->name()));
+    reshaped_matmul_input_0.set_op("Reshape");
+    reshaped_matmul_input_0.set_device(input_reshape0->device());
+    *reshaped_matmul_input_0.add_input() = input_reshape0->name();
+    *reshaped_matmul_input_0.add_input() = new_input_shape_name;
+    (*reshaped_matmul_input_0.mutable_attr())["T"] = reshape0->attr().at("T");
+    (*reshaped_matmul_input_0.mutable_attr())["Tshape"].set_type(DT_INT32);
+    mutation->AddNode(std::move(reshaped_matmul_input_0), &status);
+    TF_RETURN_IF_ERROR(status);
+
+  } else if (rank_reshape0 == 3 && rank_reshape1 == 4) {
+    // Case 2: [a, b, c] x [m, n] => [p, q, r, s]
+    // Here, [a, b, c] will be reshaped to [p, q, (a*b*c)/(p*q*m), m]
+    // and [m, n] will be reshaped into [1, 1, m, n]
+    // Transformations:
+    // [p, q, (a*b*c)/(p*q*m), m] x [1, 1, m, n] => [p, q, r, s]
+    // Constraints: (a*b*c)/(p*q*m) = r, n = s
+
+    // Reshape 1st input to MatMul: [a, b, c, d] -> [p, q, (a*b*c)/(p*q*m), m]
+    NodeDef new_input_shape;
+    const string new_input_shape_name =
+        AddPrefixToNodeName("Shape", input_reshape0->name());
+    new_input_shape.set_name(new_input_shape_name);
+    new_input_shape.set_op("Const");
+    new_input_shape.set_device(input_reshape0->device());
+    *new_input_shape.add_input() = AsControlDependency(input_reshape0->name());
+    (*new_input_shape.mutable_attr())["dtype"].set_type(DT_INT32);
+    Tensor t0(DT_INT32, {4});
+    t0.flat<int32>()(0) = p;
+    t0.flat<int32>()(1) = q;
+    t0.flat<int32>()(2) = (a * b * c) / (p * q * m);
+    t0.flat<int32>()(3) = m;
+    t0.AsProtoTensorContent(
+        (*new_input_shape.mutable_attr())["value"].mutable_tensor());
+    mutation->AddNode(std::move(new_input_shape), &status);
+    TF_RETURN_IF_ERROR(status);
+
+    NodeDef reshaped_matmul_input_0;
+    reshaped_matmul_input_0.set_name(
+        AddPrefixToNodeName("ReshapedMatMulInput", input_reshape0->name()));
+    reshaped_matmul_input_0.set_op("Reshape");
+    reshaped_matmul_input_0.set_device(input_reshape0->device());
+    *reshaped_matmul_input_0.add_input() = input_reshape0->name();
+    *reshaped_matmul_input_0.add_input() = new_input_shape_name;
+    (*reshaped_matmul_input_0.mutable_attr())["T"] = reshape0->attr().at("T");
+    (*reshaped_matmul_input_0.mutable_attr())["Tshape"].set_type(DT_INT32);
+    mutation->AddNode(std::move(reshaped_matmul_input_0), &status);
+    TF_RETURN_IF_ERROR(status);
+
+    // Reshape the 2nd input to MatMul: [m, n] -> [1, 1, m, n]
+    NodeDef new_matmul_input_1_shape;
+    const string new_matmul_input_1_shape_name =
+        AddPrefixToNodeName("Shape", matmul_input->name());
+    new_matmul_input_1_shape.set_name(new_matmul_input_1_shape_name);
+    new_matmul_input_1_shape.set_op("Const");
+    new_matmul_input_1_shape.set_device(matmul_input->device());
+    *new_matmul_input_1_shape.add_input() =
+        AsControlDependency(matmul_input->name());
+    (*new_matmul_input_1_shape.mutable_attr())["dtype"].set_type(DT_INT32);
+    Tensor t1(DT_INT32, {4});
+    t1.flat<int32>()(0) = 1;
+    t1.flat<int32>()(1) = 1;
+    t1.flat<int32>()(2) = m;
+    t1.flat<int32>()(3) = n;
+    t1.AsProtoTensorContent(
+        (*new_matmul_input_1_shape.mutable_attr())["value"].mutable_tensor());
+    mutation->AddNode(std::move(new_matmul_input_1_shape), &status);
+    TF_RETURN_IF_ERROR(status);
+
+    NodeDef reshaped_matmul_input_1;
+    reshaped_matmul_input_1.set_name(
+        AddPrefixToNodeName("ReshapedMatMulInput", matmul_input->name()));
+    reshaped_matmul_input_1.set_op("Reshape");
+    reshaped_matmul_input_1.set_device(matmul_input->device());
+    *reshaped_matmul_input_1.add_input() = matmul_input->name();
+    *reshaped_matmul_input_1.add_input() = new_matmul_input_1_shape_name;
+    (*reshaped_matmul_input_1.mutable_attr())["T"] = matmul->attr().at("T");
+    (*reshaped_matmul_input_1.mutable_attr())["Tshape"].set_type(DT_INT32);
+    mutation->AddNode(std::move(reshaped_matmul_input_1), &status);
+    TF_RETURN_IF_ERROR(status);
+
+  } else if (rank_reshape0 == 4 && rank_reshape1 == 3) {
+    // Case 3: [a, b, c, d] x [m, n] => [p, q, r]
+    // Here, [a, b, c, d] will be reshaped to [p, q, (a*b*c*d)/(p*q)]
+    // Transformations: [p, q, (a*b*c*d)/(p*q)] x [m, n] => [p, q, r]
+    // Constraints: (a*b*c*d)/(p*q) = m, n = r
+
+    // Reshape 1st input to MatMul: [a, b, c, d] -> [p, q, (a*b*c*d)/(p*q)]
+    NodeDef new_shape;
+    const string new_shape_name =
+        AddPrefixToNodeName("Shape", input_reshape0->name());
+    new_shape.set_name(new_shape_name);
+    new_shape.set_op("Const");
+    new_shape.set_device(input_reshape0->device());
+    *new_shape.add_input() = AsControlDependency(input_reshape0->name());
+    (*new_shape.mutable_attr())["dtype"].set_type(DT_INT32);
+    Tensor t(DT_INT32, {3});
+    t.flat<int32>()(0) = p;
+    t.flat<int32>()(1) = q;
+    t.flat<int32>()(2) = (a * b * c * d) / (p * q);
+    t.AsProtoTensorContent(
+        (*new_shape.mutable_attr())["value"].mutable_tensor());
+    mutation->AddNode(std::move(new_shape), &status);
+    TF_RETURN_IF_ERROR(status);
+
+    NodeDef reshaped_matmul_input_0;
+    reshaped_matmul_input_0.set_name(
+        AddPrefixToNodeName("ReshapedMatMulInput", input_reshape0->name()));
+    reshaped_matmul_input_0.set_op("Reshape");
+    reshaped_matmul_input_0.set_device(input_reshape0->device());
+    *reshaped_matmul_input_0.add_input() = input_reshape0->name();
+    *reshaped_matmul_input_0.add_input() = new_shape_name;
+    (*reshaped_matmul_input_0.mutable_attr())["T"] = reshape0->attr().at("T");
+    (*reshaped_matmul_input_0.mutable_attr())["Tshape"].set_type(DT_INT32);
+    mutation->AddNode(std::move(reshaped_matmul_input_0), &status);
+    TF_RETURN_IF_ERROR(status);
+  } else if (rank_reshape0 == 4 && rank_reshape1 == 4) {
+    // Case 4: [a, b, c, d] x [m, n] => [p, q, r, s]
+    // Here, [a, b, c, d] will be reshaped into [p, q, (a*b*c*d)/(p*q*m), m]
+    // and [m, n] will be reshaped into [1, 1, m, n].
+    // Transformations:
+    // [p, q, (a*b*c*d)/(p*q*m), m] x [1, 1, m, n] => [p, q, r, s]
+    // Constraints: (a*b*c*d)/(p*q*m) = r, n = s
+
+    // Reshape 1st input to MatMul: [a, b, c, d] ->
+    // [p, q, (a*b*c*d)/(p*q*m), m]
+    NodeDef new_input_shape;
+    const string new_input_shape_name =
+        AddPrefixToNodeName("Shape", input_reshape0->name());
+    new_input_shape.set_name(new_input_shape_name);
+    new_input_shape.set_op("Const");
+    new_input_shape.set_device(input_reshape0->device());
+    *new_input_shape.add_input() = AsControlDependency(input_reshape0->name());
+    (*new_input_shape.mutable_attr())["dtype"].set_type(DT_INT32);
+    Tensor t0(DT_INT32, {4});
+    t0.flat<int32>()(0) = p;
+    t0.flat<int32>()(1) = q;
+    t0.flat<int32>()(2) = (a * b * c * d) / (p * q * m);
+    t0.flat<int32>()(3) = m;
+    t0.AsProtoTensorContent(
+        (*new_input_shape.mutable_attr())["value"].mutable_tensor());
+    mutation->AddNode(std::move(new_input_shape), &status);
+    TF_RETURN_IF_ERROR(status);
+
+    NodeDef reshaped_matmul_input_0;
+    reshaped_matmul_input_0.set_name(
+        AddPrefixToNodeName("ReshapedMatMulInput", input_reshape0->name()));
+    reshaped_matmul_input_0.set_op("Reshape");
+    reshaped_matmul_input_0.set_device(input_reshape0->device());
+    *reshaped_matmul_input_0.add_input() = input_reshape0->name();
+    *reshaped_matmul_input_0.add_input() = new_input_shape_name;
+    (*reshaped_matmul_input_0.mutable_attr())["T"] = reshape0->attr().at("T");
+    (*reshaped_matmul_input_0.mutable_attr())["Tshape"].set_type(DT_INT32);
+    mutation->AddNode(std::move(reshaped_matmul_input_0), &status);
+    TF_RETURN_IF_ERROR(status);
+
+    // Reshape the 2nd input to MatMul: [m, n] -> [1, 1, m, n]
+    NodeDef new_matmul_input_1_shape;
+    const string new_matmul_input_1_shape_name =
+        AddPrefixToNodeName("Shape", matmul_input->name());
+    new_matmul_input_1_shape.set_name(new_matmul_input_1_shape_name);
+    new_matmul_input_1_shape.set_op("Const");
+    new_matmul_input_1_shape.set_device(matmul_input->device());
+    *new_matmul_input_1_shape.add_input() =
+        AsControlDependency(matmul_input->name());
+    (*new_matmul_input_1_shape.mutable_attr())["dtype"].set_type(DT_INT32);
+    Tensor t1(DT_INT32, {4});
+    t1.flat<int32>()(0) = 1;
+    t1.flat<int32>()(1) = 1;
+    t1.flat<int32>()(2) = m;
+    t1.flat<int32>()(3) = n;
+    t1.AsProtoTensorContent(
+        (*new_matmul_input_1_shape.mutable_attr())["value"].mutable_tensor());
+    mutation->AddNode(std::move(new_matmul_input_1_shape), &status);
+    TF_RETURN_IF_ERROR(status);
+
+    NodeDef reshaped_matmul_input_1;
+    reshaped_matmul_input_1.set_name(
+        AddPrefixToNodeName("ReshapedMatMulInput", matmul_input->name()));
+    reshaped_matmul_input_1.set_op("Reshape");
+    reshaped_matmul_input_1.set_device(matmul_input->device());
+    *reshaped_matmul_input_1.add_input() = matmul_input->name();
+    *reshaped_matmul_input_1.add_input() = new_matmul_input_1_shape_name;
+    (*reshaped_matmul_input_1.mutable_attr())["T"] = matmul->attr().at("T");
+    (*reshaped_matmul_input_1.mutable_attr())["Tshape"].set_type(DT_INT32);
+    mutation->AddNode(std::move(reshaped_matmul_input_1), &status);
+    TF_RETURN_IF_ERROR(status);
+  }
+  return Status::OK();
+}
+
+Status ReplaceWithBatchMatMulV2(RemapperContext* ctx,
+                                const std::map<string, int>& matched_nodes_map,
+                                const std::set<int>& remove_node_indices,
+                                std::vector<bool>* invalidated_nodes,
+                                std::vector<bool>* nodes_to_delete, int a,
+                                int b, int c, int d, int m, int n, int p, int q,
+                                int r, int s, int rank_reshape0,
+                                int rank_reshape1) {
+  auto* output_node =
+      ctx->graph_view.GetNode(matched_nodes_map.at("output"))->node();
+  auto* matmul_node =
+      ctx->graph_view.GetNode(matched_nodes_map.at("matmul"))->node();
+  auto* matmul_input =
+      ctx->graph_view.GetNode(matched_nodes_map.at("matmul_input"))->node();
+  auto* reshape0 = ctx->graph_view.GetNode(matched_nodes_map.at("reshape"));
+  auto* reshape0_node = reshape0->node();
+
+  // Fetching the 1st input (*) to Reshape before MatMul
+  const auto& regular_fanin_0 = reshape0->GetRegularFanin(0);  // input node
+  const auto* regular_node_view_0 = regular_fanin_0.node_view();
+  auto* input_reshape0 = regular_node_view_0->node();
+
+  TF_RETURN_IF_ERROR(AddReshapeToMatMul(
+      ctx, reshape0_node, input_reshape0, matmul_node, matmul_input, a, b, c, d,
+      m, n, p, q, r, s, rank_reshape0, rank_reshape1));
+
+  NodeDef replace_node;
+  // Fused node should have the name of terminal node of the fusion.
+  replace_node.set_name(output_node->name());
+  replace_node.set_op("BatchMatMulV2");
+  replace_node.set_device(matmul_node->device());
+  replace_node.add_input(
+      AddPrefixToNodeName("ReshapedMatMulInput", input_reshape0->name()));
+  replace_node.add_input(matmul_node->input(1));
+
+  auto* attr = replace_node.mutable_attr();
+  auto& src_attr = matmul_node->attr();
+
+  (*attr)["T"] = src_attr.at("T");
+  (*attr)["adj_x"] = src_attr.at("transpose_a");
+  (*attr)["adj_y"] = src_attr.at("transpose_b");
+
+  utils::Mutation* mutation = ctx->graph_view.GetMutationBuilder();
+  Status status;
+  mutation->AddNode(std::move(replace_node), &status);
+  TF_RETURN_IF_ERROR(status);
+  TF_RETURN_IF_ERROR(mutation->Apply());
+
+  (*invalidated_nodes)[matched_nodes_map.at("output")] = true;
+
+  for (const auto& node_idx : remove_node_indices) {
     (*nodes_to_delete)[node_idx] = true;
   }
   return Status::OK();
@@ -3494,6 +4113,39 @@ Status AddBatchMatMulBias(RemapperContext* ctx,
 
   CopyBatchMatMulAttributes(*batch_matmul_node, &fused_node);
   SetFusedOpAttributes(&fused_node, {"BiasAdd"}, /*num_args=*/1);
+
+  utils::Mutation* mutation = ctx->graph_view.GetMutationBuilder();
+  Status status;
+  mutation->AddNode(std::move(fused_node), &status);
+  TF_RETURN_IF_ERROR(status);
+  TF_RETURN_IF_ERROR(mutation->Apply());
+  (*invalidated_nodes)[matched_nodes_map.at("output")] = true;
+
+  for (const auto& node_idx : remove_node_indices) {
+    (*nodes_to_delete)[node_idx] = true;
+  }
+  return Status::OK();
+}
+
+Status AddBatchMatMulBiasAddV2(RemapperContext* ctx,
+                               const std::map<string, int>& matched_nodes_map,
+                               const std::set<int>& remove_node_indices,
+                               const std::vector<string>& input_node_names,
+                               std::vector<bool>* invalidated_nodes,
+                               std::vector<bool>* nodes_to_delete) {
+  auto* output_node =
+      ctx->graph_view.GetNode(matched_nodes_map.at("output"))->node();
+  auto* batch_matmul_node =
+      ctx->graph_view.GetNode(matched_nodes_map.at("batch_matmul"))->node();
+
+  NodeDef fused_node;
+  fused_node.set_name(output_node->name());
+  fused_node.set_op("_MklFusedBatchMatMulV2");
+  fused_node.set_device(batch_matmul_node->device());
+  for (const auto& name : input_node_names) fused_node.add_input(name);
+
+  CopyBatchMatMulAttributes(*batch_matmul_node, &fused_node);
+  SetFusedOpAttributes(&fused_node, {"BiasAdd", "Add"}, /*num_args=*/2);
 
   utils::Mutation* mutation = ctx->graph_view.GetMutationBuilder();
   Status status;
@@ -3872,7 +4524,7 @@ Status Remapper::Optimize(Cluster* cluster, const GrapplerItem& item,
         with_reshape = true;
         is_gelu_approximate = false;
         TF_RETURN_IF_ERROR(AddFusedMatMulBiasAddAndGelu(
-            &ctx, &matched_nodes_map, &remove_node_indices, &invalidated_nodes,
+            &ctx, matched_nodes_map, remove_node_indices, &invalidated_nodes,
             &nodes_to_delete, with_reshape, is_gelu_approximate,
             is_batchmatmulv2));
         continue;
@@ -3885,9 +4537,29 @@ Status Remapper::Optimize(Cluster* cluster, const GrapplerItem& item,
                                    &remove_node_indices, &is_gelu_approximate,
                                    &is_batchmatmulv2)) {
         TF_RETURN_IF_ERROR(AddFusedMatMulBiasAddAndGelu(
-            &ctx, &matched_nodes_map, &remove_node_indices, &invalidated_nodes,
+            &ctx, matched_nodes_map, remove_node_indices, &invalidated_nodes,
             &nodes_to_delete, with_reshape, is_gelu_approximate,
             is_batchmatmulv2));
+        continue;
+      };
+
+      matched_nodes_map.clear();
+      remove_node_indices.clear();
+      // shape of input0 of Reshape before matmul
+      int a = -1, b = -1, c = -1, d = -1;
+      // shape of input1 of matmul
+      int m = -1, n = -1;
+      // shape of output of Reshape after matmul
+      int p = -1, q = -1, r = -1, s = -1;
+      int rank_reshape0 = -1;  // rank of shape of reshape before matmul
+      int rank_reshape1 = -1;  // rank of shape of reshape after matmul
+      if (FindReshapeMatMulReshape(
+              &ctx, i, &matched_nodes_map, &remove_node_indices, &a, &b, &c, &d,
+              &m, &n, &p, &q, &r, &s, &rank_reshape0, &rank_reshape1)) {
+        TF_RETURN_IF_ERROR(ReplaceWithBatchMatMulV2(
+            &ctx, matched_nodes_map, remove_node_indices, &invalidated_nodes,
+            &nodes_to_delete, a, b, c, d, m, n, p, q, r, s, rank_reshape0,
+            rank_reshape1));
         continue;
       };
 
@@ -3898,6 +4570,33 @@ Status Remapper::Optimize(Cluster* cluster, const GrapplerItem& item,
       if (FindBatchMatMulBias(&ctx, i, &matched_nodes_map, &remove_node_indices,
                               &input_node_names)) {
         TF_RETURN_IF_ERROR(AddBatchMatMulBias(
+            &ctx, matched_nodes_map, remove_node_indices, input_node_names,
+            &invalidated_nodes, &nodes_to_delete));
+        continue;
+      };
+
+      // Remap BatchMatMulV2 + BiasAdd + GeluExact-node
+      matched_nodes_map.clear();
+      remove_node_indices.clear();
+      if (FindBatchMatMulBiasAddAndGelu(&ctx, i, &matched_nodes_map,
+                                        &remove_node_indices)) {
+        with_reshape = false;
+        is_batchmatmulv2 = true;
+        is_gelu_approximate = false;
+        TF_RETURN_IF_ERROR(AddFusedMatMulBiasAddAndGelu(
+            &ctx, matched_nodes_map, remove_node_indices, &invalidated_nodes,
+            &nodes_to_delete, with_reshape, is_gelu_approximate,
+            is_batchmatmulv2));
+        continue;
+      };
+
+      // Remap BatchMatMulV2 + BiasAdd + AddV2
+      matched_nodes_map.clear();
+      remove_node_indices.clear();
+      input_node_names.clear();
+      if (FindBatchMatMulBiasAddV2(&ctx, i, &matched_nodes_map,
+                                   &remove_node_indices, &input_node_names)) {
+        TF_RETURN_IF_ERROR(AddBatchMatMulBiasAddV2(
             &ctx, matched_nodes_map, remove_node_indices, input_node_names,
             &invalidated_nodes, &nodes_to_delete));
         continue;
