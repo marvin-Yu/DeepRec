@@ -156,6 +156,7 @@ class BatchMatMulMkl : public OpKernel {
     auto params = bmm.CreateMatMulParams(prefix, lhs.shape(), rhs.shape(),
                                          out_shape, adj_x_, adj_y_, bias_dims);
     this->ExtendMklMatMulParams(ctx, *params);
+    MklDnnThreadPool eigen_tp(ctx);
 
     MklDnnThreadPool eigen_tp(ctx);
     // Create or retrieve matmul primitive from cache.

@@ -509,6 +509,7 @@ class MklConvCustomBackpropFilterOp
       // variable TF_MKL_OPTIMIZE_PRIMITIVE_MEMUSE is set to true.
       bool do_not_cache = MklPrimitiveFactory<T>::IsPrimitiveMemOptEnabled();
 
+      MklDnnThreadPool eigen_tp(context);
       MklConvBwdFilterPrimitive<T>* conv_bwd_filter =
           MklConvBwdFilterPrimitiveFactory<T>::Get(convBwdFilterDims,
                                                    do_not_cache);

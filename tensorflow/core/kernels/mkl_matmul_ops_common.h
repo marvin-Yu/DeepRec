@@ -1017,6 +1017,7 @@ void dnnl_gemm(char transa, char transb, int64_t m, int64_t n, int64_t k,
 
   MklMatMulParams params("dnnl_gemm", a_dims, b_dims, NONE_DIMS, c_dims,
                          a_strides, b_strides, c_strides);
+  MklDnnThreadPool eigen_tp(ctx);
   MklMatMulPrimitive<T, T, T, T>* matmul_prim =
       MklMatMulPrimitiveFactory<T, T, T, T, T>::Get(params, 0);
 
@@ -1024,7 +1025,6 @@ void dnnl_gemm(char transa, char transb, int64_t m, int64_t n, int64_t k,
   scratch_pad.AllocateSPTensor(matmul_prim, ctx);
   // Execute matmul primitive.
   std::shared_ptr<stream> cpu_stream;
-  MklDnnThreadPool eigen_tp(ctx);
   cpu_stream.reset(CreateStream(&eigen_tp, matmul_prim->GetEngine()));
   matmul_prim->Execute(cpu_stream, a, b, nullptr, c, params, scratch_pad.Get());
 }

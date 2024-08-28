@@ -737,6 +737,7 @@ class MklConcatOp : public OpKernel {
       if (are_all_mkl_inputs)
         concat_dim = mkl_input_shapes[0].TfDimIdx(concat_dim);
 
+      MklDnnThreadPool eigen_tp(context);
       if (!inputs.empty()) {
         MklDnnThreadPool eigen_tp(context);
         if (are_all_mkl_inputs) {
