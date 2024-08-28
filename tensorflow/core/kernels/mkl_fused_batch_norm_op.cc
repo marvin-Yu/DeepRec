@@ -957,6 +957,7 @@ class MklFusedBatchNormOp : public OpKernel {
                                       src_md, dst_md, activation_mode_);
 #endif  // !ENABLE_ONEDNN_V3
       // Get forward batch-normalization op from the primitive caching pool.
+      MklDnnThreadPool eigen_tp(context);
       MklFusedBatchNormFwdPrimitive<T, U>* bn_fwd =
           MklFusedBatchNormFwdPrimitiveFactory<T, U>::Get(fwdParams);
 
@@ -1067,7 +1068,6 @@ class MklFusedBatchNormOp : public OpKernel {
 
       // Execute
       std::shared_ptr<stream> fwd_cpu_stream;
-      MklDnnThreadPool eigen_tp(context);
       fwd_cpu_stream.reset(CreateStream(&eigen_tp, bn_fwd->GetEngine()));
 #ifndef ENABLE_ONEDNN_V3
       bn_fwd->Execute(src_data, scale_shift_op_data, dst_data, mean_op_data,
@@ -1452,6 +1452,7 @@ class MklFusedBatchNormGradOp : public OpKernel {
                                       dst_md, diff_src_md,
 #endif  // ENABLE_ONEDNN_V3
                                       diff_dst_md);
+      MklDnnThreadPool eigen_tp(context);
       MklFusedBatchNormBwdPrimitive<T, U>* bn_bwd =
           MklFusedBatchNormBwdPrimitiveFactory<T, U>::Get(bwdParams);
 
@@ -1528,7 +1529,6 @@ class MklFusedBatchNormGradOp : public OpKernel {
 
       // Execute
       std::shared_ptr<stream> bwd_cpu_stream;
-      MklDnnThreadPool eigen_tp(context);
       bwd_cpu_stream.reset(CreateStream(&eigen_tp, bn_bwd->GetEngine()));
       bn_bwd->Execute(src_data, mean_data, variance_data, diff_dst_data,
                       GET_SCALE_DATA_BUFFER, diff_src_data,

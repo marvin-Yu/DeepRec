@@ -90,8 +90,8 @@ Status MKLTransposeND(OpKernelContext* context, const Tensor& in_tensor,
     out.SetUsrMemDataHandle(out_tensor, transpose_stream);
     net.push_back(*(prim->GetPrimitive()));
     std::vector<MemoryArgsMap> net_args;
-    net_args.push_back({{DNNL_ARG_FROM, *in.GetUsrMem()},
-                        {DNNL_ARG_TO, *out.GetUsrMem()}});
+    net_args.push_back(
+        {{DNNL_ARG_FROM, *in.GetUsrMem()}, {DNNL_ARG_TO, *out.GetUsrMem()}});
     execute_primitives(net, transpose_stream, net_args);
 
     return Status::OK();
