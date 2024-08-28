@@ -114,9 +114,9 @@ bool inline NativeFormatEnabled() {
 }
 
 namespace mkl_op_registry {
-// OneDNN operators whose kernels are registered with 'MklLayoutDependentOp' label
-// (e.g., MklConv2D) understand input tensors in OneDNN layout. These operators
-// get additional meta-tensors for actual input tensors.
+// OneDNN operators whose kernels are registered with 'MklLayoutDependentOp'
+// label (e.g., MklConv2D) understand input tensors in OneDNN layout. These
+// operators get additional meta-tensors for actual input tensors.
 static const char* kMklLayoutDependentOpLabel = "MklLayoutDependentOp";
 static const char* kMklLayoutDependentOpLabelPattern =
     "label='MklLayoutDependentOp'";
@@ -154,7 +154,7 @@ inline string GetMklNativeOpName(const string& name) {
       (0 == name.compare("ConjugateTranspose") ||
        0 == name.compare("BatchMatMul") || 0 == name.compare("BatchMatMulV2") ||
        0 == name.compare("Einsum") || 0 == name.compare("MatMul") ||
-       0 == name.compare("Transpose"));
+       0 == name.compare("Softmax") || 0 == name.compare("Transpose"));
   if (result) {
     return string(kMklOpPrefix) + name;
   } else {
