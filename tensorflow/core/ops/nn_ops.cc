@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include <cmath>
+
 #include "tensorflow/core/framework/common_shape_fns.h"
 #include "tensorflow/core/framework/numeric_op.h"
 #include "tensorflow/core/framework/op.h"
@@ -619,7 +620,6 @@ REGISTER_OP("_FusedDepthwiseConv2dNative")
     // ---------------------------------------------------------------------- //
     .SetShapeFn(shape_inference::DepthwiseConv2DNativeShape);
 #endif
-
 
 // --------------------------------------------------------------------------
 REGISTER_OP("Conv3D")
@@ -2243,20 +2243,6 @@ MKL version of EluGrad operator. Uses MKL DNN APIs to compute Elu
 gradients for Elu operation.
 NOTE Do not invoke this operator directly in Python. Graph rewrite pass is
 expected to invoke these operators.
-)doc");
-
-REGISTER_OP("_MklSoftmax")
-    .Input("logits: T")
-    .Input("mkl_logits: uint8")
-    .Output("softmax: T")
-    .Output("mkl_softmax: uint8")
-    .Attr("T: {bfloat16, half, float, double}")
-    .SetShapeFn([](InferenceContext* c) {
-      return shape_inference::UnchangedShapeWithRankAtLeast(c, 1);
-    })
-    .Doc(R"doc(
-MKL version of ReluGrad operator. Uses MKL DNN APIs to compute rectified
-linear gradients for Relu operation.
 )doc");
 
 REGISTER_OP("_MklTanh")

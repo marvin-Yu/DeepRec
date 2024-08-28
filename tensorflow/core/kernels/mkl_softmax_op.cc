@@ -18,11 +18,11 @@ limitations under the License.
 #ifdef INTEL_MKL
 
 #include "dnnl.hpp"
-#include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
 #include "tensorflow/core/framework/numeric_op.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/register_types.h"
 #include "tensorflow/core/framework/tensor.h"
+#include "tensorflow/core/graph/mkl_graph_util.h"
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/util/mkl_types.h"
 #include "tensorflow/core/util/mkl_util.h"
@@ -37,10 +37,10 @@ namespace tensorflow {
 class MklSoftmaxParams {
  public:
   memory::dims src_dims;
-  MKL_TENSOR_FORMAT src_fmt;
+  memory::format_tag src_fmt;
   int axis;
 
-  MklSoftmaxParams(memory::dims src_dims, MKL_TENSOR_FORMAT src_fmt, int axis)
+  MklSoftmaxParams(memory::dims src_dims, memory::format_tag src_fmt, int axis)
       : src_dims(src_dims), src_fmt(src_fmt), axis(axis) {}
 };
 
@@ -118,7 +118,7 @@ class MklSoftmaxPrimitive : public MklPrimitive {
   // Softmax forward primitive setup
   void Setup(const MklSoftmaxParams& fwdParams) {
     // Create memory descriptors for softmax data with specified format.
-    auto src_format = GET_TENSOR_FORMAT(fwdParams.src_fmt);
+    auto src_format = fwdParams.src_fmt;
     context_.src_md.reset(
         new memory::desc({fwdParams.src_dims}, MklDnnType<T>(), src_format));
 
@@ -145,6 +145,7 @@ class MklSoftmaxPrimitive : public MklPrimitive {
     context_.softmax_fwd.reset(new dnnl::softmax_forward(*context_.fwd_pd));
     context_.fwd_net_args.push_back(
         {{DNNL_ARG_SRC, *context_.src_mem}, {DNNL_ARG_DST, *context_.dst_mem}});
+
     context_.fwd_primitives.push_back(*context_.softmax_fwd);
   }
 
@@ -210,61 +211,26 @@ class MklSoftmaxOp : public OpKernel {
 
   void Compute(OpKernelContext* context) override {
     try {
-      auto cpu_engine = engine(ENGINE_CPU, 0);
-      // src_tensor points to the 0-th input of global data struct "context".
-      size_t src_idx = 0;
-      const Tensor& src_tensor = MklGetInput(context, src_idx);
-      MklDnnShape src_mkl_shape;
-      GetMklShape(context, src_idx, &src_mkl_shape);
-
-      // src_dims is the dimension of src_tensor.
-      // Dim of the dst will also be same as src_dims.
-      auto src_tf_shape = src_mkl_shape.IsMklTensor()
-                              ? src_mkl_shape.GetTfShape()
-                              : src_tensor.shape();
-      const int input_dims = src_tf_shape.dims();
-      memory::dims src_dims;
-      int axis;
-      if (src_mkl_shape.IsMklTensor()) {
-        src_dims = src_mkl_shape.GetSizesAsMklDnnDims();
-        axis = 1;
-      } else {
-        src_dims = TFShapeToMklDnnDims(src_tf_shape);
-        axis = input_dims - 1;
-      }
-      MKL_TENSOR_FORMAT layout_type;
-      // In OneDNN, data format passed to OneDNN softmax op depends on dimension
-      // of the input tensor. Here "x" data format in OneDNN is used for 1 dim
-      // tensor, "nc" for 2 dim tensor, "tnc" for 3 dim tensor, "nchw" for 4 dim
-      // tensor, and "ncdhw" for 5 dim tensor. Each of the symbols has the
-      // following meaning: n = batch, c = channels, t = sequence length, h =
-      // height, w = width, d = depth. When src tensor is OneDNN, layout_type
-      // here is only used for setting TF layout type of output tensor. When
-      // input is TF Tensor, layout here is no special sense. We use axis to
-      // define on which dimension to do softmax.
+      const Tensor& src_tensor = context->input(0);
+      auto src_shape = src_tensor.shape();
+      const int input_dims = src_shape.dims();
+      memory::format_tag src_fmt;
+      // TODO(intel-tf): Add support for dimensions larger than 5.
       switch (input_dims) {
         case 1:
-          layout_type = MKL_TENSOR_FORMAT_X;
+          src_fmt = memory::format_tag::a;
           break;
         case 2:
-          layout_type = MKL_TENSOR_FORMAT_NC;
+          src_fmt = memory::format_tag::ab;
           break;
         case 3:
-          layout_type = MKL_TENSOR_FORMAT_TNC;
+          src_fmt = memory::format_tag::abc;
           break;
         case 4:
-          if (src_mkl_shape.IsMklTensor()) {
-            layout_type = MKL_TENSOR_FORMAT_NHWC;
-          } else {
-            layout_type = MKL_TENSOR_FORMAT_NCHW;
-          }
+          src_fmt = memory::format_tag::abcd;
           break;
         case 5:
-          if (src_mkl_shape.IsMklTensor()) {
-            layout_type = MKL_TENSOR_FORMAT_NDHWC;
-          } else {
-            layout_type = MKL_TENSOR_FORMAT_NCDHW;
-          }
+          src_fmt = memory::format_tag::abcde;
           break;
         default:
           OP_REQUIRES_OK(context,
@@ -272,45 +238,17 @@ class MklSoftmaxOp : public OpKernel {
           return;
       }
 
-      // If input is in OneDNN layout, then simply get the format from input;
-      // otherwise, use TF layout defined before.
-      auto src_fmt = src_mkl_shape.IsMklTensor()
-                         ? GET_FORMAT_FROM_SHAPE(src_mkl_shape)
-                         : layout_type;
-
       // Get a softmax fwd primitive from primitive pool.
+      auto src_dims = TFShapeToMklDnnDims(src_shape);
+      int axis = input_dims - 1;
       MklSoftmaxParams fwdParams(src_dims, src_fmt, axis);
       MklDnnThreadPool eigen_tp(context);
       MklSoftmaxPrimitive<T>* softmax_fwd =
           MklSoftmaxPrimitiveFactory<T>::Get(fwdParams);
 
-      // Prepare for creating output tensor.
       Tensor* output_tensor = nullptr;
-      MklDnnShape output_mkl_shape;
-      TensorShape output_tf_shape;  // shape of output TF tensor.
-
-      auto dst_pd = softmax_fwd->GetSoftmaxFwdPd()->PRIMITIVE_DESC_DST;
-
-      // If input is OneDNN shape, output is also OneDNN shape.
-      // If input is TF shape, output is also TF shape.
-      if (src_mkl_shape.IsMklTensor()) {
-        output_mkl_shape.SetMklTensor(true);
-#ifndef ENABLE_ONEDNN_V3
-        output_mkl_shape.SetMklLayout(&dst_pd);
-#else
-        output_mkl_shape.SetMklLayout(dst_pd);
-#endif  // !ENABLE_ONEDNN_V3
-        output_mkl_shape.SetElemType(MklDnnType<T>());
-        output_mkl_shape.SetTfLayout(src_dims.size(), src_dims, layout_type);
-        output_tf_shape.AddDim((dst_pd.get_size() / sizeof(T)));
-      } else {
-        output_mkl_shape.SetMklTensor(false);
-        output_tf_shape = MklDnnDimsToTFShape(src_dims);
-      }
-      // Allocate output tensor.
-      AllocateOutputSetMklShape(context, 0, &output_tensor, output_tf_shape,
-                                output_mkl_shape);
-
+      OP_REQUIRES_OK(context, context->forward_input_or_allocate_output(
+                                  {0}, 0, src_tensor.shape(), &output_tensor));
       const T* src_data = src_tensor.flat<T>().data();
       T* dst_data = reinterpret_cast<T*>(output_tensor->flat<T>().data());
       std::shared_ptr<stream> fwd_cpu_stream;
@@ -327,15 +265,14 @@ class MklSoftmaxOp : public OpKernel {
   }
 };
 
-/* Register oneDNN kernels for supported operations and supported types:
- * right now it is Softmax for fp32 and bf16 */
-#define REGISTER_SOFTMAX_MKL_SUPPORTED_KERNELS_TYPES(type)     \
-  REGISTER_KERNEL_BUILDER(                                     \
-      Name("_MklSoftmax")                                      \
-          .Device(DEVICE_CPU)                                  \
-          .TypeConstraint<type>("T")                           \
-          .Label(mkl_op_registry::kMklLayoutDependentOpLabel), \
-      MklSoftmaxOp<CPUDevice, type>);
+// Register oneDNN kernels for supported operations and supported types:
+// right now it is Softmax for fp32 and bf16
+#define REGISTER_SOFTMAX_MKL_SUPPORTED_KERNELS_TYPES(type)                    \
+  REGISTER_KERNEL_BUILDER(Name("_MklSoftmax")                                 \
+                              .Device(DEVICE_CPU)                             \
+                              .TypeConstraint<type>("T")                      \
+                              .Label(mkl_op_registry::kMklNameChangeOpLabel), \
+                          MklSoftmaxOp<CPUDevice, type>);
 
 TF_CALL_float(REGISTER_SOFTMAX_MKL_SUPPORTED_KERNELS_TYPES);
 TF_CALL_bfloat16(REGISTER_SOFTMAX_MKL_SUPPORTED_KERNELS_TYPES);
