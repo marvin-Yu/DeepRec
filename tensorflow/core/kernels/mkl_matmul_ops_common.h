@@ -688,7 +688,7 @@ class MklMatMulPrimitive : public MklPrimitive {
     }
     context_.c_mem->set_data_handle(
         static_cast<void*>(const_cast<Toutput*>(c_data)), *stream);
-    context_.sp_mem->set_data_handle(sp_data, *stream);
+    if (sp_data != nullptr) context_.sp_mem->set_data_handle(sp_data, *stream);
 
     for (int i = 0; i < num_post_ops_data; ++i)
       context_.post_ops_mem[i]->set_data_handle(binary_op_fusions_data[i],
@@ -704,7 +704,7 @@ class MklMatMulPrimitive : public MklPrimitive {
     }
     context_.c_mem->set_data_handle(
         static_cast<void*>(const_cast<Toutput*>(c_data)));
-    context_.sp_mem->set_data_handle(sp_data);
+    if (sp_data != nullptr) context_.sp_mem->set_data_handle(sp_data);
     for (int i = 0; i < num_post_ops_data; ++i)
       context_.post_ops_mem[i]->set_data_handle(binary_op_fusions_data[i]);
     auto const& post_op_params = matmul_params.post_op_params;
@@ -721,7 +721,7 @@ class MklMatMulPrimitive : public MklPrimitive {
       context_.bias_mem->set_data_handle(DummyData);
     }
     context_.c_mem->set_data_handle(DummyData);
-    context_.sp_mem->set_data_handle(DummyData);
+    if (sp_data != nullptr) context_.sp_mem->set_data_handle(DummyData);
     for (int i = 0; i < num_post_ops_data; ++i)
       context_.post_ops_mem[i]->set_data_handle(DummyData);
   }
