@@ -743,6 +743,90 @@ class MklFusedBatchMatMul : public MklRemapperTest {
   }
 
   template <DataType DTYPE>
+  void VerifyAddend(bool adjx, bool adjy) {
+    if (!IsMKLEnabled() || (DTYPE == DT_HALF && !CPU_CHECK_FOR_FP16)) {
+      GTEST_SKIP() << "Skipping test since oneDNN is not enabled (OR) "
+                   << "fp16 is not supported on this CPU.";
+    }
+    using ::tensorflow::ops::Placeholder;
+
+    int b0 = 2;
+    int b1 = 2;
+    int m = 32;
+    int k = 16;
+    int n = 64;
+
+    tensorflow::Scope s = tensorflow::Scope::NewRootScope();
+
+    auto input_shape =
+        adjx ? TensorShape({b0, b1, k, m}) : TensorShape({b0, b1, m, k});
+    auto weight_shape =
+        adjy ? TensorShape({b0, b1, n, k}) : TensorShape({b0, b1, k, n});
+
+    auto input_placeholder_shape = ops::Placeholder::Shape(input_shape);
+    auto weight_placeholder_shape = ops::Placeholder::Shape(weight_shape);
+    auto input =
+        Placeholder(s.WithOpName("input"), DTYPE, input_placeholder_shape);
+    auto weight =
+        Placeholder(s.WithOpName("weight"), DTYPE, weight_placeholder_shape);
+
+    auto batchmatmul =
+        ops::BatchMatMulV2(s.WithOpName("batchmatmul"), input, weight,
+                           ops::BatchMatMulV2::Attrs().AdjX(adjx).AdjY(adjy));
+    auto scale_const = ops::Const(s.WithOpName("scale_const"), {0.1f});
+    auto scale = ops::Cast(s.WithOpName("scale"), scale_const, DTYPE);
+    auto mul = ops::Multiply(s.WithOpName("mul"), batchmatmul, scale);
+    auto addend_const = ops::Const(s.WithOpName("addend_const"), {2.0f});
+    auto addend = ops::Cast(s.WithOpName("addend"), addend_const, DTYPE);
+    auto add = ops::AddV2(s.WithOpName("add"), mul, addend);
+    auto fetch = ops::Identity(s.WithOpName("fetch"), add);
+
+    Tensor input_t = GenerateTensorWithSetRandom<DTYPE>(input_shape);
+    Tensor weight_t = GenerateTensorWithSetRandom<DTYPE>(weight_shape);
+
+    GrapplerItem item;
+    item.fetch = {"fetch"};
+    item.feed = {{"input", input_t}, {"weight", weight_t}};
+    TF_CHECK_OK(s.ToGraphDef(&item.graph));
+
+    // Place all nodes on CPU.
+    for (int i = 0; i < item.graph.node_size(); ++i) {
+      item.graph.mutable_node(i)->set_device("/device:CPU:0");
+    }
+
+    Remapper optimizer(RewriterConfig::ON);
+    GraphDef output;
+    TF_CHECK_OK(optimizer.Optimize(nullptr, item, &output));
+
+    int found = 0;
+    for (const NodeDef& node : output.node()) {
+      if (node.name() == "add") {
+        EXPECT_EQ("_MklFusedBatchMatMulV2", node.op());
+        EXPECT_EQ("input", node.input(0));
+        EXPECT_EQ("weight", node.input(1));
+        EXPECT_EQ("scale", node.input(2));
+        EXPECT_EQ("addend", node.input(3));
+        const auto fused_ops = node.attr().at("fused_ops").list().s();
+        EXPECT_EQ(2, fused_ops.size());
+        EXPECT_EQ("Mul", fused_ops[0]);
+        found++;
+        EXPECT_EQ("Add", fused_ops[1]);
+        found++;
+      }
+    }
+    EXPECT_EQ(2, found);
+
+    auto tensors_expected = EvaluateNodes(item.graph, item.fetch, item.feed);
+    auto tensors = EvaluateNodes(output, item.fetch, item.feed);
+    float atol = 1e-6, rtol = 1e-6;
+    if (DTYPE == DT_BFLOAT16 || DTYPE == DT_HALF) {
+      atol = 1e-2;
+      rtol = 1e-2;
+    }
+    test::ExpectClose(tensors_expected[0], tensors[0], atol, rtol);
+  }
+
+  template <DataType DTYPE>
   void VerifyPreceedingScalarMul(bool adjx, bool adjy) {
     if (!IsDataTypeSupportedByOneDNNOnThisCPU(DTYPE))
       GTEST_SKIP() << "Intel oneDNN with " << DataType_Name(DTYPE)
@@ -1215,6 +1299,15 @@ TEST_F(MklFusedBatchMatMul, MulAndAdd2) {
       this->VerifyPreceedingScalarMul<DT_FLOAT>(adjx, adjy);
       this->VerifyPreceedingScalarMul<DT_BFLOAT16>(adjx, adjy);
       this->VerifyPreceedingScalarMul<DT_HALF>(adjx, adjy);
+    }
+}
+
+TEST_F(MklFusedBatchMatMul, MulAndAdd3) {
+  for (const auto adjx : {false, true})
+    for (const auto adjy : {false, true}) {
+      this->VerifyAddend<DT_FLOAT>(adjx, adjy);
+      this->VerifyAddend<DT_BFLOAT16>(adjx, adjy);
+      this->VerifyAddend<DT_HALF>(adjx, adjy);
     }
 }
 
