@@ -25,10 +25,12 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include "dnnl_threadpool.hpp"
 #include "dnnl.hpp"
+#include "dnnl_threadpool.hpp"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/lib/core/threadpool.h"
+#include "tensorflow/core/platform/cpu_info.h"
+#include "tensorflow/core/util/onednn_env_vars.h"
 #define EIGEN_USE_THREADS
 
 namespace tensorflow {
@@ -60,48 +62,28 @@ inline void balance211(T n, U team, U tid, T* n_start, T* n_end) {
   *n_end = *n_start + min_per_team + (tid < remainder);
 }
 
+inline void run_jobs(bool balance, int i, int n, int njobs,
+                     const std::function<void(int, int)>& fn) {
+  if (balance) {
+    int start, end;
+    balance211(n, njobs, i, &start, &end);
+    for (int j = start; j < end; j++) fn(j, n);
+  } else {
+    fn(i, n);
+  }
+}
+
 struct MklDnnThreadPool : public threadpool_iface {
   MklDnnThreadPool() = default;
 
-  MklDnnThreadPool(OpKernelContext* ctx)
-      : eigen_interface_(ctx->device()
-                             ->tensorflow_cpu_worker_threads()
-                             ->workers->AsEigenThreadPool()) {
-    // Set MKL intra thread pool number.
-    int intra_num = 0;
-    const char* intra_num_str = getenv("TF_MKL_NUM_INTRAOP");
-    const int tf_intra_num = eigen_interface_->NumThreads();
-
-    if (intra_num_str != NULL) {
-      intra_num = std::stoi(intra_num_str);
-    }
-    intra_num_ =
-        intra_num > 0 ? std::min(tf_intra_num, intra_num) : tf_intra_num;
-    dnnl_threadpool_interop_set_max_concurrency(intra_num_);
+  MklDnnThreadPool(OpKernelContext* ctx, int num_threads = -1) {
+    eigen_interface_ = ctx->device()
+                           ->tensorflow_cpu_worker_threads()
+                           ->workers->AsEigenThreadPool();
+    num_threads_ =
+        (num_threads == -1) ? eigen_interface_->NumThreads() : num_threads;
   }
-
-  MklDnnThreadPool(OpKernelContext* ctx, int user_intra_num)
-      : eigen_interface_(ctx->device()
-                             ->tensorflow_cpu_worker_threads()
-                             ->workers->AsEigenThreadPool()),
-        intra_num_(user_intra_num) {
-    // Set MKL intra thread pool number.
-    int intra_num = 0;
-    const char* intra_num_str = getenv("TF_MKL_NUM_INTRAOP");
-
-    if (intra_num_str != NULL) {
-      intra_num = std::stoi(intra_num_str);
-    }
-    intra_num_ =
-        intra_num > 0 ? std::min(user_intra_num, intra_num) : user_intra_num;
-
-    intra_num_ = intra_num_ > 0 ? intra_num_ : eigen_interface_->NumThreads();
-    dnnl_threadpool_interop_set_max_concurrency(intra_num_);
-  }
-
-  virtual int get_num_threads() const override {
-    return intra_num_;
-  }
+  virtual int get_num_threads() const override { return num_threads_; }
   virtual bool get_in_parallel() const override {
     return (eigen_interface_->CurrentThreadId() != -1) ? true : false;
   }
@@ -120,25 +102,26 @@ struct MklDnnThreadPool : public threadpool_iface {
     int nthr = get_num_threads();
     int njobs = std::min(n, nthr);
     bool balance = (nthr < n);
-    for (int i = 0; i < njobs; i++) {
+
+    // If use_caller_thread, schedule njobs-1 jobs to thread pool and run last
+    // job directly.
+    const bool use_caller_thread =
+        ThreadPoolUseCallerThread() && nthr == port::NumSchedulableCPUs();
+    const int njobs_to_schedule = use_caller_thread ? njobs - 1 : njobs;
+    for (int i = 0; i < njobs_to_schedule; i++) {
       eigen_interface_->ScheduleWithHint(
-          [balance, i, n, njobs, fn]() {
-            if (balance) {
-              int start, end;
-              balance211(n, njobs, i, &start, &end);
-              for (int j = start; j < end; j++) fn(j, n);
-            } else {
-              fn(i, n);
-            }
-          },
+          [balance, i, n, njobs, fn]() { run_jobs(balance, i, n, njobs, fn); },
           i, i + 1);
+    }
+    if (use_caller_thread) {
+      run_jobs(balance, njobs - 1, n, njobs, fn);
     }
   }
   ~MklDnnThreadPool() {}
 
  private:
   Eigen::ThreadPoolInterface* eigen_interface_ = nullptr;
-  int intra_num_ = 0;
+  int num_threads_ = 1;  // Execute in caller thread.
 };
 
 #else

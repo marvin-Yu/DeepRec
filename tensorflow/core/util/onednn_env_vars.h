@@ -26,6 +26,9 @@ bool AreWeightsFrozen();
 bool UseSystemAlloc();
 
 std::string FPMathModeSetting();
+
+bool ThreadPoolUseCallerThread();
+
 }  // namespace tensorflow
 #endif  // INTEL_MKL
 #endif  // TENSORFLOW_CORE_UTIL_ONEDNN_ENV_VARS_H_

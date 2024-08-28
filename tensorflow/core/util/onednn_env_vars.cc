@@ -52,5 +52,17 @@ std::string FPMathModeSetting() {
 
   return math_mode_setting;
 }
+
+bool ThreadPoolUseCallerThread() {
+  static bool threadpool_use_caller_thread = false;
+  static absl::once_flag once;
+  absl::call_once(once, [&] {
+    TF_CHECK_OK(ReadBoolFromEnvVar("TF_ONEDNN_THREADPOOL_USE_CALLER_THREAD",
+                                   /*default_value*/ false,
+                                   &threadpool_use_caller_thread));
+  });
+  return threadpool_use_caller_thread;
+}
+
 }  // namespace tensorflow
 #endif  // INTEL_MKL
