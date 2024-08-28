@@ -1833,6 +1833,13 @@ TEST_F(FusedMatMulReshapeBiasAddAndGeluTest, Float32GeluExact) {
 TEST_F(FusedMatMulReshapeBiasAddAndGeluTest, BFloat16GeluExact) {
   RunTest<DT_BFLOAT16>();
 }
+TEST_F(FusedMatMulReshapeBiasAddAndGeluTest, Float16GeluExact) {
+  if (!CPU_CHECK_FOR_FP16) {
+    GTEST_SKIP() << "FP16 is not supported on this CPU.";
+  } else {
+    RunTest<DT_HALF>();
+  }
+}
 
 class FusedBatchMatMulV2BiasAddAndGeluTest : public GrapplerTest {
  public:

@@ -2216,19 +2216,41 @@ bool FindInstanceNorm(RemapperContext* ctx, int node_index,
   if (dtype != DT_FLOAT) return false;
 
   // Check if gamma and beta constants have the same shape
-  NodeDef* gamma_node =
-      ctx->graph_view.GetNode(matched_nodes_map->at("gamma"))->node();
-  NodeDef* beta_node =
-      ctx->graph_view.GetNode(matched_nodes_map->at("beta"))->node();
-  if (!gamma_node || !beta_node) {
+  const auto* gamma_node_view =
+      ctx->graph_view.GetNode(matched_nodes_map->at("gamma"));
+  NodeDef* gamma_node_def = gamma_node_view->node();
+  const auto* beta_node_view =
+      ctx->graph_view.GetNode(matched_nodes_map->at("beta"));
+  NodeDef* beta_node_def = beta_node_view->node();
+  if (!gamma_node_def || !beta_node_def) {
     VLOG(2) << "Unexpected error to retrieve gamma or beta node";
     return false;
   }
-  Tensor gamma_tensor, beta_tensor;
-  if (!gamma_tensor.FromProto(gamma_node->attr().at("value").tensor()) ||
-      !beta_tensor.FromProto(beta_node->attr().at("value").tensor())) {
+
+  if (gamma_node_def != nullptr && gamma_node_def->op() == "Cast") {
+    const auto& regular_fanin_0 = gamma_node_view->GetRegularFanin(0);
+    const auto* regular_node_view = regular_fanin_0.node_view();
+    gamma_node_def = regular_node_view->node();
+  }
+
+  Tensor gamma_tensor;
+  if (gamma_node_def == nullptr || gamma_node_def->op() != "Const" ||
+      !gamma_tensor.FromProto(gamma_node_def->attr().at("value").tensor())) {
     return false;
   }
+
+  if (beta_node_def != nullptr && beta_node_def->op() == "Cast") {
+    const auto& regular_fanin_0 = beta_node_view->GetRegularFanin(0);
+    const auto* regular_node_view = regular_fanin_0.node_view();
+    beta_node_def = regular_node_view->node();
+  }
+
+  Tensor beta_tensor;
+  if (beta_node_def == nullptr || beta_node_def->op() != "Const" ||
+      !beta_tensor.FromProto(beta_node_def->attr().at("value").tensor())) {
+    return false;
+  }
+
   if (!gamma_tensor.IsSameSize(beta_tensor)) return false;
 
   // Get the reduction axes for mean node to check if the
@@ -2473,15 +2495,15 @@ bool IsCommonNormPattern(RemapperContext* ctx, int node_index,
                   {"Mean", "mean1", NodeStatus::kRemove,
                     {
                       {"*", "input", NodeStatus::kRemain},
-                      {"Const", "r_indices1", NodeStatus::kRemain}
+                      {"Cast|Const", "r_indices1", NodeStatus::kRemain}
                     }
                   } // end mean1
                 }
               }, // end squareddiff
-              {"Const", "r_indices0", NodeStatus::kRemain}
+              {"Cast|Const", "r_indices0", NodeStatus::kRemain}
             }
           }, // end mean0
-          {"Const", "epsilon", NodeStatus::kRemain}
+          {"Cast|Const", "epsilon", NodeStatus::kRemain}
         }
       } // end add
     }
@@ -2528,14 +2550,14 @@ bool IsCommonNormPattern(RemapperContext* ctx, int node_index,
             {"Mul", "mul1", NodeStatus::kRemove,
               {
                 subgraph_pattern,
-                {"Const", "gamma", NodeStatus::kRemain}
+                {"Cast|Const", "gamma", NodeStatus::kRemain}
               }
             } // end mul1
           }
         }, // end mul0
         {"Sub", "sub0", NodeStatus::kRemove,
           {
-            {"Const", "beta", NodeStatus::kRemain},
+            {"Cast|Const", "beta", NodeStatus::kRemain},
             {"Mul", "mul2", NodeStatus::kRemove,
               {
                 {"Mul", "mul1", NodeStatus::kRemove},
@@ -2588,7 +2610,7 @@ bool IsCommonNormPattern(RemapperContext* ctx, int node_index,
                     {"Mean", "mean1", NodeStatus::kRemove,
                       {
                         {"*", "input", NodeStatus::kRemain},
-                        {"Const", "r_indices1", NodeStatus::kRemain}
+                        {"Cast|Const", "r_indices1", NodeStatus::kRemain}
                       }
                     }
                   }
