@@ -956,8 +956,14 @@ class MklFusedBatchNormOp : public OpKernel {
 #else
                                       src_md, dst_md, activation_mode_);
 #endif  // !ENABLE_ONEDNN_V3
+
+      // Create the oneDNN wrapper over Eigen threadpool and set max threads
+      // in oneDNN.
+      Eigen::ThreadPoolInterface* eigen_interface =
+          EigenThreadPoolFromTfContext(context);
+      OneDnnThreadPool eigen_tp(eigen_interface, ThreadPoolUseCallerThread());
+
       // Get forward batch-normalization op from the primitive caching pool.
-      MklDnnThreadPool eigen_tp(context);
       MklFusedBatchNormFwdPrimitive<T, U>* bn_fwd =
           MklFusedBatchNormFwdPrimitiveFactory<T, U>::Get(fwdParams);
 
@@ -1452,7 +1458,13 @@ class MklFusedBatchNormGradOp : public OpKernel {
                                       dst_md, diff_src_md,
 #endif  // ENABLE_ONEDNN_V3
                                       diff_dst_md);
-      MklDnnThreadPool eigen_tp(context);
+
+      // Create the oneDNN wrapper over Eigen threadpool and set max threads
+      // in oneDNN.
+      Eigen::ThreadPoolInterface* eigen_interface =
+          EigenThreadPoolFromTfContext(context);
+      OneDnnThreadPool eigen_tp(eigen_interface, ThreadPoolUseCallerThread());
+
       MklFusedBatchNormBwdPrimitive<T, U>* bn_bwd =
           MklFusedBatchNormBwdPrimitiveFactory<T, U>::Get(bwdParams);
 

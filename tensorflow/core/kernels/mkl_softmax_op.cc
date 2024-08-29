@@ -242,7 +242,13 @@ class MklSoftmaxOp : public OpKernel {
       auto src_dims = TFShapeToMklDnnDims(src_shape);
       int axis = input_dims - 1;
       MklSoftmaxParams fwdParams(src_dims, src_fmt, axis);
-      MklDnnThreadPool eigen_tp(context);
+
+      // Create the oneDNN wrapper over Eigen threadpool and set max threads
+      // in oneDNN.
+      Eigen::ThreadPoolInterface* eigen_interface =
+          EigenThreadPoolFromTfContext(context);
+      OneDnnThreadPool eigen_tp(eigen_interface, ThreadPoolUseCallerThread());
+
       MklSoftmaxPrimitive<T>* softmax_fwd =
           MklSoftmaxPrimitiveFactory<T>::Get(fwdParams);
 
