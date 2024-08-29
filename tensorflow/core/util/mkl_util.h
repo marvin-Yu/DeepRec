@@ -271,7 +271,7 @@ inline bool array_cmp(const T* a1, const T* a2, size_t size) {
 
 inline dnnl::stream* CreateStream(MklDnnThreadPool* eigen_tp,
                                   const engine& engine) {
-#if defined(ENABLE_DNNL_THREADPOOL) && !defined(ENABLE_ONEDNN_V3)
+#if defined(ENABLE_DNNL_THREADPOOL)
   if (eigen_tp != nullptr) {
     stream* tp_stream =
         new stream(dnnl::threadpool_interop::make_stream(engine, eigen_tp));
@@ -283,7 +283,7 @@ inline dnnl::stream* CreateStream(MklDnnThreadPool* eigen_tp,
 #else
   stream* tp_stream = new stream(engine);
   return tp_stream;
-#endif  // ENABLE_DNNL_THREADPOOL && !ENABLE_ONEDNN_V3
+#endif  // ENABLE_DNNL_THREADPOOL
 }
 
 class MklDnnShape {
