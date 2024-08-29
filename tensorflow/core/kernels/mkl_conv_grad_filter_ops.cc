@@ -503,11 +503,16 @@ class MklConvCustomBackpropFilterOp
           fwd_src_dims, fwd_filter_dims, diff_bias_dims, diff_dst_dims, strides,
           tf_fmt, native_format, dilations, padding_left, padding_right);
 
-      MklDnnThreadPool eigen_tp(context);
       // OneDNN allocates large buffers when a conv gradient filter primitive
       // is created. So we don't cache conv backward primitives when the env
       // variable TF_MKL_OPTIMIZE_PRIMITIVE_MEMUSE is set to true.
       bool do_not_cache = MklPrimitiveFactory<T>::IsPrimitiveMemOptEnabled();
+
+      // Create the oneDNN wrapper over Eigen threadpool and set max threads
+      // in oneDNN.
+      Eigen::ThreadPoolInterface* eigen_interface =
+          EigenThreadPoolFromTfContext(context);
+      OneDnnThreadPool eigen_tp(eigen_interface, ThreadPoolUseCallerThread());
 
       MklConvBwdFilterPrimitive<T>* conv_bwd_filter =
           MklConvBwdFilterPrimitiveFactory<T>::Get(convBwdFilterDims,

@@ -124,7 +124,11 @@ class MklAvgPoolingOp : public MklPoolingForwardOpBase<T> {
           pooling_prop_kind,
           static_cast<MEMORY_FORMAT>(this->data_format_dnnl_), input_md,
           this->native_format_);
-      MklDnnThreadPool eigen_tp(context);
+
+      Eigen::ThreadPoolInterface* eigen_interface =
+          EigenThreadPoolFromTfContext(context);
+      OneDnnThreadPool eigen_tp(eigen_interface, ThreadPoolUseCallerThread());
+
       pooling_fwd = MklPoolingFwdPrimitiveFactory<T>::Get(fwdParams);
 
       // Allocate output tensor.
@@ -270,7 +274,13 @@ class MklAvgPoolingGradOp : public MklPoolingBackwardOpBase<T> {
           ALGORITHM::pooling_avg_exclude_padding, prop_kind::forward_training,
           static_cast<MEMORY_FORMAT>(this->data_format_dnnl_), src_md,
           this->native_format_);
-      MklDnnThreadPool eigen_tp(context);
+
+      // Create the oneDNN wrapper over Eigen threadpool and set max threads
+      // in oneDNN.
+      Eigen::ThreadPoolInterface* eigen_interface =
+          EigenThreadPoolFromTfContext(context);
+      OneDnnThreadPool eigen_tp(eigen_interface, ThreadPoolUseCallerThread());
+
       MklPoolingBwdPrimitive<T>* pooling_bwd =
           MklPoolingBwdPrimitiveFactory<T>::Get(bwdParams);
 

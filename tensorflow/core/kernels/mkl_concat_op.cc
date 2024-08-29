@@ -737,9 +737,13 @@ class MklConcatOp : public OpKernel {
       if (are_all_mkl_inputs)
         concat_dim = mkl_input_shapes[0].TfDimIdx(concat_dim);
 
-      MklDnnThreadPool eigen_tp(context);
+      // Create the oneDNN wrapper over Eigen threadpool and set max threads
+      // in oneDNN.
+      Eigen::ThreadPoolInterface* eigen_interface =
+          EigenThreadPoolFromTfContext(context);
+      OneDnnThreadPool eigen_tp(eigen_interface, ThreadPoolUseCallerThread());
+
       if (!inputs.empty()) {
-        MklDnnThreadPool eigen_tp(context);
         if (are_all_mkl_inputs) {
           auto concat_pd =
               CONCAT_PRIM_DESC_USING_SRC(cpu_engine, concat_dim, srcs_pd);
