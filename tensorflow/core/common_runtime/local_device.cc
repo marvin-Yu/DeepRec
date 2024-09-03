@@ -29,6 +29,7 @@ limitations under the License.
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/public/session_options.h"
 #include "tensorflow/core/util/env_var.h"
+#include "tensorflow/core/util/util.h"
 
 namespace tensorflow {
 namespace {
@@ -87,6 +88,15 @@ struct LocalDevice::EigenThreadPoolInfo {
       if (intra_op_parallelism_threads == 0) {
         intra_op_parallelism_threads = port::MaxParallelism(numa_node);
       }
+    }
+    auto topology = port::GetTopology();
+    // Limit intra-op threads to num-phys-cores when we have pinning specified.
+    if (IsMKLEnabled() && port::ThreadPinningMode() != "none" &&
+        (intra_op_parallelism_threads > port::NumPhysCores(topology))) {
+      intra_op_parallelism_threads = port::NumPhysCores(topology);
+      VLOG(0) << "Explicit core pinning is specified. Setting intra_op "
+                 "parallelism to "
+              << intra_op_parallelism_threads << " threads.";
     }
     ThreadOptions thread_opts;
     thread_opts.numa_node = numa_node;
