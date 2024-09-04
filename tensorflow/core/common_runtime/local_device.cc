@@ -113,6 +113,12 @@ struct LocalDevice::EigenThreadPoolInfo {
     }
     eigen_device_.reset(new Eigen::ThreadPoolDevice(
         threadpool, eigen_worker_threads_.num_threads, eigen_allocator_.get()));
+    if (port::NumSpinningThreads() > 0) {
+      std::cout << "Spinning " << port::NumSpinningThreads() << " threads for "
+                << port::ThreadSpinningMicros() << " micro sec." << std::endl;
+      eigen_worker_threads_.workers->SetSpinOptions(
+          port::NumSpinningThreads(), port::ThreadSpinningMicros());
+    }
   }
 
   ~EigenThreadPoolInfo() {
