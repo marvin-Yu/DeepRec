@@ -205,6 +205,50 @@ void PinThread(int cpu) {
 #endif  // defined(__linux__) && !defined(__ANDROID__)
 }
 
+int NumSpinningThreads() {
+  // setting default mode to compact for testing.
+#if defined(__linux__) && !defined(__ANDROID__)
+  static std::string pinning_mode = "none";
+  static int num_spinning_threads = 1;
+  const char* val = std::getenv("TF_THREAD_PINNING_MODE");
+  if (val != NULL) {
+    pinning_mode = std::string(val);
+    auto pos = pinning_mode.find(',');
+    if (pos != string::npos) {
+      auto pos1 = pinning_mode.find(',', pos + 1);
+      auto nt = pinning_mode.substr(pos + 1, pos1);
+      num_spinning_threads = std::stoi(nt);
+      return num_spinning_threads;
+    }
+  }
+  return num_spinning_threads;
+#endif  // defined(__linux__) && !defined(__ANDROID__)
+  return -1;
+}
+
+int ThreadSpinningMicros() {
+  // setting default mode to compact for testing.
+#if defined(__linux__) && !defined(__ANDROID__)
+  static std::string pinning_mode = "none";
+  static int spinning_micros = 1;
+  static absl::once_flag once;
+  const char* val = std::getenv("TF_THREAD_PINNING_MODE");
+  if (val != NULL) {
+    pinning_mode = std::string(val);
+    auto pos = pinning_mode.find(',');
+    if (pos != string::npos) {
+      auto pos1 = pinning_mode.find(',', pos + 1);
+      if (pos1 == string::npos) return 1000;
+      auto spin = pinning_mode.substr(pos1 + 1);
+      spinning_micros = std::stoi(spin);
+      return spinning_micros;
+    }
+  }
+  return spinning_micros;
+#endif  // defined(__linux__) && !defined(__ANDROID__)
+  return -1;
+}
+
 int NumSchedulableCPUs() {
 #if defined(__linux__) && !defined(__ANDROID__)
   cpu_set_t cpuset;

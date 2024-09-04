@@ -34,6 +34,8 @@ CPUTopology GetTopology();
 void GetPinningCoreList(CPUTopology topology, std::vector<int>& pinning_list);
 void PinThread(int cpu);
 void PrintTopology(CPUTopology topology);
+int ThreadSpinningMicros();
+int NumSpinningThreads();
 
 // Returns true iff NUMA functions are supported.
 bool NUMAEnabled();

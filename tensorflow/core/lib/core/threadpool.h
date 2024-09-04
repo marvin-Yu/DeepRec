@@ -79,6 +79,8 @@ class ThreadPool {
   // Schedules fn() for execution in the pool of threads.
   void Schedule(std::function<void()> fn);
 
+  void SetSpinOptions(int num_threads, int duration);
+
   void SetStealPartitions(
       const std::vector<std::pair<unsigned, unsigned>>& partitions);
 

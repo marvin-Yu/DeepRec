@@ -34,9 +34,11 @@ using port::CPUTopology;
 using port::GetPinningCoreList;
 using port::GetTopology;
 using port::NumPhysCores;
+using port::NumSpinningThreads;
 using port::PinThread;
 using port::PrintTopology;
 using port::ThreadPinningMode;
+using port::ThreadSpinningMicros;
 
 struct EigenEnvironment {
   typedef Thread EnvThread;
@@ -248,6 +250,11 @@ void ThreadPool::SetStealPartitions(
   // eigen_threadpool_ is not null here.
   DCHECK(eigen_threadpool_ != nullptr);
   eigen_threadpool_->SetStealPartitions(partitions);
+}
+
+void ThreadPool::SetSpinOptions(int num_threads, int duration) {
+  DCHECK(eigen_threadpool_ != nullptr);
+  eigen_threadpool_->SetSpinOptions(num_threads, duration);
 }
 
 Eigen::ThreadPoolInterface* ThreadPool::AsEigenThreadPool() const {
